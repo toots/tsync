@@ -60,7 +60,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — PR #94.
 
 ### B-1.12 `syncfs` is not a barrier on macOS
-- **Pitfall** — macOS has no `syncfs(2)`; the stub falls back to `sync()`, which only schedules the flush. A bulk pass that wrote without a fsync per file and then relied on one `syncfs` before a durable record (the file-id backfill's completion record) could lose or tear files behind a record that survives the crash: the backfill never ran again, and the files without an id never appeared in Finder. The rebuild's last-sync mark, written after a `syncfs`, still has the directory half of this exposure.
+- **Pitfall** — macOS has no `syncfs(2)`; the stub falls back to `sync()`, which only schedules the flush. A bulk pass that wrote without a fsync per file and then relied on one `syncfs` before a durable record (the file-id backfill's completion record) could lose or tear files behind a record that survives the crash: the backfill never ran again, and the files without an id never appeared in Finder. A position written after a `syncfs` at the end of a full walk has the directory half of this exposure.
 - **Check** — Writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record. No code treats `syncfs` as a barrier on a platform where it is `sync()`.
 - **Seen** — c2d525c8, rewrite.
 
@@ -97,7 +97,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — rewrite notes (backends/gcs), 7560f124; recurred ×2, rewrite.
 
 ### B-2.7 An empty namespace lists as its own directory key
-- **Pitfall** — An empty trash or namespace lists as a zero-byte directory placeholder key with no marker, which cannot be fetched on a filesystem store; readers other than expire choked on it.
+- **Pitfall** — An empty namespace lists as a zero-byte directory placeholder key with no marker, which cannot be fetched on a filesystem store; readers other than expire choked on it.
 - **Check** — The placeholder is filtered once, at the listing point all readers share.
 - **Seen** — 25db5912, 9327a879.
 
@@ -144,7 +144,7 @@ This file collects the traps that came from the implementation medium rather tha
 ## 3. Signals, syscalls and C stubs [runtime]
 
 ### B-3.1 EINTR surfaces as a `Sys_error` string; `Sys.file_exists` answers false
-- **Pitfall** — OCaml installs signal handlers without `SA_RESTART`. A SIGCHLD from reaping a `df` child interrupted syscalls; `runtime/sys.c` does not retry and raises `Sys_error "<path>: Interrupted system call"`, which no `Unix_error EINTR` handler matches, and the daemon died 5 s into start-up. `Sys.file_exists` returns false on EINTR, which nearly re-minted the client uuid and orphaned every WAL record. Under FUSE signal delivery, unshimmed calls surfaced as spurious ENOENT or EIO.
+- **Pitfall** — OCaml installs signal handlers without `SA_RESTART`. A SIGCHLD from reaping a `df` child interrupted syscalls; `runtime/sys.c` does not retry and raises `Sys_error "<path>: Interrupted system call"`, which no `Unix_error EINTR` handler matches, and the daemon died 5 s into start-up. `Sys.file_exists` returns false on EINTR, which nearly re-minted the client uuid and orphaned every pending record. Under FUSE signal delivery, unshimmed calls surfaced as spurious ENOENT or EIO.
 - **Check** — Every Stdlib/Sys/Unix file call goes through a retry recognising both spellings; `file_exists` is rebuilt on a retried `Unix.stat`; `In_channel`/`Out_channel` are covered too; C stubs loop on EINTR. Verify the shim reaches every call site (grep for direct `Sys.`). Treat any installed signal handler as making every blocking syscall interruptible, and avoid spawning children in the daemon.
 - **Seen** — 83197636, 37c0d67d, bbc08deb, PR #83; recurred ×2.
 
@@ -196,7 +196,7 @@ This file collects the traps that came from the implementation medium rather tha
 ## 4. Fork, randomness, locks and per-process identity [runtime]
 
 ### B-4.1 Shared or replayed PRNG state
-- **Pitfall** — The id generator was seeded at module load, so forked processes drew the parent's sequence and named staged bodies and trash entries identically. Global `Random` was seeded by whichever module called `self_init` first. Under OCaml 5 a shared `Random.State` is a data race. `Id.short` fell back to pid+time without `/dev/urandom`.
+- **Pitfall** — The id generator was seeded at module load, so forked processes drew the parent's sequence and named staged bodies identically. Global `Random` was seeded by whichever module called `self_init` first. Under OCaml 5 a shared `Random.State` is a data race. `Id.short` fell back to pid+time without `/dev/urandom`.
 - **Check** — A private, pid-tagged state reseeds from the kernel after fork and is split per domain (or locked). Security tokens raise instead of falling back. A test draws ids from several forked processes and several domains.
 - **Seen** — a42c99e5, PR #92.
 
@@ -473,7 +473,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — 6d5315e8, rewrite notes (02-remote-model, 07-daemon-cli); recurred ×3.
 
 ### B-10.5 Semantics resting on physical equality
-- **Pitfall** — A claim's won/lost result was decided by physical equality of a buffer; anything that copied it flipped the answer.
+- **Pitfall** — A conditional create's won/lost result was decided by physical equality of a buffer; anything that copied it flipped the answer.
 - **Check** — No outcome depends on `==` of buffers or strings; results are explicit variants.
 - **Seen** — rewrite notes (03-journal-sync).
 
@@ -498,7 +498,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — rewrite (review of PR #114).
 
 ### B-10.10 A fold that keeps only part of its best element
-- **Pitfall** — Choosing a trashed folder's newest entry folded over triples `(entry, marker, path)` and, when the current element was not newer, returned `(best_entry, current_marker, current_path)`: the date of one entry beside the path of another. A folder trashed twice under different paths reported the path of whichever entry the fold visited last, so `trash --purge PATH` missed the folder just trashed or purged an older one.
+- **Pitfall** — Choosing the newest of a folder's entries folded over triples `(entry, marker, path)` and, when the current element was not newer, returned `(best_entry, current_marker, current_path)`: the date of one entry beside the path of another. A folder with two entries under different paths reported the path of whichever entry the fold visited last, so a command given a path acted on the wrong entry.
 - **Check** — A fold selecting an element keeps or replaces it whole (`if better cur best then cur else best`), never rebuilding the accumulator from pieces of both; or it selects by a key (`List.sort`, a max by key) and destructures once.
 - **Seen** — rewrite (review of PR #114).
 
@@ -510,7 +510,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — 38d92756, 8b266eed, 5a897988, dc1472ef, 584e3521, ffcbe492, 4fe6ec7f, 4c812de8, 5cd0c1e6; recurred ×5, rewrite.
 
 ### B-11.2 `(optional)` libraries vanish and the build stays green
-- **Pitfall** — An edit joined two dependency names into one; `(optional)` turned that into absence, `select` fell to `s3_link.disabled.ml`, and s3 was not compiled for several commits, including the one adding its claim. Missing `aws-s3-lwt` or fuse3 did the same; the FUSE and s3 frontends never compiled on macOS. `select` resolves against installed libraries, so an orphaned `~/.opam/<switch>/lib/...` changed what was compiled and `-p` failed with "inconsistent assumptions".
+- **Pitfall** — An edit joined two dependency names into one; `(optional)` turned that into absence, `select` fell to `s3_link.disabled.ml`, and s3 was not compiled for several commits, including the one adding its conditional create. Missing `aws-s3-lwt` or fuse3 did the same; the FUSE and s3 frontends never compiled on macOS. `select` resolves against installed libraries, so an orphaned `~/.opam/<switch>/lib/...` changed what was compiled and `-p` failed with "inconsistent assumptions".
 - **Check** — Anything meant to be built fails when it is not: non-optional on its platform, or an artifact assertion (`build-info`, `.cmxa`). Suspect orphaned opam lib dirs when packaged builds break.
 - **Seen** — c51dba7f, PR #40, PR #42, PR #44, PR #45, PR #46, PR #49, PR #67; recurred ×4.
 
@@ -583,7 +583,7 @@ This file collects the traps that came from the implementation medium rather tha
 
 ### B-12.5 Waiting on durations instead of conditions
 - **Pitfall** — A fixed 1.5 s fault delay let fast CI finish first (later faults landed 218 times per run). A 3 s settle compared trees mid-apply. "Queue still for 0.2 s" was satisfied by a queue not yet started. Counts were taken between two steps of a publish (1 in 24 runs). Overlap checks compared wall clock to a constant. Scenarios passed by running out a silent 10 s deadline polling for a cursor never written. download_progress asserted on an instant the scheduler decides.
-- **Check** — Waits are for states (`reached`/`held`, first journalled op, quiescence that has started). Deadlines that expire fail. Fault rates scale with workload (ops/4).
+- **Check** — Waits are for states (`reached`/`held`, first committed entry, quiescence that has started). Deadlines that expire fail. Fault rates scale with workload (ops/4).
 - **Seen** — 698cdef5, a990dc6d, 5372ed84, 291e583d, 7077fa7f, 4ca10217, 1e1715a1, bc7af78a, 2bd96b50, cc228921; recurred ×10; rewrite (composite_test listed parked copies right after settling, before the backfill had parked: one run in eight); rewrite (dqueue_test posted a job 50 ms after another and assumed the first had started, which a loaded CI runner did not honour); rewrite (import_test printed whichever of two detectors of a source rewritten mid-read fired first; the product now reports the one condition one way).
 
 ### B-12.6 Determinism that came from cooperative scheduling
@@ -602,7 +602,7 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — 724acc4f, aae5a3bf, 5b64da0d, 6468cf84, 331fec2b, bcb38107, 27bbae0e, 1c511433, e28d940f, PR #52; recurred ×6.
 
 ### B-12.9 Doubles and fixtures that bypass the code under test
-- **Pitfall** — The scenario runner dropped `on_cursor` and called replay directly, so the whole suite ran with the cursor mechanism disabled. An Outage double stalls while Flaky refuses. `Fixture.conf ~store` wrapped the store while chunk reads walked members (0 round trips). A test's own fetch function bypassed the wire pools, so a redundant bound was built. A fake `LocalServerSocket(String)` bound the abstract namespace the client never used. A "mirror" fixture was an import. A Pub/Sub handler was tested under one calling convention. A conformance assertion held only while no verifier consumed the requests. Rewrite: a GC resume test built an unreachable state and failed 1 in 12.
+- **Pitfall** — The scenario runner dropped `on_cursor` and called the fetch directly, so the whole suite ran with the cursor mechanism disabled. An Outage double stalls while Flaky refuses. `Fixture.conf ~store` wrapped the store while chunk reads walked members (0 round trips). A test's own fetch function bypassed the wire pools, so a redundant bound was built. A fake `LocalServerSocket(String)` bound the abstract namespace the client never used. A "mirror" fixture was an import. A Pub/Sub handler was tested under one calling convention. A conformance assertion held only while no verifier consumed the requests. Rewrite: a GC resume test built an unreachable state and failed 1 in 12.
 - **Check** — Doubles sit below the layer under test; runners use production paths; faults name the call they target; fixtures come from real runs and build only reachable states; assertions state their environmental preconditions.
 - **Seen** — b2e6f69b, 723493c9, 228b73b3, 27685a67, b4db4cd1, PR #57; recurred ×5, rewrite.
 

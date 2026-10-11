@@ -18,11 +18,11 @@ Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
 ## 1. Problem
 
-The domain core (mirror, chunk cache, staged edits, queues, journal replay) knows nothing about how
+The domain core (mirror, chunk cache, staged edits, upload queue, cycle) knows nothing about how
 a user reaches the files. A **frontend** is one way of presenting a domain on one host. Every OS has
 its own filesystem and threading model, and which frontends exist is a build-time fact. The rules
 that must not differ between frontends are owned once, here and in the file-operation interface
-([04 §3.5](04-checkout-cache.md)): how items are named, what staged and published mean, the error
+([04 §3.5](04-checkout-cache.md)): how items are named, what staged and committed mean, the error
 vocabulary, paging, the change feed, and what evict and restore do. Each frontend is a thin
 translation over them.
 
@@ -50,12 +50,12 @@ holds:
   enacted by the supervisor.
 - **serving**: `Daemon` (the supervisor runs it) or `Commands(refusal text)` (never run by the
   supervisor; driven by an embedding app or by CLI verbs; `tsync start` refuses it with that text).
-- **tree**: `Replicated` (the owner keeps the whole mirror and applies the journal) or
-  `Pulled(refusal text)` (the owner reads a folder from the store when it is listed and keeps no
-  replica; `tsync sync` refuses with that text and exit 2). A pulled tree's view of a folder is the
-  last pull overlaid with this client's owed work, as
-  [android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller) specifies; the
-  lazy tree itself is [04 §3.5](04-checkout-cache.md#35-the-published-tree-full-and-lazy).
+- **tree**: `Replicated` (the owner keeps the full local tree and runs the cycle,
+  [publication.md §4](algorithms/publication.md#4-the-algorithm)) or `Pulled(refusal text)` (the
+  owner keeps a lazy tree: it runs no background cycle and holds only the folders it pulled;
+  `tsync sync` refuses with that text and exit 2). A pull, and the fetch that precedes a push on a
+  lazy tree, are [04 §3.5](04-checkout-cache.md#35-the-local-tree-full-and-lazy); when a host pulls
+  is [android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle).
 - **availability(key) → `online-only` | `cached` | `pinned(until)`**: where a file's bytes are, for
   item rows and `tsync ls`. Synchronous and local.
 - **commands**: `(verb, doc, run(domain, positional args))`, exposed as `tsync <group> <verb>`.
@@ -98,7 +98,10 @@ Why references: renaming a directory renames every descendant's path, while its 
 macOS treats a changed identifier as a merge instruction, so path-named folders turned a rename into
 re-identification of a whole subtree. A file's store identity is its parent and leaf, so the owner
 keeps a local file id for it ([local-cache §3.1](data-model/local-cache.md#31-namespace-mirror)):
-a rename keeps every identifier, and a remote rename reaches a host as an update of the same item.
+a local rename keeps every identifier. A peer's rename of a folder reaches a host as an update of
+the same item; a peer's rename of a file reaches it as a rename of the same item when the owner
+enacts it as a move, and as a removal and a creation otherwise
+([conflict-resolution.md §4.1](algorithms/conflict-resolution.md#41-file-keys)).
 Neither id can be composed by a client, so every mutating reply carries the resulting item.
 
 A host that maps references to its own identifiers MUST map `root` to its own root identifier, in
@@ -110,17 +113,19 @@ One shape for `stat`, listings, mutation replies and change ops, fields in this 
 
 ```
 ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds), etag, isUploaded,
-[contentId], [symlinkTarget], [trashed: true], [readOnly: true], [availability, [pinnedUntil]]
+[contentId], [symlinkTarget], [readOnly: true], [availability, [pinnedUntil]]
 ```
 
 - **Directory**: size 0, mtime 0.0, etag = its folder id, isUploaded true. Constant for the
   folder's lifetime, so a watcher is not told a directory changed on every look.
 - **Root**: `ref` and `parentRef` `root`, name = the domain name, etag `.tsync-root`.
-- **File**: etag = the published manifest's content hash (16 hex digits), so identical content has
-  an identical etag; `""` while staged edits exist. `isUploaded` false while an upload is owed.
+- **File**: etag = the content hash of the mirror entry's manifest (16 hex digits), so identical
+  content has an identical etag; `""` while a staged edit exists. `isUploaded` is false from a
+  write until the content it wrote is committed
+  ([publication.md §4.5](algorithms/publication.md#45-push)).
   `availability` and `pinnedUntil` (epoch seconds) for files only.
 - **`contentId`** (files and symlinks): the whole-file digest `h1` ([02](02-remote-model.md)) of the
-  content the key resolves to, staged or published: equal to the etag when published, computed on
+  content the key resolves to, staged or committed: equal to the etag when committed, computed on
   adoption for a whole staged body, absent while staged partial edits exist. A symlink's is its
   symlink digest, which changes exactly when its target does. It is the identity a client sends back
   as `base` (§3.3).
@@ -149,11 +154,13 @@ or unknown code as `internal`.
 
 ### 2.5 Cursors and anchors
 
-- **Change anchor** `"<generation>|<entry key>"`, e.g. `"1756600000000|0001756600000-abc"`.
+- **Change anchor** `"<generation>|<feed key>"`, e.g. `"1756600000000|0001756600000-abc"`
+  ([03 §2.2](03-journal-sync.md#22-feed-key)).
   - `generation`: the content of the domain's resync-generation file ([07 §2.7](07-daemon-cli.md)),
     epoch milliseconds, replaced atomically and durably by `full_resync` only; `""` when never
     stamped.
-  - `entry`: the last applied journal entry key, `""` for a client that never synced.
+  - `entry`: the feed key of the last applied-log line the consumer has seen, `""` for a consumer
+    that has seen none.
   - The core owns and compares both halves; clients carry the anchor verbatim.
 - **Folder page cursor**: the last name served. A resume returns names strictly greater, compared
   bytewise. Stateless: a fresh process answers the same page, and changes before the cursor shift
@@ -183,15 +190,17 @@ or unknown code as `internal`.
 
 The frontend runs inside the domain's owner ([07 §2.2](07-daemon-cli.md)) and receives, per domain:
 
-- the **file operations** ([04 §3.5](04-checkout-cache.md)), over the replicated or the lazy
-  checkout as the descriptor's tree says;
+- the **file operations** ([04 §3](04-checkout-cache.md#3-the-file-operation-interface)), over the
+  full or the lazy tree as the descriptor's tree says;
 - the **request handler** (§3.3) over them;
 - the domain's **lifecycle** (`start`, `drain`, `stats_fields`), which the owner, not the frontend,
   drives ([07 §3.2, §3.4](07-daemon-cli.md)).
 
-Every local change a frontend accepts is posted to the owner's one upload queue and one metadata
-queue. Convergence is the owner's; the frontend learns of applied changes through its `changed`
-hook, called in-process.
+Every local change a frontend accepts becomes part of the owner's pending set, and the content it
+wrote is posted to the owner's one upload queue
+([publication.md §4.1–4.2](algorithms/publication.md#41-a-local-operation)). Convergence is the
+owner's; the frontend learns of the changes an arrival made through its `changed` hook, called
+in-process.
 
 ### 3.2 Hooks
 
@@ -201,23 +210,23 @@ The only frontend-specific behaviour of the handler:
 hooks {
   changed(keys)           # the owner changed these keys behind the frontend: refresh your view
   reannounce()            # full_resync stamped a new generation: consumers must re-list
-  on_upload_done(key)     # an upload of key published
+  on_upload_done(key)     # the content written at key is committed
   status_fields() -> fields
   stats_fields()  -> fields   # includes "frontend": <name>
   on_stop()               # a stop was requested through the socket
 }
 ```
 
-- `changed(keys)` is called by the owner after it applies peer journal entries (the keys they
-  touched), after a `revert`, and after it publishes entries for records a one-shot command
-  submitted. It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
+- `changed(keys)` is called by the owner after an arrival changed the local tree (the keys it
+  changed), after a `revert`, and after a whole-domain operation run in the owner changed the local
+  tree ([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)). It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
   state does so asynchronously and never from inside a callback on the same item.
 
 | hook | fuse | file_provider | android |
 |---|---|---|---|
 | changed | invalidate the kernel's entries for each key | debounced `changed` event | `changed` notice to the host |
 | reannounce | none | debounced `changed` event | none |
-| on_upload_done | none | publish `changed` | `changed` notice to the host |
+| on_upload_done | none | `changed` event | `changed` notice to the host |
 | on_stop | request the owner's stop | request the owner's stop | none |
 
 ### 3.3 Actions
@@ -238,7 +247,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length, item` (served length, short only at end of file; the row of the version served) | B |
 | `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
 | `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
-| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload) |
+| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
 | `mkdir` | `parentRef`, `name`, `exclusive?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
 | `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id, a file its file id | M |
@@ -251,14 +260,13 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `evict` | `ref`\|`rel` | `{evicted, failed}` | B for a folder |
 | `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B (it fetches a whole file's bytes, or walks a subtree) |
 | `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
-| `sync` | `arg`: `"full"` or `""` | the resync result ([05 §4.7](05-ops-config.md)) | B, P |
-| `trash_restore` | `path`: a trashed folder as its trash entry records it | `{outcome:"restored", announced}`, `{outcome:"not_in_trash"}` or `{outcome:"name_taken"}` | B, P |
+| `sync` | `arg`: `""` runs one cycle now; `"full"` arrives by state ([publication.md §4.7](algorithms/publication.md#47-state-read-and-arrival-by-state)) | the result of [05 §4.7](05-ops-config.md) | B, P |
 | `job` | `job`: the owner job and its arguments; `narrate?` | streamed lines, then `{exit}`: the command's exit status ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)) | B, P |
 | `cancel` | `job`: the id a `job` streamed | `{cancelled}`: whether that job was running; it stops at its next unit boundary | |
 | `prune` | `arg` = grace seconds | per task files and bytes | B |
 | `retry` | — | `{readopted}`: every parked record of the domain's logs re-adopted now | |
 | `set_aside` | `arg`: `""` lists; else a comma set of names, or `*` | `{items:[{name, kind, size, mtime}]}` or `{removed}` | |
-| `poll` | — | `{}` at once; the owner rescans its logs for submitted records and runs a journal pass soon | |
+| `poll` | — | `{}` at once; the owner rescans its logs for submitted records and ends the cycle's wait, so a cycle runs now ([03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)) | |
 | `notify_reset` | — | `{delivered: N}` after publishing a `reset` event to the domain's subscribers | |
 | `ping` | — | `{}` from memory: the liveness probe | |
 | `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, subscribers, unnamed?`, traffic, hook fields | |
@@ -295,10 +303,12 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
   changes nothing and queues no upload.
 - `ensure_cached` and `fetch_range` resolve the item and serve its bytes in one step, so the
   reply's `item` describes exactly the bytes written; its `size` is the size of that content.
-- `write` with `base` (a `contentId` the client read) declares the content the edit started from; the
-  owner carries it to the published op, where it decides between a replacement and a conflicted copy
-  ([conflict-resolution.md](algorithms/conflict-resolution.md)). Without `base` the edit's base is
-  unknown.
+- `write` with `base` (a `contentId` the client read) declares the content the edit started from. The
+  owner compares it with the key's current content identity before the write becomes part of the
+  local tree, and stages a stale write as a conflicted copy
+  ([conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)).
+  The check is local: `base` is carried to nothing that is pushed. Without `base` the write is an
+  ordinary edit.
 - A socket serving several domains adds host actions (`menu`, `menu_stats` on macOS,
   [file-provider.md](frontends/file-provider.md)) and routes every other action by `domain`; its own
   refusals carry codes ([07 §4.2](07-daemon-cli.md#42-envelopes)), and a domain it does not serve is
@@ -333,7 +343,7 @@ The handler enforces these itself, whatever a frontend advertises:
 
 - **Read-only.** Actions marked M are refused with `read_only` on a read-only domain.
 - **Pause.** Actions marked P are refused with `paused` while the domain is paused. Other mutations
-  are accepted and held in the queues.
+  are accepted and stay pending.
 - **Serialisation.** Resolving a reference and acting on it are one step under the owner's per-domain
   metadata serialisation, for every mutation. Otherwise a folder rename racing a create inside that
   folder resolves the create against the old path and files it where the folder no longer is. Reads
@@ -346,30 +356,34 @@ The handler enforces these itself, whatever a frontend advertises:
   [security-model.md §7.3](algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)
   specifies; a refused path answers `denied`.
 - **write**, in order: cancel any upload of this key in flight (a write to a file being sent stops
-  the send); adopt the staging file by rename, with its `base`; queue the put; with `await`, wait until this key's
-  upload has published or started failing; report the size and mtime of what now resolves (staged or
-  published).
+  the send); check `base` and adopt the staging file by rename
+  ([04 §4.3](04-checkout-cache.md#43-staged-writes)); post its upload; with `await`, wait until this
+  key's content is committed ([publication.md §4.5](algorithms/publication.md#45-push)) or its
+  upload or push has started failing; report the size and mtime of what now resolves (staged or
+  committed).
 
 ### 3.6 Change feed: `changes_since`
 
-Answers come from the **applied log** ([local-cache.md](data-model/local-cache.md)), never from the
-store: an entry is there only once applied, so an op never names an item the mirror has not caught
-up with. Ops are not filtered by author: a change made by a command on this machine must reach its
+Answers come from the **applied log**
+([03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local)), never from the store. It
+holds one line per local operation and one per arrival, each appended only after the change it
+names is durable in the local tree, so an op never names an item the local tree does not hold yet.
+Ops are not filtered by origin: a change made by a command on this machine must reach its
 frontends.
 
 1. Split the anchor at the first `|`. A generation different from the current one → `{stale:true}`.
-2. An anchor with no entry ("before every entry") once the dropped-shard record is set →
-   `{stale:true}`: entries it never saw may be gone.
-3. If the anchor's entry equals the applied head, or both are absent → `{stale:false,
+2. An anchor with no feed key ("before every line") once the dropped-shard record is set →
+   `{stale:true}`: lines it never saw may be gone.
+3. If the anchor's feed key equals the applied log's head, or both are absent → `{stale:false,
    cursor:anchor(gen, head), more:false, ops:[]}`.
-4. Read up to `limit` entries after the anchor's entry. The anchor's entry no longer kept →
+4. Read up to `limit` lines after the anchor's feed key. The anchor's line no longer kept →
    `{stale:true}`.
-5. `cursor` is the last entry returned, or the anchor itself on an empty page (a caller is never told
-   to start over); `more` says whether entries remain.
+5. `cursor` names the last line returned, or is the anchor itself on an empty page (a caller is
+   never told to start over); `more` says whether lines remain.
 6. Render each op; folder ids resolve through the folder-id index, which keeps an id after its marker
    is gone, and a file is named by the file id its applied-log op carries
-   ([03 §2.7](03-journal-sync.md#27-applied-log-local)), so it is named the same after it moved or
-   went:
+   ([03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local)), so it is named the same
+   after it moved or went. A `mkdir` and a `rmdir` always carry the folder's id:
    - `{"op":"put","ref","parentRef","name","item"}` — `item` read from the mirror through the
      reference's current resolution;
    - `{"op":"delete","ref","parentRef","name"}`;
@@ -388,11 +402,11 @@ assumption; a second consumer would move the watermark past the first one's anch
 walk under its pages. Nothing else calls `changes_since` or `list_all`.
 
 **Feed watermark.** An anchor stays answerable for as long as its consumer may present it. The owner
-records durably, as the domain's feed watermark, the entry of the oldest anchor a consumer may still
-present: it is set by a `cursor` answer when no watermark exists, moves to the entry of the anchor
-each `changes_since` names (the consumer will not present an older one), and is cleared when a new
-generation is stamped. Applied-log retention keeps the shard holding the watermark's entry and every
-later one ([wal-and-journal §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
+records durably, as the domain's feed watermark, the feed key of the oldest anchor a consumer may
+still present: it is set by a `cursor` answer when no watermark exists, moves to the feed key of the
+anchor each `changes_since` names (the consumer will not present an older one), and is cleared when a
+new generation is stamped. Applied-log retention keeps the shard holding the watermark's line and
+every later one ([03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local)).
 A watermark that has not moved for `FEED_WATERMARK_MAX_AGE` (recommended 180 days) lapses, is logged,
 and holds nothing back: a consumer gone that long (an extension disabled, a domain unregistered) must
 not grow the log without bound, and one that returns re-lists.
@@ -442,7 +456,7 @@ publishes, and when, is in its frontend spec. Every owner publishes:
 | Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
 | Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_stats` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
 | Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | notices to the host in place of events ([android.md §4.2](frontends/android.md#42-notices)) |
-| Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller)) |
+| Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)) |
 | Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |
 
 Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/android.md), [android-app.md](frontends/android-app.md).
@@ -476,7 +490,7 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
 
 - **Rows.** `stat` (by `ref` and by `rel`) and listings return the exact row shape of §2.3; a dirty file
   has an empty etag and a clean one does not; identical content shares an etag and a `contentId`; a
-  whole adopted staged body has a `contentId` equal to the etag its publish yields; a directory's
+  whole adopted staged body has a `contentId` equal to the etag its commit yields; a directory's
   etag, size and mtime do not change when its children change.
 - **Listings.** Paged and flat views agree; files and folders share one bytewise name order; a folder
   that cannot be named is counted, not dropped; a write between pages shifts no page; a cursor on a dropped or remade walk, or with an offset inside a line, answers `{stale:true}`; a page's cost does not grow with its position in the walk; a name containing a newline does not end the listing.
@@ -491,22 +505,27 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
 - **Events.** A subscriber of a domain, and a router-level subscriber, receives `recovered` when the owner starts serving the domain
   and after the first successful store request following an `unreachable` answer; `notify_reset`
   reports how many subscribers received the `reset` event.
-- **Engine seen by a frontend.** The owner's stats list pending and completed uploads, pending
-  metadata, degraded copies, unapplied peer entries with their reason, and its maintenance schedule
-  ([07 §6](07-daemon-cli.md#6-maintenance)); a finished upload puts the manifest on the store and
-  publishes the cursor.
-- **Change feed.** For a foreign put; mkdir then put; delete; rename; rmdir with its id; a move into a
-  folder renamed since; a directory rename with its id: the ops of §3.6. An up-to-date anchor returns
+- **Engine seen by a frontend.** The owner's stats list pending and completed uploads with the upload
+  queue's owed and parked counts, the cycle's status
+  ([03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)), degraded copies, and its
+  maintenance schedule ([07 §6](07-daemon-cli.md#6-maintenance)); a finished upload puts chunks on
+  the main and nothing else, and after the commit that follows the main's tree holds the manifest and
+  the cursor names the entry.
+- **Change feed.** For a put, a mkdir then a put, a delete, a rename, a rmdir with its id, a move into
+  a folder renamed since and a directory rename with its id, each made locally and each brought by an
+  arrival: the ops of §3.6. A conflicted copy made by an arrival is a rename of the local file aside
+  and a put at its former name. An up-to-date anchor returns
   no ops and the same cursor; a pruned anchor and an anchor from another generation are stale.
 - **Evict and restore.** On a folder (and on the root), every file of the subtree becomes
   `online-only` / `pinned` with `pinnedUntil`; a file with staged edits keeps them.
 - **Codes.** Every failure reply on every socket carries a code from §2.4.
 - **References.** Parsing and printing round-trip ([01](01-core.md)). A file keeps its `i:`
-  reference across a local rename, a peer's rename, a new version and a rebuild; a feed op for a file
-  that later moved or went still names it by that reference; `f:` and `i:` name the same file.
+  reference across a local rename, a new version, a move aside and an arrival by state; a folder keeps
+  its `d:` reference across a peer's rename; a feed op for a file that later moved or went still names
+  it by that reference; `f:` and `i:` name the same file.
 - **Feed retention.** An anchor handed out by `cursor`, and the last anchor named by
-  `changes_since`, stay answerable after the horizon passes; a rebuild leaves them valid; an anchor
-  with no entry is stale once a shard was dropped; a watermark idle for `FEED_WATERMARK_MAX_AGE`
+  `changes_since`, stay answerable after `FEED_RETENTION` passes; an arrival by state leaves them
+  valid; an anchor with no feed key is stale once a shard was dropped; a watermark idle for `FEED_WATERMARK_MAX_AGE`
   holds nothing back.
 - **Replies that describe content.** `ensure_cached` and `fetch_range` reply with the row of the
   bytes written; `write` of the key's current content queues nothing; a row of a read-only domain

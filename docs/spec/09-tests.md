@@ -3,7 +3,7 @@
 Scope: what an implementation must demonstrate before it may claim to implement this specification,
 and how the demonstration is built: the tiers of checks, how golden files are read, the seams a
 harness needs, the doubles it plugs in, fault and crash injection, property-based testing of
-conflicts, and the discipline that makes a passing suite mean something.
+the merge, and the discipline that makes a passing suite mean something.
 
 The properties themselves are not listed here. Each is stated once, in the **Conformance** section of
 the file that owns the rule (§3). This file owns the method.
@@ -31,11 +31,11 @@ Checks MUST NOT depend on elapsed time for their verdict (§10.3). A property ph
 
 | Tier | What runs | Hermetic | Required for conformance |
 |---|---|---|---|
-| Pure | codecs, key derivations, parsers, planners, renderers, decision tables | yes | yes |
+| Pure | codecs, key derivations, parsers, planners, renderers, the merge | yes | yes |
 | Contract | one component against doubles of its neighbours: store drivers, the composite, failover, the read path, queues, the uplink governor | yes | yes |
 | Scenario | the engine of one or two clients against real local stores in a scratch directory, driven step by step (§6), state compared with a golden file (§4) | yes | yes |
 | Crash and fault | scenarios under injected failures, process kills and simulated power loss (§7) | yes | yes |
-| Property | generated operation pairs and interleavings with shrinking (§8) | yes | yes |
+| Property | the merge enumerated over small trees; generated operation pairs and interleavings with shrinking (§8) | yes | yes |
 | Multi-process | several real processes sharing one machine's domain state (§7.5) | yes | yes |
 | Platform | each frontend on its operating-system surface: a real FUSE mount, the macOS extension against a real owner, the Android bridge called from foreign threads | per platform | yes, on that platform |
 | Live store | every driver against the real service it targets | no (credentials) | yes, per driver, before a driver is declared supported |
@@ -49,12 +49,13 @@ non-hermetic check that lacks its credentials or configuration MUST report "not 
 | Subject | Conformance section in |
 |---|---|
 | Names and keys, chunking and chunk keys, references, retry ladder, health breaker, IPC framing, time | [01-core.md](01-core.md) |
-| Backend entities, invariants, folder identity | [data-model/backend.md](data-model/backend.md) |
-| Byte formats, the remote interface, dedup, versions, trash, integrity | [02-remote-model.md](02-remote-model.md) |
+| Backend entities, invariants, projection of the log onto the tree | [data-model/backend.md](data-model/backend.md) |
+| Byte formats, the remote interface, dedup, versions, integrity | [02-remote-model.md](02-remote-model.md) |
 | Retention and garbage collection | [algorithms/gc.md](algorithms/gc.md) |
-| Journal, cursor, applied log, change feed formats | [03-journal-sync.md](03-journal-sync.md) |
-| WAL, publishing, discovery, application, recovery | [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) |
-| Conflict decisions | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
+| Commands, log entry, cursor, tree head, local sync records, applied log, change feed formats | [03-journal-sync.md](03-journal-sync.md) |
+| Before-values, upload, fetch, push, projection, state read, recovery, log retention | [algorithms/publication.md](algorithms/publication.md) |
+| The cases every suite covers, each tied to a result of the theory (§12 there) | [algorithms/change-algebra.md](algorithms/change-algebra.md) |
+| Enacting a merge, outcomes by operation pair, the invariants after quiescence (§10 there) | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
 | Local formats, file operations, staged writes | [04-checkout-cache.md](04-checkout-cache.md) |
 | Local entities and the owner's state | [data-model/local-cache.md](data-model/local-cache.md) |
 | Materialisation, read-ahead, cache bounds | [algorithms/read-path-and-cache.md](algorithms/read-path-and-cache.md) |
@@ -76,7 +77,10 @@ non-hermetic check that lacks its credentials or configuration MUST report "not 
 
 A scenario prints the state it reached in a canonical text form, and the print is compared with a
 committed golden file. The print covers, per client: the tree with content read back through the read
-path, owed work with its WAL state, the applied log; and, per store, a normalised dump of every object.
+path, the sync state (the position, the before-values and the pending set they give, the in-flight
+record), the upload records with their state, the applied log; and, per store, a normalised dump of
+every object: the log entries by number, the tree head, the takeovers, the cursor, and the tree's
+records.
 
 A golden file pins everything it prints, but only part of it is specification. A golden comparison is
 one assertion among others: the check MUST also verify that the process exited successfully and that
@@ -91,14 +95,14 @@ fact in a golden file as a change of behaviour, to be justified by the specifica
 | Printed element | Semantic (must be reproduced) | Incidental (may be re-baselined) |
 |---|---|---|
 | Echoed step list | — | all |
-| Tree lines | which paths exist; file or folder; logical size; how many of a file's chunks are local; published or not; etag equality and change | line syntax, order, field names |
+| Tree lines | which paths exist; file or folder; logical size; how many of a file's chunks are local; pending or not; etag equality and change | line syntax, order, field names |
 | Content lines | the exact bytes a reader gets; that a read fails | quoting, escaping |
-| Owed work | which operations are still owed after convergence, and their WAL state | rendering |
+| Sync state and owed work | the position; which keys are pending, each with its before-value; whether an in-flight record remains; which upload records remain, and the state of each | rendering |
 | Applied log / change feed | which ops a client recorded, in order, and the fields each op carries | field order, spacing |
 | Chunk objects | which chunk objects exist; that a chunk key is a function of its bytes | shard path, syntax |
 | Manifests | that a manifest exists, filed under its folder id; its recorded name, size, chunk list and digests | leaf-hash spelling where the frozen format does not require it |
-| Folder, anchor, trash, symlink, version, corruption and collection objects | the object kinds present and their relations: which folder a marker names, where the anchor places it, what is in the trash, how many versions per path, which chunks are marked or mid-collection, the collection phase | syntax, alias numbering, phase wording |
-| Journal and cursor | which ops were published, how they were batched into entries, their relative order in key order; which entry the cursor names | rendering, alias numbering |
+| Folder, anchor, symlink, version, corruption and collection objects | the object kinds present and their relations: which folder a marker names, where the anchor places it, how many versions per path, which chunks are marked or mid-collection, the collection phase | syntax, alias numbering, phase wording |
+| Log, tree head, takeovers and cursor | which entries exist, by number; the author and the commands of each (key, value before, value after); the tree head; which takeovers exist and whom each names; which entry the cursor names | rendering; the order of the commands within an entry |
 | Counts from maintenance | the numbers | the sentence around them |
 | Request replies | field set and values, reference grammar, cursor semantics, `stale`, `unnamed`, error `code` | key order; prose, except where the owning file makes the text a contract |
 | Human-readable status and menus | the facts each row states: numbers, states, which warnings appear, what is omitted when zero | layout, padding, units, phrasing |
@@ -112,19 +116,23 @@ or keys that the frozen format defines, they are semantic in full.
 Values that vary between runs MUST be replaced by stable aliases before comparison, and an
 implementation's harness MUST provide equivalents:
 
-- random folder ids → `<folder-N>`, numbered by walking from the root, then the trash, children in name
-  order; the root and trash ids are constants and printed raw;
+- random folder ids → `<folder-N>`, numbered by walking from the root, children in name order, then
+  the ids only a log entry or a before-value names, in order of first appearance; the root id is a
+  constant and printed raw;
 - file ids → `<file-N>`, numbered in order of first appearance in the output;
-- journal entry names → `<entry-N>`; version timestamps → `#N`, oldest first;
+- client uuids → the client's configured name; feed keys → `<feed-N>`, numbered per client in
+  applied-log order; version timestamps → `#N`, oldest first;
 - mtimes → `<mtime>` / `<zero>`; pin deadlines → `<deadline>`;
 - walk ids in page cursors → `<walk>`; a cursor's generation → `<cursor>` / `<empty>`.
+
+Entry numbers are deterministic and are printed raw.
 
 Values that depend on normalised inputs (byte totals of manifests embedding mtimes, for example) MUST
 NOT be printed. Wall-clock values MUST NOT appear in golden files.
 
 ### 4.4 Cross-implementation vectors
 
-Golden vectors for frozen algorithms (chunk keys, stored-key hashes, entry-key and GC-job key
+Golden vectors for frozen algorithms (chunk keys, stored-key hashes, log-entry and GC-job key
 spellings) are shared with every other program that reads a store, such as a bucket-side verifier or
 delete worker. They are semantic in full, and their line format is itself a contract with those
 programs. The vectors are owned by the file that owns the algorithm ([01](01-core.md),
@@ -167,7 +175,7 @@ health cell, so nothing can answer through a side door while the double is "down
 | Down(reason) | every call fails with `reason` | unreachable stores; two can be told apart in a report |
 | Hung | every call pends forever | deadlines, bounded probes, stall timeouts |
 | Outage(real) | while down, each call **waits** until the link returns, then goes through; calls counted on entry | outages as users see them; "0 round trips while offline" |
-| Flaky(real, n, verb?, error?) | the next n calls (of one named verb) fail, transient by default | retries, parking, stepping aside |
+| Flaky(real, n, verb?, error?) | the next n calls (of one named verb) fail, transient by default | retries, parking, a failed cycle that changes nothing |
 | Refuses | reads answer empty, writes raise not-writable | wrong credential, read-only store |
 | Memory | a fresh in-memory table | what reaches the store; one verb overridden to count or gate |
 | Landed-then-failed(real, verb) | performs the call, then reports failure | "the write landed but the answer was lost" |
@@ -193,10 +201,10 @@ Steps that model something other than a request bypass the handler:
 | Area | Operations | Models |
 |---|---|---|
 | Positional file operations | read with a stream id, write at an offset, truncate, close, fetch a range into a file | FUSE and File Provider calls |
-| Inspection | resolve (staged or published), chunk residency and counts, children, read-ahead in flight | reading state without changing it |
-| Queues | pending, pause, drain; flush the cursor | holding or releasing work |
-| Sync | one discovery-and-application pass | the poller's work without its timer |
-| Maintenance | expire, purge trashed, GC (run, and step by phase: start, step, release, abort), corruption list and invalidate, repair, resync (scoped), import, export, WAL record/advance/list/reconcile, staged-orphan sweep, cache-cap enforcement | commands and restart-time work |
+| Inspection | resolve (staged edit or mirror entry), chunk residency and counts, children, read-ahead in flight | reading state without changing it |
+| Upload queue | pending, pause, drain; flush the cursor | holding or releasing work |
+| Sync | one cycle; each of its steps alone (arrive, push, project); an arrival by state ([03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)) | the cycle worker without its timer |
+| Maintenance | expire, GC (run, and step by phase: start, step, release, abort), corruption list and invalidate, repair, import, export, owner-start recovery, staged-orphan sweep, cache-cap enforcement | commands and restart-time work |
 
 ### 5.6 Clock
 
@@ -235,10 +243,10 @@ Each driver prints its step list, then the state of §4.1.
 
 | Driver | Setup | Prints |
 |---|---|---|
-| single client | one client, two main stores | tree, content, store dump (and the second store's when a step touched it) |
-| two clients | A and B with separate caches, data and identities over one shared store | both trees, contents and owed work; both applied logs; the store |
+| single client | one client, a main and a replica | tree, content, store dump (and the second store's when a step touched it) |
+| two clients | A and B with separate caches, data and identities over one shared store | both trees, contents and sync states; both applied logs; the store |
 | listing | one client | each folder listed whole and paged, and the whole-domain listing paged |
-| change feed | A mutates, B syncs | B's feed from a baseline anchor, from its cursor, from a pruned anchor, after a generation bump, after a rebuild (still valid), and past the horizon with a watermark (still valid); a file renamed by A keeps its `i:` reference in B's feed |
+| change feed | A mutates, B syncs | B's feed from a baseline anchor, from its cursor, from a pruned anchor, after a generation bump, after an arrival by state (still valid), and past `FEED_RETENTION` with a watermark (still valid); a file renamed by A keeps its `i:` reference in B's feed |
 | page stability | one client | the whole-domain listing with a write between pages (no gap or repeat), and with the kept walk deleted between pages (`{stale:true}`) |
 | report | one client | the structure of the status report, and its text rendering |
 
@@ -254,15 +262,15 @@ Steps describe what a user or the environment does, never internal transitions.
   parent spelled verbatim.
 - **Positional**: read a range (with a stream id), fetch a range, write at an offset, truncate, stage a
   write without queueing, close.
-- **Observe**: chunks (published count, or staged slots and local count), chunk cache, staged tree,
+- **Observe**: chunks (the mirror entry's count, or staged slots and local count), chunk cache, staged tree,
   names, availability, corruption list, verify request.
-- **Queues**: drain (both queues empty, cursor flushed, and the next journal key in a later
-  millisecond), drain metadata only, pause and resume each queue, settle read-ahead (bounded; fails
-  rather than hangs).
-- **Sync**: one pass; hide the newest journal entry and unhide it later (an entry that becomes visible
-  late).
-- **Maintenance**: mark, expire (all, none, mark), purge trashed, GC and GC with verify, GC stepped to a
-  phase boundary and then continued or aborted, repair, rescan corruption, resync (scoped), import from a
+- **Queues**: drain (the upload queue empty, the pending set empty, the tree head at the head, the
+  cursor flushed, and the next feed key in a later millisecond), pause and resume the upload queue,
+  settle read-ahead (bounded; fails rather than hangs).
+- **Sync**: one cycle; arrive, push or project alone; arrive by state. A scenario holds publication by
+  running no push.
+- **Maintenance**: expire (versions, log entries, shares), GC and GC with verify, GC stepped to a
+  phase boundary and then continued or aborted, repair, rescan corruption, import from a
   local staging tree with filters, export.
 - **Faults**: §7.
 
@@ -272,19 +280,24 @@ Steps describe what a user or the environment does, never internal transitions.
 
 | Failure | Produced by | Exists to prove |
 |---|---|---|
-| Link stalled | Outage double; short and long read deadlines | metadata operations cost 0 round trips offline and owe work; a cold read fails within its deadline; a read on a long deadline is answered when the link returns |
-| Link refuses | Flaky double, per verb, transient or permanent | retries preserve order; a permanent failure steps aside, is reported, can be re-armed; a lost claim is retried |
+| Link stalled | Outage double; short and long read deadlines | local operations cost 0 round trips offline and stay pending; a cold read fails within its deadline; a read on a long deadline is answered when the link returns |
+| Link refuses | Flaky double, per verb, transient or permanent | a failed fetch or push changes nothing and the next cycle repeats it; an upload that keeps failing is parked, reported, can be re-armed, and the rest of the pending set is pushed without it |
 | Store down, hung, read-only | Down, Hung, Refuses | read and write policy by role; bounded probes; held members are not asked; deferred targets record rather than fail |
-| Landed, answer lost | Landed-then-failed | every retried store write is idempotent or detected |
-| Backend damage | delete a chunk; overwrite with another size; overwrite with the same size through the store and straight to disk; delete a manifest; each also on a secondary store | corruption markers, repair, verification finding bit rot, resync |
-| Cache loss | wipe the mirror, folder index, chunk cache and applied log, keeping staged work; delete one cached group behind the owner; forget one folder's local id | unsynced edits survive; the mirror rebuilds; ids are re-adopted |
-| Journal visibility | hide the newest entry, publish later ones, unhide | late entries are applied |
-| Lost delete | a store whose delete of one key silently does nothing | anchors make stale markers harmless |
-| Concurrency | racing conditional creates; readers and writers during promotion; foreign threads through a bridge; several processes minting ids; peers publishing conflicting ops | one winner per claim; no torn reads; unique ids; convergence |
+| Landed, answer lost | Landed-then-failed | every retried store write is idempotent or detected; a `put_if_absent` of a log entry that landed is recognised as this client's by the recovery of the in-flight record, and makes no conflicted copy ([publication.md §4.8](algorithms/publication.md#48-crash-recovery)) |
+| Backend damage | delete a chunk; overwrite with another size; overwrite with the same size through the store and straight to disk; delete a manifest; each also on a secondary store | corruption markers, repair, verification finding bit rot, tree integrity |
+| Cache loss | wipe the mirror, the position, the folder index, the chunk cache and the applied log, keeping staged work and before-values; delete one cached group behind the owner; forget one folder's local id | pending edits survive; the client arrives by state and the mirror is read back; the folder-id index is rebuilt |
+| Racing append | two clients at one position create the same entry number | one `Won`; the other is answered `Held`, arrives, and commits at the next number |
+| Projector killed | kill the projector between any two record writes of an entry, and between the last and the tree-head write | the entry is applied again from its start and ends in the same records and the same versions |
+| Projector stalled | a projector whose writes are gated on a latch past `PROJECT_SETTLE`, released after another client took the entry over | no takeover before the settle, no write of the new projector before the quarantine; the stalled projector writes nothing once released |
+| Collection before commit | run a collection between an upload and the push that names its chunks | the create is refused with the missing chunks named; the client uploads them again from its staged bytes and commits |
+| Log expiry | expire the log past a stopped client's position, the client holding pending changes | the client arrives by state; its pending changes stay pending, and one that clashes becomes a conflicted copy |
+| Main unreachable | Down or Outage on the main, a replica up | chunks are read from the replica; every fetch, state read, tree-head read and push fails UNREACHABLE; the position and the before-values do not change |
+| Lost delete | a store whose delete of one key silently does nothing | a marker that a projection failed to delete is disowned by its folder's anchor and invisible to every reader |
+| Concurrency | racing conditional creates of a log entry and of a takeover; readers and writers during promotion; foreign threads through a bridge; several processes minting ids; peers committing clashing changes | one winner per entry number and per takeover; no torn reads; unique ids; convergence |
 | Scheduling | fetchers gated on latches the test releases; overlap counters | observable limits the owning files specify hold (request caps, admission); a read never waits behind unrelated work |
 | Time | fake clock; a wall-clock step | control laws; wall-clock steps change no duration |
 | Load | CPU contention | convergence under contention; no verdict depends on speed |
-| Queue hold | pause either queue | work left owed deterministically |
+| Queue hold | pause the upload queue; run no push | work left pending deterministically |
 
 ### 7.2 Crash at every durable step
 
@@ -294,8 +307,8 @@ Every durable step (§5.7 and every store write) MUST be a kill point.
 2. **Kill twice per step.** For each step `k`, re-run and kill immediately **before** `k`, then
    immediately **after** it, with an uncatchable process kill so that no cleanup runs. Store writes get a
    third variant: landed, answer lost.
-3. **Restart and check.** Restart, recover, reach quiescence (store reachable, recovery run, queues
-   settled, a peer applying the journal) and check the invariant below.
+3. **Restart and check.** Restart, recover, reach quiescence (store reachable, recovery run, the upload
+   queue settled, the pending set empty, the tree head at the head, a peer arrived at the head) and check the invariant below.
 4. **Crash recovery too.** Repeat with a second kill point inside recovery; recovery must be crash-safe.
 5. **Prove the kill fired.** Each run asserts that the step counter reached `k`, and that recovery found
    evidence whenever `k` lies in a window that leaves some.
@@ -345,37 +358,58 @@ With the process seam (§5.8), over one machine's state:
 - Owners, one-shots and frontend hosts run concurrently and are killed independently while the others
   keep running.
 
-## 8. Property-based conflict testing
+## 8. Property-based merge testing
 
-The conflict decision tables are checked against the principle, not only against themselves.
-[conflict-resolution.md](algorithms/conflict-resolution.md) owns the invariants to assert after
+The merge is checked against the theory, and the engines against the invariants the merge exists for.
+[change-algebra.md](algorithms/change-algebra.md) owns the definitions and the theorems;
+[conflict-resolution.md](algorithms/conflict-resolution.md) §10 owns the invariants to assert after
 quiescence; this section owns how cases are generated and how the run proves its reach.
 
+### 8.1 The merge, enumerated
+
+Pure tier: no engine, no store.
+
+- **Trees.** Every well-formed tree within `merge_tree_bound`: a fixed set of folder ids besides the
+  root, of leaf names and of content tokens.
+- **Merge.** For every well-formed $R$ within the bound, and every well-formed $L$ and $M$ within it
+  that each differ from $R$ on at most `merge_diff_keys` keys, the implemented `MERGE(R, L, M)`
+  ([03 §3.6](03-journal-sync.md#36-merge-the-policy-seam)) equals a reference written directly from
+  Definition 7, and its result satisfies the five properties of Theorem 8. Where the repair rules can
+  be applied in more than one order, the reference applies them in the implementation's order.
+- **Application.** For every pair of well-formed trees within the bound, the order in which the
+  implementation applies their difference to a local tree keeps every intermediate state well-formed,
+  ends at the target, and uses at most one temporary place per folder the difference moves
+  (Theorem 3).
+- **Reach.** The run counts the cases that took each row of step 1 and each of R1, R2 and R3, and the
+  applications that needed a temporary place; a zero anywhere fails. It asserts the number of
+  triples enumerated.
+
+### 8.2 Two clients, generated
+
 - **Model.** A small tree (at most 3 names at the root and one folder level, 2–3 distinct contents as
-  tokens so that bytes can be accounted exactly), two clients, and one store with conditional create,
-  anchors, versioning on and off, and a trash. The real engines are driven through their request and
-  application interfaces; the link and pause controls produce the interleavings.
+  tokens so that bytes can be accounted exactly), two clients, and one main, with versioning on and
+  off. The real engines are driven through their request interface and the steps of the cycle (§5.5);
+  running or withholding a step produces the interleavings.
 - **Generators.**
-  1. A base tree, published and applied by both clients.
+  1. A starting tree, committed by one client and arrived at by both.
   2. One operation per side (or a short chain), from put, delete, mkdir, rmdir, rename of a file,
      rename of a folder, symlink, and a write inside a folder, with arguments biased towards collisions:
      the same name, a rename destination equal to the other side's name or source, a parent of the other
      side's name, the same leaf with the other kind.
-  3. An interleaving class: B unpublished when A's entry arrives; B publishes after A published but
-     before applying it; both published before either applies; the first with B's content staged
-     versus uploaded.
-  4. Faults: a kill before and after each enactment step and between a publish attempt and its end,
-     then recovery; a duplicated delivery; a late-visible entry; a transient store failure.
-  5. `base` presence: each edit is published with its `base`, and without it (as an older writer
-     does), in every combination of the two sides, so both the base rule and its fallback are reached
-     ([03 §2.3](03-journal-sync.md#23-journal-ops)).
-  6. Role swap: every case is also run with A and B exchanged.
-- **Shrinking.** A failure is shrunk to a minimal operation pair and base tree and emitted as a
+  3. An interleaving class: B's change pending when A's entry arrives, with B's content staged and
+     with it uploaded; B's push refused because A's entry took the number; both clients creating one
+     entry number at once; B arriving by state instead of fetching.
+  4. Faults: a kill before and after each step of an arrival's enactment, and between the in-flight
+     record and the end of the `Won` step, then recovery; a create that landed with its answer lost; a
+     transient store failure.
+  5. Role swap: every case is also run with A and B exchanged.
+- **Shrinking.** A failure is shrunk to a minimal operation pair and starting tree and emitted as a
   two-client scenario (§6.1) to be committed with its golden file.
-- **Reach.** The run counts every table situation it actually reached and fails unless each consistent
-  situation was reached at least once, listing the unreached; the combinations the table declares
-  inconsistent are excluded explicitly. It also counts cases per interleaving class and per fault point;
-  a zero anywhere fails.
+- **Reach.** The run counts every row of
+  [conflict-resolution.md §8.3](algorithms/conflict-resolution.md#83-coverage-by-operation-pair) and
+  each of the four clashes of [change-algebra.md §7.2](algorithms/change-algebra.md#72-where-the-two-sides-can-clash)
+  it actually reached, and fails unless each was reached at least once, listing the unreached. It also
+  counts cases per interleaving class and per fault point; a zero anywhere fails.
 - **Budget.** At least `property_cases` cases per run, with the seed printed, and any failing seed
   replayable.
 
@@ -386,8 +420,8 @@ convenient seams tends to miss:
 
 - the read path detecting a chunk whose bytes do not hash to its key, where the owning file requires
   verification;
-- resync comparing content identity, not only size, where the owning file requires it;
-- grouped partial edits published end to end, not only staged;
+- an arrival by state comparing content identity, not only size;
+- grouped partial edits committed end to end, not only staged;
 - the owner's own timers, the dispatch of changes to frontends, and a real owner start and stop;
 - positional operations through a real mount: rename (including over an existing name), truncate,
   partial writes, symlinks, concurrent access, and a file held open while replaced or deleted;
@@ -420,14 +454,13 @@ convenient seams tends to miss:
   ([security-model.md §7.3](algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy));
 - the bucket-function probe: `verified` and `Queued` answers only after the probe succeeded, and a
   store without the function answers "unsupported" ([gc.md](algorithms/gc.md));
-- taking over state written by an earlier version: start an implementation on a machine state an
-  earlier version left (WAL records in every state, a deferred-job backlog, staged edits including
-  set-aside ones, the mirror and folder-id index, the applied log and marks, the client identity and
-  host state such as camera-backup records), and check that it continues the owed work to the same end
-  state as the earlier version would, without rewriting any existing record to start (compare the
-  files before and after start-up);
-- journal `base` conflict cases: two peers editing one file with and without `base` on each side
-  (§8, [conflict-resolution.md](algorithms/conflict-resolution.md)).
+- starting on existing state: start an implementation on a machine state another run left (staged
+  edits including set-aside ones, before-values, a position, an in-flight record, an arrival record,
+  upload records, local intents, a deferred-job backlog, the mirror and folder-id index, the applied
+  log, the client identity and host state such as camera-backup records), and check that it continues
+  the owed work to the same end state as the run that left it would, rewriting no existing record at
+  start beyond what recovery specifies ([publication.md §4.8](algorithms/publication.md#48-crash-recovery));
+  compare the files before and after start-up.
 
 ## 10. Assertion discipline
 
@@ -490,6 +523,8 @@ A double declares no capability through which a real store could answer (§5.3),
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `property_cases` | 10 000 per run | every reach counter > 0 |
+| `merge_tree_bound` | 2 folder ids besides the root, 2 leaf names, 2 contents | every row of Definition 7 and each of R1, R2, R3 reached |
+| `merge_diff_keys` | 2 per side | ≥ 2: a removal of a folder and of what it held is two keys |
 | kill variants per durable step | before, after (and landed-then-failed for store writes) | all |
 | power-loss subsets per crash point | 16 | ≥ 1 of each of (a), (b), (c) |
 | scenario upload workers | 1 | > 1 only where the scenario tests parallelism |

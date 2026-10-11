@@ -142,7 +142,7 @@ Decoders MUST bound every length by the bytes **remaining**, never by `pos + n` 
 | `GET /o/<k>?wait=S[&last_seen=T]` | Watch, §7. `S` is a decimal number (digits, optional `.` and digits), finite, `≥ 0`; clamped to 30. Anything else → 400. `offset`/`length` with `wait` → 400. |
 | `HEAD /o/<k>` | 200 with `x-tsync-size: <int>`, `x-tsync-last-modified: <decimal seconds>`, `x-tsync-etag: <etag>` when the store names a version, and `x-tsync-checksum: <algo>:<value>` when it reports one; empty body. 404 when absent. |
 | `PUT /o/<k>` (Ro) | Body = the object. Last writer wins. 200, empty body. |
-| `PUT /o/<k>?if_absent=1` (Ro) | Conditional create arbitrated by the server's store. 200, body = **whatever is at the key afterwards**: the request body if this call created it, the earlier writer's body if not. A client MUST send `if_absent=1`. A server SHOULD accept `true`, `yes`, `on` (case-insensitive) as meaning `1`, and `0`, `false`, `no`, `off` as a plain PUT; any other value → 400. |
+| `PUT /o/<k>?if_absent=1` (Ro) | Conditional create arbitrated by the server's store. 200, body = **whatever is at the key afterwards**: the request body if this call created it, the earlier writer's whole body if not (for a log entry, up to `MAX_ENTRY_BYTES`, [publication.md §7](../algorithms/publication.md#7-parameters)). A create the server's reference gate refuses is a 409 `missing_chunks` (§6.2), and nothing is created. A client MUST send `if_absent=1`. A server SHOULD accept `true`, `yes`, `on` (case-insensitive) as meaning `1`, and `0`, `false`, `no`, `off` as a plain PUT; any other value → 400. |
 | `PUT /o/<k>?if_match=<etag>` or `?if_none_match=1` (Ro) | Conditional replace by the server's store ([store contract §3.11](../06-backends.md#311-put_if_unchanged)): body = the object, written only if the key still holds the object of that etag, or no object. 200, empty body, when written; **412**, empty body, when the precondition failed. `if_match`, `if_none_match` and `if_absent` are mutually exclusive; `if_none_match` takes only `1`; anything else → 400. |
 | `GET /checksum/<k>?algo=<algo>` | 200, body = `<algo>:<value>`, computed by the server's store (`compute_checksum`), so the object's bytes stay on the server. 404, empty body, when absent. An algorithm outside the store contract's table → 400. |
 | `DELETE /o/<k>` (Ro) | 200 when an object was removed, 204 when nothing was there. Empty body. |
@@ -223,7 +223,7 @@ Error bodies are short `text/plain` sentences for humans. Clients act on the sta
 
 Every 409 carries `x-tsync-kind: <kind>`, the permanent kind of the store failure ([failure-model §3.1](../algorithms/failure-model.md#31-kinds)) in lower case, with the subkind where there is one: `absent` (a source the operation needed is gone), `exists`, `not_empty`, `denied`, `read_only`, `other`, `invalid`, `corrupt`, `unprepared`, or `missing_chunks`. A client reads the kind from the header; a 409 without it, or with a value it does not know, is REFUSED/`other`.
 
-`missing_chunks` is the GC reference gate's refusal of a manifest or version write ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). Its body is the line `missing chunks` followed by one chunk key per line; the client validates each key and hands the list to the writer, which re-uploads them and retries. This is the one refusal whose body a client parses.
+`missing_chunks` is the GC reference gate's refusal of a write of a log entry, a manifest or a version, whichever PUT form or copy carried it ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). Its body is the line `missing chunks` followed by one chunk key per line; the client validates each key and hands the list to the writer, which uploads them again and repeats the write with the same bytes. This is the one refusal whose body a client parses.
 
 ### 6.3 Client mapping
 
@@ -267,14 +267,14 @@ Client: one attempt, outside the retry ladder. An answer **carrying** `x-tsync-w
 
 ## 8. Client driver
 
-Every request is signed (§3) and goes through the retry ladder (§9) except `watch`. Every operation is idempotent; a claim retried after a lost answer reads back the winner, possibly itself.
+Every request is signed (§3) and goes through the retry ladder (§9) except `watch`. Every operation is idempotent; a conditional create retried after a lost answer reads back the winner, possibly itself.
 
-### 8.1 First use: binding and claim support
+### 8.1 First use: binding and conditional-create support
 
 Before its first operation, an instance learns two facts, concurrently with its capability requests (§8.4), memoised for the instance's life and forgotten if the asking failed:
 
 - **Served.** `GET /list?mode=all&prefix=tsync/<d>/cursor&max_keys=1`. 200 → served. 401 or 404 → the server does not serve this domain for this secret: every operation fails REFUSED with "domain not served by <url>". `/list` is core, so its 404 can only mean an unserved domain.
-- **Claims.** Claim support is proven by `/verified` answering 200: every server that answers `/verified` honours `if_absent`. When `/verified` answers 404, `put_if_absent` fails REFUSED with "server lacks conditional create" **without sending the PUT**: a server without it would perform a plain overwrite and clobber the real winner.
+- **Conditional create.** Support is proven by `/verified` answering 200: every server that answers `/verified` honours `if_absent`. When `/verified` answers 404, `put_if_absent` fails REFUSED with "server lacks conditional create" **without sending the PUT**: a server without it would perform a plain overwrite and replace the entry that holds the number. A domain whose main is such a server cannot be pushed to ([publication.md §2](../algorithms/publication.md#2-system-model-and-assumptions), A2).
 
 On the first `put_if_unchanged` or `compute_checksum`, the instance learns one more fact, memoised and forgotten like the others:
 
@@ -285,7 +285,7 @@ On the first `put_if_unchanged` or `compute_checksum`, the instance learns one m
 | Contract op | Request | Result |
 |---|---|---|
 | `put key data` | `PUT /o/<k>` | ok |
-| `put_if_absent key data` | `PUT /o/<k>?if_absent=1` (only when claims are supported, §8.1) | the answer body, a fresh buffer, never the caller's. `data` MUST be non-empty (INVALID otherwise). An empty answer body to a non-empty claim means the server did not honour the claim: CORRUPT. |
+| `put_if_absent key data` | `PUT /o/<k>?if_absent=1` (only when conditional create is supported, §8.1) | `Won` when the answer body is byte-identical to `data`, else `Held` with the answer body, a fresh buffer, never the caller's. `data` MUST be non-empty (INVALID otherwise). An empty answer body to a non-empty `data` means the server did not honour the precondition: CORRUPT. A 409 `missing_chunks` fails the call with the named chunks (§6.2). |
 | `get key` | `GET /o/<k>` | body; ABSENT on 404 |
 | `get_opt key` | `GET /o/<k>` | `Some body`; `None` on 404 with empty body |
 | `get_range key off len` | `GET /o/<k>?offset=off&length=len` | body, **checked**: more than `len` bytes is CORRUPT (a server that ignored the range); `None` on 404. `len = 0` answers empty without a request. |
@@ -364,8 +364,8 @@ A server MUST answer every client that uses only the core correctly: new endpoin
 ## 11. Concurrency and consistency
 
 - **Concurrency**: the inherited `max_concurrency` makes the domain hold excess client-side; a 503 is backed off by the ladder.
-- **Consistency relied on**: whatever the far composite store guarantees. Reads are read-after-write for that server's own writes; `put_if_absent` is the far store's conditional create arbitrated by its first main; `watch` is as prompt as the far store's own watch, coalesced across clients.
-- **Garbage collection**: every manifest or version write through a listener passes the server's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)), and during a run chunk reads are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)). A client therefore deduplicates safely against what the server reports present, and re-uploads what a `missing_chunks` refusal names.
+- **Consistency relied on**: whatever the far composite store guarantees. Reads are read-after-write for that server's own writes; `put_if_absent` is the far store's conditional create, arbitrated by its main; `watch` is as prompt as the far store's own watch, coalesced across clients.
+- **Garbage collection**: every write of a log entry, a manifest or a version through a listener passes the server's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)), and during a run chunk reads are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)). A client therefore deduplicates safely against what the server reports present, and re-uploads what a `missing_chunks` refusal names.
 
 ---
 
@@ -382,7 +382,7 @@ A server MUST answer every client that uses only the core correctly: new endpoin
 - Parameters: `offset` alone, `length` alone, a signed or non-decimal number, zero length, `wait=nan`, `wait=-1`, `wait=inf`, an unknown `if_absent` value, and a watch on a non-cursor key are all 400.
 - Bulk: empty lists send nothing; 2 500 keys to `delete_multi` or `get_many` go as three pages; 130 prefixes to `list_many` go as three pages.
 - Fallbacks: against a server without `/get-multi`, `get_many` answers correctly through single reads and does not ask the bulk endpoint again; without `/children-multi`, `list_many` answers no folders and does not ask again.
-- Claims: against a server without `/verified`, `put_if_absent` fails REFUSED and no PUT reaches the server; an empty claim answer to a non-empty body is CORRUPT.
+- Conditional create: against a server without `/verified`, `put_if_absent` fails REFUSED and no PUT reaches the server; an empty answer to a non-empty body is CORRUPT; a create that lost returns the holder's whole body, a log entry of `MAX_ENTRY_BYTES` included; a create of a log entry naming a chunk the server lacks is a `missing_chunks` 409, delivers the named keys, and creates nothing.
 - Unserved domain: every operation, HEAD and `get_opt` included, fails REFUSED rather than reading as absent.
 - Read-only: a 403 surfaces as the contract's not-writable failure.
 - Permanent failures: a 409 costs exactly one request and its text and kind reach the caller; two 500s then a 409 cost three requests; a `missing_chunks` 409 delivers the named keys to the writer.

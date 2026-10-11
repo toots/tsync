@@ -3,7 +3,7 @@
 This file owns two things:
 
 1. **Every local on-disk format** of a domain's checkout: the mirror, the folder-id index, the
-   staged tree, the chunk cache files and the WAL record (§2).
+   staged tree, the chunk cache files, the upload records and the local intents (§2).
 2. **The file-operation interface** that frontends and the request handler drive, with the
    local behaviour of each operation (§3–§4).
 
@@ -15,17 +15,18 @@ Everything here is local to one machine and is written only by the domain's owne
 | What the owner owns; authoritative vs rebuildable entities; invariants | [data-model/local-cache.md](data-model/local-cache.md) |
 | Durable write primitives, ordering rules R1–R6, the durable queue, acknowledgement points | [algorithms/durable-queue.md](algorithms/durable-queue.md) |
 | Reading bytes, cache fills, verification, read-ahead, pins, the cache cap | [algorithms/read-path-and-cache.md](algorithms/read-path-and-cache.md) |
-| WAL state machine, publishing, reconcile, applying peers' entries | [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) |
-| Arrival and Publish decisions, conflicted-copy names, asides | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
+| Before-values, upload, fetch, push, projection, recovery | [algorithms/publication.md](algorithms/publication.md) |
+| Enacting a merge, conflicted-copy names | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
 | Leaf escaping, temporary names, random ids, chunk keys and sharding | [01](01-core.md) |
 | Manifest and folder-marker bytes | [02](02-remote-model.md) |
-| Applied log, last-sync mark, entry keys, journal ops, client identity | [03](03-journal-sync.md) |
-| Resync, import, export and their records | [05](05-ops-config.md) |
+| Sync state, applied log, feed keys, commands, client identity | [03](03-journal-sync.md) |
+| Arrival by state (`tsync sync --full`), import, export and their records | [05](05-ops-config.md) |
 | Ownership lock, pause flag, kept walk, resync generation | [07](07-daemon-cli.md) |
 | Request handler, item references, path validation for caller-supplied paths | [08](08-frontends.md), [security-model](algorithms/security-model.md) |
 
-In this file "the mirror" is the local manifest mirror: this client's projection of the
-domain's namespace, filed by real path.
+In this file "the mirror" is the local manifest mirror, filed by real path. With the staged
+edits laid over it, it is the client's **local tree**
+([publication](algorithms/publication.md) §3.2).
 
 ---
 
@@ -35,13 +36,13 @@ The backend files content by hash and folders by id, so it cannot cheaply answer
 this folder", "what is this file called" or "what bytes are at offset N", and it may be
 unreachable. The checkout exists to:
 
-1. answer every namespace question from the mirror, without the network (a full checkout's
-   mirror is the whole answer: a name it lacks is a name the domain does not have);
+1. answer every namespace question from the local tree, without the network (a full checkout's
+   tree is the whole answer: a name it lacks is a name the domain does not have);
 2. serve file bytes from a content-addressed chunk cache that fetches only what is read;
 3. hold unpublished writes (the staged tree), the sole copy of that data, in a store that
-   neither the cache cap nor a resync can reach;
-4. record every change as owed work before doing it, apply its local half at once, and hand
-   the store half to a queue;
+   neither the cache cap nor an arrival can reach;
+4. record, before a key changes, the main's value at it; apply the change at once; leave the
+   upload to a queue and the commit to the cycle;
 5. map stable folder ids to paths and back.
 
 ---
@@ -57,11 +58,11 @@ requires rewriting a valid existing file into another form.
 <cache_root>/<domain>/
   manifests/<escaped path>                     mirror entry of a file (manifest bytes)
   manifests/<escaped dir>/                     mirror entry of a folder (a directory)
+  manifests/.tsync-mirror                      mirror id ([03](03-journal-sync.md) §2.7)
   manifests/<escaped dir>/.tsync-dir           folder marker
   manifests/<escaped dir>/.tsync-name          name marker (only when the dir's leaf is escaped)
-  manifests/<escaped dir>/.tsync-own-<hex16>   own marker of a file entry this client stored
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
-  scratch/<escaped path>                       frontend scratch; wiped by resync ([07](07-daemon-cli.md))
+  scratch/<escaped path>                       frontend scratch; wiped by `full_resync` ([07](07-daemon-cli.md))
   file-ids-complete                            file-id record: a backfill pass completed (§4.10)
   file-ids-index                               file-id index snapshot, only between a clean stop and the next start (§2.3)
   scratch/.tsync-walk                          kept walk of a whole-domain listing ([08 §2.5](08-frontends.md#25-cursors-and-anchors))
@@ -76,10 +77,10 @@ requires rewriting a valid existing file into another form.
   folders/by-path/<md5 hex>                    removed-id record
   exports/…                                    export records ([05](05-ops-config.md))
   applied/<YYYY-MM>.log                        applied log ([03](03-journal-sync.md))
-<data_dir>/journal-pending/<domain>/<entry key>               WAL record
-<data_dir>/journal-pending/<domain>/<submission id>           WAL record submitted by a non-owner, until re-keyed
-<data_dir>/journal-pending/<domain>/<id>.bad                  set-aside WAL record (or `.bad.<n>`)
-<data_dir>/claims-pending/<domain>/<record id>                pending folder-claim confirmation
+<data_dir>/sync/<domain>/…                                     sync state ([03](03-journal-sync.md) §2.7–2.8)
+<data_dir>/uploads-pending/<domain>/<record id>               upload record (§2.8)
+<data_dir>/intents-pending/<domain>/<record id>               local intent (§2.8)
+<data_dir>/<log>/<domain>/<id>.bad                            set-aside record (or `.bad.<n>`)
 ```
 
 - `<escaped path>` escapes each `/`-separated component with the mirror escaping of
@@ -90,8 +91,8 @@ requires rewriting a valid existing file into another form.
   Temporary files ([01](01-core.md) §2.9) are internal leaves.
 - Folders exist only in the mirror. The staged tree has directories only as containers of
   staged manifests.
-- Directories under `<cache_root>/<domain>`, `<data_dir>/journal-pending` and
-  `<data_dir>/claims-pending` are created 0700 and their files 0600 ([durable-queue](algorithms/durable-queue.md) §3.2).
+- Directories under `<cache_root>/<domain>`, `<data_dir>/sync`, `<data_dir>/uploads-pending` and
+  `<data_dir>/intents-pending` are created 0700 and their files 0600 ([durable-queue](algorithms/durable-queue.md) §3.2).
 
 ### 2.2 Identifiers and derived names
 
@@ -113,42 +114,32 @@ requires rewriting a valid existing file into another form.
 
 - **File entry** `manifests/<escaped path>`: exactly a manifest body ([02](02-remote-model.md)),
   whose recorded name is the real leaf of the path. Every write stamps the recorded name, so a
-  file needs no name marker even when its leaf is escaped. A file entry that does not decode is
-  skipped by listings and answers CORRUPT to reads and stats of its path; a resync replaces it.
+  file needs no name marker even when its leaf is escaped. For a path with no staged edit the
+  entry is the file's local value; for a path with a staged edit it is the edit's base (§4.2). A
+  file entry that does not decode is skipped by listings and answers CORRUPT to reads and stats of
+  its path; an arrival by state replaces it.
 - **Folder entry**: a directory. Its **folder marker** `.tsync-dir` holds the same JSON as a
   backend folder marker ([02](02-remote-model.md)): `{"dir":true,"name":"<real leaf>","id":"<folder id>"}`.
   Readers ignore unknown fields. A marker whose `dir` is not `true`, or whose `id` is missing or
   violates the folder-id grammar, is treated as absent: the folder has no id here (operations
-  beneath it are UNPREPARED until a resync). The root has no marker; its id is `.tsync-root`.
+  beneath it are UNPREPARED until an arrival by state). The root has no marker; its id is `.tsync-root`.
 - **Name marker** `.tsync-name`: the raw real leaf bytes, no newline, present only in a folder
   whose leaf is escaped. It is rewritten whenever the folder is recorded, so mtime sweeps see it
   as live.
-- **The view.** A path's file entry is this client's *view* of the path
-  ([conflict-resolution](algorithms/conflict-resolution.md) §3.3): the record this client last
-  installed from a peer's entry, applied, or itself stored. An upload that stored a manifest makes
-  it the path's file entry even when the promotion of that upload is later abandoned (§4.6); a
-  local rename moves the entry; a local delete removes it.
-- **Own marker.** The view also records whether this client stored it (*own*). The marker of a
-  file entry with real leaf `l` is `.tsync-own-<hex16(XXH3-64(l, 0))>` in the entry's directory;
-  its body is `l`'s bytes. The view is own iff the marker exists and its body equals the leaf. It
-  is written, durably, after the entry when this client's upload or republish stored the entry's
-  manifest; it is removed before the entry is replaced by any other record (a peer's, a resync's,
-  a pull's) and when the entry is removed; a file rename moves it with the entry. An entry
-  without a marker is not own; a lost marker reads as not own, which only falls back to the conflict rule used without `base`.
 - **File-id marker.** The file id ([01 §2.7](01-core.md#27-item-references)) of a file entry with
   real leaf `l` is the marker `.tsync-fid-<hex16(XXH3-64(l, 0))>` in the entry's directory; its body
   is the 32-digit id, a newline, then `l`'s bytes. It belongs to the entry iff the body's leaf equals
   `l`. Replacing the entry at the same path keeps the marker; a rename moves it with the entry (the
   leaf rewritten), written before the source entry is removed; a removal deletes it after the entry.
-  The marker is written, durably, with the entry that first occupies a path (create, peer put,
-  resync, pull). An entry found without a valid marker gets a fresh one at owner start (§4.10);
+  The marker is written, durably, with the entry that first occupies a path (create, merge,
+  pull). An entry found without a valid marker gets a fresh one at owner start (§4.10);
   nothing on a read path writes a marker.
 - **Pull marker** (lazy tree only) `.tsync-pulled`, in a folder entry and in the mirror's root: the
   wall-clock time of the last completed pull of that folder, decimal epoch milliseconds. Written
   atomically after the pull's entries. Absent means never pulled. It says that a view exists and how
   old it is, which bounds how long the view is answered while the store is silent; whether a view
   is fresh is never judged from it
-  ([android §3.2](frontends/android.md#32-freshness-without-a-journal-poller)).
+  ([android §3.2](frontends/android.md#32-freshness-without-a-background-cycle)).
 - **View hold** (lazy tree only) `.tsync-view-hold`, beside the pull marker: decimal epoch
   milliseconds until which the folder's view is answered whatever its age. Written atomically by a
   restore, on the folder of each file it pins and on every ancestor, and only ever raised. Absent
@@ -175,7 +166,7 @@ requires rewriting a valid existing file into another form.
 - **Removed-id record** `folders/by-path/<md5 hex>`: the name is the lowercase hex MD5 of the
   domain's key prefix ([01](01-core.md)) followed by the folder's path; the body is a folder
   id, and readers trim surrounding whitespace.
-- Both are projections of the mirror's folder ids, except that removed-id records are history
+- Reverse entries are projections of the mirror's folder ids; removed-id records are history
   (§4.9).
 
 ### 2.5 Staged manifest
@@ -185,7 +176,7 @@ Version 2, one JSON object per locally edited path:
 ```json
 {"v":2,"name":"report.txt","size":34,"mtime":1727600000.25,"chunkSize":8388608,
  "slots":[{}, {"u":"9f3c1a2b4d5e6f70"}, {"u":"9f3c1a2b4d5e6f70","o":8388608}, {"z":true}],
- "published":"<base64 of a manifest body>"}
+ "uploaded":"<base64 of a manifest body>"}
 ```
 
 | Field | Meaning | Reader rule |
@@ -198,12 +189,11 @@ Version 2, one JSON object per locally edited path:
 | `slots` | one slot per chunk index | array; absent (and no `whole`): empty |
 | `whole` | body id of a whole-file body | string; when present, `slots` is ignored |
 | `h1` | the whole-file digest of a `whole` body: the key's `content_id`, computed at adoption with the edit's `chunkSize` (§4.3) | 16 lowercase hex; ignored without `whole`. Readers SHOULD accept it absent with `whole`, computing the digest from the body when it is first needed |
-| `base` | the **base** of the edit ([conflict-resolution](algorithms/conflict-resolution.md) §3.3): the content identity `h1` of the view the edit started from | 16 lowercase hex, or `null` for *none* (the edit started from no record); absent: *unknown* |
-| `published` | the commit record: standard padded base64 of the manifest the upload produced | present: **Committed**; absent: **Owed**. A value that does not decode to a manifest reads as Owed (the upload is redone; dedup makes it free) |
+| `uploaded` | the upload's result: standard padded base64 of the manifest the upload produced | present: **Uploaded**; absent: **Owed**. A value that does not decode to a manifest reads as Owed (the upload is redone; dedup makes it free) |
 
 A slot is one of:
 
-- `{}` **Inherit**: chunk `i` of the published manifest at the same path (the *base*);
+- `{}` **Inherit**: chunk `i` of the mirror entry at the same path (the *base*);
 - `{"z":true}` **Zero**: a hole, reading as zeros, with no bytes on disk;
 - `{"u":"<body id>"}` or `{"u":"<body id>","o":<offset>}` **Staged**: the chunk's bytes start at
   byte `offset` (absent: 0; writers omit it when 0) of staged body `<body id>`. Writers MUST NOT
@@ -212,8 +202,8 @@ A slot is one of:
 Readers ignore unknown fields. Writers MUST write exactly `⌈size / chunkSize⌉` slots; readers
 SHOULD accept more (the extra ones are ignored) or fewer (the missing ones mean Zero).
 
-- The state (Owed or Committed) is part of the type: a local mutation can only produce Owed,
-  which is what retires a pending promotion (§4.7).
+- The state (Owed or Uploaded) is part of the type: a local mutation can only produce Owed,
+  which is what retires an upload's result.
 - **Set-aside.** An unparseable staged manifest ([durable-queue](algorithms/durable-queue.md)
   R6) is renamed, in its directory, to `.tsync-bad-<escaped leaf>`, or
   `.tsync-bad-<n>-<escaped leaf>` with `n` the smallest integer ≥ 2 not taken: an internal leaf
@@ -249,84 +239,49 @@ SHOULD accept more (the extra ones are ignored) or fewer (the missing ones mean 
   suffix, and a body `<group key>` that has any companion `<group key>.<suffix>` other than
   `.pin`. At owner start the owner removes them, a body before its companions (§4.10).
 
-### 2.8 WAL record
+### 2.8 Upload records and local intents
 
-`<data_dir>/journal-pending/<domain>/<entry key>`, one per unit of owed work. The file name is
-the entry key the work will be published under ([03](03-journal-sync.md) §2.2). Only the owner
-mints entry keys. A record submitted by a non-owner
-([durable-queue](algorithms/durable-queue.md) §4.2) is named with a submission id instead
-(`<20-digit µs>-<8-digit seq>-<pid>`), and the owner re-keys it when it adopts it. The body is a
-JSON object:
+Two durable-queue logs ([durable-queue](algorithms/durable-queue.md) §4.1; record ids are
+submission ids).
+
+**Upload record** `<data_dir>/uploads-pending/<domain>/<record id>`: one per file whose staged
+content the upload queue owes the main. Body, a JSON object:
 
 ```json
-{"state":"intent","attempts":2,
- "ops":[{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false,"size":1234}],
- "priors":{"0":"3f2a9c1e0b7d4455"},
- "localFrom":{"0":"a/old (conflicted copy from laptop).txt"},
- "fids":{"0":"6c1e0b9a2f4d47e8a3b5c7d9e1f20384"},
+{"file":["3f9a0c1b2d4e-40a","report.txt"],"attempts":2,
  "lastError":{"kind":"transient/link","detail":"connection reset"}}
 ```
 
 | Field | Rule |
 |---|---|
-| `state` | `intent`, `prepared` or `executed` ([wal-and-journal](algorithms/wal-and-journal.md) §4.1). Any other string reads as `intent`: a record never claims a state it did not earn |
+| `file` | the file key ([03](03-journal-sync.md) §2.3): folder id and leaf. The file's current path is found through the folder-id index, so a record follows its file through a folder rename |
 | `attempts` | integer ≥ 0; absent: 0 |
-| `ops` | array of journal ops ([03](03-journal-sync.md) §2.3). Every element MUST decode; a record with an op this reader does not know is unparseable (set aside), never run with the op dropped |
-| `priors` | optional object mapping an op's index (decimal string) to the **expected prior record** of that op ([conflict-resolution](algorithms/conflict-resolution.md) §3.3), for `delete` and file `rename` ops only: the prior's content identity `h1` (16 lowercase hex), or `null` for *none*. An index absent from the object (or no `priors` field) means *unknown*. Local only: never published |
-| `localFrom` | optional object mapping an op's index to the path the file occupies locally until the op's move is redone; written only while a retargeted record is in `intent` ([conflict-resolution](algorithms/conflict-resolution.md) §4.6) and removed with the move to `prepared`. Local only |
-| `fids` | optional object mapping an op's index to the file id ([01 §2.7](01-core.md#27-item-references)) of the file a `put`, `delete` or file `rename` op names, read when the local operation ran, before a delete removed its marker. Copied as `fid` into the op's applied-log copy when the entry is noted ([03 §2.7](03-journal-sync.md#27-applied-log-local)). An index without one: the applied-log copy carries none. Local only: never published |
-| `lastError` | optional `{"kind", "detail"}`; `kind` is a failure-kind name of [failure-model](algorithms/failure-model.md) §3.1 in lowercase. Readers SHOULD accept `transient` and `permanent` (meaning a retryable and a non-retryable kind); writers MUST NOT produce them. Only reported, never acted on |
+| `lastError` | optional `{"kind", "detail"}`; `kind` is a failure-kind name of [failure-model](algorithms/failure-model.md) §3.1 in lowercase. Only reported, never acted on |
 
-Readers ignore unknown fields; an op index in `priors`, `localFrom` or `fids`
-that names no op, or a value of the wrong type, makes the record unparseable.
+A file rename and a move aside rewrite the record's key with the staged manifest they move.
 
-Writers MUST NOT produce the following forms; readers SHOULD accept them as stated:
-- a record whose `ops` is an empty array: it owes nothing and is completed, not set aside;
-- an **op-list body**, one that is not a JSON object with a `state` field: a sequence of journal
-  ops, one JSON object per line, empty lines ignored, meaning state `intent`, attempts 0, no other
-  field. If any non-empty line does not decode, or the body yields no op, the record is
-  unparseable.
-
-- A record is a **metadata record** iff it has at least one op and no `put`. Record kinds are
-  [wal-and-journal](algorithms/wal-and-journal.md) §4.1.
-- **Re-keying** renames the record file to its new name in one atomic rename followed by a
-  directory fsync, so at every instant exactly one of the two names exists. The new key is freshly
-  minted by the owner, and no other process creates entry-key names, so the target never exists
-  (an implementation MAY use a no-replace rename where the platform has one).
-- **Set-aside name**: `<id>.bad`, or `<id>.bad.<n>` with the smallest free `n ≥ 2`. It never
-  matches the record-name grammar, so no queue lists it.
-- A record whose entry key names another client is never run nor deleted, and is reported
-  ([durable-queue](algorithms/durable-queue.md) §4.2).
-
-### 2.9 Pending folder-claim confirmation
-
-`<data_dir>/claims-pending/<domain>/<record id>`, a durable-queue log
-([durable-queue](algorithms/durable-queue.md) §4.1; record ids are submission ids). One record per
-tentative claim that awaits confirmation ([data-model/backend](data-model/backend.md) §6.2 owns the
-protocol). The owner writes it durably when the claim's create-if-absent has landed, before any
-content is filed under the tentative id, and removes it once the claim is final or has been set
-aside. Body, a JSON object:
+**Local intent** `<data_dir>/intents-pending/<domain>/<record id>`: one per namespace operation
+whose local steps are in progress (§4.5). Body, a JSON object:
 
 ```json
-{"id":"3f2a9c1e0b7d-1a","parent":".tsync-root","name":"Photos","landedAt":1727600000.25,
- "attempts":0,"lastError":{"kind":"transient/link","detail":"connection reset"}}
+{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false},
+ "fids":["6c1e0b9a2f4d47e8a3b5c7d9e1f20384"]}
 ```
 
 | Field | Rule |
 |---|---|
-| `id` | the tentative folder id (*I*); required, folder-id grammar ([01](01-core.md)) |
-| `parent` | the parent folder id (*P*) the slot hangs from; required |
-| `name` | the real leaf (*N*) claimed; required |
-| `landedAt` | wall time, seconds since the epoch, at which the create-if-absent was answered. The confirmation is due at `landedAt + claim_settle`. A re-claim (§6.2 step 3, empty or disowned slot) replaces the record with a new `landedAt` |
-| `attempts`, `lastError` | as in the WAL record (§2.8); only reported |
+| `op` | one feed op ([03](03-journal-sync.md) §2.9). An op this reader does not know makes the record unparseable (set aside), never run with the op dropped |
+| `fids` | optional: the file ids of the files the op names, read before the first step, so the feed line names them after a delete removed their marker |
 
-Readers ignore unknown fields; a record missing a required field is unparseable (set aside). The
-folder's current local path is found from `id` through the folder-id index (§4.9), never stored.
-At most one record per `id`: a new claim of an id that already has a record replaces it.
+Readers ignore unknown fields. An intent is created before the first local step and removed after
+the last; it is never published, and it says nothing about what is owed to the main.
 
-### 2.10 Files specified elsewhere
+- **Set-aside name** (both logs, and the sync state): `<id>.bad`, or `<id>.bad.<n>` with the
+  smallest free `n ≥ 2`. It never matches the record-name grammar, so no queue lists it.
 
-Applied log and last-sync mark: [03](03-journal-sync.md). Export records:
+### 2.9 Files specified elsewhere
+
+Sync state, applied log: [03](03-journal-sync.md). Export records:
 [05](05-ops-config.md). Deferred job logs: [06](06-backends.md). Ownership lock, pause flag, kept
 walk and resync generation: [07](07-daemon-cli.md). Client uuid and folder-id leases:
 [03](03-journal-sync.md) §2.1.
@@ -354,11 +309,11 @@ walk and resync generation: [07](07-daemon-cli.md). Client uuid and folder-id le
 Two kinds of in-process lock serialise every check-then-act on local state (P1):
 
 - **The metadata lock** (one per domain): every namespace change — mkdir, rmdir, rename,
-  delete, symlink, revert's install, the application of a peer's entry, conflict asides, lazy
-  pulls, resync's record and sweep, folder-index rebuild — and every WAL record creation for
-  such a change.
+  delete, symlink, revert's install, the enactment of a merge, lazy pulls, folder-index
+  rebuild — together with the before-values and the local intent of such a change, and the
+  choice of a batch and the `Won` step of a push ([publication](algorithms/publication.md) §4.5).
 - **The key lock** (one per logical key): every content change of the key — write, truncate,
-  create, whole-file handover, sync, close, the upload's commit, promotion — and every removal,
+  create, whole-file handover, sync, close, the upload's result, promotion — and every removal,
   move or discard of the key's staged edit, whoever performs it.
 
 Rules:
@@ -366,9 +321,10 @@ Rules:
 1. Lock order: the metadata lock before any key lock; several key locks in ascending key order.
    A holder of a key lock never waits for the metadata lock.
 2. A step that acts on a fact about a key's staged edit (it exists, it is Owed, it is
-   Committed) reads that fact while holding the key lock. A decision taken under the metadata
+   Uploaded) reads that fact while holding the key lock. A decision taken under the metadata
    lock alone is re-checked under the key lock, and re-decided if the fact changed. (Otherwise a
-   peer's delete, decided while no edit existed, discards an edit written a moment later.)
+   merge that installs the main's removal, decided while no edit existed, discards an edit written
+   a moment later.)
 3. The metadata lock is never held across a store request or a cache fetch.
 4. A key lock MAY be held across a cache fetch or a single store request, each bounded by
    `STEP_DEADLINE`; on expiry the operation fails with DEADLINE and changes nothing.
@@ -390,17 +346,17 @@ also the **read stream id** of sequential detection
   key (writes, truncates, promotion of those edits).
 - Reads through the handle see the lineage's current content. A local write through any path is
   visible to every handle of the key.
-- A change that is not in the lineage (a peer's version applied to the key, a local delete of
+- A change that is not in the lineage (the main's version installed by a merge, a local delete of
   the key, a replacing rename over it) **ends** the lineage: the handle keeps reading the
   content it had at that moment, as POSIX keeps an unlinked open file readable.
   - A published version is held by its manifest, and its chunks are fetched by key as needed.
     If the store no longer holds them (collected), the read fails ABSENT; it never serves
     another version.
-  - A staged edit that is moved aside by a conflict stays in the lineage under its new name.
+  - A staged edit that is moved aside by a merge stays in the lineage under its new name.
   - Staged bodies referenced by a handle are not released until the handle closes
     ([durable-queue](algorithms/durable-queue.md) R3).
-- A rename of the key (local or a peer's) moves the handle's key with it.
-- **Retention.** `retain(key)` returns a retention of the key's current content, published or
+- A rename of the key (local, or a move aside) moves the handle's key with it.
+- **Retention.** `retain(key)` returns a retention of the key's current content, mirror entry or
   staged, as it is at that instant; reads through it behave as a handle whose lineage has ended.
   `release(retention)` ends it. A frontend uses it to keep an open-and-unlinked file readable
   ([fuse](frontends/fuse.md) §4.10).
@@ -412,16 +368,16 @@ also the **read stream id** of sequential detection
 |---|---|---|
 | `kind(key)` | Dir if the mirror holds a folder; File if it holds a file entry or a staged edit exists; else Absent | — |
 | `stat(key)` | §3.6 | ABSENT |
-| `resolve(key)` | the staged edit (with its base, if any), else the published manifest, else nothing (§4.2) | — |
+| `resolve(key)` | the staged edit (with its base, if any), else the mirror entry, else nothing (§4.2) | — |
 | `list_children(prefix)` | files and folders directly under `prefix` (§3.5) | lazy tree: *network*; a failed pull propagates |
 | `list_tree(prefix)` | every file under `prefix`, recursively | — |
 | `open_read`, `read(handle, off, buf)`, `close_read` | §3.3; bytes by [read-path-and-cache](algorithms/read-path-and-cache.md). A read is short only at end of file | *network* for uncached bytes; DEADLINE after `READ_DEADLINE` |
 | `readlink(key)` | the target of a symlink manifest | ABSENT, INVALID if not a link |
-| `content_id(key)` | the item identity of the key's content: the whole-file digest `h1` ([02](02-remote-model.md)) of the published record, or of a whole-body staged edit (computed at adoption with the chunk size the upload will use); none for a staged edit with slots | — |
+| `content_id(key)` | the item identity of the key's content: the whole-file digest `h1` ([02](02-remote-model.md)) of the mirror entry, of an Uploaded staged edit, or of a whole-body staged edit (computed at adoption with the chunk size the upload will use); none for an Owed staged edit with slots | — |
 | `write(key, off, bytes)` | §4.3 | visible; *network* only to copy inherited bytes |
 | `truncate(key, size)` | §4.3 | visible; as write |
 | `create(key, exclusive)` | an empty staged edit, replacing any content (O_TRUNC); with `exclusive`, EXISTS if the key exists | visible |
-| `write_whole(key, src, base?, exclusive)` | adopt the complete file at `src` as the key's content, then close (§4.3, §4.4); `src` no longer exists at its path afterwards. With `exclusive`, EXISTS if the key exists; with a stale `base`, the write lands as a conflicted copy ([conflict-resolution](algorithms/conflict-resolution.md) §4.9) | durable |
+| `write_whole(key, src, base?, exclusive)` | adopt the complete file at `src` as the key's content, then close (§4.3, §4.4); `src` no longer exists at its path afterwards. With `exclusive`, EXISTS if the key exists; with a stale `base`, the write lands as a conflicted copy ([conflict-resolution](algorithms/conflict-resolution.md) §7) | durable |
 | `sync(key)` | §4.4 | durable |
 | `close(key)` | §4.4 | durable |
 | `delete(key)` | §4.5 | durable |
@@ -430,15 +386,15 @@ also the **read stream id** of sequential detection
 | `rename(src, dst, exclusive)` | §4.5 | durable; UNPREPARED for folders whose parent has no id |
 | `symlink(key, target, exclusive)` | §4.5; REFUSED unless the domain's symlink policy keeps links; with `exclusive`, EXISTS if the key exists | durable |
 | `retain(key)`, `release(retention)` | §3.3 | — |
-| `evict(key)` | removes every cache body of the key's published version and their pins; never touches staged content or the mirror entry | visible; reference-blind: a body another file shares goes too and is refetched on demand |
+| `evict(key)` | removes every cache body of the key's mirror entry and their pins; never touches staged content or the mirror entry | visible; reference-blind: a body another file shares goes too and is refetched on demand |
 | `pin(key, keep)` ("make available offline") | [read-path-and-cache](algorithms/read-path-and-cache.md) §4.8 | durable; *network* |
 | `unpin(key)` | removes the pins of the key's groups | visible; reference-blind, like `evict` |
 | `assemble_to(key, dst)` | the whole content into `dst` through one read handle, then `dst`'s mtime set to the content's mtime. `dst` MUST NOT exist: it is created exclusively, without following links, mode 0600 ([security-model](algorithms/security-model.md) §7.3) | *network*; EXISTS if `dst` exists |
 | `fetch_range(key, dst, off, len)` | the bytes `[off, off+len)` into a new file `dst` (created as for `assemble_to`) at the same offsets, with a hole before them; the file ends where the bytes end (short at end of content; a range wholly past the end yields an empty file). Staged edits and holes are served from staged state; only the chunks covering the range are fetched | *network* |
 | `revert(key, version)` | §4.6 | durable; *network*; ABSENT if no such version |
 
-Peer application, reconcile and the queues' jobs are not frontend operations; their local
-steps are §4.5–§4.7 and [wal-and-journal](algorithms/wal-and-journal.md).
+The enactment of a merge, recovery and the upload job are not frontend operations; their local
+steps are §4.5–§4.7 and [conflict-resolution](algorithms/conflict-resolution.md) §4.
 
 **`rename(src, dst, exclusive)`** follows POSIX: with `exclusive`, EXISTS if `dst` exists. Otherwise
 a file replaces an existing file; a folder replaces an existing **empty** folder; a folder onto a
@@ -446,7 +402,7 @@ non-empty folder, a file onto a folder, and a folder onto a file are EXISTS (POS
 them to ENOTEMPTY, EISDIR and ENOTDIR). A rename onto itself succeeds and changes nothing; a
 folder into its own subtree is INVALID; an atomic exchange is not offered.
 
-### 3.5 The published tree: full and lazy
+### 3.5 The local tree: full and lazy
 
 A domain's tree is either **full** (desktop hosts) or **lazy** (Android); the host chooses
 ([08](08-frontends.md)). Both expose the same operations; they differ in what absence means.
@@ -455,52 +411,52 @@ A domain's tree is either **full** (desktop hosts) or **lazy** (Android); the ho
 - names are real: escaped leaves are resolved through the file entry's recorded name or the
   folder's name marker;
 - internal leaves, set-aside manifests and undecodable file entries are skipped;
-- a staged edit wins over the published entry of the same path, and a staged-only file is
+- a staged edit wins over the mirror entry of the same path, and a staged-only file is
   listed;
 - a folder's mtime is the time of the last change to its set of children (an entry added,
   removed or renamed in or out), as recorded here; it is stable between such changes.
 
-**Full tree.** Absence in the mirror is absence in the domain, as of the entries applied.
-Listing never touches the network. The resync primitives ([05](05-ops-config.md) owns resync):
-- `record(parent, entry, on_other)`: writes one store-walk entry into the mirror. A folder
-  marker is recorded at `parent/<marker name>`; with `on_other = replace` the store's id
-  replaces any held id, with `keep` a held id is kept (§4.9). A file manifest is written at
-  `parent/<recorded name>`. The answer is *same*, *changed* or *replaced(old id)*; a file is
-  *same* iff the previous entry had equal first chunk key, size, mtime and link target.
-- `sweep_stale(cutoff)`: after a complete walk only, removes every mirror entry not rewritten
-  since `cutoff − 1 s` (coarse mtimes). A stale folder is removed whole and reported as a
-  `rename` to where the folder index now places its id, else as `rmdir(path, id)`; nothing
-  beneath it is reported. A stale file is reported as `delete`. Emptied directories are
-  removed. Ops are returned in walk order.
-- `clear_projection()`: removes the scratch tree only.
+**Full tree.** Absence in the local tree is absence in the domain, as of the position, or this
+client's own pending removal. Listing never touches the network. The tree changes by local
+operations and by merges, an arrival by state included
+([publication](algorithms/publication.md) §4.7): it installs only the keys where the main
+differs, keeps chunks and staged data, and never clears the tree. `clear_projection()` removes
+the scratch tree only.
 
-**Lazy tree.** Absence means "not fetched". When the host pulls a folder is
-[android](frontends/android.md) §3.2. A **pull** of one folder:
+**Lazy tree.** Absence means "not fetched". The sync state covers the folders held: a key in a
+folder never pulled has no local value and no before-value, and a command on it in a fetched
+entry is skipped. When the host pulls a folder is [android](frontends/android.md) §3.2. A
+**pull** of one folder:
 - is refused as UNPREPARED when the folder has no local id;
-- reads the store's listing of the folder; a child that cannot be read fails the whole pull
-  (never skipped), and a failed pull changes nothing;
-- records each child, then removes every published entry directly in the folder that the listing
-  lacks. A folder held here under another id keeps its id only when that id is this client's owed
-  work (`on_other = keep`); otherwise the store's id replaces it, since a pulled tree has no resync
-  to repair a folder a peer removed and made again;
-- leaves alone every path this client changed or published while the store's listing was in
-  flight: the listing is older than they are;
-- is **overlaid** with the owed work touching the folder, never skipped because of it: a name an
-  owed operation removes or renames away stays hidden, a name an owed operation creates or
-  renames in stays shown, and staged edits are kept. A record that cannot be discharged therefore
-  never freezes a folder;
+- reads the tree head, then the folder's namespace on the main, then replays over it the commands
+  of every log entry above that tree head that concern the folder: a state read
+  ([publication](algorithms/publication.md) §4.7) restricted to one folder. A child that cannot
+  be read fails the whole pull (never skipped), and a failed pull changes nothing;
+- **merges** what it read with the local values and before-values of the folder's keys
+  ([conflict-resolution](algorithms/conflict-resolution.md) §4), under the metadata lock, and sets
+  their before-values so that what the client knows of the main, at those keys, is what it read.
+  A name a pending command removes stays hidden, a name a pending command creates stays shown, and
+  staged edits are kept;
 - writes the folder's pull marker (§2.3) when it completes;
 - never writes to the store.
+
+A pull MAY be restricted to one key of a folder (opening a file): the same steps for that key
+alone, with no pull marker written.
+
+A lazy tree has one position, like a full one. Before a push it fetches and merges the entries
+after its position, restricted to the keys of the folders it holds. When that fetch answers
+PRUNED, it pulls again every folder that holds a pending command, drops its view of the others
+(they are pulled again when opened), and takes the head it read as its position.
 
 ### 3.6 Stat and availability
 
 - **stat** of a folder: a directory, mode 0755, link count 2, size 0, mtime as in listings.
-  Of a file: the staged edit's size and mtime if any, else the published manifest's; a symlink
+  Of a file: the staged edit's size and mtime if any, else the mirror entry's; a symlink
   manifest is a symbolic link (mode 0777, size = target length); otherwise a regular file mode
   0644. Owner and group are the owner process's; ctime equals mtime.
 - **availability** of a file:
   - `cached` if a staged edit exists;
-  - else, over the published version's groups: `pinned` if every group has a whole body and a
+  - else, over the mirror entry's groups: `pinned` if every group has a whole body and a
     live pin (deadline ≥ now), reporting the earliest deadline; `cached` if every group has a
     whole body; otherwise `online-only` (a partly cached file is online-only);
   - an undecodable entry is `online-only`.
@@ -526,25 +482,23 @@ Listing never touches the network. The resync primitives ([05](05-ops-config.md)
 ### 4.2 Resolution
 
 The single resolution point for a key: the staged edit if a staged manifest exists at the path
-(Owed or Committed), with the published manifest at the same path as its base; else the
-published manifest; else nothing. A staged Inherit slot with no base, or whose base lacks that
-chunk, is CORRUPT, never zeros. A published manifest whose chunk list has a hole is CORRUPT.
+(Owed or Uploaded), with the mirror entry at the same path as its base; else the
+mirror entry; else nothing. A staged Inherit slot with no base, or whose base lacks that
+chunk, is CORRUPT, never zeros. A mirror entry whose chunk list has a hole is CORRUPT.
 
 ### 4.3 Staged writes
 
-All steps below run under the key lock and end by incrementing the edit generation.
+All steps below run under the key lock and end by incrementing the edit generation. The first
+mutation of a key that has no before-value records one first: the content identity of the key's
+mirror entry, or ∅ when it has none ([publication](algorithms/publication.md) §4.1).
 
 **Base state** of a mutation (`staged_for`):
 - a staged edit with a whole body: first **split** it: for each group of the domain's current
   chunk size, a new group body holding that group's bytes, one slot per chunk; replace the
   staged manifest; release the whole body once the new manifest is durable (R3);
-- a staged edit: as is;
-- no edit, a published manifest: every slot Inherit, size and chunk size from the manifest,
-  mtime now, `base` = the manifest's `h1`;
-- neither: empty, with the domain's chunk size, `base` = none.
-
-A put published for the edit carries its `base` ([03](03-journal-sync.md) §2.3), omitted when
-unknown.
+- a staged edit: as is (an Uploaded edit becomes Owed with the same slots);
+- no edit, a mirror entry: every slot Inherit, size and chunk size from the entry, mtime now;
+- neither: empty, with the domain's chunk size.
 
 **`write(key, off, bytes)`**:
 1. `st := staged_for(key)`; `new_size := max(st.size, off + len)`; extend the slots with Zero up
@@ -583,15 +537,14 @@ domain's chunk size); release the old bodies as in `write`.
 **`write_whole(key, src, base?, exclusive)`**:
 0. With `exclusive`, EXISTS if the key exists. With `base` different from `content_id(key)`, the
    key becomes `aside(key)` for the steps below; the reply names the original key as it now
-   resolves ([conflict-resolution](algorithms/conflict-resolution.md) §4.9).
+   resolves ([conflict-resolution](algorithms/conflict-resolution.md) §7).
 1. Adopt `src` as a new whole body: rename it into `staged/whole/<new id>`; across filesystems,
    copy it, fsync the copy, then unlink `src`.
 2. fsync the body and its directory; durably replace the staged manifest with `whole` set and
-   size and mtime taken from `src`, and `base` = the supplied `base`, else the view's `h1`
-   (none without a view). Compute the body's whole-file digest (the key's `content_id`)
+   size and mtime taken from `src`. Compute the body's whole-file digest (the key's `content_id`)
    with the chunk size the upload will use, and record it as the manifest's `h1`. When the
    digest equals the key's `content_id` before the write, nothing changes: the body is released
-   and no upload is queued (a replay of content the store already has).
+   and no upload is queued (a replay of content the key already has).
 3. Release the old bodies after the manifest is durable; then close (§4.4).
 
 **Reading staged content**: a whole body is read directly. Otherwise per chunk: Staged reads the
@@ -607,81 +560,78 @@ ever read as zeros.
   fsync the directories of bodies created since then, and durably replace the staged
   manifest. No staged edit: nothing to do.
 - **`close(key)`** (the frontend's last close after a modification, or the end of a handover):
-  sync, then post a WAL record `Prepared [put(path, size)]` to the upload queue, with the
-  staged size at that moment. The post is durable before `close` returns. A close without a
-  staged edit, or without modification since the last close, posts nothing.
+  sync, make the key's before-value durable, then post an upload record for the key. The post is
+  durable before `close` returns. A close without a staged edit, or without modification since the
+  last close, posts nothing.
 
 ### 4.5 Namespace operations
 
-Each runs under the metadata lock with the WAL sequence of
-[wal-and-journal](algorithms/wal-and-journal.md) §4.2 (durable `Intent` before the local half,
-local effects durable, then `Prepared`, then acknowledgement,
-[durable-queue](algorithms/durable-queue.md) §7.4). A local half that fails completes its
-record and returns the failure. A local half that leaves the store owed nothing completes its
-record. A `delete` or file `rename` record carries the expected prior record of the path it removes
-or overwrites on the store (§2.8): the view of that path when the local half ran.
+Each runs under the metadata lock, in this order: a durable local intent (§2.8) when the local
+half is more than one atomic step; the before-value of each key the operation changes and that
+has none; the local half, its effects made durable; the removal of every before-value the local
+value returned to; the feed line; the removal of the intent; the acknowledgement
+([publication](algorithms/publication.md) §4.1, [durable-queue](algorithms/durable-queue.md)
+§7.4). A local half that fails undoes nothing it did not do: its intent is completed at once or
+at owner start, and the failure is returned.
 
-| Operation | Local half | Store owed? |
+| Operation | Local half | Keys changed |
 |---|---|---|
-| `delete(key)` | take the key lock; discard the staged edit (its bodies released after the discard is durable, and not before open handles close); remove the mirror entry; MAY evict its cache bodies | yes iff the mirror held a published entry or the staged edit was Committed |
-| `mkdir(key, exclusive)` | parent id required; an existing folder: nothing to do (EXISTS with `exclusive`); otherwise mint a folder id; create the directory, marker, reverse entry and removed-id record. The record carries the id, which is final | yes |
-| `rmdir(key)` | parent id required; read the folder's id; in one step under the lock, refuse a folder with any child (mirror entry, folder or staged edit) as EXISTS, else remove it; keep the removed-id record | yes, unless the folder was never published |
-| `rename(src, dst, exclusive)` | the POSIX rules of §3.4; take the key locks of `src`, `dst` and every staged key under a moved folder; for a folder, the parent of `src` must have an id; replacing an existing `dst` discards `dst`'s staged edit and mirror entry (an open handle on it keeps its content, §3.3); move the staged manifests and the mirror entry (§4.1), re-stamping names; for a folder, reparent its id (§4.9); re-post the upload of every moved staged edit under the new key, with a record key minted after the rename's | yes, unless the source was a never-published staged file |
-| `symlink(key, target)` | post `Prepared [put]`, then write a symlink manifest into the mirror, both under the key's lock (the upload puts the manifest; one that finds no link owes nothing) | yes (as an upload) |
+| `delete(key)` | take the key lock; discard the staged edit (its bodies released after the discard is durable, and not before open handles close) and its upload record; remove the mirror entry; MAY evict its cache bodies | the file key |
+| `mkdir(key, exclusive)` | parent id required; an existing folder: nothing to do (EXISTS with `exclusive`); otherwise mint a folder id, which is final; create the directory, marker, reverse entry and removed-id record | the new folder's key, from ∅ |
+| `rmdir(key)` | parent id required; read the folder's id; in one step under the lock, refuse a folder with any child (mirror entry, folder or staged edit) as EXISTS, else remove it; keep the removed-id record | the folder's key, to ∅ |
+| `rename(src, dst, exclusive)` of a file | the POSIX rules of §3.4; take the key locks of `src` and `dst`; replacing an existing `dst` discards `dst`'s staged edit and mirror entry (an open handle on it keeps its content, §3.3); move the staged manifest, its upload record and the mirror entry (§4.1), re-stamping names | the source key, to ∅; the destination key |
+| `rename(src, dst, exclusive)` of a folder | the POSIX rules of §3.4; the parent of `src` must have an id; take the key locks of every staged key under the folder; move the mirror directory and the staged directory; reparent the id (§4.9) | the folder's key, and nothing beneath it |
+| `symlink(key, target)` | write a symlink manifest as the key's mirror entry, under the key's lock | the file key |
 
-The Arrival decisions and their enactment for a peer's entry
-([conflict-resolution](algorithms/conflict-resolution.md) §4.1–§4.6) use these same local steps
-and locks; an aside moves a staged edit with `rename`'s local half.
+- A file created and deleted before any push leaves no before-value: the delete brings the key
+  back to ∅, its before-value.
+- A folder renamed and renamed back leaves none either.
+- A rename of a file onto itself, or any operation that changes no key, records nothing.
 
-### 4.6 Upload, commit and publishing a Put
+The enactment of a merge ([conflict-resolution](algorithms/conflict-resolution.md) §4) uses these
+same local steps and locks; a move aside is `rename`'s local half.
 
-The upload job for a WAL record with a `put(path)` op (the upload queue's job,
+### 4.6 Upload
+
+The upload job for an upload record ([publication](algorithms/publication.md) §4.2,
 [durable-queue](algorithms/durable-queue.md) §4.9):
 
 1. Under the key lock, read the key's state and its edit generation `g`:
    - an **Owed** staged edit: continue at step 2;
-   - a **Committed** staged edit: advance the record to `Executed` if it is not, then promote
-     (§4.7) and discharge;
-   - a symlink manifest in the mirror and no staged edit: put that manifest (idempotent), then
-     discharge;
-   - **no staged edit**: ask the store whether a manifest exists at the path. Present: ensure
-     the mirror holds a manifest for the path (fetch the store's if the mirror has none), then
-     discharge. Absent: complete the record without publishing. No answer: the failure's kind
-     (the record stays owed). ([durable-queue](algorithms/durable-queue.md) §7.3)
-2. Without the lock, upload the chunks through the GC interlock ([gc](algorithms/gc.md) §4.4):
-   Inherit slots reuse the base's chunk keys (no upload); Zero slots and bytes past the slots
-   are zero chunks; Staged slots read their bodies (§4.3, never zeros for an unreadable body); a
-   whole body is uploaded whole. Build the manifest.
+   - an **Uploaded** staged edit, or **no staged edit**: complete the record.
+2. Without the lock, upload the chunks the main lacks ([02](02-remote-model.md) §4.1): Inherit
+   slots reuse the base's chunk keys (no upload); Zero slots and bytes past the slots are zero
+   chunks; Staged slots read their bodies (§4.3, never zeros for an unreadable body); a whole
+   body is uploaded whole. Build the manifest.
 3. Under the key lock: if the edit generation is no longer `g`, end CANCELLED (a later close or
-   the owner-start adoption owes the newer state). Otherwise put the manifest on the store; then
-   durably replace the path's mirror entry with it and write its own marker (the view, §2.3:
-   Inherit slots stay valid, because the new manifest reuses the base's chunk key and size at
-   every Inherit index); then durably replace the staged manifest as **Committed** with that
-   manifest and with `base` set to its `h1` (it is now the view a later edit starts from).
-4. Advance the WAL record to `Executed` (durable).
-5. Promote (§4.7).
-6. Discharge ([wal-and-journal](algorithms/wal-and-journal.md) §4.2).
+   the owner-start adoption owes the newer state). Otherwise durably replace the staged manifest
+   as **Uploaded** with that manifest.
+4. Complete the record and wake the cycle.
 
-A whole body is never modified in place, so a whole-body upload needs no snapshot. Group bodies
-may be written during step 2; step 3's generation check discards what that upload read.
+- The job writes chunks and nothing else: no manifest, no log entry, no tree record. What it
+  uploaded becomes part of the main's tree only when the cycle commits the key's command, which
+  carries the manifest ([publication](algorithms/publication.md) §4.5).
+- A whole body is never modified in place, so a whole-body upload needs no snapshot. Group bodies
+  may be written during step 2; step 3's generation check discards what that upload read.
+- A commit refused for missing chunks ([gc](algorithms/gc.md) §5.4) puts the named chunks again
+  from the staged bodies, which are still held (§4.7), and is repeated.
 
-**`revert(key, version)`** (versioning required; *network*): fetch the version's manifest;
-under the metadata lock and the key lock, discard the staged edit (the user asked for the
-version), increment the edit generation, and durably post `Prepared [put(path, size)]`; then put
-the version's manifest on the store through the GC interlock (after saving the current one as a
-version, [02](02-remote-model.md)); install it in the mirror durably; the upload queue then
-discharges the record by the "no staged edit" rule.
+**`revert(key, version)`** (versioning required; *network*): fetch the version's manifest; under
+the metadata lock and the key lock, record the key's before-value if it has none, discard the
+staged edit (the user asked for the version), increment the edit generation, and durably install
+the version's manifest as the key's mirror entry. It is a local operation like any other: the
+cycle commits it, and the commit's gate checks that the main still holds the version's chunks.
 
 ### 4.7 Promotion
 
-Promotion turns a Committed staged edit into the published mirror entry. It runs under the key
-lock, at the end of an upload and for every Committed edit at owner start (§4.10). Each step is
-idempotent.
+Promotion turns a committed staged edit into the mirror entry. It runs under the key lock, after
+the `Won` step of a push for every staged edit of the batch whose before-value that step dropped,
+and at owner start for every Uploaded staged edit whose key has no before-value (§4.10). Each
+step is idempotent.
 
-1. Re-read the staged manifest. If it is not Committed, stop: a later mutation retired the
-   commit record, and its own close or adoption owes the newer state. The mirror entry already
-   holds the stored manifest (§4.6 step 3).
-2. Chunked edits: for each group of the published manifest whose members are all Staged or Zero
+1. Re-read the staged manifest. If it is not Uploaded, stop: a later mutation retired the
+   upload's result, and its own close or adoption owes the newer state.
+2. Chunked edits: for each group of the uploaded manifest whose members are all Staged or Zero
    and at least one Staged:
    - if every Staged member sits in one body at its layout offset: resize that body to the
      group's size (zeros for Zero members), fsync it, and hand it to the cache by hard link
@@ -690,10 +640,14 @@ idempotent.
      whole body ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.5).
    Groups with an Inherit member keep their key; a cached body for them is still right. A whole
    edit hands nothing to the cache.
-3. Durably replace the mirror entry with the committed manifest.
+3. Durably replace the mirror entry with the uploaded manifest.
 4. Release the staged manifest and fsync its directory.
 5. Release the staged bodies, except those an open read handle references (released when the
    last such handle closes).
+
+A staged edit is never promoted before its commit: until the entry that carries its manifest
+exists, nothing on the main names its chunks, and the staged bodies are the only bytes a refused
+commit can upload them from again.
 
 The order is load-bearing: a reader that resolved either representation finds its bytes still
 on disk, because bodies go last and a cache body is a second name for the same inode.
@@ -722,7 +676,7 @@ on disk, because bodies go last and a cache body is a second name for the same i
   the reverse entry with the parent's id and **the leaf of `key`** (not the marker's name,
   which may spell a pre-move leaf).
 - `lookup_id_removed(key)`: the live id, else the removed-id record's id. The record outlives
-  the folder so ops recorded under a removed or moved folder stay nameable.
+  the folder so the change feed can name an item under a removed or moved folder.
 - `key_of_id(id)`: climb reverse entries to `.tsync-root` with a seen set (a cycle answers
   nothing), fold the names into a path, and accept it only if `lookup_id(path) = id`. A stale
   entry costs an answer, never a wrong folder.
@@ -739,8 +693,8 @@ on disk, because bodies go last and a cache body is a second name for the same i
 
 ### 4.10 Owner start: local recovery
 
-Before reconcile ([07](07-daemon-cli.md) §3.2), with no request served yet, the owner brings the
-checkout to a consistent state:
+Before the first cycle ([07](07-daemon-cli.md) §3.2), with no request served yet, the owner
+brings the checkout to a consistent state:
 
 1. Remove temporary files in the domain's local areas whose owning process is not alive
    ([01](01-core.md) §2.9).
@@ -751,21 +705,27 @@ checkout to a consistent state:
    set-aside manifest. The set of **named bodies** is every body id named by a decodable manifest,
    plus, for each set-aside manifest, every maximal run of exactly 16 lowercase hex characters in
    its bytes. False positives only keep a body longer.
-4. Promote every Committed staged edit (§4.7). This needs no network.
-5. Release every staged body not in the named set. The release is exact, with no grace
+4. Recover the sync state ([publication](algorithms/publication.md) §4.8 steps 1–3): complete
+   each local intent, complete the arrival record, drop each before-value equal to the local
+   value, and give each Owed staged edit that has no before-value the content identity of its
+   base entry. This needs no network.
+5. Promote every Uploaded staged edit whose key has no before-value (§4.7): its commit happened.
+6. Release every staged body not in the named set. The release is exact, with no grace
    period, because only the owner writes the staged tree and nothing else runs yet.
-6. Reconcile the WAL ([wal-and-journal](algorithms/wal-and-journal.md) §4.7), then **adopt**
-   every Owed staged edit that no WAL `put` record names: post a fresh `Prepared [put(path,
-   size)]` for it (the crash fell between a write and its close).
-7. Anchor the cache counts ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.9); this
+7. **Adopt** every Owed staged edit that no upload record names: post a fresh record for it (the
+   crash fell between a write and its close).
+8. Anchor the cache counts ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.9); this
    MAY run lazily.
-8. Load the file-id index (§2.3) from its snapshot and remove the snapshot, else start building
+9. Load the file-id index (§2.3) from its snapshot and remove the snapshot, else start building
    it in the background; then give a file-id marker to every mirror file entry without a valid one, durably. On a lazy
    tree this covers the entries present. A crash midway leaves entries without a marker, which the
    next start completes; no id was reported for them yet. Once a pass completes, the
    **file-id record** says so durably and later starts skip this step: every write path gives an id
-   from then on, and a bulk pass that writes markers without a fsync each (a rebuild) re-mints a torn
-   one when it is redone.
+   from then on, and a bulk pass that writes markers without a fsync each (an arrival by state)
+   re-mints a torn one when it is redone.
+
+The in-flight record is recovered by the first cycle, which needs the store
+([publication](algorithms/publication.md) §4.8).
 
 Set-aside manifests are never adopted, promoted or removed automatically. Status reports them;
 only an explicit user request ([07](07-daemon-cli.md)) removes one, after which its bodies become
@@ -792,7 +752,7 @@ not stop the others.
 |---|---|---|
 | `CACHE_CHUNK_SIZE` | 16 MiB | the local disk unit; with 8 MiB chunks, `per = 2` |
 | `STEP_DEADLINE` | 15 s | bound on a store request or fetch made under a key lock |
-| `REMOVED_ID_RETENTION` | the journal retention horizon ([wal-and-journal](algorithms/wal-and-journal.md) §4.8) | MUST NOT be shorter: a peer op naming the folder may still arrive |
+| `REMOVED_ID_RETENTION` | `FEED_RETENTION` ([03](03-journal-sync.md) §5) | MUST NOT be shorter: a feed line naming the folder may still be read |
 | `HOUSEKEEPING_INTERVAL` | 60 s | cap cadence |
 
 ---
@@ -806,10 +766,9 @@ An implementation MUST exhibit the following.
   body path.
 - A staged manifest round-trips slots with offsets; a manifest without `v`, `o` or
   `chunkSize` decodes as specified; a version-3 manifest is set aside, never decoded.
-- A WAL record with an unknown op, a torn body or an empty op-list body is set aside and
-  reported, never completed. `priors` and `localFrom` round-trip; a record without `priors` has
-  unknown expected priors.
-- A re-key leaves exactly one of the two record names at every kill point.
+- An upload record or a local intent with an unknown op or a torn body is set aside and reported,
+  never completed. An upload record follows its file through a rename of the file and of any
+  folder above it.
 
 **Staged writes**
 - A 2-byte write into chunk 1 of a published 3-chunk file (one chunk per group) stages exactly
@@ -827,7 +786,9 @@ An implementation MUST exhibit the following.
   filesystem; its mtime becomes the published mtime; `content_id` is known at once and equals
   the published `h1`.
 - Only `close` (and a handover) posts an upload; write, truncate and create post nothing. Staged
-  edits survive removal of the whole chunk cache, and restart recovery publishes them.
+  edits survive removal of the whole chunk cache, and restart recovery uploads and commits them.
+- The first mutation of a clean key records its before-value; a second mutation does not change
+  it; a mutation that brings the key back to it removes it.
 - Deleting a staged file releases its bodies; the cache cap never counts or removes staged
   bodies.
 - `exclusive` create, mkdir, symlink, handover and rename answer EXISTS on an existing name and
@@ -835,32 +796,33 @@ An implementation MUST exhibit the following.
   content unchanged.
 
 **Upload and promotion**
-- A one-chunk edit of a published file uploads one chunk object.
-- A replayed promotion uploads nothing; an upload redone after a lost commit record uploads
-  nothing (dedup).
+- A one-chunk edit of a published file uploads one chunk object, and no other object.
+- An upload redone after a lost result uploads nothing (dedup); a replayed promotion uploads
+  nothing.
 - A write that arrives while an upload is in flight wins: the upload ends CANCELLED and the
-  store holds the newer content once its close is uploaded.
+  main holds the newer content once its close is uploaded and committed.
 - Reads and writes concurrent with a promotion all succeed: readers always get full-length, exact
   bytes, and alternating whole-file handovers never publish a mixed body. A write inside the
   promotion window retires the pending promotion.
-- After an upload stored a manifest and its promotion was abandoned, the path's mirror entry is
-  that manifest.
-- An upload whose staged edit vanished publishes an entry only if the store holds a manifest at
-  the path.
+- A staged edit is not promoted before its commit: with pushes held, an Uploaded edit keeps its
+  staged bodies, and a commit refused for missing chunks uploads them again and succeeds.
+- An upload record whose staged edit vanished is completed and uploads nothing.
 - A whole-file promotion leaves the cache without the file's groups.
 
 **Crashes** (each at every step, [durable-queue](algorithms/durable-queue.md) §8)
 - A crash between a group body's creation and the manifest that names it leaves the previous
   edit intact and readable; the new body is released at the next owner start.
 - A set-aside staged manifest's bodies survive the owner-start sweep.
-- A staged edit with no WAL record is adopted at owner start.
+- A staged edit with no upload record is adopted at owner start; one with no before-value takes
+  its base's identity; a local intent and an arrival record left by a kill are completed.
 
 **Namespace and index**
-- Mirror absence is domain absence, answered without touching the store (full tree).
+- Absence in the local tree is domain absence, answered without touching the store (full tree).
 - Lazy tree: listing a folder on a device that never synced fetches that folder only and
-  recovers folder ids from the store; a remote delete prunes the entry; a pull is never skipped
-  because of owed work, yet local unpublished creations stay listed and local unpublished
-  removals are not listed back; a failed pull prunes nothing.
+  takes folder ids from the store; a remote delete prunes the entry; a pull is never skipped
+  because of pending work, yet local unpublished creations stay listed and local unpublished
+  removals are not listed back; a pull that meets a clashing pending edit keeps it as a conflicted
+  copy; a failed pull changes nothing.
 - After a rename, only the new name is listed and resolvable.
 - `fetch_range` writes the range at its true offset into a new file with a hole before it and
   ends where the range ends; a range past the end is short and one wholly past the end yields an
@@ -877,11 +839,11 @@ An implementation MUST exhibit the following.
   it; a cycle resolves to nothing; `write` refuses to change a held id and `replace` changes it.
 - `rmdir` refuses a folder holding a file, a folder or a staged edit, and changes nothing.
 - `rename` follows the POSIX replacement rules of §3.4.
-- A peer's delete of a file that has a staged edit here never discards the edit, whatever the
-  interleaving with a concurrent write.
-- Resync rewrites the mirror in place, keeps chunks and staged data, reports removals as ops
-  (`delete`, `rmdir` with id, a folder move as `rename`), and does not sweep after an
-  incomplete walk.
+- A merge that installs the main's removal of a file that has a staged edit here never discards
+  the edit, whatever the interleaving with a concurrent write.
+- An arrival by state changes the mirror only where the main differs, keeps chunks and staged
+  data, reports its changes as feed ops (`delete`, `rmdir` with id, a folder move as `rename`),
+  and changes nothing after a walk that failed.
 
 ---
 
@@ -889,14 +851,14 @@ An implementation MUST exhibit the following.
 
 | Choice | Reason |
 |---|---|
-| Staged data in its own tree, not a spared region of the cache | The cap and resync cannot delete sole-copy bytes because they cannot address them, not because a filter spares them. |
+| Staged data in its own tree, not a spared region of the cache | The cap and an arrival cannot delete sole-copy bytes because they cannot address them, not because a filter spares them. |
 | Mirror filed by real path with escape handles and name markers | A walkable tree without the network, and names safe on FAT and NTFS. |
 | Group of several chunks per local file | Network granularity (the chunk) differs from disk granularity; fewer files and walks. |
 | Group key hashed over member keys | Two groups sharing first and last chunk once aliased and served wrong bytes. |
 | Staged body per group in group layout, promoted by hard link | Promotion by copy wrote a large file twice. |
-| Commit record inside the staged manifest | One atomic object; a later write retires it naturally. |
+| The upload's result inside the staged manifest | One atomic object; a later write retires it naturally. |
 | Upload commits only on an unchanged edit generation | A cooperative cancel alone let a torn manifest reach the store. |
 | One metadata lock that never spans a store request | A slow link must not freeze the mount. |
-| Key-lock re-check of staged facts | A decision taken without it discarded a fresh local edit on a peer's delete. |
+| Key-lock re-check of staged facts | A decision taken without it discarded a fresh local edit when a merge installed a removal. |
 | Partial bodies live only for the owner's lifetime | No record on disk can ever claim bytes the disk lacks, whatever crashes or power losses happen; a restart costs a few range refetches. |
 | Set-aside names are internal leaves | A user's file named `x.bad` is not a set-aside object. |

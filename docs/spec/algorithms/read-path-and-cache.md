@@ -264,7 +264,7 @@ TRANSIENT and never served. Promotion installs a group by hard link instead
 
 ### 4.8 Materialisation and pinning
 
-- **Plan**: a published version needs all its groups; a staged edit needs the base groups that
+- **Plan**: a file read from its mirror entry needs all its groups; a staged edit needs the base groups that
   hold an Inherit member; a staged edit without base needs none. On a lazy tree, a file absent
   from the mirror has its manifest fetched and recorded first.
 - **`pin(key, keep)`**:
@@ -322,8 +322,8 @@ enforce_cap():            # after every upload, and every HOUSEKEEPING_INTERVAL
   piece ends the count, so a hole is never reported as read. One handle reads one lineage
   ([04](../04-checkout-cache.md) §3.3).
 - **No unpublished loss (G6).** Staged bytes are in a tree the cap, evict and forced refetch
-  cannot address; promotion links rather than renames, so at no instant are unpublished bytes
-  only in the cache.
+  cannot address; promotion runs after the commit ([04](../04-checkout-cache.md) §4.7) and links
+  rather than renames, so at no instant are staged bytes only in the cache.
 - **Liveness (G3, G7).** Every foreground wait is bounded by `READ_DEADLINE`; the detached fetch
   completes the body for the next read. In-flight entries are removed in a `finally`, so a
   failed fetch never wedges its joiners. A fill that finds its body replaced starts over, within
@@ -388,7 +388,7 @@ An implementation MUST exhibit the following.
   second sequential read fetches the current and the next group; a probe elsewhere in the file
   through another handle does not reset a sequential reader.
 - A range read is served while prefetches hold every whole-fetch request in flight.
-- A handle opened before a peer's version is applied keeps reading the version it opened; a
+- A handle opened before an arrival installs a peer's version keeps reading the version it opened; a
   local write is visible to every handle.
 - A read offline fails within `READ_DEADLINE`; the fetch lands; the next read is local with no
   store call. A body removed underneath a reader is refetched on the next read.
@@ -397,7 +397,7 @@ An implementation MUST exhibit the following.
 - A pin spares a body at cap 0; re-pinning moves the deadline; a lapsed pin is removed, then its
   body is an ordinary candidate; a pin made before its fetch survives a cap sweep that runs
   during the fetch.
-- Promotion by link: one body, two names; publishing twice succeeds; a length mismatch is
+- Promotion by link: one body, two names; promoting twice succeeds; a length mismatch is
   refused; the body stays readable after the staged name goes, with no refetch; a cap of 0
   never touches staged bodies.
 - A file with every group present but one partly filled is `online-only`; once filled it is

@@ -2,14 +2,15 @@
 
 This file specifies the abstract model of the shared object store: the entities every client of a domain
 reads and writes, how they relate, the invariants that hold between them, who may write what, and how
-independent clients agree on folder identity. It owns the entity lifecycles, the invariants and the
-folder-identity arbitration protocol.
+the per-object tree is projected from the log. It owns the entity lifecycles, the invariants and the
+projection of an entry onto the tree.
 
 It names no byte format or key spelling except in §9. Which stored formats are frozen (core) and which
 may change (ephemeral) is stated in [02-remote-model.md](../02-remote-model.md). Byte formats and key spellings are owned by
 [02-remote-model.md](../02-remote-model.md); the store contract by [06-backends.md](../06-backends.md);
-retention and garbage collection by [algorithms/gc.md](../algorithms/gc.md); journal and cursor
-formats by [03-journal-sync.md](../03-journal-sync.md); local state by
+retention and garbage collection by [algorithms/gc.md](../algorithms/gc.md); log, cursor and tree-head
+formats by [03-journal-sync.md](../03-journal-sync.md); the protocol that creates entries and decides
+who projects them by [algorithms/publication.md](../algorithms/publication.md); local state by
 [local-cache.md](local-cache.md). Implementation notes: [ocaml/data-model/backend.md](../ocaml/data-model/backend.md).
 
 ---
@@ -40,7 +41,8 @@ on for correctness.
 **Who shares it.** Every client of the domain (desktop owners, mobile apps, one-shot commands acting
 through or as an owner), http-proxy servers re-exporting a store, the collector (on the host that owns
 a filesystem main), the bucket function (per object store), and share servers. They never talk to
-each other; the store and the journal are the only channels.
+each other; the store is the only channel, and the log on the main is the only place where a change to
+the tree is decided.
 
 **Scope of one layout.** One domain is one abstract layout. A physical store may hold many domains side
 by side; a domain may be spread over several stores (*members*), each holding a copy of the same layout
@@ -87,27 +89,29 @@ objects added, existing ones immutable).
 - **Attributes** logical size, modification time, the chunk size used to cut it, the ordered list of chunk
   keys (index *i* covers bytes `[i·chunk_size, …)`), a whole-file digest derived from the ordered chunk
   keys and lengths, the leaf name recorded at write time, and for a symlink its target and no chunks.
-- **Mutability** replaced whole. Concurrent writers are resolved above the store, through the journal
-  ([algorithms/conflict-resolution.md](../algorithms/conflict-resolution.md)).
+- **Mutability** replaced whole, only by a projection (§6). The value of a file at a place is decided
+  by the log ([algorithms/publication.md](../algorithms/publication.md)); the manifest object is that
+  value made readable without the log.
 - **Recorded name** informational; the location is authoritative. It exists because places a manifest
-  body is copied to (versions, share, cache) cannot yield the name back. A reader that has the location
-  MUST use the location's leaf.
-- **Lifecycle** created or replaced on publish. A file rename copies it to the new location, deletes the
-  old one, then re-puts it so the recorded name matches. Deleted on file delete (prior bodies survive as
-  versions when versioning is on), and with its namespace when a trashed folder is purged.
+  body is copied to (versions, share, cache) cannot yield the name back, and because a namespace
+  listing yields only a hash of the leaf. A projection writes it from the key's leaf. A reader that has
+  the location MUST use the location's leaf.
+- **Lifecycle** created, replaced or deleted when a projection applies a command on its location. A
+  file rename is two commands: a deletion at the old location and a creation at the new one, with the
+  same content. Prior bodies survive as versions when versioning is on.
 
 ### 2.4 Folder
 
 - **Represents** a directory, independent of where it sits.
 - **Identity** a **stable folder id** (grammar: [01-core.md §2.5](../01-core.md#25-folder-ids)): minted
-  by a client (§6.1), made final by a confirmed claim (§6.2).
-  Never reused and never changed; it survives rename, move, trash and restore.
+  by the client that creates the folder
+  ([03-journal-sync.md §2.1](../03-journal-sync.md#21-client-identity-and-folder-id-leases-local)), final
+  from the mint. Never reused and never changed; it survives rename and move.
 - **Attributes** none of its own; it names one **namespace** (§2.5) and is the subject of one **anchor**
   (§2.7).
-- **Reserved ids** the **root** (the domain's top folder: no marker, no anchor, always exists) and the
-  **trash** (a namespace holding trash entries, §2.8; never a real folder, never a parent of a marker).
-- **Lifecycle** comes into being with its winning claim. A purge deletes its contents and leaves its
-  anchor as a tombstone (§2.7).
+- **Reserved id** the **root** (the domain's top folder: no marker, no anchor, always exists).
+- **Lifecycle** exists from the entry that creates it to the entry that removes it. A removal is
+  committed only when the folder is empty in the main's tree, so nothing remains in its namespace.
 
 ### 2.5 Namespace
 
@@ -123,40 +127,36 @@ objects added, existing ones immutable).
 - **Represents** "the folder with id *I* appears in folder *P* under name *N*".
 - **Identity** its child slot (*P*, *N*).
 - **Attributes** *I* and *N*.
-- **Mutability** **create-if-absent**. Every write of a folder marker, whether a first claim, a mkdir, a
-  move or a restore, is a create-if-absent (§6). A folder marker is never written with a plain put.
+- **Mutability** replaced whole, only by a projection (§6).
 - **Validity** a marker whose id is empty or not a folder id is **unclassifiable**: readers
-  skip it as a write in flight and never adopt its id.
-- **Lifecycle** created by the first placement of a folder at that slot. Deleted when the folder moves
-  away or goes to trash (by the mover), or when found **disowned** (§6.3) by a claimant of that slot or
-  by integrity repair (§6.5).
+  skip it as a write in flight.
+- **Lifecycle** written when a projection places a folder at that slot; deleted by the projection that
+  moves the folder away or removes it.
 
 ### 2.7 Anchor
 
-- **Represents** where a folder says it lives: (parent id, name), or "in trash" with a name.
+- **Represents** where a folder is: (parent id, name). It is the per-object record of the folder's
+  value in the main's tree.
 - **Identity** the folder id (exactly one per folder, stored inside the folder's own namespace).
-- **Mutability** replaced whole, written only by whoever places the folder (claim winner, mkdir, move,
-  trash, restore) or by integrity repair.
-- **Role** it arbitrates between markers (§6.3). A marker at (*P*, *N*) naming *I* is **filed** iff
-  anchor(*I*) = (*P*, *N*), or *I* has no anchor. Otherwise it is **disowned** and every reader treats
-  it as absent.
-- **Tombstone** an anchor is never deleted by a purge: after its folder's contents are gone it keeps every
-  marker still naming that id disowned (a marker a lost delete left elsewhere would otherwise read as
-  filed and resurrect an empty folder). Only integrity repair, after a full walk proves no marker names
-  the id, MAY delete a tombstone.
+- **Mutability** replaced whole, only by a projection (§6).
+- **Role** it settles which marker is current while a projection is in progress (§6.2). A marker at
+  (*P*, *N*) naming *I* is **filed** iff anchor(*I*) = (*P*, *N*). Otherwise it is **disowned** and
+  every reader treats it as absent. A marker whose folder has no anchor is disowned.
+- **Lifecycle** written before the marker it validates; deleted last when the folder is removed.
 
-### 2.8 Trash entry
+### 2.8 Log entry
 
-- **Represents** a deleted folder awaiting expiry or restore.
-- **Identity** a random id in the trash namespace, one per deletion; a folder deleted, restored and
-  deleted again has had two entries.
-- **Attributes** folder id, name, and the domain-relative path at deletion time.
-- **Mutability** immutable.
-- **Age** the store-assigned modification time of the entry.
-- **Lifecycle** created by folder delete, before the anchor says "in trash" (§6.4). Deleted by restore
-  (after the folder is re-placed), by expiry or purge (after the subtree,
-  [algorithms/gc.md](../algorithms/gc.md)), and by expiry when **stale** (its folder's anchor says the
-  folder is live). The subtree is untouched while trashed: unreachable from root, still intact.
+- **Represents** one batch of commands a client committed: for each key it changes, the value before
+  and the value after ([algorithms/change-algebra.md](../algorithms/change-algebra.md) Definition 6).
+- **Identity** its number. Numbers are dense from 1; the highest is the **head**.
+- **Attributes** the author's client id; the commands. A file's value after is its whole manifest, so
+  an entry references chunks and nothing else.
+- **Mutability** **create-if-absent**, then immutable. This is the one arbitration between clients: at
+  most one entry holds a number.
+- **Lifecycle** created by a push
+  ([algorithms/publication.md §4.5](../algorithms/publication.md#45-push)), after every chunk it names
+  is on the main; deleted by expiry, never above the tree head and never the head entry
+  ([algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention)).
 
 ### 2.9 Version
 
@@ -169,29 +169,26 @@ objects added, existing ones immutable).
   group strictly increasing, so two snapshots never share a key.
 - **Attributes** the old manifest body verbatim (hence the recorded name of a deleted file).
 - **Mutability** immutable; **appended** per group.
-- **Lifecycle** created, when versioning is on, immediately before a manifest is replaced, deleted or
-  renamed away. The snapshot is best effort: a failed snapshot MUST NOT block the write, and MUST be
-  logged. Deleted by expiry by age.
+- **Lifecycle** created, when versioning is on, by a projection immediately before it replaces or
+  deletes a manifest. The snapshot is best effort: a failed snapshot MUST NOT block the projection, and
+  MUST be logged. Deleted by expiry by age.
 - **Derived notion** a *deleted file* is a history group with versions and no live manifest at its
   location.
 
-### 2.10 Journal entry
+### 2.10 Tree head and takeover
 
-- **Represents** one unit of work a client published: an ordered batch of ops naming domain-relative
-  paths and, for folder ops, folder ids.
-- **Identity** (start time in ms, client id): a total order that is not causal.
-- **Mutability** immutable; the journal is **appended** by many writers, and entries become visible out
-  of key order.
-- **Lifecycle** written after the store half of the work is visible; deleted by expiry. Formats and the
-  replication protocol: [03-journal-sync.md](../03-journal-sync.md),
-  [algorithms/wal-and-journal.md](../algorithms/wal-and-journal.md).
+- **Tree head** one per domain: the number of the last entry whose commands are all applied to the
+  per-object records. **Mutability** replaced whole, raised only, by the projector of that entry.
+- **Takeover** one per (entry, generation): names the client that may project an entry its previous
+  projector left unprojected. **Mutability** create-if-absent.
+- **Role, lifecycle** [algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log).
 
 ### 2.11 Cursor
 
-- **Represents** a hint: "some writer recently published entry *K*".
+- **Represents** a hint: "the head was *n* when some writer last looked".
 - **Identity** one per domain. **Mutability** replaced whole, debounced; it may move backwards or be lost.
 - **Role** lets idle readers watch one object; correctness never depends on it. Also the object the write
-  guard probes to learn whether a main is reachable. Owned by [03-journal-sync.md](../03-journal-sync.md).
+  guard probes to learn whether the main is reachable. Owned by [03-journal-sync.md](../03-journal-sync.md).
 
 ### 2.12 Folder index
 
@@ -201,7 +198,7 @@ objects added, existing ones immutable).
 - **Validity** an entry counts only if the live listing reports the same tag for that child; otherwise
   the child is read. It is meaningful only on the store whose tags it recorded, and MUST be neither read
   nor written for a domain with more than one readable member.
-- **Lifecycle** rewritten when its coverage falls below a threshold; deleted with its namespace on purge.
+- **Lifecycle** rewritten when its coverage falls below a threshold; deleted when its folder is removed.
   Nothing on the write path maintains it.
 
 ### 2.13 Collection run
@@ -212,7 +209,7 @@ objects added, existing ones immutable).
 - **Mutability** replaced whole; the phase is recorded before the step it names.
 - **Effect on readers** its **presence**, whatever its body, means chunks may live in either of two
   collection spaces (§2.14).
-- **Generation** a counter beside it on the first collectable main, persisting across runs: odd while a
+- **Generation** a counter beside it on the collectable main, persisting across runs: odd while a
   collection's deletions on copies are in flight, even once they settled. Memos of chunks present on a
   copy are tagged with it ([algorithms/gc.md §5.6](../algorithms/gc.md#56-the-generation-and-presence-memos)).
 - **Lifecycle and exclusion** [algorithms/gc.md](../algorithms/gc.md).
@@ -270,7 +267,7 @@ objects added, existing ones immutable).
 - **Lifecycle** created by the share operation ([05-ops-config.md](../05-ops-config.md)); deleted by
   expiry once expired ([algorithms/gc.md](../algorithms/gc.md)) and when its domain is dropped.
 - **Referent** a folder share follows the folder by id through moves and renames, and stops serving
-  once the folder is trashed. A file share follows the manifest's location: it stops serving after a
+  once the folder is removed. A file share follows the manifest's location: it stops serving after a
   rename or delete of the file, and follows a rename of a containing folder.
 
 ### 2.19 Share artifact cache
@@ -287,9 +284,9 @@ objects added, existing ones immutable).
 
 ### 2.20 Deferred debt (not a store object)
 
-What a replica or backfill member owes relative to the mains is recorded client-side, per (domain,
+What a replica or backfill member owes relative to the main is recorded client-side, per (domain,
 member), as an ordered durable log of **bodyless** jobs: put *key*, copy *src→dst*, delete *keys*. The
-job names what changed; bodies are re-read from the mains at execution time. It is the only record of
+job names what changed; bodies are re-read from the main at execution time. It is the only record of
 how a copy differs from the main; it is not replicated and not visible to other clients. Owned by
 [algorithms/replication.md](../algorithms/replication.md).
 
@@ -301,19 +298,22 @@ how a copy differs from the main; it is not replicated and not visible to other 
 erDiagram
     DOMAIN ||--|| ROOT_FOLDER : "has"
     DOMAIN ||--o{ CHUNK : "dedup scope"
+    DOMAIN ||--o{ LOG_ENTRY : "numbered from 1"
+    DOMAIN ||--|| TREE_HEAD : "projected up to"
     FOLDER ||--|| NAMESPACE : "names"
-    FOLDER ||--o| ANCHOR : "says where it lives"
+    FOLDER ||--o| ANCHOR : "says where it is"
     NAMESPACE ||--o{ FILE_MANIFEST : "child slot (id, name)"
     NAMESPACE ||--o{ FOLDER_MARKER : "child slot (id, name)"
     NAMESPACE ||--o| FOLDER_INDEX : "cache of children"
     FOLDER_MARKER }o--|| FOLDER : "by stable id"
     ANCHOR }o--|| FOLDER : "parent, by stable id"
     FILE_MANIFEST }o--o{ CHUNK : "ordered, by chunk key"
+    LOG_ENTRY }o--o{ CHUNK : "through the manifests it carries"
+    LOG_ENTRY }o--o{ FOLDER : "commands, by stable id"
     VERSION }o--o{ CHUNK : "ordered, by chunk key"
     VERSION }o--|| HISTORY_GROUP : "(folder id, leaf name)"
-    TRASH_ENTRY }o--|| FOLDER : "by stable id"
-    JOURNAL_ENTRY }o--o{ FOLDER : "folder ops, by stable id"
-    CURSOR }o--|| JOURNAL_ENTRY : "by entry key (hint)"
+    TREE_HEAD }o--|| LOG_ENTRY : "by number"
+    CURSOR }o--|| LOG_ENTRY : "by number (hint)"
     SHARE }o--o| FILE_MANIFEST : "by location"
     SHARE }o--o| FOLDER : "by stable id"
     CORRUPTION_MARKER }o--|| CHUNK : "by chunk key, per store"
@@ -324,21 +324,20 @@ erDiagram
 
 | From → to | By | A dangling reference means | Readers MUST |
 |---|---|---|---|
-| manifest / version → chunk | chunk key | A copy behind its debt, or a violated invariant (§4.1) | fail the read with "missing"; never substitute bytes |
+| manifest / version / log entry → chunk | chunk key | A copy behind its debt, or a violated invariant (§4.1) | fail the read with "missing"; never substitute bytes |
 | marker → folder | stable id | The namespace may be empty (a new folder): legal | list it as an empty folder |
-| anchor → parent folder | stable id | Parent trashed or purged: the folder is unreachable | not show it; integrity reports it |
-| trash entry → folder | stable id | Folder restored or re-filed (anchor not "in trash") | treat the entry as stale: never purge through it |
-| journal op → path / folder id | name + stable id | Normal: the store has moved on | resolve by the conflict tables |
-| cursor → journal entry | entry key | Entry expired | ignore it |
+| marker → anchor | stable id | A projection in progress, or a marker a lost delete left | treat the marker as absent |
+| tree head → log entry | number | Entry expired | nothing: the tree stands for it |
+| cursor → log entry | number | Stale hint | ignore it |
 | share → manifest location | (folder id, leaf) | File renamed or deleted | answer "not found" |
-| share → folder id | stable id | Folder trashed or purged | answer "not found" |
+| share → folder id | stable id | Folder removed | answer "not found" |
 | folder index entry → child | location + tag | Tag mismatch or child gone | ignore the entry |
 | corruption marker → chunk | chunk key | Chunk gone: the marker is stale | ignore it |
 | discard job → chunk | chunk key | Chunk already gone | treat the delete as done |
 
 The **path of a file** is not stored anywhere as a unit: it is the chain root → marker → … → manifest
 location, resolved by one read per segment, each segment validated by the target folder's anchor. Only
-trash entries (path at deletion), journal ops and share filenames record paths, as history or display.
+share filenames record names, for display.
 
 ---
 
@@ -346,65 +345,59 @@ trash entries (path at deletion), journal ops and share filenames record paths, 
 
 ### 4.1 At rest (after every writer has finished and every debt is paid)
 
-1. **Referential completeness.** Every chunk named by a manifest or version exists (in either collection
-   space during a run) on every member that holds that manifest or version.
+1. **Referential completeness.** Every chunk named by a manifest, a version or a retained log entry
+   above the tree head exists (in either collection space during a run) on every member that holds
+   that referrer.
 2. **Content identity.** A chunk's bytes hash to its key, except where a corruption marker on that store
    says otherwise.
-3. **One placement per folder.** For each folder id, at most one filed marker exists: the one at its
-   anchor's (parent, name). A folder never appears at two paths.
-4. **One occupant per child slot.** A slot holds a manifest, a folder marker, or nothing.
-5. **Reachability.** Every live folder is reachable from root through filed markers. Every trashed folder
-   is named by at least one trash entry, and its anchor says "in trash".
-6. **Journal after state.** A journal entry exists only for work whose store half is already visible.
-7. **Cursor names a published entry**, or is absent.
-8. **Collection closure.** With no run open there is exactly one collection space. With a run open, every
-   chunk named by a manifest or version that marking has passed, or that was published through the
-   collection interlock since the run opened, is in the surviving space.
-9. **Copies never hold unverifiable state.** A copy is written only while every main is reachable, and
-   receives only what a main already took.
-10. **Copy file completeness.** A manifest reaches a replica or backfill only after every chunk it names
-    is confirmed there ("partial coverage, never partial files").
+3. **The log is dense.** The retained entries have consecutive numbers up to the head, and every tree
+   $M_n$ they define is well-formed
+   ([algorithms/change-algebra.md](../algorithms/change-algebra.md) Proposition 6).
+4. **The tree is the log's.** With the tree head at the head, the per-object records are exactly the
+   head's tree: one manifest per present file, one anchor and one filed marker per present folder, and
+   nothing else in the manifest area but folder indexes.
+5. **One placement per folder, one occupant per child slot.** A consequence of 3 and 4.
+6. **Cursor names an entry that exists**, or is absent.
+7. **Collection closure.** With no run open there is exactly one collection space. With a run open, every
+   chunk named by a manifest or version that marking has passed, by an entry marking has passed, or by
+   a write that went through the collection interlock since the run opened, is in the surviving space.
+8. **Copies never hold unverifiable state.** A copy is written only while the main is reachable, and
+   receives only what the main already took.
+9. **Copy file completeness.** A manifest or a log entry reaches a replica only after every chunk it
+   names is confirmed there ("partial coverage, never partial files").
 
 ### 4.2 Temporarily violated, and who repairs
 
 | Violation | Arises from | Repaired by |
 |---|---|---|
-| Orphan chunks (no manifest names them) | an upload that stopped before its manifest; deletes and expiry | the next collection |
-| Unanchored marker | the window between a won claim and its anchor write | the claimant writes the anchor; integrity repair writes a missing one |
-| Unconfirmed claim | the window of §6.2 | the claimant's confirmation, which sets the folder aside if it lost |
-| Folder unreachable (anchor moved, destination marker not yet written) | a move or restore in progress | the mover's owed operation, retried from its WAL |
-| Disowned marker still present | a lost or pending delete after a move or trash | the mover's owed delete, the next claimant of the slot, or integrity repair |
-| File at old and new location | a file rename (copy then delete) | the mover's owed operation; the recorded name follows with the re-put |
-| Journal entry missing for visible work | a crash between publish and journal write | the writer's WAL republishes it under the record's key |
-| Stale trash entry (folder live) | a restore whose entry delete was lost | expiry deletes the entry alone; integrity repair |
-| Chunk in the outgoing space while referenced | a run between its open and the marking of that namespace | marking, or the interlock's promotion before the reference is published |
+| Orphan chunks (nothing names them) | an upload whose commit has not happened yet, or never will; deletions and expiry | the commit names them; otherwise the next collection |
+| Tree behind the log (tree head below the head) | always, between a commit and the end of its projection | the entry's projector; another client after the settle ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
+| A record ahead of the tree head | a projection in progress | the projection's end; a state read replays the log over it |
+| Disowned marker still present | a projection between its anchor write and its marker writes; a lost delete | the projection's end; integrity repair |
+| Folder with an anchor and no filed marker | a projection between two of its steps | the projection's end |
+| Chunk in the outgoing space while referenced | a run between its open and the marking of that referrer | marking, or the interlock's promotion before the reference is published |
 | Copy behind the main | always, by design | the member's deferred job log |
 | Folder index stale | any child write | readers validate per entry; the next full walk rewrites it |
 | Corruption marker for a good chunk | a spurious finding, or a rewrite not yet re-checked | re-verification |
-| Orphan namespace (content no marker reaches) | a move or restore cut short and never resumed | the owner's WAL; after a grace period, adoption into the trash ([algorithms/gc.md](../algorithms/gc.md)) |
 
 ### 4.3 Ordering rules (crash consistency)
 
 The atomicity unit is one object. Every multi-object change MUST be ordered so that a crash at any point
 leaves the old state, the new state, or a state readers classify safely.
 
-1. **Referent before referrer.** Chunks before the manifest naming them; manifests and markers before
-   the journal entry; the journal entry before the cursor bump. This holds on every member and for every
-   writer, including member-to-member mirror and repair: a manifest is never written to a store before
+1. **Referent before referrer.** Chunks before the log entry that names them; the log entry before any
+   tree record it gives a value to; the tree records of an entry before the tree head names it; the
+   entry before the cursor names it. This holds on every member and for every writer, including
+   member-to-member mirror and repair: a manifest or a log entry is never written to a store before
    every chunk it names is present there.
-2. **Interlock before reference.** On a collectable main, a manifest or version becomes visible only
-   through the collection interlock ([algorithms/gc.md](../algorithms/gc.md)).
-3. **Authority before evidence** for a folder whose id is already settled: the anchor is written before
-   the marker it validates (mkdir, move, restore), and a trash entry before the anchor says "in trash",
-   before the live marker is deleted. A first claim is the one exception (§6.2): the marker is the claim,
-   and the anchor follows.
-4. **Old version before overwrite.** The version snapshot is taken before a manifest is replaced, deleted
-   or renamed away.
-5. **Namer deleted last.** A purge deletes a subtree deepest namespace first and the trash entries that
-   name it last.
-6. **State before step.** A collection records its phase before performing it, and its progress after
+2. **Interlock before reference.** On a collectable main, a log entry, a manifest or a version becomes
+   visible only through the collection interlock ([algorithms/gc.md](../algorithms/gc.md)).
+3. **Authority before evidence.** A folder's anchor is written before the marker it validates.
+4. **Old version before overwrite.** The version snapshot is taken before a manifest is replaced or
+   deleted.
+5. **State before step.** A collection records its phase before performing it, and its progress after
    each finished unit; every step is idempotent.
-7. **Deletes owed to copies are durable before the main discards.** A collection records each copy's
+6. **Deletes owed to copies are durable before the main discards.** A collection records each copy's
    deletes durably before removing the chunks from the main, so a crash repeats deletes rather than
    leaking them.
 
@@ -418,13 +411,12 @@ leaves the old state, the new state, or a state readers classify safely.
 |---|---|---|
 | Chunk | any client (uploads), deferred workers (copies), integrity repair (one member) | none needed: same name, same bytes |
 | Chunk deletion | a collection only | the collection interlock on the collected main ([algorithms/gc.md](../algorithms/gc.md)) |
-| File manifest | any client | last writer wins on the store; conflicts resolved in the journal layer |
-| Folder marker | any client, integrity repair | **create-if-absent**, then confirmation (§6) |
-| Anchor | whoever places the folder; integrity repair | last writer wins; readers settle markers by it |
-| Trash entry | the deleting client; restore and expiry delete it | unique random identity |
-| Version | the client replacing, deleting or renaming a manifest | unique increasing timestamp per group |
-| Journal entry | each client its own keys | unique (time, client id); immutable |
-| Cursor | any publishing client | last writer wins, debounced |
+| Log entry | any client, from the head | **create-if-absent**: one entry per number |
+| File manifest, folder marker, anchor | the projector of the entry that changes them; integrity repair | one projector per entry ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
+| Tree head | the projector of the entry it names | the same |
+| Takeover | a client that saw an entry stay unprojected | **create-if-absent** |
+| Version | the projector replacing or deleting a manifest | unique increasing timestamp per group |
+| Cursor | any committing client | last writer wins, debounced |
 | Folder index | full walkers allowed to write | last writer wins; validated per entry at read |
 | Collection run, spaces | the collector on the main's host | [algorithms/gc.md](../algorithms/gc.md) |
 | Corruption marker | the store's checker, a verifying collection | the checker deletes before re-checking |
@@ -437,36 +429,42 @@ leaves the old state, the new state, or a state readers classify safely.
   readers skip it rather than fail, except the collector, which stops rather than risk a discard.
 - A child listed but gone on read is a *permanent* miss for that child. A deleter MUST NOT take it as the
   absence of the whole folder.
-- Journal entries appear out of key order; a reader lists the whole window and dedupes.
+- The tree may be behind the log, and some of its records ahead of the tree head. A reader that needs
+  the main's tree at a known position takes a state read
+  ([algorithms/publication.md §4.7](../algorithms/publication.md#47-state-read-and-arrival-by-state)). A
+  reader that serves one item (a share server, a path lookup) takes the records as they are, with the
+  anchor rule of §6.2.
 - During a run, a chunk may be in either space. The collected main's driver scopes every chunk access:
   it looks in the surviving space, then the outgoing one, and re-checks the run's presence before answering
   "absent"; a server re-exporting that main (an http-proxy) inherits this through the driver
   ([algorithms/gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
-- A manifest may name chunks a copy does not yet hold. A reader fails over to a copy only when no main is
-  reachable, never because of a miss on a reachable main.
+- A manifest may name chunks a copy does not yet hold. A reader fails over to a copy only for chunks,
+  and only when the main is unreachable, never because of a miss on a reachable main.
 
-### 5.3 Members: mains, replicas, backfills, archives
+### 5.3 Members: main, replicas, backfills, archives
 
 All members of a domain hold the same abstract layout; they differ in what they carry and how current it
 is. Roles, the composite and deferred work are owned by [algorithms/replication.md](../algorithms/replication.md).
 
 | Member | Written | Read | Carries |
 |---|---|---|---|
-| **main** (≥ 1) | every write, synchronously | the first main is the read primary; a miss there is authoritative | everything; a collectable main also carries its run and outgoing space |
-| **replica** | every write, deferred through the durable job log | only when no main is reachable | everything except folder indexes and collection state; a lagging prefix-closed subset of the main, possibly with extra chunks (deletes not yet applied) |
-| **backfill** | as a replica | never | content only: no journal, cursor or indexes |
-| **archive** (read-only) | never | on a source-of-truth miss or when the mains are unreachable | different content (a frozen or foreign copy of the layout) |
+| **main** (at most 1) | every write, synchronously | every read; a miss there is authoritative | everything; a collectable main also carries its run and outgoing space |
+| **replica** | every write, deferred through the durable job log | chunks only, and only when the main is unreachable | everything except folder indexes and collection state; a lagging subset of the main, possibly with extra chunks (deletes not yet applied) |
+| **backfill** | as a replica | never | the tree and its content: no log, tree head, takeover or cursor, and no indexes |
+| **archive** (read-only) | never | chunks on a miss of the main or when it is unreachable; everything in a domain with no main | different content (a frozen or foreign copy of the layout) |
 
 Consequences:
 
 - **Per-member entities.** Corruption markers, verify jobs, discard jobs, shares and collection state
   describe one store and live on it.
-- **Copies re-read from mains only**, so a stale body is never propagated from another copy.
-- **Write guard.** A copy is never written directly (mirror, repair, verify, share) while a main is
+- **Copies re-read from the main only**, so a stale body is never propagated from another copy.
+- **Nothing a copy holds decides anything.** A copy's log and tree lag the main's and are not a
+  snapshot of it; no fetch, state read or push is answered by a copy.
+- **Write guard.** A copy is never written directly (mirror, repair, verify, share) while the main is
   unreachable.
 - **Mirror** (member to member) is additive: it copies what the destination lacks or holds at a
   different size, never deletes, excludes indexes and collection state, and obeys §4.3 rule 1 (chunks
-  before the manifests naming them).
+  before what names them).
 
 ### 5.4 Multi-domain
 
@@ -479,151 +477,74 @@ Consequences:
 
 ---
 
-## 6. Folder identity arbitration
+## 6. Projecting an entry onto the tree
 
-Folders are the one place where independent clients must agree on a single answer (which id a name
-denotes) through a store without transactions. The protocol: mint without coordination, claim with
-create-if-absent, settle with anchors, place with create-if-absent, and **confirm** every placement
-after the window in which a concurrent delete could still undo it. Every write of a folder marker is a
-create-if-absent; no step writes a marker with a plain put. The protocol is correct on any store that
-meets §6.7, including one that answers create-if-absent unreliably: confirmation turns every lost race
-into a folder conflict resolved by setting one folder aside, never into a stranded subtree.
+The tree is written only by projections. Which client projects an entry, the lease it works under and
+the takeover of an entry its projector left are owned by
+[algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log).
+This section owns what applying an entry writes.
 
-### 6.1 Minting
+### 6.1 Apply
 
-- A folder id is (client identity prefix, counter), minted as specified in
-  [03-journal-sync.md §2.1](../03-journal-sync.md#21-client-identity-and-folder-id-leases-local), which
-  guarantees that no two processes of one client mint the same id.
-- Minting needs no store round trip. A minted id is only a **candidate**: it says nothing about which id a
-  name denotes.
+To apply an entry, its projector sets each key of the entry to its value after, in four passes over the
+entry's commands. A slot is read immediately before it is deleted or replaced.
 
-### 6.2 Claiming a name for a new folder
+1. **Clear what leaves.**
+   - A file command whose value after is ∅: if the slot holds a manifest, save it as a version when
+     its content identity is the command's value before, then delete it. A slot holding anything else,
+     or nothing, is left.
+   - A folder command whose value before is a place (a move or a removal): if the slot at that place
+     holds a marker naming this folder, delete it. A slot holding anything else is left.
+2. **Anchor what arrives or moves.** A folder command whose value after is a place: write the folder's
+   anchor with that place.
+3. **Fill.**
+   - A file command whose value after is a manifest: if the slot holds a manifest whose content
+     identity is the command's value before, save it as a version; put the manifest.
+   - A folder command whose value after is a place: put the marker at that slot.
+4. **Forget what is removed.** A folder command whose value after is ∅: delete the folder's index, then
+   its anchor.
 
-To publish into a folder the store does not file yet, a client claims it, parents first, root down, so
-every claim names a slot under an agreed parent id. A claim of slot (*P*, *N*) with candidate *I*:
+Then the projector raises the tree head to the entry's number.
 
-1. **Create-if-absent** the marker (*I*, *N*) at (*P*, *N*). Read the answer as follows:
-   - the answer names *I*: **won**. Write anchor(*I*) = (*P*, *N*).
-   - the answer names another id *J* that is filed there (§6.3): **taken**. The client adopts *J*,
-     discards *I*, and files its content under *J*. A folder that must stay distinct (the conflict
-     tables decide) is set aside under a conflicted-copy name, which is claimed afresh.
-   - the answer names *J* that is disowned: the slot holds litter. The client removes it (§6.5) and
-     claims again.
-   - the answer is empty or unparseable (a store or server that did not arbitrate): the client MUST read
-     the slot back and apply the three cases above to what it reads; an empty slot means claim again.
-     An empty answer MUST NOT be read as "won".
-2. A slot that already names *I* when claimed again: if anchor(*I*) is absent, write it; if anchor(*I*) =
-   (*P*, *N*), the claim is held; if the anchor places *I* elsewhere, the folder has moved and the claim
-   fails transiently (the client's view is behind; sync resolves it).
-3. **Confirm.** A won claim is **tentative** until confirmed. At least `claim_settle` after its
-   create-if-absent landed, the claimant reads the slot again:
-   - it still names *I*: the claim is **final**;
-   - it names another filed id: the claimant **lost** the name after the fact. It MUST set its folder
-     aside under a conflicted-copy name by the placement procedure of §6.4 (its content is kept, under
-     its own id, at the new name), and resolve the clash as a folder conflict
-     ([algorithms/conflict-resolution.md](../algorithms/conflict-resolution.md));
-   - it is empty or disowned: the claimant claims again with *I* (which keeps its content), then
-     confirms again.
+- **Idempotent.** Each pass tests what the slot holds before it deletes, and the passes after it only
+  overwrite. Applying an entry again from its start, after any prefix of its writes, ends in the same
+  records and saves no second version: a slot already at its value after no longer has the identity of
+  the value before.
+- **No ordering between keys is needed.** A batch is a set, and a slot is overwritten whole. Two folders
+  that swap names lose both markers in pass 1 and gain them in pass 3; the temporary places of Theorem 3
+  are for trees whose records cannot be overwritten, which this one's can.
+- **Manifests and versions pass the reference gate** on a collectable main
+  ([algorithms/gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). The entry passed it at its
+  commit, so the chunks are present.
+- **Plain writes.** No projection step is conditional. One projector per entry is what makes that
+  safe.
 
-   A tentative id MAY be used immediately (content is filed under it and handed to frontends): if the
-   claim is lost, the set-aside moves the folder, not its content. Pending confirmations MUST be recorded
-   durably by the owner and resumed after a restart ([local-cache.md](local-cache.md)).
-4. Once final, an id held for a name is not re-checked on each publish into the folder: moves by peers
-   arrive through the journal, and content is filed by id.
+### 6.2 What readers see mid-projection
 
-`claim_settle` MUST exceed the longest time any write or delete request against a marker slot can still
-land after the client that issued it decided to issue it: the request deadline including retries
-([algorithms/failure-model.md](../algorithms/failure-model.md)) plus a margin for requests still in
-flight. Recommended: 10 minutes.
+A marker at (*P*, *N*) naming *I* is **filed** iff anchor(*I*) = (*P*, *N*). It is **disowned**
+otherwise, and every reader (tree walk, path lookup, state read, integrity, share servers) MUST treat it
+as absent. At most one marker per folder is filed at any time, whatever deletes were lost.
 
-**Why confirm.** Deleting a disowned marker (§6.5) is a read followed by a delete. Without a conditional
-delete, a delete decided on a stale read can land after another client's claim filled the slot, and
-remove the winner's marker. Every such delete lands within `claim_settle` of the claim it can hit, so a
-claim still holding its slot after that time holds it for good. The same argument covers a server that
-ignores create-if-absent and overwrites: the overwritten winner finds the other marker at confirmation
-and steps aside.
-
-**Why the marker precedes the anchor here.** A candidate has no settled identity to anchor until it wins;
-writing an anchor first would leave an anchored empty namespace for every lost claim. A marker without an
-anchor reads as filed (§6.3), so a claim cut short between the two writes is still a correct placement,
-and the next claim of the slot (step 2) writes the missing anchor.
-
-### 6.3 Settling: the anchor decides
-
-Several markers may name one folder: a move whose old-marker delete was lost, a crash between steps, a
-claim racing a move. The folder's **anchor**, one object inside the folder's own namespace, is the single
-authority:
-
-- A marker at (*P*, *N*) naming *I* is **filed** iff anchor(*I*) = (*P*, *N*). It is **disowned**
-  otherwise, and every reader (tree walk, path lookup, claim, expiry, integrity, share servers) MUST treat
-  it as absent.
-- A marker whose folder has **no anchor** is taken at its word. This covers the window between a won
-  claim and its anchor write. Readers SHOULD accept an unanchored marker outside that window too (meaning
-  the same: filed where it sits; integrity repair writes the anchor); writers MUST NOT leave one behind
-  once their claim completes.
-- Consequence: at most one filed marker per folder at any time, whatever deletes were lost.
-
-### 6.4 Placing a folder whose id is settled
-
-Every placement of an existing id *I* at (*P′*, *N′*), whether mkdir of a held id, move, rename or
-restore, follows one procedure:
-
-1. Write anchor(*I*) = (*P′*, *N′*). This is the commit point: from here on every other marker naming
-   *I* is disowned, whether or not its delete ever lands.
-2. **Create-if-absent** the marker (*I*, *N′*) at (*P′*, *N′*), reading the answer as in §6.2 step 1:
-   - ours: placed;
-   - another filed id: the destination is taken. The client sets its folder aside under a
-     conflicted-copy name at *P′* and repeats this procedure for that name (the anchor is rewritten to
-     the new name first);
-   - a disowned marker: remove it (§6.5) and retry step 2;
-   - empty or unparseable: read back, as in §6.2.
-3. Remove what the placement leaves behind: the old marker of a move, the live marker of a trash, the
-   trash entries naming *I* after a restore. The old marker is removed only if it still names *I*
-   (§6.5).
-4. Confirm the new marker as in §6.2 step 3.
-
-Specialisations:
-
-- **Trash**: write the trash entry (with name and path), then anchor(*I*) = "in trash" with its name,
-  then remove the live marker. Nothing is placed, so there is nothing to confirm.
-- **Restore**: the procedure above, destination = the entry's path (its parent resolved to an id), then
-  delete every trash entry naming *I*.
-
-Destination collisions MAY be checked before the placement to choose a name early, but the
-create-if-absent of step 2 is what decides.
-
-### 6.5 Removing a disowned marker
-
-Any client MAY remove a marker it has just read and found disowned (a claimant in its way, a mover
-removing its own old marker, integrity repair):
-
-- It MUST delete only the version it read, where the store offers a conditional delete.
-- Otherwise it deletes plainly; the confirmation of §6.2 step 3 is what makes this safe.
-- A mover removing its own old marker first reads the slot and deletes only if the marker there still
-  names its folder; a marker naming another id is left alone.
-
-### 6.6 What readers see mid-move
-
-| Point reached | A reader walking from root sees |
+| Point reached in a move | A reader walking from root sees |
 |---|---|
-| before the anchor write | the folder at the old place |
-| anchor written, new marker not yet | the folder **nowhere**; its content intact, reachable again when the placement completes |
-| new marker written, old one still present | the folder at the new place only |
-| done | the folder at the new place |
+| before pass 1 | the folder at the old place |
+| old marker deleted, anchor not yet rewritten | the folder **nowhere**; its content intact, reachable by id |
+| anchor rewritten, new marker not yet | the same |
+| new marker written | the folder at the new place |
 
-A path lookup by segment follows the same rule, so a lookup of the old path answers "missing" from the
-anchor write on. A client holding the id keeps reaching the folder's content through it at every point:
-ids, not paths, are what frontends and journal ops keep.
+A path lookup by segment follows the same rule. A client holding the id keeps reaching the folder's
+content through it at every point: ids, not paths, are what frontends and commands keep.
 
-### 6.7 What a store must guarantee
+### 6.3 What a store must guarantee
 
 1. **Create-if-absent, linearizable per name**, returning the body that holds the name afterwards, or an
-   honest refusal. On a store that refuses it, a claim or placement fails REFUSED and is reported: a
-   folder claim never falls back to a plain put. A transient failure is retried. (Every supported driver
-   arbitrates; an S3-compatible endpoint is checked for it, [backends/s3.md](../backends/s3.md).)
+   honest refusal. It is used for log entries and takeovers. On a store that refuses it, a push fails
+   REFUSED and is reported: an entry is never created with a plain put. A transient failure is retried.
+   (Every supported driver arbitrates; an S3-compatible endpoint is checked for it,
+   [backends/s3.md](../backends/s3.md).)
 2. **Atomic visibility** of each object write.
-3. **Read-after-write per object** for markers and anchors (listings may lag).
-4. Plain put and delete. A conditional delete is used when offered, never required.
+3. **Read-after-write per object** (listings may lag).
+4. Plain put and delete.
 
 ---
 
@@ -631,13 +552,14 @@ ids, not paths, are what frontends and journal ops keep.
 
 | Entity | Status | Rebuilt from |
 |---|---|---|
-| Chunk, file manifest, folder marker, anchor, trash entry, version | **authoritative** | — |
-| Journal entry | authoritative as history of work; the tree does not depend on it | — (a client that cannot bridge a gap resyncs from the tree) |
-| Cursor | hint | newest journal entry |
+| Chunk, version | **authoritative** | — |
+| Log entry | **authoritative**: the log decides the tree | — |
+| File manifest, folder marker, anchor | projection of the log; the only record of the entries expiry has deleted | the log, for the entries still retained |
+| Tree head, takeover | bookkeeping of the projection | — |
+| Cursor | hint | the head |
 | Folder index | cache | namespace listing and child reads |
 | Whole-file digest in a manifest | derived | its chunk keys and lengths |
 | Recorded name in a manifest | derived (informational) | its location |
-| Paths in trash entries, journal ops, shares | historical | a tree walk, for the current path |
 | Collection run | authoritative about a run in progress | — |
 | Corruption marker | authoritative finding until re-checked | re-verification |
 | Verify / discard job | request | re-issued by the client |
@@ -653,20 +575,18 @@ Every entity that grows has a reclaiming path. Rules: [algorithms/gc.md](../algo
 
 | Grows with | Reclaimed by |
 |---|---|
-| Chunks | a collection on each collectable main, which also deletes on copies; expiry removes the references that make chunks garbage. A domain with no collectable main is not collected. |
-| Manifests and markers | user deletes |
+| Chunks | a collection on a collectable main, which also deletes on copies; expiry removes the references that make chunks garbage. A domain with no collectable main is not collected. |
+| Manifests, markers and anchors | user deletes, through the log |
 | Versions | expiry by age |
-| Trash entries and trashed subtrees | expiry by age of the newest entry naming the folder, or purge; stale entries are deleted alone |
-| Journal entries | expiry by the retention horizon ([algorithms/wal-and-journal.md](../algorithms/wal-and-journal.md)) |
-| Folder indexes | one per namespace, capped in children and size; deleted with the namespace |
+| Log entries | expiry by age, below the tree head ([algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention)) |
+| Takeovers | deleted once the tree head has passed their entry |
+| Folder indexes | one per namespace, capped in children and size; deleted with the folder |
 | Corruption markers | good rewrites; collections that delete the chunk |
 | Verify jobs | consumed; at most one per shard per domain per store |
 | Discard jobs | consumed; re-delivered by the client when outstanding |
 | Shares | expiry deletes expired shares of the domain; a domain drop deletes all of its shares |
 | Share artifact cache | age rule of §2.19; deleted with its share; clear-cache |
-| Disowned markers | the mover's owed delete, the next claimant of the slot, integrity repair |
-| Orphan namespaces | adoption into the trash after a grace period, then expiry |
-| Anchors of purged folders | kept as tombstones (§2.7); integrity repair removes one once no marker names its id |
+| Disowned markers | the projection's end; integrity repair |
 
 ---
 
@@ -680,16 +600,17 @@ of a chunk key.
 |---|---|
 | Domain scope | prefix `tsync/D/`, plus the sibling trees below |
 | Chunk | `tsync/D/chunks/sss/<chunk key>` |
-| Folder id | [01-core.md §2.5](../01-core.md#25-folder-ids); reserved `.tsync-root`, `.tsync-trash` |
+| Folder id | [01-core.md §2.5](../01-core.md#25-folder-ids); reserved `.tsync-root` |
 | Namespace | prefix `tsync/D/manifests/<folder id>/` |
 | Child slot | `tsync/D/manifests/<folder id>/<dual hash of leaf name>` |
 | File manifest | binary `tsyncm03` body at the child slot |
 | Folder marker | JSON `{"dir":true,"name","id"}` at the child slot |
 | Anchor | JSON `{"parent","name"}` at `…/manifests/<folder id>/.tsync-parent` |
-| Trash entry | JSON marker plus `"path"` at `…/manifests/.tsync-trash/<16 hex>` |
 | Folder index | binary `tsyncidx1` at `…/manifests/<folder id>/.tsync-index` |
 | Version | manifest body at `tsync/D/versions/<folder id>/<leaf hash>/<ns>` |
-| Journal entry, cursor | `tsync/D/journal/…`, `tsync/D/cursor` ([03-journal-sync.md](../03-journal-sync.md)) |
+| Log entry | JSON at `tsync/D/log/<group>/<number>` ([03-journal-sync.md](../03-journal-sync.md)) |
+| Tree head, takeover | `tsync/D/tree-head`, `tsync/D/log-takeover/<number>-<generation>` |
+| Cursor | `tsync/D/cursor` |
 | Collection run | JSON at `tsync/D/gc-run`; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
 | Collection generation | JSON at `tsync/D/gc-generation` |
 | Collection spaces | surviving `tsync/D/chunks/`, outgoing `tsync/D/chunks.from/` |
@@ -706,34 +627,30 @@ of a chunk key.
 
 An implementation MUST exhibit these observable properties:
 
-- **Claims.** Any number of clients claiming one name concurrently end with exactly one folder at that
-  name, every other client either adopting its id or holding its own folder under a conflicted-copy
-  name; no client's content becomes unreachable. This holds when the store answers create-if-absent
-  with an empty body (a server that does not arbitrate), and when a disowned marker is deleted
-  concurrently with a claim of its slot.
-- **No marker is ever written with a plain put**; on a store that refuses create-if-absent, folder
-  creation fails REFUSED.
-- **Anchors decide.** After a move whose old-marker delete was lost, the folder is listed at the new
-  place only; a path lookup of the old path answers "missing"; a folder with no anchor is listed where
-  its marker says.
-- **Placement collisions.** A move, mkdir or restore onto a name another filed folder holds never
-  overwrites that folder's marker; the moving folder ends under a conflicted-copy name.
-- **Trash.** Trashing a folder leaves an entry, an "in trash" anchor and no live marker; restoring it
-  leaves a live marker at the destination, a matching anchor, and no entry naming it.
-- **Tombstones.** After a purge, a marker left elsewhere naming a purged folder is still disowned.
+- **One entry per number.** Any number of clients creating one entry number concurrently end with
+  exactly one entry at that number, and every client is told whether it is its own. On a store that
+  refuses create-if-absent, a push fails REFUSED and no entry is written.
+- **The tree is the log's.** After any sequence of commits, with the tree head at the head, a walk of
+  the tree equals the tree the log defines: names, kinds, folder ids and contents.
+- **Apply is idempotent.** A projection killed between any two of its writes and applied again from its
+  start ends in the same records and the same versions as one that ran once.
+- **Anchors decide.** A marker whose folder's anchor names another place, or whose folder has no anchor,
+  is invisible to tree walks, path lookups, state reads and share servers. After a move whose old-marker
+  delete was lost, the folder is listed at the new place only.
+- **Swaps.** An entry that swaps two folders' names, or puts a folder where a file was and the file
+  elsewhere, is applied with no intermediate name and leaves no stale record.
 - **Readers.** A child listed but unparseable is skipped by walkers and stops a collection; a child
-  listed but gone fails a deleter's walk; a disowned marker is invisible to tree walks, path lookups,
-  claims, expiry and share servers.
-- **Ordering.** A crash injected between any two object writes of a publish, a folder placement, a
-  trash, a restore, a purge or a collection step leaves a state that the readers above classify as the
-  old state, the new state, or a documented temporary violation (§4.2).
-- **Deletes never collect chunks.** Deleting a file or folder removes manifests or markers only;
-  chunks stay until a collection. Removing a folder leaves its subtree intact under a trash entry and
-  an "in trash" anchor.
-- **Tree integrity.** An integrity pass reports one folder id under two filed markers, a trash entry
-  naming a live folder, a folder with no anchor, a disowned marker, an orphan namespace and a tombstone.
-  Repair removes disowned markers and stale trash entries, writes missing anchors, adopts orphans only
-  past `orphan_grace` ([algorithms/gc.md §4.6](../algorithms/gc.md#46-orphan-namespaces)), and never
-  deletes an orphan's content.
+  listed but gone fails a deleter's walk.
+- **Ordering.** A crash injected between any two object writes of a commit, a projection or a
+  collection step leaves a state that the readers above classify as the old state, the new state, or a
+  documented temporary violation (§4.2).
+- **Deletes never collect chunks.** Removing a file or folder removes manifests, markers and anchors
+  only; chunks stay until a collection.
+- **Removed folders are empty.** A folder removal is committed only for a folder with no child in the
+  main's tree; after its projection its namespace holds nothing.
+- **Tree integrity.** An integrity pass reports a folder with an
+  anchor and no filed marker, a disowned marker, and a record the log at the tree head does not account
+  for, each only when the tree head is at the head. Repair rewrites the records from the retained log
+  and removes disowned markers.
 - **Shares.** A share naming a key outside its domain's manifest area, an invalid folder id or an
   invalid domain is refused; an expired share is refused and deleted by the next expiry of its domain.

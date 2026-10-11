@@ -46,7 +46,7 @@ surfaced with a named repair and never fixed silently).
 - **A2. Links** can be down, flapping, slow-but-flowing, or dead without a FIN. A connection
   dead without a FIN is silent forever unless a timer ends it.
 - **A3. Members.** Several members can hold the same content (main, replica) or different
-  content (archive). The first main is the source of truth for existence.
+  content (archive). The main is the source of truth for existence.
 - **A4. Local resources** fail independently of stores: descriptor exhaustion, disk full, EIO,
   permission.
 - **A5. Processes** can be killed at any instruction.
@@ -72,7 +72,7 @@ decides it, and it travels upward as data.
 | **REFUSED** | `denied`, `read_only`, `other` | The authority answered and will answer the same: permissions or credentials (`denied`); a read-only store or domain (`read_only`); any other permanent refusal whose cause this side cannot name (`other`). | not until configuration changes |
 | **INVALID** | | The request is malformed on this side: a bad argument, a malformed key or reference, an unknown action, bad JSON. | no |
 | **CORRUPT** | `missing_chunks`, `other` | An answer was obtained and contradicts what it must be: bytes that do not hash to their key, a length that disagrees with the manifest, a manifest with a hole, a range answer longer than asked, an undecodable object or local record, a dependency no member holds after all were asked. `missing_chunks` is a store refusing to take a manifest or version whose chunks it does not hold; it carries the missing chunk keys. The thing exists and is wrong. | no; only repair (for `missing_chunks`, the writer re-sends the named chunks) |
-| **UNPREPARED** | `paused`, `other` | Local state cannot express the operation yet: the user paused the domain's remote work and the operation needs it (`paused`); the parent folder has no id here, or a rebuild is refused while metadata is owed (`other`). A user action (resume, sync) or convergence clears it. | not by itself |
+| **UNPREPARED** | `paused`, `other` | Local state cannot express the operation yet: the user paused the domain's remote work and the operation needs it (`paused`); the parent folder has no id here, or the log holds an entry of a version this client does not know (`other`). A user action (resume, sync) or convergence clears it. | not by itself |
 | **TRANSIENT** | `link`, `load`, `local` | No considered answer yet. `link`: connection error, TLS or DNS failure, a 5xx that is not throttling, a stall, a transfer truncated below its announced length. `load`: the authority answered "later" (429, a throttling 503, a peer's `busy`, a conflict-in-progress answer to a conditional write). `local`: a resource on this host (`EMFILE`, `ENFILE`, `ENOMEM`, `ENOSPC`, `EDQUOT`, `EIO`, `EAGAIN`, `EBUSY`). | yes, later |
 | **UNREACHABLE** | | Derived, never raised by a driver: every candidate that could answer is held by the breaker; TRANSIENT/link persisted past the caller's patience or deadline; a deadline expired while the store was silent; or the owner does not serve the domain named. "The store (or its server) is the problem; stop asking until told." | yes, after the link returns |
 | **STOPPING** | | A process stop was requested. The work is untouched and owed on disk. | yes, at next start |
@@ -240,14 +240,15 @@ substituted.
 
 ### 4.7 Local state files and durable records
 
-For local files the system relies on (last-sync mark, applied log, cursor copies, WAL records,
-folder-id index, durable-queue records):
+For local files the system relies on (position, before-values, in-flight and arrival records,
+applied log, folder-id index, durable-queue records):
 
 - ENOENT → ABSENT, and the owner's rule for "none recorded" applies.
 - Undecodable → CORRUPT: set aside, surfaced, never deleted; the owning file states how to
   proceed.
 - Any other failure → classified by §4.1. The consumer MUST NOT proceed as if the file were
-  absent. (A transient read error taken as "never synced" triggers a full rebuild.)
+  absent. (A transient read error of a before-value taken as "none" would make a pending change look
+  like the main's and let the next arrival overwrite it.)
 
 Durable-queue record reads follow the same rule: a record gone is already completed; an
 unparseable one is CORRUPT; any other failure leaves it for the next rescan
@@ -298,10 +299,10 @@ Consequences:
 
 - A listing that fails, or fails partway through its pages, is a failure, never an empty or
   shorter listing.
-- A read of a journal entry, a manifest, a marker or a mark that fails is a failure, never "no
+- A read of a log entry, the tree head, a manifest or a marker that fails is a failure, never "no
   entry".
 - Any action that is justified only by absence — deleting, overwriting, allocating a name,
-  zero-filling, advancing a mark past an entry, dropping a reference, reporting "no children" —
+  zero-filling, taking the head to be below an entry, dropping a reference, reporting "no children" —
   MUST have ABSENT, and MUST NOT proceed on any other kind.
 - ABSENT of a *dependency* (a manifest names a chunk nobody holds) is CORRUPT; ABSENT of the
   *requested* item stays ABSENT.
@@ -365,27 +366,27 @@ What the breaker ([01 §8](../01-core.md#8-health-breaker)) hears:
 "Owed" means the durable record stays; queue mechanics (backoff, park, re-arm, degraded
 marking) are owned by [durable-queue](durable-queue.md).
 
-| Kind | Ladder | Composite | Ordered queue (own metadata ops) | Ordered queue (replica/backfill jobs) | Keyed queue (uploads) | Inbound peer entry |
-|---|---|---|---|---|---|---|
-| ABSENT | return "no value" | answer if from the source of truth, else ask the next | the op's own rules decide | job's own rules decide | local source gone → §4.6 | per [wal-and-journal](wal-and-journal.md) |
-| EXISTS | return the holder | the first main arbitrates | conflict table ([conflict-resolution](conflict-resolution.md)) | job's own rules | n/a | conflict table |
-| REFUSED | one attempt | pass on | park | park; copy marked degraded | park | step aside |
-| INVALID | n/a | n/a | park | park; degraded | park | step aside |
-| CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy | park | park; degraded | park | step aside |
-| UNPREPARED | n/a | n/a | refused before anything changes | n/a | park | step aside |
-| TRANSIENT (any) | retry with backoff up to the attempt limit or the caller's deadline | fail fast on a held member when another candidate exists; the last candidate is always asked | block at the head with backoff | block at the head with backoff | requeue at the tail with backoff | abort the pass without advancing |
-| UNREACHABLE | not retried by the ladder; the hold ends it | fail over to a readable copy, then archives; writes are never redirected | block at the head | block at the head | tail with backoff | abort the pass |
-| STOPPING | end at once | pass through | leave the record, uncounted | leave the record | leave the record | end the pass; nothing advances |
-| CANCELLED | pass through | pass through | complete the record | complete the record | complete the record | n/a |
-| DEADLINE | n/a | n/a | n/a | n/a | n/a | abort the pass |
-| UNEXPLAINED | retried as TRANSIENT, never link evidence | pass on | park | park | tail with backoff | step aside |
+| Kind | Ladder | Composite | Ordered queue (replica/backfill jobs) | Keyed queue (uploads) | Cycle (fetch, push, projection) |
+|---|---|---|---|---|---|
+| ABSENT | return "no value" | the main's answer; for a chunk, ask the next member | job's own rules decide | local source gone → §4.6 | entry $h+1$ absent: the head is $h$ ([publication](publication.md) §4.3) |
+| EXISTS | return the holder | the main arbitrates | job's own rules | n/a | the entry number is taken: arrive, then push from the new head |
+| REFUSED | one attempt | pass on | park; copy marked degraded | park | fail the cycle; reported; retried at the re-arm cadence |
+| INVALID | n/a | n/a | park; degraded | park | fail the cycle; reported |
+| CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy of a chunk | park; degraded | park | an entry that does not decode: arrive by state once the tree head has passed it, else stop and report. `missing_chunks` on a commit: upload them again, repeat the create |
+| UNPREPARED | n/a | n/a | n/a | park | an entry of an unknown version: stop fetching and pushing; report |
+| TRANSIENT (any) | retry with backoff up to the attempt limit or the caller's deadline | fail fast on a held member when another candidate exists; the last candidate is always asked | block at the head with backoff | requeue at the tail with backoff | fail the cycle; nothing advances; an in-flight record stays; retry after `RETRY_FLOOR` |
+| UNREACHABLE | not retried by the ladder; the hold ends it | chunk reads fail over to a replica, then archives; every other read fails; writes are never redirected | block at the head | tail with backoff | as TRANSIENT |
+| STOPPING | end at once | pass through | leave the record | leave the record | end the cycle; nothing advances |
+| CANCELLED | pass through | pass through | complete the record | complete the record | n/a |
+| DEADLINE | n/a | n/a | n/a | n/a | as TRANSIENT |
+| UNEXPLAINED | retried as TRANSIENT, never link evidence | pass on | park | tail with backoff | fail the cycle; reported |
 
 - **Park** keeps the record on disk, takes it out of the running order, surfaces it with its
   reason, and re-offers it on the re-arm cadence of [durable-queue](durable-queue.md). Every
   queue that parks re-arms, so a repaired credential resumes work without a restart.
-- **Step aside** records the entry as unapplied with its reason, retries it on every pass, and
-  surfaces it; the pass continues with later entries only where
-  [wal-and-journal](wal-and-journal.md) allows.
+- **A failed cycle** changes nothing: the position, the before-values and the local tree are as
+  they were, and an in-flight record is recovered by the next cycle
+  ([publication](publication.md) §4.8). A cycle never skips an entry.
 - Nothing in this table removes a record because it failed. A copy with a parked replica or
   backfill job is marked degraded by a durable marker, with its repair, for as long as any of
   its jobs is parked ([durable-queue](durable-queue.md), [replication](replication.md)).
@@ -477,7 +478,7 @@ the work behind it is cancelled only where the table says so.
 | an advisory IPC send | deadline | owned by [07](../07-daemon-cli.md) | dropped, logged once |
 | a partial IPC request line | deadline | `IPC_LINE_DEADLINE` | connection closed |
 
-**Background loops** (journal polling, maintenance sweeps, queue workers, deferred-job workers,
+**Background loops** (the cycle, maintenance sweeps, queue workers, deferred-job workers,
 lease renewal, status collection): every wait inside a pass has one of the bounds above, so a
 pass either makes progress or fails within a bound. A loop whose pass fails backs off and runs
 again; it never exits silently. A loop that has work pending and has made no progress for
@@ -522,7 +523,7 @@ A failure a person must act on is shown in status and by the CLI, not only in a 
 Status MUST show:
 
 - each tripped breaker, with its reason and the hold's end;
-- parked records and unapplied peer entries, with counts and reasons;
+- parked records, with counts and reasons; a log entry the client cannot follow;
 - degraded copies, with their repair;
 - corruption markers and set-aside local files;
 - stalled loops and queues (§8.1);
@@ -537,8 +538,8 @@ A failure surfaced only in a log line below warning level is not surfaced.
 An implementation MUST exhibit:
 
 - **Absent is authoritative.** A store or local read failing with anything but an absence
-  answer never yields "absent", "empty", "no entries", a hole, or an advanced mark; injecting a
-  transient failure into a listing, a journal-entry read, a marker read or a mark read aborts
+  answer never yields "absent", "empty", "no entry", a hole, or a head; injecting a
+  transient failure into a listing, a log-entry read, a tree-head read or a marker read aborts
   the operation without side effects.
 - **Batch.** A failed bulk read re-asks singly or fails; it never marks items absent.
 - **Replica absence.** With the main unreachable and a replica answering absent, the domain

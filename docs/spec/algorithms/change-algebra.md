@@ -13,6 +13,12 @@ here and are not inherited. Section 11 relates each result to its source.
 The proofs are sketches. They show why a claim holds and what it depends on,
 so that an implementation can be checked against them.
 
+This document owns the model: keys, values, commands, batches, the merge and
+the properties claimed of them. How tsync realises it is owned elsewhere: the
+protocol by [publication.md](publication.md), the enactment of a merge and the
+names it gives by [conflict-resolution.md](conflict-resolution.md), the formats
+by [03](../03-journal-sync.md).
+
 ## 1. Setting
 
 A **client** has a local tree $L$ that applications use directly. Local
@@ -39,9 +45,11 @@ Assumptions:
 - **A6. Clients follow the rules.** Every client is well-intended: it creates
   an entry only as section 6 allows.
 
-A2 is provided by a proxy in front of the main, which holds a lock, or by a
-store that can create an object only if it is absent. Where neither exists,
-the deployment must have a single writer.
+A2 is provided by a store that can create an object only if it is absent,
+directly or through a proxy in front of it. Where neither exists, the
+deployment must have a single writer. tsync requires the conditional create of
+every store it pushes to ([publication.md](publication.md) §2), so the last
+case does not arise there.
 
 Two deployments are covered.
 
@@ -574,10 +582,11 @@ With one client, the head moves only by that client's commits. A fetch finds
 nothing, section 7 never runs, and every push is accepted. The theory
 reduces to sections 3 to 6: record before-values, upload, commit batches.
 
-The same rules run. If the store cannot provide A2, the client checks the
-head and then creates the entry in two steps. Should a second client write
-the main against the assumption, the two may create the same entry number;
-this is the one thing the single-writer assumption is there to exclude.
+The same rules run, the append included. On a store that cannot provide A2,
+a client would check the head and then create the entry in two steps; should
+a second client write the main against the assumption, the two may create the
+same entry number. This is the one thing the single-writer assumption is there
+to exclude.
 
 The incident of section 2 occurred in this deployment. It is a failure of
 Proposition 5 alone: a local delete changed $R$.
@@ -681,8 +690,8 @@ Each follows from a numbered result.
 4. Does anything a conflict policy could use get lost by deriving $P$ from
    states, apart from file renames?
 5. Content is uploaded before the entry that names it. Whatever removes
-   unreferenced content must not remove content that is waiting for its
-   commit.
+   unreferenced content must not let an entry name content it removed. tsync
+   settles this at the commit: [gc.md](gc.md) §5.4.
 
 ## References
 

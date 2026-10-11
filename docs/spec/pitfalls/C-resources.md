@@ -49,7 +49,7 @@ Measured numbers from the material:
 - **Seen** — 1f1deb27, a0bd9159, d386d435, 4e29ca1c, PR #55, #61, #69, e54c7d5c, c1647b68; recurred ×3; rewrite.
 
 ### C-1.4 Per-entry state held for a whole import
-- **Pitfall** — Journal ops, statuses and encoded strings held per entry for the run came to about 320 B/entry: 7 MB at 24k files, 100 MB major heap near 143k files. Keys crossed four lists and two full manifest encodings.
+- **Pitfall** — Published ops, statuses and encoded strings held per entry for the run came to about 320 B/entry: 7 MB at 24k files, 100 MB major heap near 143k files. Keys crossed four lists and two full manifest encodings.
 - **Check** — Memory scales with in-flight work, not tree size. Append-only records are spooled to disk; manifests build incrementally into an off-heap buffer.
 - **Seen** — c4997728, PR #69.
 
@@ -237,7 +237,7 @@ Measured numbers from the material:
 
 ### C-7.7 Workloads hostile to the small host's disk
 - **Pitfall** — On one shared USB 2.0 bus, a disk-to-disk copy took the host down; an SMR drive stalled under small scattered writes (95% iowait, 60-180 s timeouts); a full client resync OOM-killed the proxy child.
-- **Check** — Avoid many small scattered writes and simultaneous read+write on one bus. Full-resync load is tested against the smallest host's budget.
+- **Check** — Avoid many small scattered writes and simultaneous read+write on one bus. The load of a full state read is tested against the smallest host's budget.
 - **Seen** — session memories (small-host USB disk failure, small-host proxy OOM).
 
 ### C-7.8 An index over the tree built by reading every file, inside a request
@@ -269,12 +269,12 @@ Measured numbers from the material:
 
 ### C-8.3 Retry loops without backoff
 - **Pitfall** — A wedged peer entry was re-applied every 2 s for hours. A "debug" line was written every 2 s per skipped read of a dead main.
-- **Check** — Every retry loop backs off; stuck items step aside and are reported.
+- **Check** — Every retry loop backs off; stuck items are parked and reported.
 - **Seen** — mem:foreign-rename-enotempty-loop, dbdfbc27.
 
 ### C-8.4 Status cost proportional to poll rate
-- **Pitfall** — Each status call listed a thousand journal keys, the corruption prefix and the cursor per store; `status --watch 1` kept a small server's disk busy. In the rewrite a status page re-listed both journals per poll (8,084 entries on GCS) and burned a core parsing. Each of four processes described its whole domain and probed every backend.
-- **Check** — Expensive status inputs are cached and shared (journal listing 60 s, probe 5 s) and refreshed behind the reply. Machine-level probes run once, in the converging process. Tests count store requests per status call.
+- **Pitfall** — Each status call listed a thousand log keys, the corruption prefix and the cursor per store; `status --watch 1` kept a small server's disk busy. In the rewrite a status page re-listed both stores' logs per poll (8,084 entries on GCS) and burned a core parsing. Each of four processes described its whole domain and probed every backend.
+- **Check** — Expensive status inputs are cached and shared (probe 5 s) and refreshed behind the reply. Status reads the sync state the owner holds and lists nothing on the store (03 §3.4). Machine-level probes run once, in the converging process. Tests count store requests per status call.
 - **Seen** — b0d8d9c0, 2bd96b50, a0b1de78, 58b482c9; recurred ×3; rewrite.
 
 ### C-8.5 Pollers pile requests behind a slow server
@@ -331,11 +331,11 @@ Measured numbers from the material:
 
 ### C-9.6 Backend reads on metadata paths
 - **Pitfall** — `stat` and `pread` fell through to backend GETs for keys the mirror lacked: 85 ms per missing-name getattr (about 1 s on shell startup), O(files) GETs on a cold listing. A folder-id miss walked 235k manifests treating the miss as a stale index.
-- **Check** — The mirror answers existence; no backend read on a metadata path. A miss means absent; rebuilding an index is the resync's job. Tests count backend reads.
+- **Check** — The mirror answers existence; no backend read on a metadata path. A miss means absent; rebuilding an index is the state walk's job. Tests count backend reads.
 - **Seen** — 1f091af5, 5396b942, bac2b877, 1b08744e.
 
 ### C-9.7 Hot paths re-fetched remote state
-- **Pitfall** — Before every File Provider enumeration the change feed listed the whole journal prefix with a GET per entry, then stat'd per op because replies named items by reference.
+- **Pitfall** — Before every File Provider enumeration the change feed listed the store's whole log prefix with a GET per entry, then stat'd per op because replies named items by reference.
 - **Check** — Hot paths answer from local state. Change replies carry whole items.
 - **Seen** — 20a26efa, a06abe2f.
 

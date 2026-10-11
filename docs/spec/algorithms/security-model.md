@@ -35,10 +35,10 @@ Trust boundaries, each an enforcement point in this file:
 
 ## 2. Assets
 
-1. Domain content and metadata: file bodies, names, folder structure, versions, journal.
+1. Domain content and metadata: file bodies, names, folder structure, versions, the log.
 2. Credentials: store credentials, http-proxy secrets, share tokens.
 3. The listener host's filesystem outside its stores.
-4. Local state: mirror, staged bodies, chunk cache, WAL, queues. Staged bodies are the only copy of unpublished data.
+4. Local state: mirror, staged bodies, chunk cache, sync state (before-values, position), queues. Staged bodies are the only copy of content not yet on the main.
 5. Operational information: status reports, domain names, traffic, backend settings.
 
 ---
@@ -47,8 +47,8 @@ Trust boundaries, each an enforcement point in this file:
 
 ### 3.1 Non-goals
 
-- **Confidentiality from the storage provider.** Objects are stored in plaintext. Whoever administers the bucket, disk or NAS can read every file, name and journal entry. Encryption at rest is the provider's or the volume's.
-- **Integrity against a domain writer.** A holder of write access to a domain can replace, delete or corrupt anything in it, including version history. tsync keeps conflicted copies and versions against *accidents*, not against a hostile writer.
+- **Confidentiality from the storage provider.** Objects are stored in plaintext. Whoever administers the bucket, disk or NAS can read every file, name and log entry. Encryption at rest is the provider's or the volume's.
+- **Integrity against a domain writer.** A holder of write access to a domain can replace, delete or corrupt anything in it, including version history. tsync keeps conflicted copies and versions against *accidents*, not against a hostile writer. In particular the main checks nothing about the entries appended to its log: that every client creates an entry only from the head, with a batch, is an assumption of the protocol (A6, [change-algebra.md §1](change-algebra.md#1-setting)), not something tsync enforces. A writer that breaks it can commit any tree.
 - **Chunk keys as a security property.** Chunk keys are two seeded 64-bit non-cryptographic hashes ([01-core](../01-core.md)). They detect accidental corruption and drive deduplication. An adversary with write access to the store can craft colliding content and poison deduplication for every writer of the domain. Nothing in tsync MAY rely on a chunk key to authenticate content against an adversary.
 - **Replay of a captured request within the freshness window** (§4.2) by a party that can read requests on the path. TLS (§9) is what keeps requests from being captured.
 - **Availability against a network attacker.** A party that can reach the listener can use its bounded resources (§11). Exposure is controlled by the bind address and the operator's firewall.
@@ -75,7 +75,7 @@ The wire format is owned by [backends/http-proxy §3](../backends/http-proxy.md#
 ### 4.1 Signature
 
 - Every request other than the unsigned ones (status login page, share links) MUST carry a timestamp and an HMAC-SHA256 signature keyed with the domain's secret, over the method, the canonical request target, the timestamp and the SHA-256 of the body. The canonical encoding is specified byte-exactly in the wire file so any language can sign and verify.
-- The signature binds every parameter: range offsets, claim flag, watch parameters, listing prefixes, copy source and destination. A parameter that changes behaviour MUST travel in the signed target or body, never in an unsigned header.
+- The signature binds every parameter: range offsets, conditional-create flag, watch parameters, listing prefixes, copy source and destination. A parameter that changes behaviour MUST travel in the signed target or body, never in an unsigned header.
 - Verification MUST compare in constant time and MUST refuse a signature of the wrong length or case.
 - A failed verification MUST be indistinguishable, in status and body, from an unserved domain (§5.2), so an unauthenticated prober cannot enumerate domain names.
 
@@ -105,7 +105,8 @@ Answers are not signed. Their integrity rests on TLS alone, which is why TLS is 
 | Every listing, every driver | Each listed name | Omitted from the listing with a warning; never mapped to a path |
 | http-proxy server, before routing | Every key and prefix of every operation: object key, bulk list elements, `copy` source and destination, listing and capability prefixes, watch key | 400 |
 | http-proxy client | Every key in a bulk answer | CORRUPT |
-| Any reader of a store | Chunk keys from manifests; folder ids from markers, anchors and share manifests; keys in delete-job bodies; names in journal entries and folder indexes | CORRUPT; the item is skipped, never used |
+| Any reader of a store | Chunk keys from manifests; folder ids from markers, anchors and share manifests; keys in delete-job bodies; names in folder indexes | CORRUPT; the item is skipped, never used |
+| Any reader of the log | Every command of an entry: folder ids, leaf names, content identities, manifest bodies ([03 §2.3](../03-journal-sync.md#23-commands)) | The whole entry is CORRUPT; it is never applied with a command dropped |
 | Request handler (IPC) | Item references, leaf names, `staging` and `dest` paths (§7.3) | `invalid` / `denied` |
 | Share server | Token; `path` components; manifest's domain, key and folder id (§6.3) | 400 / 404 |
 
@@ -145,14 +146,14 @@ The share operation surface is in [05-ops-config §4.11](../05-ops-config.md#411
 - Every manifest carries an expiry. The default is `share_default_ttl` (7 days). A caller MAY choose a longer finite lifetime; there is no unbounded share.
 - A manifest whose expiry is missing, non-numeric or in the past is expired (410). An expiry in fractional seconds: readers SHOULD accept it (meaning that instant); writers MUST write whole seconds.
 - **Revocation**: deleting the manifest revokes the link at once for every server. A server-issued redirect to a presigned URL (cloud function) MUST expire within `share_presign_ttl` (5 min) and never after the share.
-- Expired manifests and their cached artifacts are removed by retention ([gc.md §4.5](gc.md#45-shares)).
-- A folder share grants the folder **as it is at each request**, later additions included, until expiry, revocation or trashing of the folder ([data-model/backend §2.18](../data-model/backend.md#218-share)).
+- Expired manifests and their cached artifacts are removed by retention ([gc.md §4.3](gc.md#43-shares)).
+- A folder share grants the folder **as it is at each request**, later additions included, until expiry, revocation or removal of the folder ([data-model/backend §2.18](../data-model/backend.md#218-share)).
 
 ### 6.3 A share never leaves its domain
 
 A server serves a manifest only if it passes the validity rule of [data-model/backend §2.18](../data-model/backend.md#218-share) (version 1, a valid domain name, a file key inside that domain's manifest area, a valid folder id) and, in addition, names a domain this server serves (on a listener: the domain of the route asked). Otherwise it answers as for a corrupt manifest (502) or, for another domain, an absent token (404).
 
-Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.3](../data-model/backend.md#63-settling-the-anchor-decides)): a disowned marker is absent, and a trashed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400).
+Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)): a disowned marker is absent, and a removed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400).
 
 ### 6.4 The share space on a listener
 
@@ -226,7 +227,7 @@ Some clients are less privileged than the owner process (the sandboxed macOS ext
 
 - A file that holds secrets (the config) MUST be created with mode 0600 in a 0700 directory, the mode set on the temporary file at creation, before any byte is written; it is then renamed into place ([durable-queue](durable-queue.md) write rule). Changing the mode after writing leaves a window where it is readable.
 - A process loading the config MUST refuse (or, interactively, warn and fix) a config readable by group or other.
-- Platform backup and device transfer MUST exclude files holding secrets, the client identity and local domain state (a restored identity or WAL on a second device would publish as the first). Android: backup rules excluding them, or backup disabled.
+- Platform backup and device transfer MUST exclude files holding secrets, the client identity and local domain state (a restored identity or sync state on a second device would push as the first). Android: backup rules excluding them, or backup disabled.
 
 ### 10.3 Masking
 
@@ -296,8 +297,8 @@ An implementation MUST exhibit:
 - A key outside the route, an unserved domain and a bad signature produce the same status and body.
 - A bulk operation with one foreign key is refused whole.
 - A configuration with a domain named after a reserved root, or containing `/`, is refused.
-- A share manifest naming another domain, a file key outside the domain, or the trash folder id, is not served. A proxy client cannot read, overwrite, delete or list another domain's share manifests or preview images; share-space listings contain no manifest keys and no preview images.
-- A share with a past or missing expiry answers 410; a revoked share answers 404 at once; a share of a folder that was since trashed is no longer served.
+- A share manifest naming another domain, a file key outside the domain, or an invalid folder id, is not served. A proxy client cannot read, overwrite, delete or list another domain's share manifests or preview images; share-space listings contain no manifest keys and no preview images.
+- A share with a past or missing expiry answers 410; a revoked share answers 404 at once; a share of a folder that was since removed is no longer served.
 - A caller-chosen token that is taken is refused, not overwritten.
 - A socket in a directory with group or other access is not served; a connection from another uid is closed without an answer.
 - A `staging` or `dest` path outside its declared root (where one is declared), or through a symbolic link, is refused `denied`; an existing `dest` is not overwritten.

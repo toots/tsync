@@ -10,8 +10,8 @@ This document owns three things:
 
 Related rules owned elsewhere, referenced and not restated:
 
-- WAL record states, publishing and startup reconcile:
-  [wal-and-journal.md](wal-and-journal.md) §4.1, §4.2, §4.7.
+- Before-values, the in-flight and arrival records, the push and startup recovery:
+  [publication.md](publication.md) §4.1, §4.5, §4.8.
 - What the domain owner owns, and which local entities are authoritative:
   [data-model/local-cache.md](../data-model/local-cache.md).
 - The process model and the ownership lock's lifecycle (P1): [07-daemon-cli.md](../07-daemon-cli.md).
@@ -110,7 +110,7 @@ Every write of an authoritative local object (the classes in
   level the acknowledgement promises before the acknowledgement is given. Enqueueing in memory
   is only a hint.
 - **R2. Referent before referrer.** An object that names another (a staged manifest naming a
-  body, a WAL record naming a staged edit, a mirror entry naming the manifest promotion
+  body, an upload record naming a staged edit, a mirror entry naming the manifest promotion
   produced, a record state claiming an effect) reaches a durability level only after every
   object it names has reached that level.
 - **R3. Switch before release.** A referent is released only after every referrer that named it
@@ -119,9 +119,10 @@ Every write of an authoritative local object (the classes in
   concluding something is gone), the release's directory is fsynced before that step.
 - **R4. Intent before effect.** A record that announces an effect not yet performed is durable
   before the effect begins.
-- **R5. Effect before claim.** A record state that claims an effect (a WAL record reaching
-  Prepared or Executed, an applied-log line, a completed job) is written only after the effect
-  is durable: local effects fsynced, store effects acknowledged by the store.
+- **R5. Effect before claim.** A record state that claims an effect (a staged manifest marked
+  Uploaded, a before-value dropped after a commit, an applied-log line, a completed job) is
+  written only after the effect is durable: local effects fsynced, store effects acknowledged by
+  the store.
 - **R6. Unparseable is not absent.** A reader of an authoritative object distinguishes three
   outcomes:
   - **absent**: the name does not exist;
@@ -150,12 +151,8 @@ Every write of an authoritative local object (the classes in
   interprets the body; the job kind's decoder answers job, or unparseable (R6).
 - **Record-id format** (owned here). A **submission id** is
   `<20-digit microseconds since the epoch>-<8-digit sequence>-<decimal pid>`, the sequence
-  breaking ties within one microsecond, per process and log. The WAL's own records are named by
-  entry keys ([03](../03-journal-sync.md) §2.2), which only the owner mints; a record a non-owner
-  submits to the WAL carries a submission id, and the owner **re-keys** it to a fresh entry key
-  when it adopts it, by one atomic rename ([04](../04-checkout-cache.md) §2.8). Every other log
-  names all its records by submission ids. The owner's own posts get strictly increasing ids
-  within a log.
+  breaking ties within one microsecond, per process and log. Every log names all its records by
+  submission ids. The owner's own posts get strictly increasing ids within a log.
 - **Lock files** (owned here). A log has no claim file: the domain ownership lock is the claim
   ([07](../07-daemon-cli.md) §2.3). A submitter's hold (§4.2) is an exclusive advisory lock on
   the record file itself, of the kind required by §2 A1. Files beside a log directory, and files
@@ -171,8 +168,9 @@ Every write of an authoritative local object (the classes in
   [07](../07-daemon-cli.md) §2.3) is the claim, for every log of the domain.
 - The owner is every log's only **resumer**: it starts every log of its domain at ownership
   start, with recovery, and loads the records on disk in id order before accepting new posts on
-  that log. The logs of a domain are its WAL, its deferred job logs (one per replica or backfill
-  target) and its pending folder-claim confirmations ([04](../04-checkout-cache.md) §2.9).
+  that log. The logs of a domain are its upload records, its local intents
+  ([04](../04-checkout-cache.md) §2.8) and its deferred job logs (one per replica or backfill
+  target).
   Owners settle their logs on exit, bounded by the grace. When a one-shot command
   becomes the owner, it runs every log of the domain, not only its own posts.
 - **Submission** (the only write a non-owner makes to a log, [07](../07-daemon-cli.md) §2.2).
@@ -181,8 +179,7 @@ Every write of an authoritative local object (the classes in
     (§3.2), minting a new id on EEXIST; it never replaces, updates or removes
     a record;
   - it MAY hold an exclusive advisory lock on its record file for as long as the record must
-    not run yet (a bulk publisher holds it until the manifests its record announces are on the
-    store, §7.3); the lock dies with the submitter;
+    not run yet; the lock dies with the submitter;
   - it then pokes the owner ([07](../07-daemon-cli.md) §4.6).
 
   Submitters are the non-owner writers of [07](../07-daemon-cli.md) §2: the store server
@@ -192,19 +189,10 @@ Every write of an authoritative local object (the classes in
   The owner adopts submitted records by rescanning the log at ownership start, on a poke, and
   every `REARM_INTERVAL`. It runs a submitted record only after taking that record's lock
   without waiting; a record whose lock is held is skipped until a later rescan.
-- **Release order.** Submitted records are adopted, and WAL records re-keyed, in the order the
-  submitter released them: a submitter MUST create its records in the order it wants them
-  published and release their locks in that same order (hence in id order), and the owner adopts
-  a submitter's records in id order, never adopting one while a lower id of the same submitter
-  (same pid in the id) is still held. A bulk publisher that releases its folder records before
-  its file records therefore has the folder ops published first. Across submitters, and against
-  the owner's own posts, a submitted record may run after records with later ids, so only
+- **Release order.** The owner adopts a submitter's records in id order, never adopting one while
+  a lower id of the same submitter (same pid in the id) is still held. Across submitters, and
+  against the owner's own posts, a submitted record may run after records with later ids, so only
   order-insensitive job kinds (§4.7) accept submissions.
-- Several queues MAY run over one log when each takes a disjoint subset of records by a
-  predicate over the decoded job (the WAL's metadata and upload queues:
-  [wal-and-journal.md](wal-and-journal.md) §4.2).
-- A record whose job belongs to another client (a WAL record under another client uuid) is
-  never run, never deleted, and reported by status.
 
 ### 4.3 Operations
 
@@ -250,7 +238,7 @@ set_aside(id): rename log/id → set-aside name; report
 | For | effects that do not commute across jobs | independent keys, where the newest state of a key supersedes older jobs for it |
 | Transient retry | at the **head**: nothing recorded later overtakes a failing job | at the **tail**: one failing key never stalls others |
 | Coalescing | none: every record runs | a new post for a key with a running job sets that job's cancel flag and replaces any pending job for the key; the replaced pending record is completed |
-| Used by | metadata publishing; deferred replica and backfill jobs | uploads, one key per file |
+| Used by | deferred replica and backfill jobs | uploads, one key per file |
 
 Keyed coalescing is sound only for **bodyless** jobs: the job reads the key's current state
 when it runs, so the newest record fully describes what is owed, and completing a superseded
@@ -319,12 +307,12 @@ repeated and when run after later jobs of its log. The owner of the mechanism is
 
 | Job kind | Requirement | Mechanism owned by |
 |---|---|---|
-| Upload of a file (keyed) | content-addressed chunks skip what exists; the manifest put overwrites with the same body; the commit record is written before any local move, so a replay only promotes; every promotion step is idempotent; discharge publishes under the record's own key | [04](../04-checkout-cache.md) §4.6, [wal-and-journal.md](wal-and-journal.md) §4.2 |
-| Put with no local staged edit (bulk publish, revert, recovery) | publishes an entry only for paths whose manifest the store holds; installs that manifest locally if absent | [04](../04-checkout-cache.md) §4.6 |
-| Metadata publish (ordered) | re-reads its record (a conflict may have retargeted it); decides from store facts, so a repeat publishes nothing new | [conflict-resolution.md](conflict-resolution.md) §4.4 |
-| Metadata local redo (Intent recovery) | removals by folder id; a rename only when the source is present and the destination absent; a mkdir writes an id final for life | [wal-and-journal.md](wal-and-journal.md) §4.7 |
+| Upload of a file (keyed) | content-addressed chunks skip what exists; the result is recorded in the staged manifest only if the edit is the one the upload read; a job that finds the edit Uploaded or gone completes | [04](../04-checkout-cache.md) §4.6 |
+| Local intent (recovery only, not a queue) | removals by folder id; a rename only when the source is present and the destination absent; a mkdir writes an id final for life | [04](../04-checkout-cache.md) §4.5 |
 | Deferred replica/backfill job (ordered) | bodyless: it brings the target's key to the source's *current* state (copy when present, delete when absent), so any order converges | [replication.md](replication.md) |
-| Peer-entry application (not a queue) | per-op facts; noted handled only after every op's effects are durable | [wal-and-journal.md](wal-and-journal.md) §4.4 |
+| Push (not a queue) | the in-flight record holds the exact bytes; creating the entry again answers `Won` on identical bytes | [publication.md](publication.md) §4.8 |
+| Arrival (not a queue) | the arrival record holds the merge's result as idempotent steps | [publication.md](publication.md) §4.4 |
+| Projection of a log entry (not a queue) | every step tests the slot before it deletes and otherwise overwrites | [data-model/backend.md](../data-model/backend.md) §6.1 |
 | GC step, GC discard job | phase saved before the step; deletes of absent keys succeed | [gc.md](gc.md) |
 | Export chunk | a progress line is appended only after the chunk's bytes are fsynced | [05](../05-ops-config.md) |
 
@@ -358,16 +346,20 @@ steps are specified by the file operations of [04](../04-checkout-cache.md) §3�
 
 | Action | Acknowledged when | Level | Evidence at that moment |
 |---|---|---|---|
-| Write, truncate, create of a file | the call returns | visible | staged bodies written; staged manifest replaced (§3.2 *replace*) |
-| Sync (`fsync` on the mount) | the call returns | durable | the file's staged bodies fsynced, its staged manifest durable, their directories fsynced |
-| Close of a modified file | the call returns | durable | as sync, then the WAL record `Prepared [Put]` durable |
-| Whole-file handover (File Provider, Android) | the call returns | durable | the handed-over file adopted as a staged whole body and fsynced, staged manifest durable, WAL record durable |
-| mkdir, rmdir, rename, delete, symlink | the call returns | durable | WAL record `Intent` durable before the local half; the local half's effects durable; the record `Prepared` durable |
+| Write, truncate, create of a file | the call returns | visible | the key's before-value written; staged bodies written; staged manifest replaced (§3.2 *replace*) |
+| Sync (`fsync` on the mount) | the call returns | durable | the file's staged bodies fsynced, its staged manifest and before-value durable, their directories fsynced |
+| Close of a modified file | the call returns | durable | as sync, then the upload record durable |
+| Whole-file handover (File Provider, Android) | the call returns | durable | the handed-over file adopted as a staged whole body and fsynced, staged manifest, before-value and upload record durable |
+| mkdir, rmdir, rename, delete, symlink | the call returns | durable | the before-value of each key changed, durable before the local half; the local half's effects durable |
 | Pin ("make available offline") | the call returns | durable | every group whole and each pin durable ([read-path-and-cache.md](read-path-and-cache.md) §4.8) |
 | Android share-sheet save, in-app upload, picker close | the app reports success to the platform | durable | every file handed over and closed as above, or its staging copy fsynced with a durable *ready* ingest intent that the next app start commits ([android-app](../frontends/android-app.md) §8.2) |
-| Write to a domain with replica or backfill targets | the publishing step returns | durable | the mains hold the object and each target's deferred job record is durable ([replication.md](replication.md)) |
-| Bulk publish (import, rsync), revert | the command returns 0 / the call returns | durable | every manifest put, every Put op recorded (§7.3) and discharged or durably owed |
-| Any one-shot command | exit status 0 | durable | its effects, plus any owed remainder durable in the domain's logs (reported on exit) |
+| Write to a domain with replica or backfill targets | the store write returns | durable | the main holds the object and each target's deferred job record is durable ([replication.md](replication.md)) |
+| Bulk publish (import, rsync), revert | the command returns 0 / the call returns | durable | every chunk on the main, every manifest installed in the local tree with its before-value (§7.3), committed or durably pending |
+| Any one-shot command | exit status 0 | durable | its effects, plus any owed remainder durable in the domain's local state (reported on exit) |
+
+An acknowledgement says the change is in the local tree and will be pushed. It never says the
+change is on the main: that is the push's `Won` ([publication.md](publication.md) §4.5), which a
+caller waits for only when it asks (`await`, `sync`).
 
 An action killed before its acknowledgement is not acknowledged: it may be absent after
 restart, and it is never half applied (§8, property 2).
@@ -384,82 +376,80 @@ owner finds it at start.
 | # | Evidence | Primitive | Rediscovery | Kill point → outcome |
 |---|---|---|---|---|
 | E1 | Staged body (group layout or whole file) | in-place data; fsynced at sync, close, handover | named by E2; the start-of-ownership orphan sweep releases bodies nothing names | Written, no manifest names it: the write was not acknowledged; released at start. Named by a manifest: kept. |
-| E2 | Staged manifest, *Owed* or *Committed* | replace per write; durable at sync, close and state changes | owner start: Committed ones are promoted; Owed ones with no WAL record are adopted with a fresh `Prepared [Put]` | Replaced mid-write: old or new, whole. Committed, not promoted: promotion replays with no upload. |
+| E2 | Staged manifest, *Owed* or *Uploaded* | replace per write; durable at sync, close and state changes | owner start: Uploaded ones whose key has no before-value are promoted; Owed ones with no upload record are adopted | Replaced mid-write: old or new, whole. Uploaded, not committed: stays staged until its commit. |
 | E3 | Set-aside staged manifest | rename (R6) | reported at start | Kept forever with every body it may name ([04](../04-checkout-cache.md) §4.10); never adopted automatically. |
-| E4 | WAL record `Intent` | durable replace, before the local half | reconcile at owner start | Mid local half: local redo (idempotent), then Prepared. The local half failed: record completed, error returned (not acknowledged). |
-| E5 | WAL record `Prepared` | durable replace, after the local effects are durable | reconcile; the queues' recovery | Put with an Owed edit: uploads. Put with a Committed edit: promotes and discharges. Put with no staged edit: §7.3. Metadata: republished by the ordered queue. |
-| E6 | WAL record `Executed` | durable replace, after the store half and before promotion | reconcile | Publishes the entry if the store lacks it, then completes ([wal-and-journal.md](wal-and-journal.md) §4.7). |
+| E4 | Before-value | durable replace, before the local tree changes at its key | read at owner start; the pending set is derived from them | Recorded, change not made: equal to the local value, dropped at start. Change made: pending until committed. |
+| E5 | Local intent | durable create, before the first local step | owner start completes it | Mid local half: local redo (idempotent). |
+| E6 | In-flight record | durable replace, before the entry's create is issued | the first cycle | The create is issued again with the same bytes: `Won` if this client's entry is there, else another client's entry is merged ([publication.md](publication.md) §4.8). |
+| E6a | Arrival record | durable replace, before a merge touches the local tree | owner start completes it | The recorded steps are applied again; the result is the uninterrupted merge's. |
+| E6b | Position | durable replace, with the step that changes it | read at start | Old or new, whole. Lost: an arrival by state. |
 | E7 | Parked records (any log) | the record itself, with its failure noted | loaded at owner start and retried (§4.7) | Survive any kill; retried at start and every `REARM_INTERVAL`. |
 | E8 | Deferred replica/backfill job log | durable replace per job, before the main write is acknowledged | loaded at owner start (every owner, including a one-shot command and the Android app) | Killed before running: run by the next owner. |
-| E9 | Queue memory, upload slots, cancel flags | volatile | rebuilt from E4–E8 | Lost on kill; harmless. |
-| E10 | Cursor debounce | volatile | none | Kill inside the debounce window: peers learn of the entry by their periodic listing. Latency only. The owner flushes it on stop and SHOULD flush when the host signals imminent suspension. |
-| E11 | Applied log ([03](../03-journal-sync.md)) | durable append: own entries before the journal put; peer entries after their effects are durable | read at owner start | A line never claims an effect that is not durable. A lost own line after a kill is written again by the record's discharge. |
-| E12 | Last-sync mark, resync generation | durable replace | read at start | Old or new value, whole. |
-| E13 | Client uuid | durable create-if-absent | read at start | Never lost once any record carries it. |
+| E9 | Queue memory, upload slots, cancel flags | volatile | rebuilt from the upload records and E8 | Lost on kill; harmless. |
+| E10 | Cursor debounce | volatile | none | Kill inside the debounce window: peers learn of the entry by their periodic fetch. Latency only. The owner flushes it on stop and SHOULD flush when the host signals imminent suspension. |
+| E11 | Applied log ([03](../03-journal-sync.md)) | durable append, after the change it names is durable | read at owner start | A line never claims an effect that is not durable. A kill between a change and its line loses the line: frontends miss one change of the feed and see it at their next listing. |
+| E12 | Resync generation | durable replace | read at start | Old or new value, whole. |
+| E13 | Client uuid | durable create-if-absent | read at start | Never lost once any entry carries it. |
 | E14 | Folder-id lease | durable create-if-absent before the first id of the block is used | none needed | A kill wastes the rest of the block; ids stay unique. |
 | E15 | Export progress record | owned by [05](../05-ops-config.md): header first, a line per chunk after the chunk is fsynced | a re-run of the export | Every kill point resumes. |
-| E16 | Owed work left by a one-shot command | E4–E8 | the next owner of the domain (daemon or next command) | Nothing is lost; the command reported it on exit. |
+| E16 | Pending work left by a one-shot command | E2–E8 | the next owner of the domain (daemon or next command) | Nothing is lost; the command reported it on exit. |
 | E17 | GC run marker and lock, GC discard and verify jobs | owned by [gc.md](gc.md) | the next collection | Resumable; see gc.md. |
 | E18 | Android staging copies and ingest intents (share sheet, picker, camera) | owned by [android-app](../frontends/android-app.md) §8: copy fsynced, intent durable before success is reported | the next app start commits every *ready* intent | Before the intent is ready: not acknowledged; copy and intent discarded. Ready, not committed: committed at start. Committed: E1–E5. |
 | E19 | Android camera-backup records | owned by [android-app](../frontends/android-app.md) §11 | the backup worker | A photo is marked done only after its close was acknowledged; failed and unsettled photos are retried. |
 | E20 | Cache bodies and pins | whole bodies: data fsynced before the rename that installs them; pins: durable create | the cache walk at owner start | A partial body is discarded at start; a whole body is whole; a pin survives ([read-path-and-cache.md](read-path-and-cache.md) §6). |
 | E21 | Locally written configuration | owned by [05](../05-ops-config.md): durable replace | read at start | Old or new config, whole. |
+| E22 | An entry committed and not projected | on the main: the log entry, and the tree head below it | the author's next cycle; another client after the settle | The projection is applied again from its start ([publication.md](publication.md) §4.6). |
 
-### 7.2 Kill-point walkthrough: a file edit from write to published entry
+### 7.2 Kill-point walkthrough: a file edit from write to committed entry
 
-Steps of [04](../04-checkout-cache.md) §4.3–§4.6, in order. Every kill point leaves one of the
-listed states, and each state recovers without losing an acknowledged action.
+Steps of [04](../04-checkout-cache.md) §4.3–§4.7 and [publication.md](publication.md) §4.5, in
+order. Every kill point leaves one of the listed states, and each state recovers without losing an
+acknowledged action.
 
 | # | Step | Kill just after → state at restart → recovery |
 |---|---|---|
+| W0 | before-value of the key, if it has none | a before-value equal to the local value → dropped at start |
 | W1 | stage group body bytes (in-place data) | unacknowledged bytes in a body nothing new names; the previous manifest still names what it named → the orphan sweep releases unnamed bodies |
-| W2 | replace the staged manifest (acknowledges the write) | new manifest, visible → adopted at start with a fresh `Prepared [Put]` |
+| W2 | replace the staged manifest (acknowledges the write) | new manifest, visible → adopted at start with a fresh upload record; a missing before-value is taken from the base |
 | W3 | release bodies the new manifest no longer names, after the manifest is durable (R3) | orphans at worst → swept |
-| C1 | sync: fsync bodies, durable staged manifest | as W2, durable |
-| C2 | WAL `Prepared [Put]` durable (acknowledges the close) | reconcile resumes the upload |
-| U1 | upload chunks and the manifest (GC interlock, [gc.md](gc.md) §4.4) | Prepared + Owed edit → upload again (existing chunks are skipped) |
-| U2 | durable replace of the staged manifest as *Committed* | Prepared + Committed → promote, then discharge; no upload |
-| U3 | WAL record → `Executed` (durable) | Executed + Committed → promote at start; reconcile publishes |
-| U4 | promotion: cache groups, durable mirror entry, release of the staged manifest (directory fsynced), release of bodies | any sub-step: the Committed manifest replays the promotion idempotently; after the manifest's release, only orphan bodies remain → swept |
-| U5 | discharge: applied line, journal put, cursor note, record release | per [wal-and-journal.md](wal-and-journal.md) §4.2 |
+| C1 | sync: fsync bodies, durable staged manifest and before-value | as W2, durable |
+| C2 | upload record durable (acknowledges the close) | the upload queue resumes it |
+| U1 | upload the chunks | Owed edit → upload again (existing chunks are skipped) |
+| U2 | durable replace of the staged manifest as *Uploaded* | Uploaded, before-value present → pending; the cycle pushes it |
+| P1 | in-flight record durable | the create is issued at the next cycle |
+| P2 | the entry is created | in-flight record, entry on the main → the create again: `Won` |
+| P3 | the `Won` step: before-value dropped, position advanced, in-flight record cleared | Uploaded edit with no before-value → promoted at start |
+| P4 | promotion: cache groups, durable mirror entry, release of the staged manifest (directory fsynced), release of bodies | any sub-step: the Uploaded manifest replays the promotion idempotently; after the manifest's release, only orphan bodies remain → swept |
+| P5 | projection of the entry, tree head, cursor note | E22; the cursor is a hint |
 
 ### 7.3 Kill-point walkthrough: publishing without a local staged edit
 
-Bulk publishers (import, rsync), revert and the recovery of a Put whose staged edit is gone use
-one rule, so that a manifest on the store is never left unannounced:
+Bulk publishers (import, rsync) and revert change the local tree to content that is on the main
+without passing through the staged tree. They run in the owner ([07](../07-daemon-cli.md) §2.5)
+and use one rule, so that a chunk on the main is never left with nothing that will name it or
+collect it:
 
-1. Durably record a WAL record `Prepared` listing the batch's Put ops **before** the first
-   manifest put. Publishers run in the owner ([07](../07-daemon-cli.md) §2.5).
-2. Put the chunks, then the manifests (GC interlock).
-3. Install each manifest in the mirror if the mirror lacks that path, durably.
-4. Discharge: publish the entry.
+1. Put the chunks and build the manifest.
+2. Under the metadata lock: record the key's before-value if it has none, then install the
+   manifest as the key's mirror entry, durably.
+3. The cycle commits the key like any other pending command.
 
-A batch announces only what it did. Before its record is handed to the queue that discharges it,
-the record is rewritten to the ops of the items whose **store half** happened: a manifest published,
-a slot deleted. A local step failing after it (removing the source file) does not take the op out,
-since the store has changed and peers must hear of it. An item the batch did not reach (a cancel,
-the batch's age limit) goes to the next batch, and an item that failed before its store half is
-reported failed; neither is announced by this record, and a batch none of whose items reached its
-store half announces nothing. The record is rewritten before its hold is released, so no rescan
-adopts it in between. Only a crash before that rewrite leaves ops of items that did not run, which
-recovery handles as below.
+A kill between steps 1 and 2 leaves chunks nothing names: the next collection removes them, and a
+re-run of the command uploads them again. A kill after step 2 leaves a pending command.
 
-Recovery of a `Prepared` Put op with no staged edit asks the store whether a manifest exists at
-the op's path: if yes, it ensures the mirror holds a manifest for the path (fetching the store's
-if the mirror has none) and publishes the op; if no, the op is dropped from the record; if the
-store cannot answer, the record stays owed (TRANSIENT). A Put entry for a manifest that exists
-is always harmless, because a Put tells peers to fetch the current manifest
-([wal-and-journal.md](wal-and-journal.md) §3.1). The mechanism of that recovery is owned by
-[wal-and-journal.md](wal-and-journal.md) §4.7; this section owns the requirement.
+Such a command has no staged bytes behind it. If its commit is refused for missing chunks (a
+collection ran between steps 1 and 3), the publisher uploads them again from its source while it
+still runs; otherwise the command stays pending and the file is reported as damaged
+([publication.md](publication.md) §4.5), until the publisher's next run uploads the chunks again.
 
 ### 7.4 Kill-point walkthrough: a namespace operation
 
 | # | Step | Kill just after → recovery |
 |---|---|---|
-| M1 | WAL `Intent` durable | local redo of the op (idempotent), then Prepared |
-| M2 | local half (mirror, staged moves, folder index), each effect made durable | as M1: the redo finds each effect already there |
-| M3 | WAL `Prepared` durable (acknowledges the call) | the metadata queue publishes |
-| M4 | publish decision, store effects, `Executed`, discharge | per [wal-and-journal.md](wal-and-journal.md) §4.2 |
+| M1 | local intent durable (when the local half is more than one step) | local redo of the op (idempotent) |
+| M2 | before-values of the keys the op changes | equal to the local value until the local half reaches them: dropped at start, or kept once it has |
+| M3 | local half (mirror, staged moves, folder index), each effect made durable | as M1: the redo finds each effect already there |
+| M4 | feed line; intent removed (acknowledges the call) | the cycle pushes the pending commands |
 
 ---
 
@@ -471,20 +461,24 @@ put and loses its answer, power-loss states generated from the fsync barriers, k
 recovery, and multi-process runs).
 
 After any sequence of acknowledged actions interrupted by kills or power losses at any step,
-followed by restarts and quiescence (store reachable, owner started, queues settled, one peer
-applying the journal):
+followed by restarts and quiescence (store reachable, owner started, queues settled, pending set
+empty, one peer arrived at the head):
 
 1. **No acknowledged action is lost.** Each acknowledged action's effect is visible in the local
-   view, on the store and in the peer's view, or it was superseded by a later acknowledged
+   view, on the main and in the peer's view, or it was superseded by a later acknowledged
    action, or its bytes survive in a conflicted copy
-   ([conflict-resolution.md](conflict-resolution.md) §5.1). For a write acknowledged only at the
+   ([conflict-resolution.md](conflict-resolution.md) §8.1). For a write acknowledged only at the
+   *visible* level, this holds for kills of the process and not for power loss.
    *visible* level, this holds for kills of the process and not for power loss.
 2. **Unacknowledged actions are atomic.** Each is fully applied or absent: no torn file, no
    rename that leaves both names or neither.
-3. **Nothing owed remains**, except parked records, which are reported: the logs are empty, the
-   staged tree is empty, no Committed staged manifest remains.
-4. **Convergence.** The local view, the main store, the peer's view and every replica (minus
-   excluded keys) agree; every manifest on a replica has all its chunks.
+3. **Nothing owed remains**, except parked records, which are reported: no before-value, no
+   in-flight or arrival record, no local intent; the logs are empty, the staged tree is empty.
+4. **Convergence.** The local view, the main's tree (its tree head at the head), the peer's view
+   and every replica (minus excluded keys) agree; every manifest and log entry on a replica has
+   all its chunks.
+5. **Idempotence.** The final state equals that of the same actions run without a crash; in
+   particular no kill produces a conflicted copy that an uninterrupted run would not.
 5. **Idempotence.** The final state equals that of the same actions run without a crash.
 6. **Visibility.** Every set-aside object and every parked record shows in status.
 7. **Single runner.** No record is run by two processes, and an ordered log's records that
@@ -525,7 +519,7 @@ At the level of one queue:
 | Choice | Reason |
 |---|---|
 | One file per record | Completion is a release; listing can skip loaded ids by name without reading bodies; an I/O error is local to one record. An embedded database with the same states and durability is an acceptable encoding. |
-| The domain ownership lock is the only claim | Per-log claims taken by some processes and checked by others let two processes run one log, which ran a job three times and reordered an rmdir/mkdir pair. One owner makes every record's writer unique, so a record update cannot resurrect a completed record. |
+| The domain ownership lock is the only claim | Per-log claims taken by some processes and checked by others let two processes run one log, which ran a job three times. One owner makes every record's writer unique, so a record update cannot resurrect a completed record. |
 | Park, never drop | A dropped record is owed work gone silently; a parked one is visible and retried. Parking must not block the log, so parked jobs are made order-insensitive instead. |
 | Head retry for ordered, tail retry for keyed | A later mkdir once overtook the rmdir it followed; a failing upload must not stall other files. |
 | Stop races the grace rather than cancelling | Cancellation completes records whose work is still owed. |

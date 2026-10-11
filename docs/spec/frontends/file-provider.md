@@ -72,8 +72,9 @@ anchor expiry practically never happen, and to make every change reachable throu
 
 **Ownership (P1).** One process owns all File Provider domains of the user. It holds each domain's
 ownership lock for its lifetime and is the only process that mutates their local state. It also
-converges them: reconcile, journal polling and application, maintenance, and resumption of deferred
-work. The app, the extension and the CLI act on a domain only through the owner's request
+converges them: local recovery, the cycle
+([publication §4](../algorithms/publication.md#4-the-algorithm)), maintenance, and resumption of
+deferred work. The app, the extension and the CLI act on a domain only through the owner's request
 interface. A one-shot command that finds no owner running MAY take ownership for its own duration,
 as [07](../07-daemon-cli.md) specifies.
 
@@ -229,14 +230,14 @@ On macOS:
 
 **Ordering.** The system asks for the anchor before the first page of a full enumeration, and asks
 for changes from it afterwards. The anchor MUST therefore describe a state at or before the one the
-pages show. The owner's anchor names the last applied entry and the kept walk is taken at page 1,
+pages show. The owner's anchor names the last line of the applied log and the kept walk is taken at page 1,
 after it, so a change landing in between is delivered twice, which is harmless.
 
 **Anchors do not expire on a running installation.** The core keeps an anchor valid for as long as
 its consumer may present it ([08 §3.6](../08-frontends.md#36-change-feed-changes_since)): the applied
-log keeps every entry from the feed watermark on, the watermark being the oldest anchor the extension
-was handed or asked from; a rebuild appends its difference to the applied log and stamps no new
-generation. An anchor is stale only after `reimport` stamps a new generation, or after the watermark
+log keeps every line from the feed watermark on, the watermark being the oldest anchor the extension
+was handed or asked from; an arrival by state appends the changes it made to the applied log and
+stamps no new generation. An anchor is stale only after `reimport` stamps a new generation, or after the watermark
 lapsed because the domain was not enumerated for `FEED_WATERMARK_MAX_AGE`. So a machine off for months
 resumes with a change enumeration, not a rescan.
 
@@ -258,8 +259,12 @@ skipped there is never enumerated again.
   a file by its **file id**, a local id the owner assigns to each file of the domain, keeps across
   renames, moves and content changes of that file, and never reuses. Every reference the owner
   issues to this host is one of `root`, `d:<folder id>`, `i:<file id>`.
-- A remote rename or move is an update of the same identifier with a new name or parent; nothing is
-  deleted and the materialised content stays.
+- A peer's rename or move of a folder is an update of the same identifier with a new name or parent;
+  nothing is deleted and the content materialised under it stays.
+- A peer's rename or move of a file is an update of the same identifier when the owner enacts it
+  as a move ([conflict resolution §4.1](../algorithms/conflict-resolution.md#41-file-keys)): one
+  arrival, an unedited local file, the same content. Otherwise it reaches this host as a deletion
+  and a creation, and the file at the new place is a new item with a new identifier.
 - Rows whose `ref` or `parentRef` do not parse are dropped.
 
 ### 6.2 Item model
@@ -284,8 +289,8 @@ Both versions MUST be non-empty and at most 128 bytes.
 
 - **contentVersion** changes if and only if the bytes of the item change.
   - File: the row's `contentId` (the whole-file digest of the content the key resolves to, staged or
-    published, [08 §2.3](../08-frontends.md#23-item-row)). It does not change when this client's own
-    upload of content the system already holds completes: a changed contentVersion makes the system
+    committed, [08 §2.3](../08-frontends.md#23-item-row)). It does not change when this client's own
+    upload and commit of content the system already holds complete: a changed contentVersion makes the system
     fetch a materialised file again and replace the file the user just saved.
   - Symlink: `"l:"` followed by the row's `contentId`, the symlink digest, so a retarget changes it
     and a long target still fits. The extension computes no digest of its own.
@@ -294,7 +299,7 @@ Both versions MUST be non-empty and at most 128 bytes.
 - **metadataVersion** = contentVersion. The system stores it and otherwise ignores it; metadata
   changes (name, parent, upload state) are applied whether or not it moves.
 - The owner MUST report a `contentId` for every file it describes on this host: a whole adopted body
-  is digested while adopting it, with the chunk size the upload will use, so the later publish yields
+  is digested while adopting it, with the chunk size the upload will use, so the later commit yields
   the same digest. Staged partial edits are never produced on macOS.
 
 ### 6.4 Capabilities and domain
@@ -341,7 +346,8 @@ tags were silently reverted).
 
 **Concurrent edit on write.** A `write` whose `base` differs from the key's current content identity
 is a local edit of a version this client no longer has. The owner keeps both sides as
-[conflict resolution](../algorithms/conflict-resolution.md) specifies for a stale `base`: the item
+[conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)
+specifies for a stale `base`: the item
 keeps the newer content and the local edit becomes a conflicted copy. The reply's `item` is the item
 as it now resolves; its contentVersion differs from the bytes the system sent, so the system fetches
 the winning content, and it learns of the copy through the working set. This is the resolution the
@@ -354,10 +360,12 @@ the URL (copying when cloning is impossible) to a new UUID name in its staging d
 path as `staging`, and removes its name afterwards whatever the outcome. It does not hard-link: a
 second link on the system's file makes the item unevictable. The owner validates the path (§4.4) and
 adopts the file by rename before replying, so the callback completes once the content is the owner's
-and the upload continues behind it, reported through `isUploaded`. The whole file is sent on every
+and the upload and the commit continue behind it. The item is reported uploaded through
+`isUploaded`, which turns true when its content is committed and not when its chunks are uploaded
+([08 §2.3](../08-frontends.md#23-item-row)). The whole file is sent on every
 edit; chunk deduplication keeps unchanged chunks off the wire.
 
-Completing before the upload publishes is allowed by the framework on macOS and is what lets a local
+Completing before the content is committed is allowed by the framework on macOS and is what lets a local
 edit never wait on the network; the system then counts no upload against its pipeline depth.
 
 ### 6.7 Custom actions
@@ -445,6 +453,12 @@ for (i, op) in ops where last[op.ref] = i:
 Every change is reported wherever it sits. The extension MUST NOT filter by what the system has
 materialised: a folder holding a child the system was never told about is never removed.
 
+**Conflicted copies.** A conflicted copy made by an arrival reaches the extension as a `rename` and
+a `put`: the local file moved aside keeps its identifier under the conflicted-copy name, with its
+materialised content, and the main's content is a new item at the former name
+([conflict resolution §4.1](../algorithms/conflict-resolution.md#41-file-keys)). A conflicted copy
+made by a write on a stale `base` (§6.5) is a `put` of a new item.
+
 An op or listing entry the owner could not name (a folder with no id on this client) is counted in
 `unnamed`, never turned into `stale`. The item is missing from the replica until it can be named, so
 the owner surfaces a non-zero count in status with its repair (`tsync sync --full`), as
@@ -466,8 +480,8 @@ answers and streams the events of every domain it serves, now or later. One JSON
 - `id` increases within one owner process; a client uses it only for ordering.
 - `changed` names nothing: the answer is always "enumerate the working set's changes". The owner emits
   it debounced: the first changed key after a quiet period schedules one event `changed_debounce`
-  later, and later keys join it. It is raised when the owner applies a peer change, on `revert`, when
-  an upload publishes, and after `full_resync` stamps a new generation.
+  later, and later keys join it. It is raised when an arrival changed the local tree, on `revert`, when
+  the content of a write is committed, and after `full_resync` stamps a new generation.
 - `recovered` is the domain's recovery notice
   ([08 §3.8](../08-frontends.md#38-events)), including when the owner starts serving the domain.
 - `reset` follows `notify_reset` (§9.3).
@@ -703,8 +717,12 @@ checked.
 **Identifiers and items**
 - `root` and `d:.tsync-root` are one identity, mapped to the root container; malformed references are
   rejected without an exception.
-- A renamed or moved file or folder keeps its identifier; a remote rename reaches the system as an
-  update, not a deletion; a materialised file stays materialised across a remote rename.
+- A file or folder renamed or moved on this machine keeps its identifier. A peer's rename of a folder
+  reaches the system as an update, not a deletion, and a file materialised under it stays
+  materialised. A peer's rename of an unedited file, brought by one arrival, reaches the system as an update of
+  the same identifier, and the file stays materialised.
+- A conflicted copy made by an arrival keeps the edited file's identifier under the conflicted-copy
+  name; the main's content appears as a new item at the former name.
 - A directory's version is stable across looks and renames.
 - Two configured names with the same identifier are refused.
 - Every item of a read-only domain carries `readOnly`; an item with a non-UTF-8 name does not, and
@@ -712,7 +730,8 @@ checked.
   directory takes its package type; a folder named like a flat file stays a folder.
 
 **Versions and content**
-- A file's contentVersion is identical before and after its own upload completes; a peer's edit
+- A file's contentVersion is identical before and after its own upload and commit complete, and its
+  `isUploaded` turns true only at the commit; a peer's edit
   changes it.
 - `ensure_cached` and `fetch_range` reply with the item whose bytes they wrote, and its size equals
   the bytes delivered.
@@ -741,8 +760,8 @@ checked.
 - Change batches: create then delete → only deleted; rename then delete → deleted; a→b→c → one update
   at c; a removal needs no item; an update without an item is not invented.
 - The anchor of the last full enumeration, and the last anchor asked from, survive applied-log
-  retention past the horizon; an empty-entry anchor is stale once a shard was dropped; a rebuild
-  leaves outstanding anchors valid.
+  retention past `FEED_RETENTION`; an anchor with no feed key is stale once a shard was dropped; an
+  arrival by state leaves outstanding anchors valid.
 - Oversized pages or anchors are refused; sentinels are not names; non-UTF-8 anchor bytes are no
   anchor.
 
@@ -754,7 +773,7 @@ checked.
   a removal preserves dirty data.
 - Make Available Offline on a file makes it readable with the store unreachable; Make Online Only
   leaves it dataless on disk and absent from the cache.
-- After the owner and the app are stopped for longer than the journal horizon and restarted, the
+- After the owner and the app are stopped for longer than `LOG_RETENTION` and restarted, the
   replica converges through a change enumeration, without a scan.
 - The replica passes the system's consistency check after the platform-neutral end-to-end scenario.
 
@@ -766,19 +785,19 @@ checked.
   frontier in the page, which overflowed 500 bytes at about 26 folders and ended enumeration silently;
   re-walking per page cost a minute a page at 220k items; a name cursor looped on a folder id at two
   paths.
-- **Anchors survive downtime and rebuilds.** At 220k items the scan after an expiry never finished and
+- **Anchors survive downtime and arrivals by state.** At 220k items the scan after an expiry never finished and
   the replica held 40k items for weeks.
-- **Two enumerators.** A single one reported the whole journal into every folder's changes.
+- **Two enumerators.** A single one reported the whole change feed into every folder's changes.
 - **Report every change.** A materialised-set filter left folders on disk forever.
-- **Stable file ids.** Name-derived file identifiers made every file rename a merge and every remote
-  rename a re-download; they also needed a read-only rule for lossy names and source-retiring logic in
+- **Stable file ids.** Name-derived file identifiers made every local file rename a merge; they also
+  needed a read-only rule for lossy names and source-retiring logic in
   change batches.
 - **Only `unreachable` and an absent owner latch, and both are unlatched by the relay.** Latching on
   other codes took domains offline for weeks after a one-second owner restart, when nothing
   signalled them resolved.
 - **The owner writes fetched files into the system's temporary directory.** The extension cannot move
   files there.
-- **Content identity survives the upload.** A version that moved on publish re-fetched every saved
+- **Content identity survives the upload.** A version that moved on commit re-fetched every saved
   file.
 - **The fetch reply carries the item.** A separate stat could describe a newer version than the bytes
   written.

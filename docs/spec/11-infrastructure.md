@@ -151,7 +151,8 @@ for one on a store without a share function is refused before anything is applie
   began, bucket-wide.
 - **Archival** is off by default and per tsync domain: an **archived domain** has the objects under
   `tsync/<domain>/chunks/` moved to a colder storage class `after_days` after creation. Nothing else
-  is ever transitioned: manifests, versions, the journal and the cursor are read on every sync.
+  is ever transitioned: the log (`log/`), the takeovers (`log-takeover/`), `tree-head` and `cursor`
+  are read on every cycle, and manifests and versions whenever the tree is.
   - The domain is named because it sits in the middle of the key and a rule takes one literal
     prefix. A domain not named is not archived.
   - The key MUST NOT be empty, hold `/`, or be `shares`, `corrupted`, `verify-jobs` or `gc-jobs`.
@@ -160,7 +161,10 @@ for one on a store without a share function is refused before anything is applie
   - The class MUST be one that reads online, with no restore step: a chunk is read by `get_range`
     whenever a file is opened.
 - **Nothing under `tsync/` is expired by a rule.** A request under `tsync/gc-jobs/` is a delete
-  promised and not yet made; a share carries its own expiration.
+  promised and not yet made; a share carries its own expiration; a log entry is deleted only by
+  tsync's `expire`, which never deletes the head entry nor an entry above the tree head
+  ([publication.md §4.9](algorithms/publication.md#49-log-retention)), neither of which a rule by
+  age can tell.
 - **Operator rules**, where the provider file offers them, are carried beside the store's own. A
   rule that can match a key under `tsync/` MUST NOT expire anything, and MUST transition only to a
   class that reads online; one that does is refused before anything is applied.

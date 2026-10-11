@@ -154,4 +154,4 @@ Beyond [06 §10](../06-backends.md#10-conformance) and [object-store-common §8]
 - The bulk-delete body for `["a/x","a/y"]` is exactly as §3.3, with the five XML metacharacters escaped. `<DeleteResult/>` has no refusals, `NoSuchKey` is absent, and `AccessDenied` is REFUSED.
 - A token endpoint answering `invalid_grant` makes the storage attempt REFUSED after one attempt, without tripping the member's health. A storage 401 re-mints once and retries once.
 - A range starting at or past the end answers an empty body.
-- Against a real bucket: 300-key batch reads are answered whole and in order; a chunk-sized holder is returned to a losing claim; a `delete_multi` spanning the page boundary clears every live key; with the function deployed, a discarded chunk is deleted within the probe wait.
+- Against a real bucket: 300-key batch reads are answered whole and in order; a chunk-sized holder is returned to a `put_if_absent` that lost; a `delete_multi` spanning the page boundary clears every live key; with the function deployed, a discarded chunk is deleted within the probe wait.

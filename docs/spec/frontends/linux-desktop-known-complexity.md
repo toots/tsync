@@ -364,7 +364,7 @@ Answered by: [linux-tray.md §5.1](linux-tray.md#51-the-bus-is-always-served) an
 
 - **Situation** — The switch acts on every owner. An owner may be unreachable or refuse.
 - **What went wrong** — The switch first held uploads only: a rename or a delete was still
-  published, and a peer's change still applied, while the user had asked for quiet. The row was
+  pushed, and a peer's change still merged, while the user had asked for quiet. The row was
   renamed with the fix.
 - **Why it is hard** — A checkmark set from the click shows the request, not the result. The rule
   from the start is to change nothing locally and read the state back on the next poll.
