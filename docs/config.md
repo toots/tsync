@@ -24,7 +24,7 @@ One JSON object. `tsync build-info` prints its location. Keys that are not liste
 | `name` | yes | | The domain's name, and its folder's. Unique, ignoring case. No `/`. |
 | `backends` | yes | | See below, and [backend types](#backend-types) |
 | `frontends` | yes | | At least one. See [frontend options](#frontend-options). |
-| `symlinks` | yes | | `"keep"`, `"follow"` or `"skip"`. See [symlinks](#symlinks). |
+| `symlinks` | no | `"keep"` | `"keep"`, `"follow"` or `"skip"`. See [symlinks](#symlinks). An [advanced setting](tuning.md#advanced-settings). |
 | `versioning` | yes | | Keep previous versions |
 | `readOnly` | no | `false` | Refuse local writes. Forced on when no backend is a `main`. |
 | `chunkSize` | no | the main's, else 8 MiB | 256 KiB to 256 MiB |

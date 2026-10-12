@@ -59,7 +59,8 @@ let typed (kind : Field_spec.kind) s : (json, string) result =
    applies itself stays out of the file; [write_default] writes the wizard's
    own (§5.9) and those the parser requires. *)
 let rec field io j ?(secret = false) ?(required = false)
-    ?(check = fun _ -> None) ?(write_default = false) ?default name label kind =
+    ?(check = fun _ -> None) ?(write_default = false) ?(reset = false) ?default
+    name label kind =
   let current = Option.bind (get j name) show in
   let shown = if secret && current <> None then Some "(kept)" else current in
   let answer =
@@ -80,10 +81,11 @@ let rec field io j ?(secret = false) ?(required = false)
     else Some answer
   in
   match value with
+    | Some "-" when reset -> unset j name
     | None when required && current = None ->
         io.say (label ^ " is required");
-        field io j ~secret ~required ~check ~write_default ?default name label
-          kind
+        field io j ~secret ~required ~check ~write_default ~reset ?default name
+          label kind
     | None -> j
     | Some v -> (
         match
@@ -96,8 +98,15 @@ let rec field io j ?(secret = false) ?(required = false)
           | Ok None -> j
           | Error e ->
               io.say (label ^ ": " ^ e);
-              field io j ~secret ~required ~check ~write_default ?default name
-                label kind)
+              field io j ~secret ~required ~check ~write_default ~reset ?default
+                name label kind)
+
+(* 05 §2.1, 07 §5.9: an advanced key is asked about in the advanced mode
+   only, where "-" removes it: the value is the main's or the default again. *)
+let advanced_field io ~advanced j ?check name label kind =
+  if advanced then
+    field io j ?check ~reset:true name (label ^ " (-: unset)") kind
+  else j
 
 let spec_fields io j (specs : Field_spec.field list) =
   List.fold_left
@@ -203,7 +212,7 @@ let filled_from_deployment io ~btype =
                   (choose io ~label:"store" ~default:(List.hd names) names)
                   stores))
 
-let backend io ~has_main b =
+let backend io ~advanced ~has_main b =
   let types = Tsync_store.Driver.names () in
   let btype =
     choose io ~label:"type"
@@ -222,7 +231,9 @@ let backend io ~has_main b =
         else Some "one of main, replica, backfill, readOnly")
       String
   in
-  let b = if cloud then field io b "link" "link (blank: none)" String else b in
+  let b =
+    if cloud then advanced_field io ~advanced b "link" "link" String else b
+  in
   match Tsync_store.Driver.find btype with
     | None -> b
     | Some d ->
@@ -361,28 +372,40 @@ let frontends io ~system current =
   in
   kept @ asked
 
-let domain io ~system d =
+let domain io ~advanced ~system d =
   let d = field io d ~required:true "name" "domain name" String in
   let d =
     field io d "versioning" "versioning" ~default:"true" ~write_default:true
       Bool
   in
-  let d =
-    field io d "symlinks" "symlinks (keep, follow, skip)" ~default:"keep"
-      ~write_default:true
-      ~check:(fun s ->
-        if List.mem s ["keep"; "follow"; "skip"] then None
-        else Some "keep, follow or skip")
-      String
-  in
   let d = field io d "readOnly" "read-only" ~default:"false" Bool in
-  let d = field io d "chunkSize" "chunk size (blank: the store's)" Size in
-  let d =
-    field io d "cacheChunkSize" "cache chunk size (blank: default)" Size
-  in
   let d =
     field io d "maxCache" "cache limit" ~default:"1 GiB" ~write_default:true
       Size
+  in
+  let d =
+    List.fold_left
+      (fun d (name, label, kind, check) ->
+        advanced_field io ~advanced d ?check name label kind)
+      d
+      Field_spec.
+        [
+          ( "symlinks",
+            "symlinks (keep, follow, skip)",
+            String,
+            Some
+              (fun s ->
+                if List.mem s ["keep"; "follow"; "skip"; "-"] then None
+                else Some "keep, follow or skip") );
+          ("chunkSize", "chunk size", Size, None);
+          ("cacheChunkSize", "cache chunk size", Size, None);
+          ("maxEntryCommands", "changes in one log entry", Int, None);
+          ("batchDelay", "seconds before a push", Float, None);
+          ("projectWidth", "projection writes at once", Int, None);
+          ("projectLease", "projection lease, seconds", Float, None);
+          ("projectQuarantine", "projection quarantine, seconds", Float, None);
+          ("projectSettle", "projection settle, seconds", Float, None);
+        ]
   in
   let backends =
     edit_list io ~noun:"backends"
@@ -401,7 +424,7 @@ let domain io ~system d =
               && Option.bind (get o "role") show <> Some "readOnly")
             others
         in
-        backend io ~has_main b)
+        backend io ~advanced ~has_main b)
       (list_of d "backends")
   in
   let d = set d "backends" (`List backends) in
@@ -417,7 +440,7 @@ let links_used j =
     (list_of j "domains")
   |> List.sort_uniq compare
 
-let globals io j =
+let globals io ~advanced j =
   let j =
     field io j "name" "client name" ~default:(Config.hostname ()) String
   in
@@ -425,12 +448,29 @@ let globals io j =
   let uploads =
     Option.value ~default:"4" (Option.bind (get j "maxUploads") show)
   in
-  let j = field io j "maxChunkBuffers" "chunk buffers" ~default:uploads Int in
+  let j =
+    advanced_field io ~advanced j "maxChunkBuffers"
+      (Printf.sprintf "chunk buffers (default: %s)" uploads)
+      Int
+  in
   let j = field io j "maxDownloads" "downloads at once" ~default:"8" Int in
   let uplink = Option.value ~default:(`Assoc []) (get j "uplink") in
   let uplink =
     field io uplink "enabled" "govern uploads to the network's capacity"
       ~default:"true" Bool
+  in
+  let uplink =
+    List.fold_left
+      (fun u (name, label, kind) ->
+        advanced_field io ~advanced u name label kind)
+      uplink
+      Field_spec.
+        [
+          ("headroom", "uplink: share of the measured capacity to use", Float);
+          ("targetDelayMs", "uplink: queueing delay to hold, ms", Float);
+          ("minRate", "uplink: least bytes per second", Size);
+          ("maxRate", "uplink: most bytes per second", Size);
+        ]
   in
   let j =
     if fields uplink = [] then unset j "uplink" else set j "uplink" uplink
@@ -441,8 +481,8 @@ let globals io j =
       (fun links l ->
         let s = Option.value ~default:(`Assoc []) (get links l) in
         let s =
-          field io s "maxRate"
-            (Printf.sprintf "%s: most bytes per second (blank: no ceiling)" l)
+          advanced_field io ~advanced s "maxRate"
+            (Printf.sprintf "%s: most bytes per second" l)
             Int
         in
         if fields s = [] then links else set links l s)
@@ -460,8 +500,9 @@ let describe_domain d =
     (Option.value ~default:"?" (Option.bind (get d "name") show))
     (List.length (list_of d "backends"))
 
-let edit ?(system = if Fs.is_macos then `Macos else `Linux) io start =
-  let domain = domain io ~system in
+let edit ?(advanced = false) ?(system = if Fs.is_macos then `Macos else `Linux)
+    io start =
+  let domain = domain io ~advanced ~system and globals = globals ~advanced in
   let j =
     match start with
       | Some (`Assoc _ as j) -> j

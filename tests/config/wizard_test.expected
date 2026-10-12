@@ -2,16 +2,12 @@
   A new config: first the settings for this machine, then a domain.
 ? client name [<host>] -> laptop
 ? uploads at once [4] -> 
-? chunk buffers [4] -> 
 ? downloads at once [8] -> 
 ? govern uploads to the network's capacity [true] -> 
 ? TLS implementation (openssl, native) [openssl] -> 
 ? domain name -> docs
 ? versioning [true] -> 
-? symlinks (keep, follow, skip) [keep] -> 
 ? read-only [false] -> 
-? chunk size (blank: the store's) -> 
-? cache chunk size (blank: default) -> 
 ? cache limit [1 GiB] -> 
 ? type (gcs, http-proxy, local, s3) [local] -> local
 ? backend name -> main
@@ -39,7 +35,6 @@ new: would write
     {
       "name": "docs",
       "versioning": true,
-      "symlinks": "keep",
       "maxCache": "1 GiB",
       "backends": [
         {
@@ -67,10 +62,7 @@ new: would write
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
 ? domain name [docs] -> 
 ? versioning [true] -> 
-? symlinks (keep, follow, skip) [keep] -> 
 ? read-only [false] -> 
-? chunk size (blank: the store's) -> 
-? cache chunk size (blank: default) -> 
 ? cache limit [1 GiB] -> 2 GiB
     1. main (local, main)
     2. far (http-proxy, replica)
@@ -138,12 +130,7 @@ edit: would write
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> e 1
 ? domain name [docs] -> 
 ? versioning [true] -> 
-? symlinks (keep, follow, skip) [keep] -> sometimes
-  symlinks (keep, follow, skip): keep, follow or skip
-? symlinks (keep, follow, skip) [keep] -> skip
 ? read-only [false] -> 
-? chunk size (blank: the store's) -> 
-? cache chunk size (blank: default) -> 
 ? cache limit [1 GiB] -> lots
   cache limit: a size such as 8M or 1.5 GiB
 ? cache limit [1 GiB] -> 
@@ -174,7 +161,7 @@ invalid: would write
   "domains": [
     {
       "name": "docs",
-      "symlinks": "skip",
+      "symlinks": "keep",
       "versioning": true,
       "frontends": [ "http-proxy" ],
       "backends": [
@@ -212,10 +199,7 @@ macos: http-proxy
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
 ? domain name [docs] -> 
 ? versioning [true] -> 
-? symlinks (keep, follow, skip) [keep] -> 
 ? read-only [false] -> 
-? chunk size (blank: the store's) -> 
-? cache chunk size (blank: default) -> 
 ? cache limit [1 GiB] -> 
     1. main (local, main)
 ? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
@@ -248,6 +232,44 @@ kept: would write
 s3 files: bucket=b1 region=eu-west-1 accessKeyId=AK shareUrl=https://s secretAccessKey=SK
 gcs media: bucket=b2 serviceAccountKey={}
 not json: 0
+
+== advanced mode: a value set, one kept, two removed
+  Domains:
+    1. docs: 1 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> g
+? client name [box] -> 
+? uploads at once [4] -> 
+? chunk buffers (default: 4) (-: unset) [3] -> -
+? downloads at once [8] -> 
+? govern uploads to the network's capacity [true] -> 
+? uplink: share of the measured capacity to use (-: unset) [0.5] -> 
+? uplink: queueing delay to hold, ms (-: unset) -> 80
+? uplink: least bytes per second (-: unset) [64K] -> -
+? uplink: most bytes per second (-: unset) -> 
+? TLS implementation (openssl, native) [openssl] -> 
+  Domains:
+    1. docs: 1 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
+advanced: would write
+{
+  "name": "box",
+  "uplink": { "headroom": 0.5, "targetDelayMs": 80.0 },
+  "domains": [
+    {
+      "name": "docs",
+      "versioning": true,
+      "frontends": [ "http-proxy" ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/docs"
+        }
+      ]
+    }
+  ]
+}
 
 == not an object
 refused: the config is not a JSON object

@@ -42,6 +42,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 |---|---|
 | `tsync config` | Print the domains as read, secrets masked |
 | `tsync config --edit` | Create or change the config through prompts |
+| `tsync config --edit --advanced` | The same, also asking about the [advanced settings](tuning.md#advanced-settings); answer `-` to remove one |
 | `tsync default-domain [NAME] [--clear]` | See above |
 | `tsync build-info` | What this binary includes, and where it keeps things |
 

@@ -144,6 +144,21 @@ let () =
     ["s3"; "gcs"; "local"];
   p "not json: %d\n"
     (List.length (Config_wizard.stores_of_outputs ~btype:"s3" "nope"));
+  p "\n== advanced mode: a value set, one kept, two removed\n";
+  finish "advanced"
+    (Config_wizard.edit ~advanced:true ~system:`Linux
+       (scripted
+          [
+            ("[w]rite", ["g"; "w"]);
+            ("chunk buffers", ["-"]);
+            ("queueing delay", ["80"]);
+            ("least bytes", ["-"]);
+          ])
+       (Some
+          (Yojson.Safe.from_string
+             {|{"name":"box","maxChunkBuffers":3,"uplink":{"headroom":0.5,"minRate":"64K"},
+                "domains":[{"name":"docs","versioning":true,"frontends":["http-proxy"],
+                  "backends":[{"type":"local","name":"main","role":"main","path":"/srv/docs"}]}]}|})));
   p "\n== not an object\n";
   match Config_wizard.edit (scripted []) (Some (`List [])) with
     | _ -> p "accepted\n"

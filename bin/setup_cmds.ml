@@ -87,7 +87,7 @@ let terminal_io : Config_wizard.io =
   in
   { ask; say = print_endline }
 
-let edit_config () =
+let edit_config ~advanced () =
   run (fun () ->
       let path = Paths.config_file () in
       let current =
@@ -100,7 +100,7 @@ let edit_config () =
                     fail "%s is not valid JSON (%s); fix it by hand first" path
                       e)
       in
-      match Config_wizard.edit terminal_io current with
+      match Config_wizard.edit ~advanced terminal_io current with
         | None ->
             say "nothing written";
             0
@@ -119,9 +119,19 @@ let config_cmd =
   let edit =
     Arg.(value & flag & info ["edit"] ~doc:"Edit the config through prompts.")
   in
+  let advanced =
+    Arg.(
+      value & flag
+      & info ["advanced"]
+          ~doc:
+            "With $(b,--edit), also ask about the advanced settings; the \
+             answer - removes one.")
+  in
   cmd "config" ~doc:"Print the config, secrets masked, or edit it."
     Term.(
-      const (fun edit -> if edit then edit_config () else show_config ()) $ edit)
+      const (fun edit advanced ->
+          if edit then edit_config ~advanced () else show_config ())
+      $ edit $ advanced)
 
 let default_domain name clear =
   run (fun () ->
