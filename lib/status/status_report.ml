@@ -135,6 +135,7 @@ type settings = {
   max_entry_commands : int; [@key "maxEntryCommands"] [@default 256]
   batch_delay : float; [@key "batchDelay"] [@default 10.]
   project_width : int; [@key "projectWidth"] [@default 8]
+  projector : string option; [@default None]
   domain_wide : sources; [@key "domainWide"] [@default []]
 }
 [@@deriving yojson { strict = false }]

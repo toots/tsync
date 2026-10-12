@@ -92,6 +92,7 @@ type settings = {
   max_entry_commands : int;
   batch_delay : float;
   project_width : int;
+  projector : string option;
   domain_wide : sources;
 }
 [@@deriving yojson]
