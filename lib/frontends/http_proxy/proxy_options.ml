@@ -146,7 +146,10 @@ let resolve (config : Config.t) =
             project_commits =
               (match present (List.assoc_opt "projectCommits" opts) with
                 | None -> true
-                | v -> bool v);
+                | Some (Config.B b) -> b
+                | Some _ ->
+                    invalid
+                      "http-proxy for %s: projectCommits must be a boolean" name);
             max_entry_commands =
               (match present (List.assoc_opt "maxEntryCommands" opts) with
                 | Some (Config.I n) when n >= 1 -> Some n

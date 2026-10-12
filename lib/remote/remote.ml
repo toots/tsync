@@ -75,18 +75,36 @@ module Make (C : Context.S) = struct
           resolve_chunk_size ();
           own
 
+  let settings_learned = Atomic.make neg_infinity
+  let refreshing_settings = Atomic.make false
+  let settings_refresh = 60.
+
+  let learn_settings () =
+    let caps = store.capabilities (Key.domain_prefix d) in
+    Atomic.set stated_settings
+      (match caps.domain_settings with
+        | Some s -> `Stated s
+        | None -> `Unstated);
+    Atomic.set settings_learned (Rt.now ())
+
   (* 05 §2.1: the domain-wide settings the main states, learned with its chunk
-     size. [wait] asks the main now when they are unknown. *)
+     size and asked again every [settings_refresh]. [wait] asks the main now
+     when they are unknown. *)
   let stated ?(wait = false) () =
     (match Atomic.get stated_settings with
-      | `Unknown when wait ->
-          let caps = store.capabilities (Key.domain_prefix d) in
-          Atomic.set stated_settings
-            (match caps.domain_settings with
-              | Some s -> `Stated s
-              | None -> `Unstated)
+      | `Unknown when wait -> learn_settings ()
       | `Unknown -> resolve_chunk_size ()
-      | _ -> ());
+      | _ ->
+          if
+            Rt.now () -. Atomic.get settings_learned > settings_refresh
+            && Atomic.compare_and_set refreshing_settings false true
+          then
+            Rt.spawn ~name:"domain settings" (fun () ->
+                Fun.protect
+                  ~finally:(fun () -> Atomic.set refreshing_settings false)
+                  (fun () ->
+                    try learn_settings ()
+                    with e when not (Rt.is_cancelled e) -> ())));
     Atomic.get stated_settings
 
   let marked_m = Mutex.create ()

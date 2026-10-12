@@ -66,13 +66,7 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
           when 0. < lease && lease < quarantine && quarantine < settle ->
             let projector =
               match List.assoc_opt "projector" l with
-                | Some (`String p)
-                  when String.length p = 32
-                       && String.for_all
-                            (function
-                              | '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
-                            p ->
-                    Some p
+                | Some (`String p) when Log_entry.is_client_uuid p -> Some p
                 | _ -> None
             in
             Some

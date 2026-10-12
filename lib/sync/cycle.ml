@@ -973,6 +973,10 @@ module Make (C : Engine_ctx.S) = struct
   (* publication §4.5, "which batch": the pushable commands, without the
      removals an Owed edit still inherits from, as many as an entry holds; and
      no removal of content that a command left out creates elsewhere. *)
+  (* publication §4.5: the entry this client creates of a batch. *)
+  let entry_of batch : Log_entry.t =
+    { author = C.client_uuid; projector = projector (); commands = batch }
+
   let choose_batch () : Log_entry.command list =
     let all = List.filter (fun c -> not (null c)) (pending ()) in
     let created : Log_entry.command -> string option = function
@@ -1008,13 +1012,7 @@ module Make (C : Engine_ctx.S) = struct
     in
     let fits batch =
       List.length batch <= 1
-      || String.length
-           (Log_entry.encode
-              {
-                author = C.client_uuid;
-                projector = projector ();
-                commands = batch;
-              })
+      || String.length (Log_entry.encode (entry_of batch))
          <= Log_entry.max_bytes
     in
     let rec choose candidates limit =
@@ -1072,14 +1070,7 @@ module Make (C : Engine_ctx.S) = struct
                 match choose_batch () with
                   | [] -> None
                   | batch ->
-                      let body =
-                        Log_entry.encode
-                          {
-                            author = C.client_uuid;
-                            projector = projector ();
-                            commands = batch;
-                          }
-                      in
+                      let body = Log_entry.encode (entry_of batch) in
                       Sync_state.set_in_flight sync_state { n = h + 1; body };
                       Some (body, batch))
           in
@@ -1096,7 +1087,7 @@ module Make (C : Engine_ctx.S) = struct
 
   (* publication §4.6: one entry, and whether it was projected. The settle
      and the quarantine are waited out across cycles, never inside one. *)
-  let project () =
+  let project ?(others_only = false) () =
     let apply ~t ~generation (e : Log_store.entry) commands =
       let checked = ref neg_infinity and taken_over = ref false in
       (* The fibers writing one pass share the check: one makes it, the others
@@ -1141,6 +1132,7 @@ module Make (C : Engine_ctx.S) = struct
                 | Some client, _ -> client = C.client_uuid
                 | None, Entry { author; projector; _ } ->
                     Option.value ~default:author projector = C.client_uuid
+                    && not (others_only && author = C.client_uuid)
                 | None, _ -> false
             in
             match (mine, Log_store.commands e) with
@@ -1193,18 +1185,28 @@ module Make (C : Engine_ctx.S) = struct
      and projects. *)
   let step ?narrate ?(full = false) ~push_now () =
     Rt.Fmutex.with_lock cycle_lock (fun () ->
+        if C.lazy_tree then complete_arrival ();
         (* 05 §2.1: nothing is pushed or projected before the main was asked
            for its settings, the projector it states among them. *)
         ignore (R.stated ~wait:true ());
+        (* §4.6: before the arrival, so that a merge that fails or takes long
+           here holds up no client whose entries this owner projects. *)
+        let projected = project () in
         let arrival, changed =
           if C.lazy_tree then (
-            complete_arrival ();
             recover_in_flight ();
             (`Entries 0, 0))
           else arrive ?narrate ~full ()
         in
         let pushed = if push_now then push () else `Nothing in
-        (arrival, changed, pushed, project ()))
+        (arrival, changed, pushed, projected || project ()))
+
+  (* 07 §2.6: a paused owner goes on projecting the entries other clients
+     created through its listener. *)
+  let project_for_clients () =
+    Rt.Fmutex.with_lock cycle_lock (fun () ->
+        ignore (R.stated ~wait:true ());
+        project ~others_only:true ())
 
   (* Cycles until one neither pushes nor projects, for a caller that waits for
      the result. A push refused a few times in a row is left to a later call.
@@ -1242,6 +1244,12 @@ module Make (C : Engine_ctx.S) = struct
     Atomic.set asked true;
     wake_cycle ()
 
+  let nudged = Atomic.make false
+
+  let nudge () =
+    Atomic.set nudged true;
+    wake_cycle ()
+
   (* publication §4, CYCLE. A lazy tree fetches nothing on the cursor or on a
      timer (§4.11): its loop wakes to push. *)
   let cycle_loop () =
@@ -1265,7 +1273,12 @@ module Make (C : Engine_ctx.S) = struct
     let rec loop () =
       Stop.check ();
       if Atomic.get paused then (
-        Stop.sleep 1.;
+        if
+          not
+            (try project_for_clients () with
+              | Stop.Stopping as e -> raise e
+              | _ -> false)
+        then Stop.sleep 1.;
         loop ())
       else (
         let since = Rt.Signal.version cycle_signal in
@@ -1299,7 +1312,7 @@ module Make (C : Engine_ctx.S) = struct
                | None -> false
            in
            let was_asked = Atomic.exchange asked false in
-           let ran = !again in
+           let ran = !again || Atomic.exchange nudged false in
            again := false;
            if
              was_asked || push_due || ran

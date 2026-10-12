@@ -204,6 +204,9 @@ type _ request =
   | Cancel : int -> bool request  (** whether that job was running *)
   | Retry : int request  (** records re-adopted *)
   | Poll : unit request
+  | Wake : unit request
+      (** a cycle now that pushes nothing it would not have: the listener's, for
+          an entry to project (publication §4.6) *)
   | Notify_reset : int request  (** subscribers reached *)
   | Status : status request
   | Pause : bool -> bool request  (** [false] resumes; the reply is the state *)

@@ -53,3 +53,6 @@ val chunk_names : Bigstring.t -> (Chunk_key.t list, string) result
 val max_bytes : int
 
 val max_commands : int
+
+(** 32 lowercase hexadecimal digits. *)
+val is_client_uuid : string -> bool

@@ -29,7 +29,7 @@ type t = {
   claims : bool option Atomic.t;
   checksums : bool option Atomic.t;
       (** the server answers /checksum, and so honours if_match *)
-  caps : (string * Store.caps) list Atomic.t;
+  caps : (string * (float * Store.caps)) list Atomic.t;
   no_get_many : bool Atomic.t;
   no_list_many : bool Atomic.t;
 }
@@ -178,13 +178,17 @@ let positive j k =
           | _ -> None)
     | _ -> None
 
+(* 05 §2.1: a peer's answers are asked again after this long, so that a
+   change of its domain-wide settings reaches a running client. *)
+let caps_age = 60.
+
 (* §8.4: four questions at once, the answer kept per prefix for the instance's
    life; claims are known supported once /verified answers. *)
 let capabilities t prefix =
   let key = Key.prefix_to_string prefix in
   match List.assoc_opt key (Atomic.get t.caps) with
-    | Some c -> c
-    | None ->
+    | Some (at, c) when Rt.now () -. at < caps_age -> c
+    | _ ->
         ensure_served t;
         let answers =
           ladder t "capabilities" (fun () ->
@@ -234,7 +238,11 @@ let capabilities t prefix =
         in
         let rec keep () =
           let l = Atomic.get t.caps in
-          if not (Atomic.compare_and_set t.caps l ((key, c) :: l)) then keep ()
+          if
+            not
+              (Atomic.compare_and_set t.caps l
+                 ((key, (Rt.now (), c)) :: List.remove_assoc key l))
+          then keep ()
         in
         keep ();
         c

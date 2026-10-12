@@ -19,6 +19,7 @@ put without a size           bad: size
 an absolute path             bad: a valid key
 
 == commands and log entries (03 §2.3–2.4)
+an entry naming a projector: 0123456789abcdef0123456789abcdef; one that is no client id: corrupt, expected a projector; a number: corrupt, expected a projector
 {"v":1,"author":"3f9a0c1b2d4e5f60718293a4b5c6d7e8","commands":[{"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":null,"after":"<manifest>"},{"file":["3f9a0c1b2d4e-40a","two.jpg"],"before":"71ca1fc46f3a5f1c-8643e36d2bc5c592","after":null},{"folder":"3f9a0c1b2d4e-40b","before":null,"after":[".tsync-root","Photos"]},{"folder":"3f9a0c1b2d4e-40a","before":[".tsync-root","Photos"],"after":[".tsync-root","Pics"]}]}
 decodes: author kept true, 4 commands, guards read as identities true
 an empty batch: refused: a log entry with no command

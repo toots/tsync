@@ -818,6 +818,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Stats args -> t.stats args
     | Stop -> t.stop ()
     | Poll -> Rt.spawn ~name:"poll" E.poll
+    | Wake -> E.nudge ()
     | Pause on ->
         E.set_paused on;
         E.is_paused ()

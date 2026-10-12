@@ -683,7 +683,8 @@ let execute ?(partial = false) t route op body =
         match s.put_if_absent k body with
           | Won ->
               (* publication §4.6: the serving owner projects the entry. *)
-              if Key.under (Key.log route.domain) k then route.wake ();
+              if Key.under (Key.log route.domain) k then
+                Rt.spawn ~name:"wake the owner" route.wake;
               { Server.status = 200; headers = []; body = Bigstring body }
           | Held b -> { Server.status = 200; headers = []; body = Bigstring b })
     | Put_if_unchanged (k, etag) -> (
@@ -1173,6 +1174,16 @@ let owner_poke (d : Domain_name.t) () =
          ("domain", `String (Domain_name.to_string d));
        ])
 
+(* §4.6: a cycle that projects, asking the owner to push nothing. *)
+let owner_wake (d : Domain_name.t) () =
+  Tsync_ipc.Ipc.advisory
+    (Tsync_config.Paths.owner_socket d)
+    (`Assoc
+       [
+         ("action", `String "wake");
+         ("domain", `String (Domain_name.to_string d));
+       ])
+
 (* §A11: with [frontend], its own entries for the route named by [domain], or
    every route; otherwise, and for [status], the full report over every route. *)
 let control t stop req =
@@ -1254,23 +1265,28 @@ let run config =
                 chunk_size = b.domain.chunk_size;
                 domain_settings =
                   (let stated = Tsync_config.Config.stated b.domain in
-                   if b.project_commits then
-                     {
-                       stated with
-                       entry_commands =
-                         Option.value ~default:projected_entry_commands
-                           b.max_entry_commands;
-                       projector = Some (Tsync_domain.Domain.client_uuid domain);
-                     }
-                   else
-                     {
-                       stated with
-                       entry_commands =
-                         Option.value ~default:stated.entry_commands
-                           b.max_entry_commands;
-                     });
+                   let local_main =
+                     List.exists
+                       (fun (m : Tsync_config.Config.backend) ->
+                         m.role = Composite.Main && m.btype = "local")
+                       b.domain.backends
+                   in
+                   {
+                     stated with
+                     entry_commands =
+                       Option.value
+                         ~default:
+                           (if b.project_commits && local_main then
+                              projected_entry_commands
+                            else stated.entry_commands)
+                         b.max_entry_commands;
+                     projector =
+                       (if b.project_commits then
+                          Some (Tsync_domain.Domain.client_uuid domain)
+                        else None);
+                   });
                 wake =
-                  (if b.project_commits then owner_poke b.domain.name
+                  (if b.project_commits then owner_wake b.domain.name
                    else ignore);
                 store = Tsync_domain.Domain.store domain;
                 share =
