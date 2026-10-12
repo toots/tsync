@@ -162,7 +162,7 @@ CYCLE (the owner, per domain):
     wait until one of:
       the store says the cursor may have changed        (at most SWEEP)
       SWEEP elapsed since the last fetch
-      the pending set has held a pushable command for BATCH_DELAY
+      the pending set has held a pushable command for BATCH_DELAY, or fills an entry
       a request asks for a cycle now (poll, sync, await, drain)
     ARRIVE()                                             # §4.3, §4.4, §4.7
     if a pushable batch is due: PUSH()                   # §4.5
@@ -364,8 +364,10 @@ enacted as a move ([conflict-resolution.md](conflict-resolution.md) §4.1).
   committed: a key changed meanwhile keeps a before-value, now the committed value.
 - **When.** A pushable command is pushed once the pending set has been non-empty for
   `BATCH_DELAY`, and at once when a request asks (a `sync`, a drain at stop, a write that awaits
-  its publication). The delay is the client's choice and nothing depends on its value; being
-  offline is a long delay.
+  its publication). The delay exists to gather the changes of one burst into one entry, so a
+  client MAY push before it has elapsed once its pending set fills an entry
+  (`MAX_ENTRY_COMMANDS`), unless its last push committed nothing. The delay is the client's
+  choice and nothing depends on its value; being offline is a long delay.
 - **Missing chunks with no bytes to send.** A command whose manifest names a chunk the main lacks
   and this client cannot upload again (an inherited chunk of a partial edit, whose base left the
   main and was collected, and which the local cache does not hold) is left out: the client clears the in-flight record, reports
