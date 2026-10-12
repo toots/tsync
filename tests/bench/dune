@@ -21,3 +21,19 @@
  (name tree_gen)
  (modules tree_gen)
  (libraries tsync_core tsync_store tsync_remote unix))
+
+(executable
+ (name rename_push)
+ (modules rename_push)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(executable
+ (name project_latency)
+ (modules project_latency)
+ (libraries tsync_core tsync_store tsync_remote unix))
