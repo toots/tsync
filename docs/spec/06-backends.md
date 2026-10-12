@@ -49,6 +49,10 @@ entry = { key: key; size: bytes; last_modified: wall-clock epoch seconds; etag: 
 ```
 caps = { share_url: string?;       -- base URL of the share endpoint serving this store
          chunk_size: bytes?;       -- the chunk size of new files (01 §3.5)
+         symlinks: keep | follow | skip ?;
+         projection: {lease, quarantine, settle: seconds}?;
+         max_entry_commands: int?;
+                                   -- with chunk_size, the domain-wide settings (05 §2.1)
          max_concurrency: int?;    -- object operations this store usefully serves at once
          verified: bool }          -- every chunk this store takes is checked against its name
 ```
@@ -289,7 +293,7 @@ Rules:
 Configuration of the governor, read once per process before the first store is built:
 
 - A top-level `uplink` object, and a `links` object mapping a link name to overrides. Overrides apply field by field over `uplink`.
-- Fields: `enabled` (bool, default true), `headroom` (in (0, 1], default 0.8), `targetDelayMs` (≥ 5, default 50), `minRate` (a size per second, > 0, default 64 KiB/s), `maxRate` (a size per second, default none).
+- Fields: `enabled` (bool, default true), `headroom` (in (0, 1], default 0.8), `targetDelayMs` (≥ 5, default 50), `minRate` (a size per second, > 0, default 64 KiB/s), `maxRate` (a size per second, default none). `headroom`, `targetDelayMs` and `minRate` are *advanced* ([05 §2.1](05-ops-config.md#21-schema-and-validation)).
 - `maxRate < minRate` MUST be refused. A `links` name that no backend uses MUST be refused.
 - Each backend with a network path has a `link` field naming its link, default `"wan"`. The field MUST be refused on a `local` backend.
 - A per-store ceiling is expressed by giving the store a link of its own and capping that link.

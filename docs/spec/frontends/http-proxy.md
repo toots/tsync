@@ -72,6 +72,7 @@ At start the server builds one route per served domain:
 | `cursor` | the domain's cursor key |
 | `secret`, `read_only` | §A3; `read_only` = the domain's own read-only flag or the `readOnly` option |
 | `chunk_size` | the domain's configured chunk size, if any |
+| `domain_settings` | the domain-wide settings in force for the domain: configured, else the default |
 | `store` | the domain's composite store |
 | `shares` | whether the route serves `/s/` |
 | `peers`, `traffic` | peer sockets; per-domain byte counters |

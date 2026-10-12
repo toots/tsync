@@ -164,9 +164,10 @@ CYCLE (the owner, per domain):
       SWEEP elapsed since the last fetch
       the pending set has held a pushable command for BATCH_DELAY, or its pushable commands fill an entry
       a request asks for a cycle now (poll, sync, await, drain)
+      the last cycle pushed an entry or projected one    (at once)
     ARRIVE()                                             # §4.3, §4.4, §4.7
-    if a pushable batch is due: PUSH()                   # §4.5
-    PROJECT()                                            # §4.6
+    if a pushable batch is due: PUSH()                   # §4.5, one entry
+    PROJECT()                                            # §4.6, one entry
   on failure: log; wait RETRY_FLOOR (stop-aware)
 ```
 
@@ -397,18 +398,17 @@ collector, integrity) read the main's tree from per-object records. Entries are 
 time, in number order, each by exactly one **projector**.
 
 ```
-PROJECT():
-  loop:
-    t := tree_head(); if t ≥ h: return
-    e := log entry t + 1
-    g := the highest takeover generation of entry t + 1 (0 when none)
-    if this client is not the projector of (t + 1, g):
-      if entry t + 1 has stayed unprojected at generation g for PROJECT_SETTLE (as this owner saw it):
-        if put_if_absent(takeover (t + 1, g + 1), this client) = Won:
-          wait PROJECT_QUARANTINE; continue                    # now the projector
-      return
-    apply(e)                                                   # data-model/backend §6
-    write the tree head := t + 1
+PROJECT():                                                     # one entry
+  t := tree_head(); if t ≥ h: return
+  e := log entry t + 1
+  g := the highest takeover generation of entry t + 1 (0 when none)
+  if this client is not the projector of (t + 1, g):
+    if entry t + 1 has stayed unprojected at generation g for PROJECT_SETTLE (as this owner saw it):
+      if put_if_absent(takeover (t + 1, g + 1), this client) = Won:
+        wait PROJECT_QUARANTINE, then apply as below             # now the projector
+    return
+  apply(e)                                                     # data-model/backend §6
+  write the tree head := t + 1
 ```
 
 - **Who.** The projector of an entry at generation 0 is its author. The projector at generation
@@ -436,9 +436,22 @@ PROJECT():
   fails none is issued any more, and those in flight are what the quarantine covers.
 - **The quarantine.** A client that takes over waits `PROJECT_QUARANTINE` before its first write,
   so every write the previous projector issued under its lease has landed or failed.
+- **One timing per domain.** `PROJECT_LEASE`, `PROJECT_QUARANTINE` and `PROJECT_SETTLE` are settings
+  of the domain ([05 §2.1](../05-ops-config.md#21-schema-and-validation), *domain-wide settings*),
+  and every client of a main uses the same three: a quarantine covers the lease the previous
+  projector worked under, and a settle shorter than another client's quarantine lets two clients
+  take an entry over in turn without either writing. A client neither projects nor takes an entry
+  over before it knows the timing its main states, or that the main states none.
 - **Order.** An author whose entry is not the one after the tree head waits for the tree head to
   reach it. Commits do not wait for projections: any number of entries may be unprojected, and the
   settle and the quarantine are waited out beside the cycle, never inside it.
+- **One entry per cycle.** A cycle pushes at most one entry and projects at most one, and the next
+  cycle follows at once while either had work. A client that commits many entries therefore projects
+  each before it commits the next, and the entry after the tree head is never kept waiting by its
+  own author's pushes: left behind a long run of pushes it would pass `PROJECT_SETTLE` and be taken
+  over from an author that is running. It also bounds what a cycle holds up: a pause or a stop takes
+  effect between two entries, other clients' entries are fetched between them, and a change made
+  while a backlog is projected is pushed after one entry, not after the backlog.
 - **Not a source for merges.** Nothing a client reads from the tree enters $R$ except through a
   state read (§4.7), which replays the log over it.
 
@@ -676,17 +689,17 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 
 | Parameter | Recommended | Constraint / effect |
 |---|---|---|
-| `BATCH_DELAY` | 10 s | the client's choice; trades commits for latency; nothing depends on it |
+| `BATCH_DELAY` | 10 s | the client's choice; trades commits for latency; nothing depends on it; the domain's `batchDelay` |
 | `MAX_ENTRY_BYTES` | 8 MiB | a larger batch is split into several entries; the put-body limit of a store on the way to the main is tied to it in [security-model.md](security-model.md) §11 |
-| `MAX_ENTRY_COMMANDS` | 256 | bounds the record writes of one projection (§4.6); a client MAY use less |
+| `MAX_ENTRY_COMMANDS` | 256 | bounds the record writes of one projection (§4.6); a client MAY use less; the domain's `maxEntryCommands` |
 | `SWEEP` | 60 s | worst-case latency when a cursor note is lost; one entry read per client per interval when idle |
 | `CURSOR_INTERVAL` | 2 s | MUST be ≥ the store's per-object write interval |
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |
 | `RETRY_FLOOR` | 2 s | back-off after a failed cycle; the least time between two pushes made before `BATCH_DELAY` |
-| `PROJECT_LEASE` | 30 s | how long a projector writes after one check |
-| `PROJECT_WIDTH` | 8 | the writes of one pass of a projection in flight at once; a client MAY use less |
-| `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
-| `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST exceed `PROJECT_QUARANTINE` by the time the slowest expected client takes to project a largest entry |
+| `PROJECT_LEASE` | 30 s | how long a projector writes after one check; the domain's `projectLease` |
+| `PROJECT_WIDTH` | 8 | the writes of one pass of a projection in flight at once; a client MAY use less; the domain's `projectWidth` |
+| `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land; the domain's `projectQuarantine` |
+| `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST exceed `PROJECT_QUARANTINE` by the time the slowest expected client takes to project a largest entry; the domain's `projectSettle` |
 | `LOG_RETENTION` | 30 days | how far back a returning client fetches entries instead of reading the tree |
 
 ---
