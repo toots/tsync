@@ -10,6 +10,7 @@ type route = {
   read_only : bool;
   chunk_size : int option;
   domain_settings : Store.domain_settings;
+  wake : unit -> unit;
   store : Store.t;
   share : Share_server.t option;  (** [Some] when the route serves share links *)
 }
@@ -680,7 +681,10 @@ let execute ?(partial = false) t route op body =
     | Claim k -> (
         writable route k;
         match s.put_if_absent k body with
-          | Won -> { Server.status = 200; headers = []; body = Bigstring body }
+          | Won ->
+              (* publication §4.6: the serving owner projects the entry. *)
+              if Key.under (Key.log route.domain) k then route.wake ();
+              { Server.status = 200; headers = []; body = Bigstring body }
           | Held b -> { Server.status = 200; headers = []; body = Bigstring b })
     | Put_if_unchanged (k, etag) -> (
         writable route k;
@@ -1157,6 +1161,9 @@ let handle t (r : Server.request) read_body =
             if is_data op then admitted t go else go ())
   with Answer response -> response
 
+(* frontends/http-proxy §A3, [maxEntryCommands] with [projectCommits]. *)
+let projected_entry_commands = 4096
+
 let owner_poke (d : Domain_name.t) () =
   Tsync_ipc.Ipc.advisory
     (Tsync_config.Paths.owner_socket d)
@@ -1245,7 +1252,26 @@ let run config =
                 secret = b.secret;
                 read_only = b.read_only;
                 chunk_size = b.domain.chunk_size;
-                domain_settings = Tsync_config.Config.stated b.domain;
+                domain_settings =
+                  (let stated = Tsync_config.Config.stated b.domain in
+                   if b.project_commits then
+                     {
+                       stated with
+                       entry_commands =
+                         Option.value ~default:projected_entry_commands
+                           b.max_entry_commands;
+                       projector = Some (Tsync_domain.Domain.client_uuid domain);
+                     }
+                   else
+                     {
+                       stated with
+                       entry_commands =
+                         Option.value ~default:stated.entry_commands
+                           b.max_entry_commands;
+                     });
+                wake =
+                  (if b.project_commits then owner_poke b.domain.name
+                   else ignore);
                 store = Tsync_domain.Domain.store domain;
                 share =
                   (if b.shares then

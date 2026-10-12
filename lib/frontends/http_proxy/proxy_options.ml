@@ -18,6 +18,8 @@ type binding = {
   secret : string;
   shares : bool;
   read_only : bool;
+  project_commits : bool;
+  max_entry_commands : int option;
 }
 
 let invalid fmt = Printf.ksprintf (fun m -> raise (Config.Invalid m)) fmt
@@ -141,6 +143,18 @@ let resolve (config : Config.t) =
             shares = bool (present (List.assoc_opt "shares" opts));
             read_only =
               dom.read_only || bool (present (List.assoc_opt "readOnly" opts));
+            project_commits =
+              (match present (List.assoc_opt "projectCommits" opts) with
+                | None -> true
+                | v -> bool v);
+            max_entry_commands =
+              (match present (List.assoc_opt "maxEntryCommands" opts) with
+                | Some (Config.I n) when n >= 1 -> Some n
+                | None -> None
+                | Some _ ->
+                    invalid
+                      "http-proxy for %s: maxEntryCommands must be 1 or more"
+                      name);
           })
         bound
     in

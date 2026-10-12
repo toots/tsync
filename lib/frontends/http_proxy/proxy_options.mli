@@ -23,6 +23,8 @@ type binding = {
   secret : string;
   shares : bool;
   read_only : bool;
+  project_commits : bool;
+  max_entry_commands : int option;
 }
 
 (** [None] when no domain lists the frontend. *)

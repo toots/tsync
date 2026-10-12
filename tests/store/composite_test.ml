@@ -119,6 +119,7 @@ let () =
         (Log_entry.encode
            {
              author = "a";
+             projector = None;
              commands =
                [
                  `Folder

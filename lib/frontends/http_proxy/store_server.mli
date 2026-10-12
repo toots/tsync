@@ -11,6 +11,9 @@ type route = {
   read_only : bool;
   chunk_size : int option;
   domain_settings : Tsync_store.Store.domain_settings;
+  wake : unit -> unit;
+      (** asks the domain's owner on this host for a cycle: it projects the
+          entries created here *)
   store : Tsync_store.Store.t;
   share : Share_server.t option;  (** [Some] when the route serves share links *)
 }

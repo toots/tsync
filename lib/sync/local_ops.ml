@@ -131,6 +131,12 @@ module Make (C : Engine_ctx.S) = struct
         | `Unstated | `Unknown -> None)
 
   let tuning () = fst (settings ())
+
+  (* publication §4.6: the projector the main states for the entries created
+     through it, named in each. *)
+  let projector () =
+    match R.stated () with `Stated s -> s.projector | _ -> None
+
   let symlinks () = snd (settings ())
   let mirror = Mirror.create ~cache_root:C.cache_root d
   let staged = Staged.create ~cache_root:C.cache_root d

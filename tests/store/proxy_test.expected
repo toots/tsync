@@ -54,7 +54,9 @@ unserved domain get_opt: refused/denied
 unserved domain head: refused/denied
 a key of another route: refused/denied
 capabilities: chunk 4096, concurrency 4, verified true
-domain settings stated: chunk 4096, symlinks skip true, timings 20 200 420, entry 64
+domain settings stated: chunk 4096, symlinks skip true, timings 20 200 420, entry 64, projector 0123456789abcdef0123456789abcdef
+the owner woken by a create outside the log: 0
+by a create of a log entry, won then held: 1
 get_many across pages: 2500 answers
 list_many: 1 folders
 copy into a share manifest: refused/denied

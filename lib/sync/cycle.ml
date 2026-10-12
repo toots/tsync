@@ -1009,7 +1009,12 @@ module Make (C : Engine_ctx.S) = struct
     let fits batch =
       List.length batch <= 1
       || String.length
-           (Log_entry.encode { author = C.client_uuid; commands = batch })
+           (Log_entry.encode
+              {
+                author = C.client_uuid;
+                projector = projector ();
+                commands = batch;
+              })
          <= Log_entry.max_bytes
     in
     let rec choose candidates limit =
@@ -1069,7 +1074,11 @@ module Make (C : Engine_ctx.S) = struct
                   | batch ->
                       let body =
                         Log_entry.encode
-                          { author = C.client_uuid; commands = batch }
+                          {
+                            author = C.client_uuid;
+                            projector = projector ();
+                            commands = batch;
+                          }
                       in
                       Sync_state.set_in_flight sync_state { n = h + 1; body };
                       Some (body, batch))
@@ -1119,8 +1128,6 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> None
     in
     let projected = ref false in
-    (* §4.6, one timing per domain: none before the main's is known. *)
-    ignore (R.stated ~wait:true ());
     let one () =
       let t = Log_store.tree_head log in
       Atomic.set tree_head_seen t;
@@ -1132,7 +1139,8 @@ module Make (C : Engine_ctx.S) = struct
             let mine =
               match (holder, e.read) with
                 | Some client, _ -> client = C.client_uuid
-                | None, Entry { author; _ } -> author = C.client_uuid
+                | None, Entry { author; projector; _ } ->
+                    Option.value ~default:author projector = C.client_uuid
                 | None, _ -> false
             in
             match (mine, Log_store.commands e) with
@@ -1185,6 +1193,9 @@ module Make (C : Engine_ctx.S) = struct
      and projects. *)
   let step ?narrate ?(full = false) ~push_now () =
     Rt.Fmutex.with_lock cycle_lock (fun () ->
+        (* 05 §2.1: nothing is pushed or projected before the main was asked
+           for its settings, the projector it states among them. *)
+        ignore (R.stated ~wait:true ());
         let arrival, changed =
           if C.lazy_tree then (
             complete_arrival ();

@@ -37,7 +37,7 @@ let () =
         incr n;
         ignore
           (Log_store.create_entry log !n
-             (Log_entry.encode { author = "gen"; commands }));
+             (Log_entry.encode { author = "gen"; projector = None; commands }));
         P.apply ~before_write:ignore commands;
         Log_store.raise_tree_head log !n
       in

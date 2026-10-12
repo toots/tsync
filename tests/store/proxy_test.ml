@@ -17,6 +17,7 @@ let () =
   Fs.rm_rf root;
   Rt.run_sync (fun () ->
       let local name = Local.create ~name (Filename.concat root name) in
+      let woken = Atomic.make 0 in
       let route ?(read_only = false) ?(secret = secret) name domain store =
         {
           P.name;
@@ -32,9 +33,11 @@ let () =
               quarantine = 200.;
               settle = 420.;
               entry_commands = 64;
+              projector = Some "0123456789abcdef0123456789abcdef";
             };
           store;
           share = None;
+          wake = (fun () -> Atomic.incr woken);
         }
       in
       (* A backend that answers "later" until told otherwise. *)
@@ -112,7 +115,31 @@ let () =
                 "chunk %d, symlinks skip %b, timings %g %g %g, entry %d" s.chunk
                 (s.symlinks = `Skip) s.lease s.quarantine s.settle
                 s.entry_commands
+              ^ Option.fold ~none:", no projector"
+                  ~some:(fun p -> ", projector " ^ p)
+                  s.projector
           | None -> "none");
+      let body = Bigstring.of_string in
+      ignore (s.put_if_absent (Key.takeover d 1 ~generation:1) (body "x"));
+      p "the owner woken by a create outside the log: %d\n" (Atomic.get woken);
+      let entry author =
+        body
+          (Log_entry.encode
+             {
+               author;
+               projector = None;
+               commands =
+                 [
+                   `Folder
+                     ( Folder_id.mint ~uuid:"aaaaaaaaaaaaaaaa" ~counter:1,
+                       None,
+                       Some { Algebra.parent = Folder_id.root; name = "f" } );
+                 ];
+             })
+      in
+      ignore (s.put_if_absent (Key.log_entry d 1) (entry "a"));
+      ignore (s.put_if_absent (Key.log_entry d 1) (entry "b"));
+      p "by a create of a log entry, won then held: %d\n" (Atomic.get woken);
       p "get_many across pages: %d answers\n"
         (List.length
            (Option.get s.get_many

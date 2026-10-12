@@ -35,7 +35,7 @@ val manifest_to_json : leaf:string -> value option -> Yojson.Safe.t
 
 val manifest_of_json : Yojson.Safe.t -> (value option, string) result
 
-type t = { author : string; commands : command list }
+type t = { author : string; projector : string option; commands : command list }
 
 (** The body of an entry, checked to decode back to the same batch; INVALID for
     an empty batch, two commands on one key, or a file whose value after is not

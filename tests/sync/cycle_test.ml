@@ -60,12 +60,23 @@ let faulty link (s : Store.t) : Store.t =
 
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
-let client ?(link = link ()) ?replica ?(tuning = Tuning.default) root name :
-    (module Engine.S) =
+let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated root
+    name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
-      ({ Composite.name = "main"; role = Main; store = faulty link (main root) }
+      ({
+         Composite.name = "main";
+         role = Main;
+         store =
+           (let s = faulty link (main root) in
+            (* What an http-proxy main would state (05 §2.1). *)
+            {
+              s with
+              capabilities =
+                (fun p -> { (s.capabilities p) with domain_settings = stated });
+            });
+       }
       :: List.map
            (fun store -> { Composite.name = "replica"; role = Replica; store })
            (Option.to_list replica))
@@ -92,8 +103,8 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) root name :
   end in
   (module Engine.Make (C))
 
-let started ?link ?replica ?tuning root name =
-  let c = client ?link ?replica ?tuning root name in
+let started ?link ?replica ?tuning ?stated root name =
+  let c = client ?link ?replica ?tuning ?stated root name in
   let (module E) = c in
   E.start ~background:false ();
   c
@@ -164,6 +175,39 @@ let scenario name f =
 let () =
   Fs.rm_rf base;
   Rt.run_sync (fun () ->
+      scenario "a main that states a projector" (fun root ->
+          let server = started root "S" in
+          ignore (sync server);
+          let projector =
+            Tsync_checkout.Identity.client_uuid (Filename.concat root "S/data")
+          in
+          let a =
+            started
+              ~stated:
+                {
+                  chunk = 4;
+                  symlinks = `Keep;
+                  lease = 30.;
+                  quarantine = 300.;
+                  settle = 600.;
+                  entry_commands = 256;
+                  projector = Some projector;
+                }
+              root "A"
+          in
+          ignore (sync a);
+          write a "f" "abcd";
+          uploaded a;
+          p "  A: %s\n" (sync a);
+          p "  the entry names the server as its projector: %b\n"
+            (match Log_store.read_entry (log root) 1 with
+              | Some { read = Entry e; _ } -> e.projector = Some projector
+              | _ -> false);
+          p "  A has not projected it: entries %d, the tree head %d\n"
+            (entries root)
+            (Log_store.tree_head (log root));
+          p "  S: %s\n" (sync server);
+          p "  S has: the tree head %d\n" (Log_store.tree_head (log root)));
       scenario "a run of pushes projects each entry before the next"
         (fun root ->
           let link = link () in
@@ -480,6 +524,7 @@ let () =
                (Log_entry.encode
                   {
                     author = "a client that stopped";
+                    projector = None;
                     commands =
                       [
                         `File
