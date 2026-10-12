@@ -162,7 +162,7 @@ CYCLE (the owner, per domain):
     wait until one of:
       the store says the cursor may have changed        (at most SWEEP)
       SWEEP elapsed since the last fetch
-      the pending set has held a pushable command for BATCH_DELAY, or fills an entry
+      the pending set has held a pushable command for BATCH_DELAY, or its pushable commands fill an entry
       a request asks for a cycle now (poll, sync, await, drain)
     ARRIVE()                                             # §4.3, §4.4, §4.7
     if a pushable batch is due: PUSH()                   # §4.5
@@ -362,12 +362,14 @@ enacted as a move ([conflict-resolution.md](conflict-resolution.md) §4.1).
   before-value, which is what it must have.
 - **Local operations during a push** are allowed. The `Won` step compares each key with what was
   committed: a key changed meanwhile keeps a before-value, now the committed value.
-- **When.** A pushable command is pushed once the pending set has been non-empty for
-  `BATCH_DELAY`, and at once when a request asks (a `sync`, a drain at stop, a write that awaits
-  its publication). The delay exists to gather the changes of one burst into one entry, so a
-  client MAY push before it has elapsed once its pending set fills an entry
-  (`MAX_ENTRY_COMMANDS`), unless its last push committed nothing. The delay is the client's
-  choice and nothing depends on its value; being offline is a long delay.
+- **When.** A pushable command is pushed once the pending set has been non-empty for `BATCH_DELAY`,
+  and at once when a request asks (a `sync`, a drain at stop, a write that awaits its publication).
+  The delay exists to gather the changes of one burst into one entry, so a client MAY push before it
+  has elapsed once its pushable commands fill an entry (`MAX_ENTRY_COMMANDS`), and no sooner than
+  `RETRY_FLOOR` after its last push or after the pending set stopped being empty. Commands still
+  waiting for their upload do not count: a burst of new files is not committed a few commands at a
+  time as its uploads end. The delay is the client's choice and nothing depends on its value; being
+  offline is a long delay.
 - **Missing chunks with no bytes to send.** A command whose manifest names a chunk the main lacks
   and this client cannot upload again (an inherited chunk of a partial edit, whose base left the
   main and was collected, and which the local cache does not hold) is left out: the client clears the in-flight record, reports
@@ -680,7 +682,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 | `SWEEP` | 60 s | worst-case latency when a cursor note is lost; one entry read per client per interval when idle |
 | `CURSOR_INTERVAL` | 2 s | MUST be ≥ the store's per-object write interval |
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |
-| `RETRY_FLOOR` | 2 s | back-off after a failed cycle |
+| `RETRY_FLOOR` | 2 s | back-off after a failed cycle; the least time between two pushes made before `BATCH_DELAY` |
 | `PROJECT_LEASE` | 30 s | how long a projector writes after one check |
 | `PROJECT_WIDTH` | 8 | the writes of one pass of a projection in flight at once; a client MAY use less |
 | `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
