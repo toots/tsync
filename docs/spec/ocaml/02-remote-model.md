@@ -74,8 +74,8 @@ is mapped in [data-model/backend.md](data-model/backend.md); body handling in [m
   markers; the result is swapped in under the mutex. Duplicate listings, never a torn table.
 - **Version timestamps** come from `next_version_ts`: one mutex, the last stamp per group, pruned
   past 1024 groups to stamps not yet in the past. It orders snapshots of one process only.
-- **`save_version` is bounded by `Rt.with_timeout ~detach:true`** and re-raises `Stop.Stopping` and
-  `Rt.Cancelled`; every other failure is logged and the write proceeds.
+- **`save_version` raises as its put does.** `Projection.save_replaced` is where a main lacking the
+  manifest's chunks is logged and passed (data-model/backend §2.9).
 - **`fold_tree` bounds its look-ahead by position** (C-1.2): an explicit stack, each folder carrying
   a promise cell, and only the next `width` folders in visit order fetched with `Rt.async`. The
   visit order does not depend on which fetch finishes first. Under `Skip`, a folder failing with a
