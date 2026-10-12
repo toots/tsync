@@ -724,6 +724,8 @@ let make_store t ~source_only =
               Option.bind from_main (fun (_, c) -> c.Store.share_url);
             chunk_size =
               Option.bind from_main (fun (_, c) -> c.Store.chunk_size);
+            domain_settings =
+              Option.bind from_main (fun (_, c) -> c.Store.domain_settings);
             max_concurrency =
               List.fold_left
                 (fun acc (_, c) ->

@@ -21,6 +21,13 @@ module Make (_ : Context.S) : sig
       binding; INVALID for a domain configured with another. *)
   val chunk_size : unit -> int
 
+  (** The domain-wide settings the main states (05 §2.1), learned in the
+      background; [wait] asks the main now while they are unknown. *)
+  val stated :
+    ?wait:bool ->
+    unit ->
+    [ `Unknown | `Unstated | `Stated of Store.domain_settings ]
+
   (** A chunk marked corrupt on a verifying member (memo refreshed every 5 s).
   *)
   val is_marked : Chunk_key.t -> bool

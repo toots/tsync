@@ -24,6 +24,15 @@ let () =
           secret;
           read_only;
           chunk_size = Some 4096;
+          domain_settings =
+            {
+              chunk = 4096;
+              symlinks = `Skip;
+              lease = 20.;
+              quarantine = 200.;
+              settle = 420.;
+              entry_commands = 64;
+            };
           store;
           share = None;
         }
@@ -96,6 +105,14 @@ let () =
         (Option.fold ~none:"none" ~some:string_of_int caps.chunk_size)
         (Option.fold ~none:"none" ~some:string_of_int caps.max_concurrency)
         caps.verified;
+      p "domain settings stated: %s\n"
+        (match caps.domain_settings with
+          | Some s ->
+              Printf.sprintf
+                "chunk %d, symlinks skip %b, timings %g %g %g, entry %d" s.chunk
+                (s.symlinks = `Skip) s.lease s.quarantine s.settle
+                s.entry_commands
+          | None -> "none");
       p "get_many across pages: %d answers\n"
         (List.length
            (Option.get s.get_many

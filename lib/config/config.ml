@@ -527,6 +527,61 @@ let parse_domain path j =
       t.project_lease t.project_quarantine t.project_settle;
   d
 
+(* 05 §2.1, domain-wide settings: what a main serving this domain states. *)
+let stated (d : domain) : Tsync_store.Store.domain_settings =
+  let t = tuning d in
+  {
+    chunk = Option.value ~default:Chunking.default_chunk_size d.chunk_size;
+    symlinks = Option.value ~default:default_symlinks d.symlinks;
+    lease = t.project_lease;
+    quarantine = t.project_quarantine;
+    settle = t.project_settle;
+    entry_commands = t.max_entry_commands;
+  }
+
+(* 05 §2.1, domain-wide settings: the main's where it states them, and a
+   configured value that differs from the main's refused. The chunk size is
+   the remote layer's (01 §3.5). *)
+let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
+  let own = tuning d in
+  match main with
+    | None -> (own, Option.value ~default:default_symlinks d.symlinks)
+    | Some m ->
+        let differs what configured stated show =
+          match configured with
+            | Some c when c <> stated ->
+                Fail.invalid
+                  "%s is configured with %s %s and its main states %s"
+                  (Domain_name.to_string d.name)
+                  what (show c) (show stated)
+            | _ -> ()
+        in
+        let seconds = Printf.sprintf "%g s" in
+        differs "symlinks" d.symlinks m.symlinks (fun p ->
+            fst (List.find (fun (_, q) -> q = p) Tsync_store.Store.policies));
+        differs "projectLease" d.project_lease m.lease seconds;
+        differs "projectQuarantine" d.project_quarantine m.quarantine seconds;
+        differs "projectSettle" d.project_settle m.settle seconds;
+        let max_entry_commands =
+          match d.max_entry_commands with
+            | Some c when c > m.entry_commands ->
+                Fail.invalid
+                  "%s is configured with maxEntryCommands %d, above the %d its \
+                   main states"
+                  (Domain_name.to_string d.name)
+                  c m.entry_commands
+            | Some c -> c
+            | None -> m.entry_commands
+        in
+        ( {
+            own with
+            max_entry_commands;
+            project_lease = m.lease;
+            project_quarantine = m.quarantine;
+            project_settle = m.settle;
+          },
+          m.symlinks )
+
 let hostname () = try Unix.gethostname () with _ -> "tsync"
 
 let of_json j =
