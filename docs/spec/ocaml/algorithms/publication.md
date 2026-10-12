@@ -27,8 +27,8 @@ Not normative.
 | Log retention (§4.9) | `Gc_plan.log`, `takeovers`; `Retention.expire` |
 | The lazy tree (§4.11) | `Cycle.pull_folder`, `push_position`, `views_of`, `commit_position`; positions beside the pull marker (`folder_position`) |
 | Bulk publishers (§4.12) | `Bulk` (`install`, `folder`, `await`), `Import`, `Rsync` |
-| The cycle (§4) | `Cycle.run_cycle`, `cycle_loop`; `Engine.resync`, `drain`, `poll` |
-| Parameters (§7) | constants at the top of `cycle.ml`; `Log_entry.max_bytes`, `max_commands`; `Projection.project_width`; `Log_store.retention`, `cursor_interval` |
+| The cycle (§4) | `Cycle.step` (one cycle: arrive, push one entry, project one), `cycle_loop` (a step, and the next at once while one pushed or projected), `run_cycle` (steps until one does neither, for a caller that waits); `Engine.resync`, `drain`, `poll` |
+| Parameters (§7) | `Tuning.default` for the six a domain may set, read through `Engine_ctx.S.tuning`; `sweep` and `retry_floor` at the top of `cycle.ml`; `Log_entry.max_bytes`; `Log_store.retention`, `cursor_interval` |
 
 `Engine.Make (C)` is one functor chain, each layer including the one below: `Local_ops`, `Uploads`,
 `Cycle`, `Bulk`, `Import`, `Rsync`, then `Engine` (the change feed, start and drain, status).

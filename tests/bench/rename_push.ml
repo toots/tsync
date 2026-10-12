@@ -40,6 +40,7 @@ let client root : (module Engine.S) =
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
+    let tuning () = Tuning.default
   end in
   (module Engine.Make (C))
 

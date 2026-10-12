@@ -2,12 +2,8 @@ open Tsync_core
 open Tsync_remote
 open Tsync_checkout
 
-let batch_delay = 10.
 let sweep = 60.
 let retry_floor = 2.
-let project_lease = 30.
-let project_quarantine = 300.
-let project_settle = 600.
 let feed_line_ops = 64
 
 module Keys = Map.Make (struct
@@ -1042,7 +1038,7 @@ module Make (C : Engine_ctx.S) = struct
     choose
       (removals_last
          (List.filter (fun c -> pushable c && not (held_back c)) all))
-      (Some Log_entry.max_commands)
+      (Some (C.tuning ()).max_entry_commands)
 
   (* The position a push is made from. On a lazy tree every folder that holds
      a pending key, and every ancestor, is pulled first, and all must stand at
@@ -1089,8 +1085,8 @@ module Make (C : Engine_ctx.S) = struct
   let watching : watch option ref = ref None
   let took : watch option ref = ref None
 
-  (* publication §4.6. The settle and the quarantine are waited out across
-     cycles, never inside one. *)
+  (* publication §4.6: one entry, and whether it was projected. The settle
+     and the quarantine are waited out across cycles, never inside one. *)
   let project () =
     let apply ~t ~generation (e : Log_store.entry) commands =
       let checked = ref neg_infinity and taken_over = ref false in
@@ -1101,7 +1097,7 @@ module Make (C : Engine_ctx.S) = struct
         Rt.Fmutex.with_lock checking (fun () ->
             if
               (not !taken_over)
-              && Rt.boottime () -. !checked >= project_lease /. 2.
+              && Rt.boottime () -. !checked >= (C.tuning ()).project_lease /. 2.
             then (
               let now = Rt.boottime () in
               taken_over :=
@@ -1112,7 +1108,7 @@ module Make (C : Engine_ctx.S) = struct
               Fail.raise_ Fail.Link "the projection of entry %d was taken over"
                 e.n)
       in
-      P.apply ~before_write commands;
+      P.apply ~width:(C.tuning ()).project_width ~before_write commands;
       before_write ();
       Log_store.raise_tree_head log e.n;
       Atomic.set tree_head_seen e.n
@@ -1122,7 +1118,8 @@ module Make (C : Engine_ctx.S) = struct
         | Some w when w.entry = e.n && w.generation = generation -> Some w.since
         | _ -> None
     in
-    let rec loop () =
+    let projected = ref false in
+    let one () =
       let t = Log_store.tree_head log in
       Atomic.set tree_head_seen t;
       match Log_store.read_entry log (t + 1) with
@@ -1139,12 +1136,13 @@ module Make (C : Engine_ctx.S) = struct
             match (mine, Log_store.commands e) with
               | true, Some commands when generation = 0 ->
                   apply ~t ~generation e commands;
-                  loop ()
+                  projected := true
               | true, Some commands -> (
                   match held !took e generation with
-                    | Some since when now -. since >= project_quarantine ->
+                    | Some since
+                      when now -. since >= (C.tuning ()).project_quarantine ->
                         apply ~t ~generation e commands;
-                        loop ()
+                        projected := true
                     | Some _ -> ()
                     | None ->
                         took := Some { entry = e.n; generation; since = now })
@@ -1153,7 +1151,7 @@ module Make (C : Engine_ctx.S) = struct
                   match held !watching e generation with
                     | Some since ->
                         if
-                          now -. since >= project_settle
+                          now -. since >= (C.tuning ()).project_settle
                           && Log_store.takeover_create log e.n
                                ~generation:(generation + 1)
                                ~client:C.client_uuid
@@ -1170,7 +1168,8 @@ module Make (C : Engine_ctx.S) = struct
                         watching :=
                           Some { entry = e.n; generation; since = now }))
     in
-    loop ()
+    one ();
+    !projected
 
   type cycled = {
     arrival : [ `Entries of int | `State of int * int ];
@@ -1178,38 +1177,53 @@ module Make (C : Engine_ctx.S) = struct
     committed : int;
   }
 
-  (* One cycle (publication §4): arrive, push while a push commits, and again
-     after the arrival a refusal asks for, a few times; then project.
-     [push_now] is false while the batch delay runs. A lazy tree arrives
-     folder by folder when its host pulls, so its cycle only recovers and
-     pushes. A paused domain runs none (07 §2.6). *)
+  (* One cycle (publication §4): arrive, push one entry when [push_now], which
+     is false while the batch delay runs, and project one. A lazy tree arrives
+     folder by folder when its host pulls, so its cycle only recovers, pushes
+     and projects. *)
+  let step ?narrate ?(full = false) ~push_now () =
+    Rt.Fmutex.with_lock cycle_lock (fun () ->
+        let arrival, changed =
+          if C.lazy_tree then (
+            complete_arrival ();
+            recover_in_flight ();
+            (`Entries 0, 0))
+          else arrive ?narrate ~full ()
+        in
+        let pushed = if push_now then push () else `Nothing in
+        (arrival, changed, pushed, project ()))
+
+  (* Cycles until one neither pushes nor projects, for a caller that waits for
+     the result. A push refused a few times in a row is left to a later call.
+     A paused domain runs none (07 §2.6). *)
   let run_cycle ?narrate ?(full = false) ?(push_now = true) () =
-    if Atomic.get paused then
+    let rec cycles ~first ~refusals ~push_now (acc : cycled) =
+      if Atomic.get paused then acc
+      else (
+        let arrival, changed, pushed, projected =
+          step
+            ?narrate:(if first then narrate else None)
+            ~full:(first && full) ~push_now ()
+        in
+        let acc =
+          {
+            arrival = (if first then arrival else acc.arrival);
+            changed = acc.changed + changed;
+            committed =
+              (acc.committed + match pushed with `Committed _ -> 1 | _ -> 0);
+          }
+        in
+        match pushed with
+          | `Committed _ -> cycles ~first:false ~refusals ~push_now acc
+          | `Refused when refusals > 0 ->
+              cycles ~first:false ~refusals:(refusals - 1) ~push_now acc
+          | `Refused -> cycles ~first:false ~refusals ~push_now:false acc
+          | `Nothing ->
+              if projected then cycles ~first:false ~refusals ~push_now acc
+              else acc)
+    in
+    cycles ~first:true ~refusals:3 ~push_now
       { arrival = `Entries 0; changed = 0; committed = 0 }
-    else
-      Rt.Fmutex.with_lock cycle_lock (fun () ->
-          let arrival, changed =
-            if C.lazy_tree then (
-              complete_arrival ();
-              recover_in_flight ();
-              (`Entries 0, 0))
-            else arrive ?narrate ~full ()
-          in
-          let rec pushes ~refusals committed =
-            if not push_now then committed
-            else (
-              match push () with
-                | `Committed _ -> pushes ~refusals (committed + 1)
-                | `Refused ->
-                    if not C.lazy_tree then ignore (arrive ());
-                    if refusals > 0 then
-                      pushes ~refusals:(refusals - 1) committed
-                    else committed
-                | `Nothing -> committed)
-          in
-          let committed = pushes ~refusals:3 0 in
-          project ();
-          { arrival; changed; committed })
 
   let request_cycle () =
     Atomic.set asked true;
@@ -1221,15 +1235,19 @@ module Make (C : Engine_ctx.S) = struct
     let cursor = ref None
     and last = ref neg_infinity
     and dirty_since = ref None
+    (* Whether the last cycle pushed or projected, so that the next follows at
+       once, and the pushes refused in a row. *)
+    and again = ref false
+    and refused = ref 0
     and failing = ref None in
     (* publication §4.5, "when": how long a push waits from [dirty_since]. The
        commands whose upload is owed are not pushable and do not fill an entry. *)
     let push_delay () =
       if
         Sync_state.pending_count sync_state - Dqueue.pending uploads
-        >= Log_entry.max_commands
+        >= (C.tuning ()).max_entry_commands
       then retry_floor
-      else batch_delay
+      else (C.tuning ()).batch_delay
     in
     let rec loop () =
       Stop.check ();
@@ -1244,17 +1262,18 @@ module Make (C : Engine_ctx.S) = struct
                 max 0.05 (min sweep (push_delay () -. (Rt.now () -. at)))
             | None -> sweep
         in
-        (try
-           Rt.first ~detach:true
-             ((if C.lazy_tree then []
-               else [(fun () -> Log_store.cursor_wait log !cursor)])
-             @ [
-                 (fun () -> Rt.Signal.wait ~since cycle_signal);
-                 (fun () -> Stop.sleep wait);
-               ])
-         with
-          | Stop.Stopping -> raise Stop.Stopping
-          | _ -> ());
+        if not !again then (
+          try
+            Rt.first ~detach:true
+              ((if C.lazy_tree then []
+                else [(fun () -> Log_store.cursor_wait log !cursor)])
+              @ [
+                  (fun () -> Rt.Signal.wait ~since cycle_signal);
+                  (fun () -> Stop.sleep wait);
+                ])
+          with
+            | Stop.Stopping -> raise Stop.Stopping
+            | _ -> ());
         (match
            let token =
              if C.lazy_tree then None else Log_store.cursor_token log
@@ -1266,20 +1285,38 @@ module Make (C : Engine_ctx.S) = struct
                | Some at -> Rt.now () -. at >= push_delay ()
                | None -> false
            in
-           let asked = Atomic.exchange asked false in
+           let was_asked = Atomic.exchange asked false in
+           let ran = !again in
+           again := false;
            if
-             asked || push_due
+             was_asked || push_due || ran
              || (not C.lazy_tree)
                 && (token <> !cursor || Rt.now () -. !last >= sweep)
            then (
              last := Rt.now ();
-             ignore (run_cycle ~push_now:(asked || push_due) ());
+             let _, _, pushed, projected =
+               step ~push_now:(was_asked || push_due) ()
+             in
              cursor := token;
-             if asked || push_due then
-               dirty_since :=
-                 if Sync_state.pending_count sync_state > 0 then
-                   Some (Rt.now ())
-                 else None)
+             let pending = Sync_state.pending_count sync_state > 0 in
+             (match pushed with
+               | `Committed _ ->
+                   refused := 0;
+                   (* What is left was due with what was pushed. *)
+                   if not pending then dirty_since := None
+                   else if was_asked then Atomic.set asked true
+               | `Refused -> incr refused
+               | `Nothing ->
+                   refused := 0;
+                   if was_asked || push_due then
+                     dirty_since := if pending then Some (Rt.now ()) else None);
+             again :=
+               projected
+               ||
+                 match pushed with
+                 | `Committed _ -> true
+                 | `Refused -> !refused <= 3
+                 | `Nothing -> false)
          with
           | () ->
               if !failing <> None then Log.info "cycles run again";

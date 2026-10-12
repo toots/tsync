@@ -166,6 +166,7 @@ let engine t =
     let read_only = t.domain.read_only
     let symlinks = t.domain.symlinks
     let lazy_tree = t.lazy_tree
+    let tuning () = Tuning.default
   end in
   (module Engine.Make (C) : Engine.S)
 

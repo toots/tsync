@@ -19,4 +19,7 @@ module type S = sig
 
   (** A pulled tree (Android): no poller, folders read when listed. *)
   val lazy_tree : bool
+
+  (** The advanced settings in force. *)
+  val tuning : unit -> Tsync_core.Tuning.t
 end

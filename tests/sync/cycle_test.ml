@@ -60,7 +60,8 @@ let faulty link (s : Store.t) : Store.t =
 
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
-let client ?(link = link ()) ?replica root name : (module Engine.S) =
+let client ?(link = link ()) ?replica ?(tuning = Tuning.default) root name :
+    (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
@@ -87,11 +88,12 @@ let client ?(link = link ()) ?replica root name : (module Engine.S) =
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
+    let tuning () = tuning
   end in
   (module Engine.Make (C))
 
-let started ?link ?replica root name =
-  let c = client ?link ?replica root name in
+let started ?link ?replica ?tuning root name =
+  let c = client ?link ?replica ?tuning root name in
   let (module E) = c in
   E.start ~background:false ();
   c
@@ -162,6 +164,35 @@ let scenario name f =
 let () =
   Fs.rm_rf base;
   Rt.run_sync (fun () ->
+      scenario "a run of pushes projects each entry before the next"
+        (fun root ->
+          let link = link () in
+          let a =
+            started ~link
+              ~tuning:{ Tuning.default with max_entry_commands = 2 }
+              root "A"
+          in
+          let (module A) = a in
+          ignore (sync a);
+          let behind = ref [] in
+          link.before_create <-
+            (fun () ->
+              behind :=
+                (entries root - Log_store.tree_head (log root)) :: !behind;
+              if List.length !behind = 2 then A.set_paused true);
+          List.iter
+            (fun n -> write a (Printf.sprintf "f%d" n) "abcd")
+            [1; 2; 3; 4; 5; 6; 7];
+          uploaded a;
+          ignore (try sync a with _ -> "");
+          p "  paused at the second push: %s; entries on the main: %d\n"
+            (status a) (entries root);
+          A.set_paused false;
+          p "  resumed: %s\n" (sync a);
+          p "  entries not projected when each was pushed: %s\n"
+            (String.concat " " (List.rev_map string_of_int !behind));
+          p "  entries on the main: %d, the tree head: %d\n" (entries root)
+            (Log_store.tree_head (log root)));
       scenario "the answer to a create is lost; the owner restarts" (fun root ->
           let link = { (link ()) with create = `Lost_answer } in
           let a = started ~link root "A" in
