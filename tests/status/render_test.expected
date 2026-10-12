@@ -44,6 +44,7 @@ Domain Files
   PAUSED           changes stay local until resumed
   MAIN OFFLINE     reads and publishing wait for it
   pending          5 changes to commit, creating entry 1441
+  projecting       the store's tree is at entry 1438 of 1440
   CANNOT FOLLOW    log entry 1441: it is of version 2; nothing is fetched or pushed
   SET ASIDE        2 records that cannot be read, kept and never run
   uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
