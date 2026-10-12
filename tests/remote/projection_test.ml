@@ -35,12 +35,13 @@ let context root (main : Store.t) : (module Context.S) =
     let max_chunk_buffers = 4
   end)
 
-(* 09 "Version not saved": a projection removing one file and replacing
-   another while the write of a version fails. *)
+(* 09 "Version not saved" and "Projector killed": a projection removing one
+   file and replacing another while the write of a version fails, then while
+   the delete that follows a saved version does. *)
 let version_not_saved () =
   let root = Filename.concat root "versions" in
   let inner = Local.create ~name:"main" (Filename.concat root "store") in
-  let versions = ref `Saved in
+  let versions = ref `Saved and passed = ref 0 and deletes = ref `Done in
   let main =
     {
       inner with
@@ -51,8 +52,13 @@ let version_not_saved () =
               | `Saved -> ()
               | `Link -> Fail.raise_ Fail.Link "the link is down"
               | `Missing ->
+                  incr passed;
                   Fail.raise_ (Fail.Missing_chunks ["c"]) "chunks missing");
           inner.put ?mode k b);
+      delete =
+        (fun k ->
+          if !deletes = `Link then Fail.raise_ Fail.Link "the link is down";
+          inner.delete k);
     }
   in
   let module C = (val context root main) in
@@ -78,27 +84,43 @@ let version_not_saved () =
       (String.concat ", " (List.sort compare files))
       (List.fold_left (fun n (_, l) -> n + List.length l) 0 (R.all_versions ()))
   in
-  let entry gone kept : Log_entry.command list =
-    [`File (at gone, Some old, None); `File (at kept, Some old, Some edited)]
-  in
-  let project what how gone kept =
-    versions := how;
+  let project what entry =
     let result =
-      match P.apply ~before_write:ignore (entry gone kept) with
+      match P.apply ~before_write:ignore entry with
         | () -> "projected"
-        | exception Fail.E _ -> "failed"
+        | exception Fail.E f -> "failed, " ^ Fail.kind_name f.kind
     in
     p "  %s: %s; %s\n" what result (state ())
+  in
+  let both gone kept : Log_entry.command list =
+    [`File (at gone, Some old, None); `File (at kept, Some old, Some edited)]
   in
   P.apply ~before_write:ignore
     (List.map
        (fun name -> `File (at name, None, Some old))
-       ["gone"; "kept"; "gone2"; "kept2"]);
+       ["gone"; "kept"; "gone2"; "kept2"; "gone3"]);
   p "== a version that cannot be saved\n";
   p "  before: %s\n" (state ());
-  project "the link down" `Link "gone" "kept";
-  project "applied again, the link up" `Saved "gone" "kept";
-  project "the main lacks the chunks" `Missing "gone2" "kept2"
+  versions := `Link;
+  project "the link down" (both "gone" "kept");
+  versions := `Saved;
+  project "applied again, the link up" (both "gone" "kept");
+  versions := `Missing;
+  project "the main lacks the chunks" (both "gone2" "kept2");
+  p "  versions the main refused and the projection passed: %d\n" !passed;
+  versions := `Saved;
+  deletes := `Link;
+  let removal : Log_entry.command list = [`File (at "gone3", Some old, None)] in
+  project "a version saved, its delete failing" removal;
+  deletes := `Done;
+  project "applied again" removal;
+  let bodies =
+    List.map
+      (fun (_, e) -> R.get_version e)
+      (R.list_versions Folder_id.root "gone3")
+  in
+  p "  that file's versions: %d, of one body: %b\n" (List.length bodies)
+    (List.length (List.sort_uniq compare bodies) = 1)
 
 (* 09 "Projection in parallel": one entry applied with [width] writes in
    flight, its slots read one by one or together; the records and versions it
