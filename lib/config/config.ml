@@ -582,6 +582,20 @@ let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
           },
           m.symlinks )
 
+(* 05 §2.1: where each domain-wide setting in force comes from. *)
+let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
+  let from configured =
+    if configured then "config" else if main <> None then "main" else "default"
+  in
+  [
+    ("chunkSize", from (d.chunk_size <> None));
+    ("symlinks", from (d.symlinks <> None));
+    ("projectLease", from (d.project_lease <> None));
+    ("projectQuarantine", from (d.project_quarantine <> None));
+    ("projectSettle", from (d.project_settle <> None));
+    ("maxEntryCommands", from (d.max_entry_commands <> None));
+  ]
+
 let hostname () = try Unix.gethostname () with _ -> "tsync"
 
 let of_json j =
