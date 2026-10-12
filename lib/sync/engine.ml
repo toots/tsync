@@ -372,10 +372,13 @@ module Make (C : Engine_ctx.S) = struct
         (Dqueue.retrying uploads @ Dqueue.parked uploads)
     in
     let asked = ref false in
+    (* Under the metadata lock: the commit drops the before-value and promotes
+       the edit in one hold, and the caller reads the file after this. *)
     let committed () =
-      match place_opt path with
-        | None -> true
-        | Some place -> Sync_state.before_file sync_state place = None
+      with_meta (fun () ->
+          match place_opt path with
+            | None -> true
+            | Some place -> Sync_state.before_file sync_state place = None)
     in
     let stopped () =
       Atomic.get cycle_failing <> None
