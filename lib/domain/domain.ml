@@ -165,6 +165,15 @@ let engine t =
     let max_uploads = t.config.max_uploads
     let read_only = t.domain.read_only
     let lazy_tree = t.lazy_tree
+
+    let projects_all =
+      match Config.frontend t.domain "http-proxy" with
+        | Some f -> (
+            match List.assoc_opt "projectCommits" f.options with
+              | Some (Config.B b) -> b
+              | _ -> true)
+        | None -> false
+
     let settings main = Config.in_force t.domain main
   end in
   (module Engine.Make (C) : Engine.S)

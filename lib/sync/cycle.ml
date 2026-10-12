@@ -1133,13 +1133,22 @@ module Make (C : Engine_ctx.S) = struct
           | Some e -> (
               let generation, holder = Log_store.takeover log e.n in
               let now = Rt.boottime () in
+              let own =
+                match e.read with
+                  | Entry { author; _ } -> author = C.client_uuid
+                  | _ -> false
+              in
               let mine =
-                match (holder, e.read) with
-                  | Some client, _ -> client = C.client_uuid
-                  | None, Entry { author; projector; _ } ->
-                      Option.value ~default:author projector = C.client_uuid
-                      && not (others_only && author = C.client_uuid)
-                  | None, _ -> false
+                (not (others_only && own))
+                && ((* §4.6: one projector for a domain its listener
+                       projects. *)
+                    C.projects_all
+                   ||
+                     match (holder, e.read) with
+                     | Some client, _ -> client = C.client_uuid
+                     | None, Entry { author; projector; _ } ->
+                         Option.value ~default:author projector = C.client_uuid
+                     | None, _ -> false)
               in
               match (mine, Log_store.commands e) with
                 | true, Some commands when generation = 0 ->

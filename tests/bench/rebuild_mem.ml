@@ -44,6 +44,7 @@ let () =
     let read_only = true
     let symlinks = `Keep
     let lazy_tree = false
+    let projects_all = false
     let settings _ = (Tuning.default, symlinks)
   end in
   let module E = Engine.Make (C) in

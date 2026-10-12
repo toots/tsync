@@ -42,6 +42,7 @@ let client name : (module Engine.S) * (module Tsync_remote.Context.S) =
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
+    let projects_all = false
     let settings _ = (Tuning.default, symlinks)
   end in
   ((module Engine.Make (C)), (module C : Tsync_remote.Context.S))
