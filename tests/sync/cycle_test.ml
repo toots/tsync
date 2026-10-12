@@ -405,6 +405,12 @@ let () =
           refusing := false;
           let rearmed = A.rearm () in
           settle a;
+          (* The re-armed jobs run in no order, and a settle ends at the first
+             that fails: the entry's, when it runs before its chunk's. *)
+          let deadline = Rt.now () +. 10. in
+          while (not (copied ())) && Rt.now () < deadline do
+            Rt.sleep 0.02
+          done;
           p "  re-armed: %b; the replica holds the chunk: %b\n" (rearmed > 0)
             (copied ());
           A.set_paused true;
