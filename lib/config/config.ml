@@ -28,13 +28,34 @@ type domain = {
   name : Domain_name.t;
   backends : backend list;
   frontends : frontend list;
-  symlinks : [ `Keep | `Follow | `Skip ];
+  symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;
   chunk_size : int option;
   cache_chunk_size : int option;
   max_cache : int option;
+  batch_delay : float option;
+  project_width : int option;
+  max_entry_commands : int option;
+  project_lease : float option;
+  project_quarantine : float option;
+  project_settle : float option;
 }
+
+let default_symlinks = `Keep
+
+(* 05 §2.1: what the domain configures, else the application's default. *)
+let tuning (d : domain) : Tuning.t =
+  let v o default = Option.value ~default o in
+  let t = Tuning.default in
+  {
+    batch_delay = v d.batch_delay t.batch_delay;
+    project_width = v d.project_width t.project_width;
+    max_entry_commands = v d.max_entry_commands t.max_entry_commands;
+    project_lease = v d.project_lease t.project_lease;
+    project_quarantine = v d.project_quarantine t.project_quarantine;
+    project_settle = v d.project_settle t.project_settle;
+  }
 
 type link = {
   enabled : bool;
@@ -350,6 +371,12 @@ let parse_domain path j =
       "chunkSize";
       "cacheChunkSize";
       "maxCache";
+      "batchDelay";
+      "projectWidth";
+      "maxEntryCommands";
+      "projectLease";
+      "projectQuarantine";
+      "projectSettle";
     ]
     l;
   let raw_name =
@@ -420,14 +447,38 @@ let parse_domain path j =
       fail (sub path "backends")
         "nothing here can answer a read: add a main or a readOnly store");
   let symlinks =
-    match
-      required (sub path "symlinks") "string" (string_field path l "symlinks")
-    with
-      | "keep" -> `Keep
-      | "follow" -> `Follow
-      | "skip" -> `Skip
-      | _ -> fail (sub path "symlinks") "expected keep, follow or skip"
+    Option.map
+      (function
+        | "keep" -> `Keep
+        | "follow" -> `Follow
+        | "skip" -> `Skip
+        | _ -> fail (sub path "symlinks") "expected keep, follow or skip")
+      (string_field path l "symlinks")
   in
+  let at_least k least what v =
+    Option.iter (fun v -> if v < least then fail (sub path k) what) v;
+    v
+  in
+  let seconds k =
+    match float_field path l k with
+      | Some v when v <= 0. -> fail (sub path k) "expected seconds above 0"
+      | v -> v
+  in
+  let batch_delay =
+    at_least "batchDelay" 0. "expected seconds, 0 or more"
+      (float_field path l "batchDelay")
+  in
+  let project_width =
+    at_least "projectWidth" 1 "expected an integer of 1 or more"
+      (int_field path l "projectWidth")
+  in
+  let max_entry_commands =
+    at_least "maxEntryCommands" 1 "expected an integer of 1 or more"
+      (int_field path l "maxEntryCommands")
+  in
+  let project_lease = seconds "projectLease" in
+  let project_quarantine = seconds "projectQuarantine" in
+  let project_settle = seconds "projectSettle" in
   let versioning =
     required (sub path "versioning") "boolean" (bool_field path l "versioning")
   in
@@ -437,25 +488,44 @@ let parse_domain path j =
       ->
         fail (sub path "chunkSize") "must lie between 256 KiB and 256 MiB"
     | _ -> ());
-  {
-    name;
-    backends =
-      List.stable_sort
-        (fun a b ->
-          compare
-            (Tsync_store.Composite.read_rank a.role)
-            (Tsync_store.Composite.read_rank b.role))
-        backends;
-    frontends;
-    symlinks;
-    versioning;
-    read_only =
-      Option.value ~default:false (bool_field path l "readOnly")
-      || not (has Main);
-    chunk_size;
-    cache_chunk_size = size_field path l "cacheChunkSize";
-    max_cache = size_field path l "maxCache";
-  }
+  let d =
+    {
+      name;
+      backends =
+        List.stable_sort
+          (fun a b ->
+            compare
+              (Tsync_store.Composite.read_rank a.role)
+              (Tsync_store.Composite.read_rank b.role))
+          backends;
+      frontends;
+      symlinks;
+      versioning;
+      read_only =
+        Option.value ~default:false (bool_field path l "readOnly")
+        || not (has Main);
+      chunk_size;
+      cache_chunk_size = size_field path l "cacheChunkSize";
+      max_cache = size_field path l "maxCache";
+      batch_delay;
+      project_width;
+      max_entry_commands;
+      project_lease;
+      project_quarantine;
+      project_settle;
+    }
+  in
+  let t = tuning d in
+  if
+    not
+      (t.project_lease < t.project_quarantine
+      && t.project_quarantine < t.project_settle)
+  then
+    fail path
+      "the projection timings in force must satisfy projectLease < \
+       projectQuarantine < projectSettle, and are %g, %g and %g"
+      t.project_lease t.project_quarantine t.project_settle;
+  d
 
 let hostname () = try Unix.gethostname () with _ -> "tsync"
 

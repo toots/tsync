@@ -398,7 +398,10 @@ let rename t src dst (flags : Fuse.rename_flags) =
 
 let symlink t target path =
   check_mutation t;
-  if t.domain.domain.symlinks <> `Keep then errno EPERM;
+  if
+    Option.value ~default:Config.default_symlinks t.domain.domain.symlinks
+    <> `Keep
+  then errno EPERM;
   let (module E : Tsync_sync.Engine.S) = t.engine in
   call (fun () -> E.symlink (rel path) ~target ~exclusive:true)
 

@@ -5,6 +5,17 @@ a lone readOnly store forces read-only   ok: Archive ro=true backends=a:readOnly
 sizes and string booleans                ok: Files ro=false backends=disk:main
 fuse ownership and modes for a group     ok: Media ro=false backends=disk:main
 
+== advanced keys: what is in force
+none set               symlinks unset, batch 10 s, width 8, entry 256, lease 30, quarantine 300, settle 600
+all set                symlinks skip, batch 0 s, width 4, entry 1024, lease 20, quarantine 200, settle 420
+settle under quarantine refused: domains[0]: the projection timings in force must satisfy projectLease < projectQuarantine < projectSettle, and are 30, 300 and 120
+lease over quarantine  refused: domains[0]: the projection timings in force must satisfy projectLease < projectQuarantine < projectSettle, and are 400, 300 and 600
+a width of 0           refused: domains[0].projectWidth: expected an integer of 1 or more
+an entry of 0          refused: domains[0].maxEntryCommands: expected an integer of 1 or more
+a negative delay       refused: domains[0].batchDelay: expected seconds, 0 or more
+a lease of 0           refused: domains[0].projectLease: expected seconds above 0
+a bad policy           refused: domains[0].symlinks: expected keep, follow or skip
+
 == refused, each naming its path
 unknown top-level key                    refused: unknown key(s) "maxUpload"
 unknown backend key                      refused: domains[0].backends[0]: unknown key(s) "bukcet"

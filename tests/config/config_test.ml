@@ -68,6 +68,40 @@ let () =
              {|[{"type":"fuse","allowOther":true,"uid":"1000","gid":"root","fileMode":"0664","dirMode":"775"}]|}
            "Media";
        ]);
+  p "\n== advanced keys: what is in force\n";
+  let in_force what extra =
+    let bare =
+      Printf.sprintf
+        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
+        extra
+    in
+    match Config.of_string bare with
+      | { domains = [d]; _ } ->
+          let t = Config.tuning d in
+          p
+            "%-22s symlinks %s, batch %g s, width %d, entry %d, lease %g, \
+             quarantine %g, settle %g\n"
+            what
+            (match d.symlinks with
+              | None -> "unset"
+              | Some `Keep -> "keep"
+              | Some `Follow -> "follow"
+              | Some `Skip -> "skip")
+            t.batch_delay t.project_width t.max_entry_commands t.project_lease
+            t.project_quarantine t.project_settle
+      | _ -> p "%-22s not one domain\n" what
+      | exception Config.Invalid e -> p "%-22s refused: %s\n" what e
+  in
+  in_force "none set" "";
+  in_force "all set"
+    {|,"symlinks":"skip","batchDelay":0,"projectWidth":4,"maxEntryCommands":1024,"projectLease":20,"projectQuarantine":200,"projectSettle":420|};
+  in_force "settle under quarantine" {|,"projectSettle":120|};
+  in_force "lease over quarantine" {|,"projectLease":400|};
+  in_force "a width of 0" {|,"projectWidth":0|};
+  in_force "an entry of 0" {|,"maxEntryCommands":0|};
+  in_force "a negative delay" {|,"batchDelay":-1|};
+  in_force "a lease of 0" {|,"projectLease":0|};
+  in_force "a bad policy" {|,"symlinks":"sometimes"|};
   p "\n== refused, each naming its path\n";
   try_ "unknown top-level key" (config ~top:{|,"maxUpload":4|} [domain "Files"]);
   try_ "unknown backend key"

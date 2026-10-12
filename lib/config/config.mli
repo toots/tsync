@@ -27,13 +27,25 @@ type domain = {
   name : Domain_name.t;
   backends : backend list;  (** in read order: role, then config order *)
   frontends : frontend list;
-  symlinks : [ `Keep | `Follow | `Skip ];
+  symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;  (** forced when no backend has a writable role *)
   chunk_size : int option;
   cache_chunk_size : int option;
   max_cache : int option;
+  batch_delay : float option;
+  project_width : int option;
+  max_entry_commands : int option;
+  project_lease : float option;
+  project_quarantine : float option;
+  project_settle : float option;
 }
+
+val default_symlinks : [ `Keep | `Follow | `Skip ]
+
+(** The advanced settings a domain configures, else the application's defaults
+    (05 §2.1). *)
+val tuning : domain -> Tuning.t
 
 (** One link's uplink settings (06 §7). *)
 type link = {
