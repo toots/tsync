@@ -272,10 +272,15 @@ Each step either commits a command of $P$, which then leaves $P$ for good,
 or moves a folder to a temporary place, which happens at most once per
 folder. $\square$
 
-**Theorem 3 is about applying changes one at a time to a real tree**: a local
-file system, or records kept one per key. A temporary place exists only
-there. It is never part of a pending set and never part of what is
-published.
+**Theorem 3 is about applying changes one at a time to a tree that must be
+well-formed after each of them**: a local file system, which refuses the
+states in between. A temporary place exists only there. It is never part of
+a pending set and never part of what is published.
+
+The records the main keeps per object are not such a tree. An entry is
+applied to them as the set it is, and they may be no well-formed tree until
+its last write: what a reader finds meanwhile is specified with them
+([data-model/backend.md](../data-model/backend.md) §6), not here.
 
 **Definition 6 (batch).** A subset $B \subseteq P$ is a *batch* if $R$, with
 the keys of $B$ set to their values in $L$, is well-formed. That state is
