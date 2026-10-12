@@ -3,6 +3,7 @@ tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
 
 Domain Media
   settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
+  projection       by this machine
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   read-only        yes
   cache            7494 chunks, 9.9 GiB of 10.0 GiB
@@ -40,6 +41,7 @@ tsync on example — 2 domains, 2 processes, up 1d 1h, load 0.4
 Domain Files
   settings         versioning on, symlinks follow, chunk 4.0 MiB, cache chunk 16.0 MiB
   advanced         settle 420 s (from the main), entry 1024, batch delay 2 s
+  projection       by the main's server (71bdd2de)
   concurrency      1 upload, 1 chunk buffer, 1 download
   cache            1088 chunks, 9.5 GiB of 200.0 GiB, 316.4 MiB pinned
   PAUSED           changes stay local until resumed
@@ -83,6 +85,7 @@ tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
 
 Domain Media
   settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
+  projection       by this machine
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   read-only        yes
   cache            7494 chunks, 9.9 GiB of 10.0 GiB

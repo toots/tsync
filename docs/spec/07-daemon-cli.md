@@ -691,8 +691,10 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   (reports under 1 s apart reuse it; the first is the lifetime average);
 - a domain body from its owner: `name`, `settings {versioning, symlinks, chunkSize, cacheChunkSize,
   maxUploads, maxChunkBuffers, maxDownloads, readOnly, projectLease, projectQuarantine,
-  projectSettle, maxEntryCommands, batchDelay, projectWidth, domainWide {<key>: "config" | "main" | "default"}}` (`domainWide` says where each
-  domain-wide setting in force comes from), `mainOffline?`, `paused`, `sync {position?,
+  projectSettle, maxEntryCommands, batchDelay, projectWidth, projector?, domainWide {<key>: "config" | "main" | "default"}}` (`domainWide` says where each
+  domain-wide setting in force comes from; `projector` is the client uuid the main states for the
+  entries created through it, absent when each entry is its author's to project; the text form
+  says which in a `projection` row), `mainOffline?`, `paused`, `sync {position?,
   pending, inFlight?, treeHead?, cannotFollow?: {entry, reason}}` (the cycle's `status()`,
   [03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner): the position, absent when the
   client has none; the count of pending commands; the number of the entry being created; the tree

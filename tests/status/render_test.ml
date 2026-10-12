@@ -56,6 +56,7 @@ let settings : settings =
     max_entry_commands = 256;
     batch_delay = 10.;
     project_width = 8;
+    projector = None;
     domain_wide = [];
   }
 
@@ -271,6 +272,7 @@ let degraded : machine =
                 project_settle = 420.;
                 max_entry_commands = 1024;
                 batch_delay = 2.;
+                projector = Some "71bdd2de2d1c3b5398a19fcd7456a58b";
                 domain_wide =
                   [
                     ("projectLease", "default");

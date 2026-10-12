@@ -69,6 +69,13 @@ let settings b (s : settings) =
       ]
   in
   if advanced <> [] then row b "  " "advanced" (String.concat ", " advanced);
+  (* publication §4.6: who projects the entries this machine commits. *)
+  row b "  " "projection"
+    (match s.projector with
+      | Some p ->
+          Printf.sprintf "by the main's server (%s)"
+            (String.sub p 0 (min 8 (String.length p)))
+      | None -> "by this machine");
   row b "  " "concurrency"
     (Printf.sprintf "%s, %s, %s"
        (plural s.max_uploads "upload" "uploads")
