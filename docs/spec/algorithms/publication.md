@@ -420,14 +420,16 @@ PROJECT():                                                     # one entry
   such a main, and then does not project its own entries: the serving owner does, as their
   generation-0 projector, woken by the listener when the create is won. The serving owner writes to
   the main without a network between them, so the entry is in the tree at once, whatever the
-  author's link is and whether the author stays connected or not. Every client reads the projector
-  from the entry, so they agree on it without having asked the same peer, and the rest of this
-  section applies to the serving owner as to any projector: a client takes over an entry it left
-  unprojected for `PROJECT_SETTLE`. A main that states no projector, and any main reached as a plain
-  store, leaves each entry to its author. The serving owner projects such an entry before it merges
-  it into its own tree, so a merge that fails or takes long there holds up nobody else, and it goes
-  on projecting them while it is paused: a pause holds this machine's own changes, not those of the
-  clients it serves.
+  author's link is and whether the author stays connected or not. A client whose main states a
+  projector projects nothing and takes nothing over: it commits, and the serving owner is the one
+  projector of what goes through that main, so no two machines there ever write the tree. A serving
+  owner that stopped resumes its entries when it starts. Every machine reads the projector from the
+  entry, so those that reach the same main directly agree on it too, and the takeover of this
+  section remains theirs, the serving owner among them. A main that states no projector, and any
+  main reached as a plain store, leaves each entry to its author. The serving owner projects such an
+  entry before it merges it into its own tree, so a merge that fails or takes long there holds up
+  nobody else, and it goes on projecting them while it is paused: a pause holds this machine's own
+  changes, not those of the clients it serves.
 - **Short by construction.** Nothing tells a slow projector from a stopped one. An entry is one
   put, and its projection is at most `MAX_ENTRY_COMMANDS` commands and `MAX_ENTRY_BYTES` of
   records (or one record of any size): the caps are chosen so that a projection ends well within

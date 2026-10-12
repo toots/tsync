@@ -1119,56 +1119,62 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> None
     in
     let projected = ref false in
+    (* §4.6: behind a main that states a projector this client commits and
+       nothing more; the serving owner is the one projector there. *)
+    let served =
+      match projector () with Some p -> p <> C.client_uuid | None -> false
+    in
     let one () =
       let t = Log_store.tree_head log in
       Atomic.set tree_head_seen t;
-      match Log_store.read_entry log (t + 1) with
-        | None -> ()
-        | Some e -> (
-            let generation, holder = Log_store.takeover log e.n in
-            let now = Rt.boottime () in
-            let mine =
-              match (holder, e.read) with
-                | Some client, _ -> client = C.client_uuid
-                | None, Entry { author; projector; _ } ->
-                    Option.value ~default:author projector = C.client_uuid
-                    && not (others_only && author = C.client_uuid)
-                | None, _ -> false
-            in
-            match (mine, Log_store.commands e) with
-              | true, Some commands when generation = 0 ->
-                  apply ~t ~generation e commands;
-                  projected := true
-              | true, Some commands -> (
-                  match held !took e generation with
-                    | Some since
-                      when now -. since >= (tuning ()).project_quarantine ->
-                        apply ~t ~generation e commands;
-                        projected := true
-                    | Some _ -> ()
-                    | None ->
-                        took := Some { entry = e.n; generation; since = now })
-              | true, None -> ()
-              | false, _ -> (
-                  match held !watching e generation with
-                    | Some since ->
-                        if
-                          now -. since >= (tuning ()).project_settle
-                          && Log_store.takeover_create log e.n
-                               ~generation:(generation + 1)
-                               ~client:C.client_uuid
-                             = `Won
-                        then
-                          took :=
-                            Some
-                              {
-                                entry = e.n;
-                                generation = generation + 1;
-                                since = now;
-                              }
-                    | None ->
-                        watching :=
-                          Some { entry = e.n; generation; since = now }))
+      if not served then (
+        match Log_store.read_entry log (t + 1) with
+          | None -> ()
+          | Some e -> (
+              let generation, holder = Log_store.takeover log e.n in
+              let now = Rt.boottime () in
+              let mine =
+                match (holder, e.read) with
+                  | Some client, _ -> client = C.client_uuid
+                  | None, Entry { author; projector; _ } ->
+                      Option.value ~default:author projector = C.client_uuid
+                      && not (others_only && author = C.client_uuid)
+                  | None, _ -> false
+              in
+              match (mine, Log_store.commands e) with
+                | true, Some commands when generation = 0 ->
+                    apply ~t ~generation e commands;
+                    projected := true
+                | true, Some commands -> (
+                    match held !took e generation with
+                      | Some since
+                        when now -. since >= (tuning ()).project_quarantine ->
+                          apply ~t ~generation e commands;
+                          projected := true
+                      | Some _ -> ()
+                      | None ->
+                          took := Some { entry = e.n; generation; since = now })
+                | true, None -> ()
+                | false, _ -> (
+                    match held !watching e generation with
+                      | Some since ->
+                          if
+                            now -. since >= (tuning ()).project_settle
+                            && Log_store.takeover_create log e.n
+                                 ~generation:(generation + 1)
+                                 ~client:C.client_uuid
+                               = `Won
+                          then
+                            took :=
+                              Some
+                                {
+                                  entry = e.n;
+                                  generation = generation + 1;
+                                  since = now;
+                                }
+                      | None ->
+                          watching :=
+                            Some { entry = e.n; generation; since = now })))
     in
     one ();
     !projected

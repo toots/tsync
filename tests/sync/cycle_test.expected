@@ -2,6 +2,7 @@
   A: 0 entries merged, 1 committed, 0 pending
   the entry names the server as its projector: true
   A has not projected it: entries 1, the tree head 0
+  nor taken it over, long after its settle and quarantine: the tree head 0
   S: 1 entries merged, 0 committed, 0 pending
   S has: the tree head 1
 

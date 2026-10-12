@@ -183,6 +183,13 @@ let () =
           in
           let a =
             started
+              ~tuning:
+                {
+                  Tuning.default with
+                  project_lease = 0.01;
+                  project_quarantine = 0.02;
+                  project_settle = 0.03;
+                }
               ~stated:
                 {
                   chunk = 4;
@@ -205,6 +212,14 @@ let () =
               | _ -> false);
           p "  A has not projected it: entries %d, the tree head %d\n"
             (entries root)
+            (Log_store.tree_head (log root));
+          Rt.sleep 0.1;
+          ignore (sync a);
+          Rt.sleep 0.1;
+          ignore (sync a);
+          p
+            "  nor taken it over, long after its settle and quarantine: the \
+             tree head %d\n"
             (Log_store.tree_head (log root));
           p "  S: %s\n" (sync server);
           p "  S has: the tree head %d\n" (Log_store.tree_head (log root)));
