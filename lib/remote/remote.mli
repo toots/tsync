@@ -56,8 +56,9 @@ module Make (_ : Context.S) : sig
   val get_slot : Folder_id.t -> string -> string option
   val head_slot : Folder_id.t -> string -> Store.entry option
 
-  (** Snapshot the replaced body when versioning (best effort, bounded): [body]
-      when the caller read the slot, else what the slot holds. *)
+  (** Save the replaced body as a version when versioning: [body] when the
+      caller read the slot, else what the slot holds. Fails as the put does,
+      except on a main that lacks the manifest's chunks, which is logged. *)
   val save_version : ?body:Bigstring.t -> Key.t -> unit
 
   (** Put a manifest, saving a version first unless [save] is false; on a
