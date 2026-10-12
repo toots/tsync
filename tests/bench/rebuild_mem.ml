@@ -44,6 +44,7 @@ let () =
     let read_only = true
     let symlinks = `Keep
     let lazy_tree = false
+    let tuning () = Tuning.default
   end in
   let module E = Engine.Make (C) in
   let show label (u : Usage.t) =

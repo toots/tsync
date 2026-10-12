@@ -11,4 +11,7 @@ module type S = sig
   val read_only : bool
   val symlinks : [ `Keep | `Follow | `Skip ]
   val lazy_tree : bool
+
+  (** The advanced settings in force. *)
+  val tuning : unit -> Tsync_core.Tuning.t
 end
