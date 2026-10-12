@@ -79,7 +79,8 @@
 == an entry its author never projected
   A merges it without waiting for its projection: 1 entries merged, 0 committed, 0 pending
   A: f="one"  g="dead"; tree head: 1 of 2
-  A commits behind it: 0 entries merged, 1 committed, 0 pending; tree head: 1 of 3
+  an owner whose listener projects, at its first cycle: arrived by state, 0 committed, 0 pending; tree head: 2 of 2
+  A commits behind it: 0 entries merged, 1 committed, 0 pending; tree head: 3 of 3
   a new client arrives by state over the unprojected entries: f="one"  g="dead"  h="after"
 
 == a position that is gone: arrival by state keeps pending work

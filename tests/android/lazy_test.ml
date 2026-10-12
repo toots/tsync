@@ -97,6 +97,7 @@ let peer : (module Engine.S) Lazy.t =
        let read_only = false
        let symlinks = `Skip
        let lazy_tree = false
+       let projects_all = false
        let settings _ = (Tuning.default, symlinks)
      end in
      let e = (module Engine.Make (C) : Engine.S) in

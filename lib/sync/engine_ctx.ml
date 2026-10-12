@@ -11,6 +11,10 @@ module type S = sig
   val read_only : bool
   val lazy_tree : bool
 
+  (** This owner's domain is served by a listener that projects (frontends/
+      http-proxy, [projectCommits]): it is the projector of every entry. *)
+  val projects_all : bool
+
   (** The advanced settings and the symlink policy in force, given what the main
       states (05 §2.1); INVALID when the configuration differs from it. *)
   val settings :

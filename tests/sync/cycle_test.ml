@@ -60,8 +60,8 @@ let faulty link (s : Store.t) : Store.t =
 
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
-let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated root
-    name : (module Engine.S) =
+let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
+    ?(projects_all = false) root name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
@@ -99,12 +99,13 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated root
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
+    let projects_all = projects_all
     let settings _ = (tuning, symlinks)
   end in
   (module Engine.Make (C))
 
-let started ?link ?replica ?tuning ?stated root name =
-  let c = client ?link ?replica ?tuning ?stated root name in
+let started ?link ?replica ?tuning ?stated ?projects_all root name =
+  let c = client ?link ?replica ?tuning ?stated ?projects_all root name in
   let (module E) = c in
   E.start ~background:false ();
   c
@@ -550,6 +551,13 @@ let () =
                   }));
           p "  A merges it without waiting for its projection: %s\n" (sync a);
           p "  A: %s; tree head: %d of 2\n" (tree a)
+            (Log_store.tree_head (log root));
+          let serving = started ~projects_all:true root "S" in
+          let synced = sync serving in
+          p
+            "  an owner whose listener projects, at its first cycle: %s; tree \
+             head: %d of 2\n"
+            synced
             (Log_store.tree_head (log root));
           write a "h" "after";
           uploaded a;

@@ -40,6 +40,7 @@ let client root : (module Engine.S) =
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
+    let projects_all = false
     let settings _ = (Tuning.default, symlinks)
   end in
   (module Engine.Make (C))
