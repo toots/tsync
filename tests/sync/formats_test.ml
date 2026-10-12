@@ -98,6 +98,23 @@ let () =
   in
   let author = "3f9a0c1b2d4e5f60718293a4b5c6d7e8" in
   let body = Log_entry.encode { author; projector = None; commands = batch } in
+  let named projector =
+    let prefix = {|{"v":1,|} in
+    match
+      Log_entry.decode
+        (prefix
+        ^ Printf.sprintf {|"projector":%s,|} projector
+        ^ String.sub body (String.length prefix)
+            (String.length body - String.length prefix))
+    with
+      | `Entry e -> Option.value ~default:"its author" e.projector
+      | `Corrupt what -> "corrupt, expected " ^ what
+      | `Later_version _ -> "a later version"
+  in
+  p
+    "an entry naming a projector: %s; one that is no client id: %s; a number: %s\n"
+    (named {|"0123456789abcdef0123456789abcdef"|})
+    (named {|"the server"|}) (named "7");
   let shown =
     (* The manifest bodies are binary: only their place in the object shows. *)
       match Yojson.Safe.from_string body with

@@ -115,6 +115,10 @@ let command_of_json json : (command, string) result =
         let* after = place_of_json after in
         Ok (`Folder (i, before, after))
 
+let is_client_uuid s =
+  String.length s = 32
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
+
 let distinct_keys commands =
   let keys = List.map Algebra.key_of commands in
   List.length (List.sort_uniq Algebra.compare_key keys) = List.length keys
@@ -140,14 +144,14 @@ let decode body =
               match (List.assoc_opt "author" fields, commands) with
                 | _, Error what -> `Corrupt what
                 | Some (`String author), Ok commands ->
-                    let projector =
+                    if not (distinct_keys commands) then
+                      `Corrupt "commands on distinct keys"
+                    else (
                       match List.assoc_opt "projector" fields with
-                        | Some (`String p) -> Some p
-                        | _ -> None
-                    in
-                    if distinct_keys commands then
-                      `Entry { author; projector; commands }
-                    else `Corrupt "commands on distinct keys"
+                        | None -> `Entry { author; projector = None; commands }
+                        | Some (`String p) when is_client_uuid p ->
+                            `Entry { author; projector = Some p; commands }
+                        | Some _ -> `Corrupt "a projector")
                 | _ -> `Corrupt "an author")
           | _ -> `Corrupt "a version")
     | _ -> `Corrupt "a JSON object"

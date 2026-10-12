@@ -190,6 +190,7 @@ type _ request =
   | Cancel : int -> bool request
   | Retry : int request
   | Poll : unit request
+  | Wake : unit request
   | Notify_reset : int request
   | Status : status request
   | Pause : bool -> bool request
@@ -228,6 +229,7 @@ let action : type a. a request -> string = function
   | Cancel _ -> "cancel"
   | Retry -> "retry"
   | Poll -> "poll"
+  | Wake -> "wake"
   | Notify_reset -> "notify_reset"
   | Status -> "status"
   | Pause _ -> "pause"
@@ -314,8 +316,8 @@ let destination_of j =
 
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
-  | Ping | Cursor | Full_resync | Retry | Poll | Notify_reset | Status | Stop
-  | Share_clear_cache ->
+  | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
+  | Stop | Share_clear_cache ->
       []
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
@@ -486,6 +488,7 @@ let decode j =
           | None -> Fail.invalid "cancel needs a job")
     | "retry" -> Request Retry
     | "poll" -> Request Poll
+    | "wake" -> Request Wake
     | "notify_reset" -> Request Notify_reset
     | "status" -> Request Status
     | "pause" -> Request (Pause (str j "arg" <> Some "off"))
@@ -638,7 +641,8 @@ let page_fields (pg : page) =
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Stop | Delete _ | Rmdir _ | Revert _ -> ok []
+    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _ ->
+        ok []
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -785,6 +789,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Full_resync -> ()
     | Revert _ -> ()
     | Poll -> ()
+    | Wake -> ()
     | Stop -> ()
     | Delete _ -> ()
     | Rmdir _ -> ()
