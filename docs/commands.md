@@ -121,6 +121,7 @@ A healthy report is short. These lines appear only when there is something to sa
 | `copies … owed` | A replica or backfill is behind by that many objects | Nothing; it catches up |
 | `(… parked)` | Work for a copy was set aside after failing for good | Fix the cause, then `tsync retry` |
 | `pending … to commit` | Changes made here and not published yet | Nothing; they go within seconds once uploaded |
+| `projecting` | Changes committed here are still being written to the store's tree, where a new machine and shares read them | Nothing; it catches up |
 | `PARKED` | An upload failed for good, with the error | Fix the cause, then `tsync retry` |
 | `CANNOT FOLLOW` | The store holds a change this machine cannot read, with the reason. Nothing is picked up or published until it is dealt with. | Upgrade tsync here; if the entry is damaged, `tsync void-entry N` on any machine |
 | `CORRUPTED` | A store found damaged chunks | `tsync data-integrity --repair` |

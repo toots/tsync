@@ -81,6 +81,11 @@ let sync b (d : domain_body) =
         match s.in_flight with
         | Some n -> Printf.sprintf ", creating entry %d" n
         | None -> "");
+  (match (s.position, s.tree_head) with
+    | Some position, Some tree when tree < position ->
+        row b "  " "projecting"
+          (Printf.sprintf "the store's tree is at entry %d of %d" tree position)
+    | _ -> ());
   Option.iter
     (fun (c : cannot_follow) ->
       row b "  " "CANNOT FOLLOW"
