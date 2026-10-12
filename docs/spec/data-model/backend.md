@@ -544,7 +544,10 @@ Then the projector raises the tree head to the entry's number.
   commit, so the chunks are present.
 - **A version is saved before what it keeps is gone.** The save is under the same deadlines and retries
   as the write it precedes, and has no bound of its own. When it fails, the slot is neither deleted nor
-  replaced, the pass stops, and the tree head is not raised (§2.9 names the one failure that is passed).
+  replaced, no further command of the pass is started, and the tree head is not raised (§2.9 names the
+  one failure that is passed). A command whose version is saved writes its slot all the same, whatever
+  failed beside it: stopped there, it would save that version again at the next application. Only a
+  failed lease test stops a write that is due (publication §4.6).
 - **Plain writes.** No projection step is conditional. One projector per entry is what makes that
   safe.
 
@@ -662,7 +665,9 @@ An implementation MUST exhibit these observable properties:
 - **The tree is the log's.** After any sequence of commits, with the tree head at the head, a walk of
   the tree equals the tree the log defines: names, kinds, folder ids and contents.
 - **Apply is idempotent.** A projection killed between any two of its writes and applied again from its
-  start ends in the same records and the same versions as one that ran once.
+  start ends in the same records as one that ran once, and in the same versions but for a command
+  stopped between its version and the write of its slot, whose version is saved once more with the same
+  body (§6.1).
 - **Anchors decide.** A marker whose folder's anchor names another place, or whose folder has no anchor,
   is invisible to tree walks, path lookups, state reads and share servers. After a move whose old-marker
   delete was lost, the folder is listed at the new place only.
