@@ -75,7 +75,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `name` | string | the host name | client name, labels conflicted copies; non-empty |
 | `tls` | `"native"` \| `"openssl"` | unset (the build's default) | A build has one or both. The default is OpenSSL when the build has it, else native; naming one the build lacks fails each connection INVALID. `tsync build-info` lists them. |
 | `maxUploads` | int ≥ 0 | 4 | concurrent upload files; 0 means the default |
-| `maxChunkBuffers` | int ≥ 0 | `maxUploads` | chunk bodies in memory across all uploads; also bounds deferred forwards and `tsync mirror` copies; 0 means the default |
+| `maxChunkBuffers` | int ≥ 0 | `maxUploads` | *advanced*; chunk bodies in memory across all uploads; also bounds deferred forwards and `tsync mirror` copies; 0 means the default |
 | `maxDownloads` | int ≥ 0 | 8 | concurrent file downloads; 0 means the default |
 | `uplink`, `links` | objects | | [06](06-backends.md); a `links` entry naming a link no backend uses is refused |
 | `domains` | array | required | |
@@ -87,12 +87,41 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)) |
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
-| `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | yes | |
+| `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
-| `chunkSize` | size | no | MUST equal the main's chunk size when the main states one; unset: the main's, else 8 MiB; within the range of [01 §3.5](01-core.md#35-chunk-size) |
-| `cacheChunkSize` | size | no | unset: 16 MiB |
+| `chunkSize` | size | no | *advanced*, *domain-wide* (below); unset: the main's, else 8 MiB; within the range of [01 §3.5](01-core.md#35-chunk-size) |
+| `cacheChunkSize` | size | no | *advanced*; unset: 16 MiB |
+| `projectLease`, `projectQuarantine`, `projectSettle` | seconds > 0 | no | *advanced*, *domain-wide* (below); unset: the main's, else 30, 300 and 600 ([publication §7](algorithms/publication.md#7-parameters)). The three in force MUST satisfy lease < quarantine < settle |
+| `maxEntryCommands` | int ≥ 1 | no | *advanced*, *domain-wide* as a ceiling (below); unset: the main's, else 256. A higher value lengthens one projection, which MUST still end well within settle − quarantine on the slowest link of the domain ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
+| `batchDelay` | seconds ≥ 0 | no | *advanced*; unset: 10. This machine's choice: nothing depends on it |
+| `projectWidth` | int ≥ 1 | no | *advanced*; unset: 8. This machine's choice |
 | `maxCache` | size | no | unset: unbounded |
+
+**Advanced settings.** A key marked *advanced* tunes the protocol and has a default that suits a
+deployment nobody is experimenting on. A config that leaves it out is complete, and no tool writes
+it unasked. The config editor asks about it only in its advanced mode
+([07 §5.9](07-daemon-cli.md#59-config-wizard-tsync-config---edit)).
+
+**Domain-wide settings.** `chunkSize`, `symlinks`, the three projection timings and
+`maxEntryCommands` are values the clients of one main MUST share. One rule serves them all:
+
+1. A domain that leaves the value out uses the one its main states, when the main states one, and
+   the application's default otherwise.
+2. A main states its values when it is an http-proxy peer: it answers with every one in force for
+   the domain it serves, configured or default ([backends/http-proxy](backends/http-proxy.md)). A
+   main reached as a plain store states nothing, and the domains sharing it are the operator's to
+   configure alike.
+3. A domain whose configured value differs from the one its main states is refused as a
+   configuration error naming both values: the owner stops serving the domain once it has learned
+   the main's. `maxEntryCommands` is a ceiling: a domain MAY configure less than its main states,
+   and is refused only for more.
+4. The values are learned in the background from owner start on, and once per start: a change on
+   the main reaches a client when its owner restarts. Until then a local operation never waits on a
+   store: the chunk size and the symlink policy are the configured one, else the default, and what
+   was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
+   client neither projects nor takes an entry over before it has learned them
+   ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
 
 **Backend object**
 

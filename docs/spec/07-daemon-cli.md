@@ -690,7 +690,9 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   (the last 50 warnings and errors). `cpuPercent` covers the interval since the previous report
   (reports under 1 s apart reuse it; the first is the lifetime average);
 - a domain body from its owner: `name`, `settings {versioning, symlinks, chunkSize, cacheChunkSize,
-  maxUploads, maxChunkBuffers, maxDownloads, readOnly}`, `mainOffline?`, `paused`, `sync {position?,
+  maxUploads, maxChunkBuffers, maxDownloads, readOnly, projectLease, projectQuarantine,
+  projectSettle, maxEntryCommands, batchDelay, projectWidth, domainWide {<key>: "config" | "main" | "default"}}` (`domainWide` says where each
+  domain-wide setting in force comes from), `mainOffline?`, `paused`, `sync {position?,
   pending, inFlight?, treeHead?, cannotFollow?: {entry, reason}}` (the cycle's `status()`,
   [03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner): the position, absent when the
   client has none; the count of pending commands; the number of the entry being created; the tree
@@ -770,7 +772,7 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   uses; TLS implementation when more than one is available), then a domain.
 - Main loop: a number alone edits that domain; `[a]dd`, `[r]emove N`, `[g]lobals`, `[w]rite`,
   `[q]uit`. No answer is ever a letter and a number where a number says enough. A domain prompts for
-  its name, `versioning` (default true), `symlinks`, `readOnly`, sizes, `maxCache` (default 1 GiB),
+  its name, `versioning` (default true), `readOnly`, `maxCache` (default 1 GiB),
   then its backends and its frontends.
 - **Backends** are a list edited the same way (a number edits, `[a]dd`, `[r]emove N`, `[d]one`). An
   empty list goes straight to the prompts of its first backend, since a domain needs one. Per
@@ -785,10 +787,15 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   (default no). A frontend the descriptor does not offer here (another system's, or one its host
   configures itself, such as `android`) is never asked about, and an entry of that type already in
   the file is kept as it is.
+- **Advanced mode** (`tsync config --edit --advanced`). The keys [05 §2.1](05-ops-
+  config.md#21-schema-and-validation) marks *advanced* are asked about only in this mode, after the
+  others of their object. In the default mode they are never asked about and are kept as the file
+  has them. In advanced mode the answer `-` to an optional key removes it from the file, so that the
+  value is again the main's or the application's default; the prompt shows which of the two that is.
 - Prompts: blank keeps the current value; required fields are asked again; secrets are read without
   echo; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
   blank answer to a field with no value writes nothing when the parser applies that default itself,
-  and writes the wizard's own defaults (`versioning`, `symlinks`, `maxCache`, a backend's `role`).
+  and writes the wizard's own defaults (`versioning`, `maxCache`, a backend's `role`).
 - On write: drop per-link settings no backend uses; validate with the parser's own rules
   ([05 §2](05-ops-config.md)) and refuse to write an invalid config (exit 1); write to a temporary
   file **created with mode 0600**, fsync, rename over the config, fsync the directory; tell the user
