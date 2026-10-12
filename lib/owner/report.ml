@@ -228,9 +228,16 @@ let backend t s : R.backend =
 
 let settings t : R.settings =
   let d = t.domain.domain and c = t.domain.config in
+  let (module E : Tsync_sync.Engine.S) = t.engine in
+  let main = E.stated_settings () in
+  (* A configuration its main refuses is shown as configured: the refusal is
+     the cycle's to report. *)
+  let tuning, symlinks =
+    try Config.in_force d main with Fail.E _ -> Config.in_force d None
+  in
   {
     versioning = d.versioning;
-    symlinks = Option.value ~default:Config.default_symlinks d.symlinks;
+    symlinks;
     chunk_size = Option.value ~default:Chunking.default_chunk_size d.chunk_size;
     chunk_size_default = d.chunk_size = None;
     cache_chunk_size =
@@ -240,6 +247,13 @@ let settings t : R.settings =
     max_chunk_buffers = c.max_chunk_buffers;
     max_downloads = c.max_downloads;
     read_only = d.read_only;
+    project_lease = tuning.project_lease;
+    project_quarantine = tuning.project_quarantine;
+    project_settle = tuning.project_settle;
+    max_entry_commands = tuning.max_entry_commands;
+    batch_delay = tuning.batch_delay;
+    project_width = tuning.project_width;
+    domain_wide = Config.sources d main;
   }
 
 let domain_body t : R.domain_body =

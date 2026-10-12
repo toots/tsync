@@ -104,6 +104,21 @@ let symlinks_to_yojson, symlinks_of_yojson =
       | `String s -> Option.map fst (List.find_opt (fun (_, n) -> n = s) cases)
       | _ -> None)
 
+(* 05 §2.1: where each domain-wide setting in force comes from: "config",
+   "main" or "default". *)
+type sources = (string * string) list
+
+let sources_to_yojson, sources_of_yojson =
+  tagged "domainWide"
+    (fun l -> `Assoc (List.map (fun (k, v) -> (k, `String v)) l))
+    (function
+      | `Assoc l ->
+          Some
+            (List.filter_map
+               (function k, `String v -> Some (k, v) | _ -> None)
+               l)
+      | _ -> None)
+
 type settings = {
   versioning : bool;
   symlinks : symlinks;
@@ -114,6 +129,13 @@ type settings = {
   max_chunk_buffers : int; [@key "maxChunkBuffers"]
   max_downloads : int; [@key "maxDownloads"]
   read_only : bool; [@key "readOnly"]
+  project_lease : float; [@key "projectLease"] [@default 30.]
+  project_quarantine : float; [@key "projectQuarantine"] [@default 300.]
+  project_settle : float; [@key "projectSettle"] [@default 600.]
+  max_entry_commands : int; [@key "maxEntryCommands"] [@default 256]
+  batch_delay : float; [@key "batchDelay"] [@default 10.]
+  project_width : int; [@key "projectWidth"] [@default 8]
+  domain_wide : sources; [@key "domainWide"] [@default []]
 }
 [@@deriving yojson { strict = false }]
 

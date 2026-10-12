@@ -236,6 +236,9 @@ module Make (C : Engine_ctx.S) = struct
 
   let is_paused () = Atomic.get paused
 
+  let stated_settings () =
+    match R.stated () with `Stated s -> Some s | `Unstated | `Unknown -> None
+
   let start ?(background = true) () =
     let is_paused = Fs.exists paused_path in
     Atomic.set paused is_paused;

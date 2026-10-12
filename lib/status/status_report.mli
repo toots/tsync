@@ -72,6 +72,10 @@ type self = {
 }
 [@@deriving yojson]
 
+(** Where each domain-wide setting in force comes from (05 §2.1): "config",
+    "main" or "default". *)
+type sources = (string * string) list
+
 type settings = {
   versioning : bool;
   symlinks : [ `Keep | `Follow | `Skip ];
@@ -82,6 +86,13 @@ type settings = {
   max_chunk_buffers : int;
   max_downloads : int;
   read_only : bool;
+  project_lease : float;
+  project_quarantine : float;
+  project_settle : float;
+  max_entry_commands : int;
+  batch_delay : float;
+  project_width : int;
+  domain_wide : sources;
 }
 [@@deriving yojson]
 

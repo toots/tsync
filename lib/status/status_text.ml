@@ -46,6 +46,29 @@ let settings b (s : settings) =
          ^ if s.chunk_size_default then " (default)" else "");
          "cache chunk " ^ isize s.cache_chunk_size;
        ]);
+  (* 05 §2.1: the advanced settings that are not the application's default. *)
+  let advanced =
+    let seconds = Printf.sprintf "%g s" in
+    let wide name key value =
+      match List.assoc_opt key s.domain_wide with
+        | Some "main" ->
+            Some (Printf.sprintf "%s %s (from the main)" name value)
+        | Some "config" -> Some (Printf.sprintf "%s %s" name value)
+        | _ -> None
+    and own name value default =
+      if value = default then None else Some (name ^ " " ^ value)
+    in
+    List.filter_map Fun.id
+      [
+        wide "lease" "projectLease" (seconds s.project_lease);
+        wide "quarantine" "projectQuarantine" (seconds s.project_quarantine);
+        wide "settle" "projectSettle" (seconds s.project_settle);
+        wide "entry" "maxEntryCommands" (string_of_int s.max_entry_commands);
+        own "batch delay" (seconds s.batch_delay) (seconds 10.);
+        own "projection width" (string_of_int s.project_width) "8";
+      ]
+  in
+  if advanced <> [] then row b "  " "advanced" (String.concat ", " advanced);
   row b "  " "concurrency"
     (Printf.sprintf "%s, %s, %s"
        (plural s.max_uploads "upload" "uploads")

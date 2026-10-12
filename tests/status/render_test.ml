@@ -50,6 +50,13 @@ let settings : settings =
     max_chunk_buffers = 4;
     max_downloads = 8;
     read_only = true;
+    project_lease = 30.;
+    project_quarantine = 300.;
+    project_settle = 600.;
+    max_entry_commands = 256;
+    batch_delay = 10.;
+    project_width = 8;
+    domain_wide = [];
   }
 
 let idle_sync =
@@ -261,6 +268,16 @@ let degraded : machine =
             settings =
               {
                 settings with
+                project_settle = 420.;
+                max_entry_commands = 1024;
+                batch_delay = 2.;
+                domain_wide =
+                  [
+                    ("projectLease", "default");
+                    ("projectQuarantine", "default");
+                    ("projectSettle", "main");
+                    ("maxEntryCommands", "config");
+                  ];
                 symlinks = `Follow;
                 chunk_size = mib 4;
                 chunk_size_default = false;

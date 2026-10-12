@@ -51,6 +51,11 @@ val tuning : domain -> Tuning.t
     states them. *)
 val stated : domain -> Tsync_store.Store.domain_settings
 
+(** Where each domain-wide setting in force comes from: "config", "main" or
+    "default". *)
+val sources :
+  domain -> Tsync_store.Store.domain_settings option -> (string * string) list
+
 (** The advanced settings and the symlink policy in force given what the main
     states: the main's values where it states them. INVALID naming both values
     when a configured one differs, or exceeds the main's entry size. *)
