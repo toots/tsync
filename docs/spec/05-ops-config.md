@@ -77,7 +77,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `maxUploads` | int ≥ 0 | 4 | concurrent upload files; 0 means the default |
 | `maxChunkBuffers` | int ≥ 0 | `maxUploads` | *advanced*; chunk bodies in memory across all uploads; also bounds deferred forwards and `tsync mirror` copies; 0 means the default |
 | `maxDownloads` | int ≥ 0 | 8 | concurrent file downloads; 0 means the default |
-| `uplink`, `links` | objects | | [06](06-backends.md); a `links` entry naming a link no backend uses is refused |
+| `uplink`, `links` | objects | | *advanced* but for `uplink.enabled`; [06](06-backends.md); a `links` entry naming a link no backend uses is refused |
 | `domains` | array | required | |
 
 **Domain**
@@ -130,7 +130,7 @@ it unasked. The config editor asks about it only in its advanced mode
 | `type` | required; a known backend type |
 | `name` | required, non-empty, not `.` or `..`, no `/`; unique within the domain **ignoring case** (it names the target's deferred log directory and its counters) |
 | `role` | required: `"main"`, `"replica"`, `"backfill"` or `"readOnly"` ([replication.md](algorithms/replication.md)) |
-| `link` | optional non-blank string, trimmed; default `"wan"`; refused on `type: local` (a local store has no link) |
+| `link` | *advanced*; optional non-blank string, trimmed; default `"wan"`; refused on `type: local` (a local store has no link) |
 | other keys | the driver's declared fields ([backends/](backends/)), each with its declared type. A field declared as a list (for example an `exec` command) takes a JSON array. A local store's `path` is absolute or starts with `~/`. |
 
 **Role validation.** More than one `main` is refused ("a domain has one main"). With no `main`: a `replica` is refused ("a replica is a copy of a source of

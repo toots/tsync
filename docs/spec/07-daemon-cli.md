@@ -767,9 +767,10 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 
 - Edits the raw JSON so that nothing it does not ask about is lost. An existing file that is not
   valid JSON is refused (exit 1).
-- New file: prompts for globals (client name, default the hostname; `maxUploads`; `maxChunkBuffers`,
-  default `maxUploads`; `maxDownloads`; uplink settings; per-link ceilings for links some backend
-  uses; TLS implementation when more than one is available), then a domain.
+- New file: prompts for globals (client name, default the hostname; `maxUploads`; `maxDownloads`;
+  whether the uplink governor is enabled; TLS implementation when more than one is available), then
+  a domain. The advanced mode adds `maxChunkBuffers` (default `maxUploads`), the governor's other
+  settings and the per-link ceilings of the links some backend uses.
 - Main loop: a number alone edits that domain; `[a]dd`, `[r]emove N`, `[g]lobals`, `[w]rite`,
   `[q]uit`. No answer is ever a letter and a number where a number says enough. A domain prompts for
   its name, `versioning` (default true), `readOnly`, `maxCache` (default 1 GiB),
@@ -778,7 +779,8 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   empty list goes straight to the prompts of its first backend, since a domain needs one. Per
   backend: type (default `local`); field prompts from the driver's option spec; role default
   `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
-  from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs).
+  from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs). The advanced mode adds the
+  backend's `link`.
 - **Frontends** are one yes-or-no question per frontend whose descriptor offers it on this system
   ([08 §2.1](08-frontends.md#21-frontend-descriptor) **wizard**), presenting ones first, with the
   descriptor's question. On a domain with no frontend yet the default answer is yes for a presenting
