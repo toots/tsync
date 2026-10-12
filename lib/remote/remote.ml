@@ -230,19 +230,14 @@ module Make (C : Context.S) = struct
         Hashtbl.replace last_version group ts;
         ts)
 
-  (* data-model/backend §2.9: a write of the projection. A main that lacks the
-     manifest's chunks is passed: no version keeps content it does not hold. *)
+  (* data-model/backend §2.9: a write of the projection, failing as its put. *)
   let save_version ?body key =
     if C.versioning then (
       let body = match body with Some _ -> body | None -> store.get_opt key in
       match body with
-        | Some body when Manifest.is_manifest body -> (
+        | Some body when Manifest.is_manifest body ->
             let group = group_of key in
-            try
-              store.put (Key.version d ~group ~ns:(next_version_ts group)) body
-            with Fail.E { kind = Missing_chunks _; _ } as e ->
-              Log.warn "no version of %s can be saved: %s" (Key.to_string key)
-                (Printexc.to_string e))
+            store.put (Key.version d ~group ~ns:(next_version_ts group)) body
         | _ -> ())
 
   let missing_of = function

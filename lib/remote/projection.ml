@@ -32,28 +32,38 @@ module Make (C : Context.S) = struct
         | None -> invalid_arg "Projection: a slot that was not read"
 
   (* §6.1: a version is saved only of the content the command replaces, so an
-     entry applied again saves no second one. *)
+     entry applied again saves no second one. §2.9: a main that lacks the
+     manifest's chunks is passed, no version keeps content it does not hold. *)
   let save_replaced ~write p held before =
     match (held, Option.bind before Log_entry.identity) with
       | `Manifest (m, body), Some identity
         when Log_entry.identity_of m = identity ->
-          write (fun () -> R.save_version ~body (slot p))
+          write (fun () ->
+              try R.save_version ~body (slot p)
+              with Fail.E { kind = Missing_chunks _; _ } as e ->
+                Log.warn "no version of %s can be saved: %s"
+                  (Key.to_string (slot p))
+                  (Printexc.to_string e))
       | _ -> ()
 
   let apply ?(width = project_width) ~before_write
       (commands : Log_entry.command list) =
-    (* publication §4.6: once a check or a write fails nothing more is issued. *)
-    let failed = Atomic.make None in
-    let stopped () = Option.iter raise (Atomic.get failed) in
+    (* publication §4.6: once the lease test fails no write is issued. §6.1:
+       once a write fails no command is started, and one that saved its
+       version still writes its slot. *)
+    let lease_lost = Atomic.make None and failed = Atomic.make None in
     let write f =
-      stopped ();
-      before_write ();
+      Option.iter raise (Atomic.get lease_lost);
+      (try before_write ()
+       with e ->
+         Atomic.set lease_lost (Some e);
+         raise e);
       f ()
     in
     let each f l =
       Rt.iter_bounded ~width
         (fun x ->
-          stopped ();
+          Option.iter raise (Atomic.get failed);
           try f x
           with e ->
             Atomic.set failed (Some e);

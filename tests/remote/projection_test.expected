@@ -6,10 +6,14 @@
   8 in flight, slots read together true: the same true, several writes in flight true
 a refused write stops its pass: it fails true, no more than 8 writes were issued true
 == a version that cannot be saved
-  before: gone2=3, gone=3, kept2=3, kept=3; versions kept: 0
-  the link down: failed; gone2=3, gone=3, kept2=3, kept=3; versions kept: 0
-  applied again, the link up: projected; gone2=3, kept2=3, kept=6; versions kept: 2
-  the main lacks the chunks: projected; kept2=6, kept=6; versions kept: 2
+  before: gone2=3, gone3=3, gone=3, kept2=3, kept=3; versions kept: 0
+  the link down: failed, transient/link; gone2=3, gone3=3, gone=3, kept2=3, kept=3; versions kept: 0
+  applied again, the link up: projected; gone2=3, gone3=3, kept2=3, kept=6; versions kept: 2
+  the main lacks the chunks: projected; gone3=3, kept2=6, kept=6; versions kept: 2
+  versions the main refused and the projection passed: 2
+  a version saved, its delete failing: failed, transient/link; gone3=3, kept2=6, kept=6; versions kept: 3
+  applied again: projected; kept2=6, kept=6; versions kept: 4
+  that file's versions: 2, of one body: true
 writes: 5
 == two folders and a file
   #aaaaaaaaaaaa-1/one = 13 bytes
