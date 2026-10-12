@@ -1093,21 +1093,24 @@ module Make (C : Engine_ctx.S) = struct
      cycles, never inside one. *)
   let project () =
     let apply ~t ~generation (e : Log_store.entry) commands =
-      let checked = ref neg_infinity in
+      let checked = ref neg_infinity and taken_over = ref false in
       (* The fibers writing one pass share the check: one makes it, the others
-         wait for its answer. *)
+         wait for its answer, a failure included. *)
       let checking = Rt.Fmutex.create () in
       let before_write () =
         Rt.Fmutex.with_lock checking (fun () ->
-            if Rt.boottime () -. !checked >= project_lease /. 2. then (
+            if
+              (not !taken_over)
+              && Rt.boottime () -. !checked >= project_lease /. 2.
+            then (
               let now = Rt.boottime () in
-              if
+              taken_over :=
                 Log_store.tree_head log <> t
-                || fst (Log_store.takeover log e.n) <> generation
-              then
-                Fail.raise_ Fail.Link
-                  "the projection of entry %d was taken over" e.n;
-              checked := now))
+                || fst (Log_store.takeover log e.n) <> generation;
+              checked := now);
+            if !taken_over then
+              Fail.raise_ Fail.Link "the projection of entry %d was taken over"
+                e.n)
       in
       P.apply ~before_write commands;
       before_write ();
@@ -1218,10 +1221,16 @@ module Make (C : Engine_ctx.S) = struct
     let cursor = ref None
     and last = ref neg_infinity
     and dirty_since = ref None
-    (* Whether a full entry pending is pushed before the delay: not after a
-       push that committed nothing, whose commands wait for their uploads. *)
-    and early = ref true
     and failing = ref None in
+    (* publication §4.5, "when": how long a push waits from [dirty_since]. The
+       commands whose upload is owed are not pushable and do not fill an entry. *)
+    let push_delay () =
+      if
+        Sync_state.pending_count sync_state - Dqueue.pending uploads
+        >= Log_entry.max_commands
+      then retry_floor
+      else batch_delay
+    in
     let rec loop () =
       Stop.check ();
       if Atomic.get paused then (
@@ -1231,7 +1240,8 @@ module Make (C : Engine_ctx.S) = struct
         let since = Rt.Signal.version cycle_signal in
         let wait =
           match !dirty_since with
-            | Some at -> max 0.05 (min sweep (batch_delay -. (Rt.now () -. at)))
+            | Some at ->
+                max 0.05 (min sweep (push_delay () -. (Rt.now () -. at)))
             | None -> sweep
         in
         (try
@@ -1253,11 +1263,7 @@ module Make (C : Engine_ctx.S) = struct
            then dirty_since := Some (Rt.now ());
            let push_due =
              match !dirty_since with
-               | Some at ->
-                   Rt.now () -. at >= batch_delay
-                   || !early
-                      && Sync_state.pending_count sync_state
-                         >= Log_entry.max_commands
+               | Some at -> Rt.now () -. at >= push_delay ()
                | None -> false
            in
            let asked = Atomic.exchange asked false in
@@ -1267,14 +1273,13 @@ module Make (C : Engine_ctx.S) = struct
                 && (token <> !cursor || Rt.now () -. !last >= sweep)
            then (
              last := Rt.now ();
-             let ran = run_cycle ~push_now:(asked || push_due) () in
+             ignore (run_cycle ~push_now:(asked || push_due) ());
              cursor := token;
-             if asked || push_due then (
-               early := ran.committed > 0;
+             if asked || push_due then
                dirty_since :=
                  if Sync_state.pending_count sync_state > 0 then
                    Some (Rt.now ())
-                 else None))
+                 else None)
          with
           | () ->
               if !failing <> None then Log.info "cycles run again";

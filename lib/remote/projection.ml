@@ -26,7 +26,10 @@ module Make (C : Context.S) = struct
     List.iter
       (fun (key, body) -> Hashtbl.replace read key (classify body))
       (Tsync_store.Store.read_keys store (List.map slot places));
-    fun p -> Option.value ~default:`Nothing (Hashtbl.find_opt read (slot p))
+    fun p ->
+      match Hashtbl.find_opt read (slot p) with
+        | Some holds -> holds
+        | None -> invalid_arg "Projection: a slot that was not read"
 
   (* §6.1: a version is saved only of the content the command replaces, so an
      entry applied again saves no second one. *)
@@ -39,17 +42,24 @@ module Make (C : Context.S) = struct
 
   let apply ?(width = project_width) ~before_write
       (commands : Log_entry.command list) =
-    (* publication §4.6: once a check fails no write is issued any more. *)
+    (* publication §4.6: once a check or a write fails nothing more is issued. *)
     let failed = Atomic.make None in
+    let stopped () = Option.iter raise (Atomic.get failed) in
     let write f =
-      Option.iter raise (Atomic.get failed);
-      (try before_write ()
-       with e ->
-         Atomic.set failed (Some e);
-         raise e);
+      stopped ();
+      before_write ();
       f ()
     in
-    let each f l = Rt.iter_bounded ~width:(max 1 width) f l in
+    let each f l =
+      Rt.iter_bounded ~width
+        (fun x ->
+          stopped ();
+          try f x
+          with e ->
+            Atomic.set failed (Some e);
+            raise e)
+        l
+    in
     let leaving =
       List.filter_map
         (function
@@ -80,29 +90,29 @@ module Make (C : Context.S) = struct
                         { parent = place.parent; aname = place.name })))
         | _ -> ())
       commands;
-    let replaced =
-      if C.versioning then
-        List.filter_map
-          (function
-            | `File (p, Some _, Some (Log_entry.Known _)) -> Some p | _ -> None)
-          commands
-      else []
+    (* §6.1 Reads: the slot of a command that can save a version. *)
+    let replaces : Log_entry.command -> Algebra.place option = function
+      | `File (p, Some _, Some (Known _)) when C.versioning -> Some p
+      | _ -> None
     in
-    let held = held_at replaced in
+    let held = held_at (List.filter_map replaces commands) in
     each
-      (function
-        | `File (p, before, Some (Log_entry.Known m)) ->
-            save_replaced ~write p (held p) before;
-            let m = if m.name = p.name then m else Manifest.rename m p.name in
-            write (fun () -> R.put_manifest ~save:false (slot p) m)
-        | `File (p, _, Some (Identity _ | Unknown)) ->
-            Fail.corrupt "%s: an entry's value after is not a manifest" p.name
-        | `Folder (i, _, Some place) ->
-            write (fun () ->
-                store.put (slot place)
-                  (Bigstring.of_string
-                     (Folder.marker_body { name = place.name; id = i })))
-        | _ -> ())
+      (fun (c : Log_entry.command) ->
+        match c with
+          | `File (p, before, Some (Log_entry.Known m)) ->
+              Option.iter
+                (fun p -> save_replaced ~write p (held p) before)
+                (replaces c);
+              let m = if m.name = p.name then m else Manifest.rename m p.name in
+              write (fun () -> R.put_manifest ~save:false (slot p) m)
+          | `File (p, _, Some (Identity _ | Unknown)) ->
+              Fail.corrupt "%s: an entry's value after is not a manifest" p.name
+          | `Folder (i, _, Some place) ->
+              write (fun () ->
+                  store.put (slot place)
+                    (Bigstring.of_string
+                       (Folder.marker_body { name = place.name; id = i })))
+          | _ -> ())
       commands;
     each
       (function

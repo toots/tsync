@@ -21,9 +21,22 @@ let parallel ~width ~together =
   let inner = Local.create ~name:"main" (Filename.concat root "store") in
   let read = ref [] and reading = Mutex.create () in
   let note keys = Mutex.protect reading (fun () -> read := keys @ !read) in
+  (* A write takes long enough for the others of its pass to start. *)
+  let in_flight = Atomic.make 0 and peak = Atomic.make 0 in
+  let writing f =
+    let now = Atomic.fetch_and_add in_flight 1 + 1 in
+    if now > Atomic.get peak then Atomic.set peak now;
+    Fun.protect
+      ~finally:(fun () -> Atomic.decr in_flight)
+      (fun () ->
+        Rt.sleep 0.005;
+        f ())
+  in
   let main =
     {
       inner with
+      put = (fun ?mode k b -> writing (fun () -> inner.put ?mode k b));
+      delete = (fun k -> writing (fun () -> inner.delete k));
       get_opt =
         (fun k ->
           note [k];
@@ -77,6 +90,7 @@ let parallel ~width ~together =
       `File (at a "gone", None, Some gone);
     ];
   Mutex.protect reading (fun () -> read := []);
+  Atomic.set peak 0;
   P.apply ~width ~before_write:ignore
     [
       `File (at a "new", None, Some fresh);
@@ -87,6 +101,7 @@ let parallel ~width ~together =
       `Folder (b, Some (top "b"), Some (top "a"));
     ];
   let slots = Mutex.protect reading (fun () -> !read) in
+  let peak = Atomic.get peak in
   let records =
     P.fold
       (fun acc -> function
@@ -106,30 +121,95 @@ let parallel ~width ~together =
   let versions =
     List.fold_left (fun n (_, l) -> n + List.length l) 0 (R.all_versions ())
   in
-  Printf.sprintf
-    "%s; versions kept: %d; slots read: %d, each once: %b, the new file's: %b"
-    (String.concat ", " (List.sort compare records))
-    versions (List.length slots)
-    (List.length (List.sort_uniq compare slots) = List.length slots)
-    (List.mem (Key.child d a "new") slots)
+  ( Printf.sprintf
+      "%s; versions kept: %d; slots read: %d, each once: %b, the new file's: %b"
+      (String.concat ", " (List.sort compare records))
+      versions (List.length slots)
+      (List.length (List.sort_uniq compare slots) = List.length slots)
+      (List.mem (Key.child d a "new") slots),
+    peak )
+
+(* One write of a pass is refused: the writes issued, of the 40 it holds. *)
+let refused () =
+  let root = Filename.concat root "refused" in
+  let d = Domain_name.v "photos" in
+  let inner = Local.create ~name:"main" (Filename.concat root "store") in
+  let issued = Atomic.make 0 and refusing = ref false in
+  let main =
+    {
+      inner with
+      put =
+        (fun ?mode k b ->
+          if !refusing then (
+            let first = Atomic.fetch_and_add issued 1 = 0 in
+            Rt.sleep 0.005;
+            if first then Fail.raise_ Fail.Corrupt "refused");
+          inner.put ?mode k b);
+    }
+  in
+  let knowledge =
+    { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
+  in
+  let composite =
+    Composite.create ~domain:d
+      ~data_dir:(Filename.concat root "data")
+      ~owner:true ~poke:ignore ~knowledge
+      [{ name = "main"; role = Main; store = main }]
+  in
+  let module C = struct
+    let domain = d
+    let store = Composite.store composite
+    let composite = composite
+    let versioning = true
+    let chunk_size_config = Some 8
+    let max_downloads = 8
+    let max_chunk_buffers = 4
+  end in
+  let module R = Remote.Make (C) in
+  let module P = Projection.Make (C) in
+  let content =
+    Log_entry.Known
+      (R.upload_chunks ~name:"f" ~size:4 ~chunk_size:8 ~mtime:1. (fun _ ->
+           Bytes (Bigstring.of_string "body")))
+  in
+  refusing := true;
+  let failed =
+    match
+      P.apply ~before_write:ignore
+        (List.init 40 (fun i ->
+             `File
+               ( { Algebra.parent = Folder_id.root; name = string_of_int i },
+                 None,
+                 Some content )))
+    with
+      | () -> false
+      | exception Fail.E _ -> true
+  in
+  Printf.sprintf "it fails %b, no more than %d writes were issued %b" failed
+    Projection.project_width
+    (Atomic.get issued <= Projection.project_width)
 
 let () =
   Fs.rm_rf root;
   Rt.run_sync (fun () ->
-      let one_by_one = parallel ~width:1 ~together:false in
+      let one_by_one, peak = parallel ~width:1 ~together:false in
       p
         "== one entry of every kind, one write in flight, slots read one by one\n";
       p "  %s\n" one_by_one;
+      p "  writes in flight at most: %d\n" peak;
       List.iter
         (fun (width, together) ->
-          p "  %d in flight, slots read together %b: the same %b\n" width
-            together
-            (parallel ~width ~together = one_by_one))
+          let records, peak = parallel ~width ~together in
+          p
+            "  %d in flight, slots read together %b: the same %b, several \
+             writes in flight %b\n"
+            width together (records = one_by_one) (peak > 1))
         [
           (1, true);
           (Projection.project_width, false);
           (Projection.project_width, true);
         ];
+      p "a refused write stops its pass: %s\n" (refused ());
       let d = Domain_name.v "photos" in
       let main = Local.create ~name:"main" (Filename.concat root "store") in
       let knowledge =
