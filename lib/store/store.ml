@@ -154,6 +154,15 @@ let read_many s (entries : entry list) =
                   List.map (fun k -> (k, s.get_opt k)) keys)
           (batches [] [] 0 0 entries)
 
+(* Keys no listing gave: their sizes are unknown, so only the key cap splits
+   them. *)
+let read_keys s keys =
+  read_many s
+    (List.map
+       (fun key ->
+         { key; size = 0; last_modified = 0.; etag = None; checksum = None })
+       keys)
+
 let count_up s n =
   Option.iter (fun t -> ignore (Atomic.fetch_and_add t.uploaded n)) s.traffic
 

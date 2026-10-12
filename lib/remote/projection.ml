@@ -1,5 +1,7 @@
 open Tsync_core
 
+let project_width = 8
+
 module Make (C : Context.S) = struct
   module R = Remote.Make (C)
   module T = Tree.Make (C)
@@ -8,70 +10,107 @@ module Make (C : Context.S) = struct
   let store = C.store
   let slot (p : Algebra.place) = Key.child d p.parent p.name
 
-  let held p =
-    match store.get_opt (slot p) with
-      | None -> `Nothing
-      | Some body -> (
-          match Manifest.of_body body with
-            | Some m -> `Manifest m
-            | None -> (
-                match Folder.classify_marker (Bigstring.to_string body) with
-                  | `Marker m -> `Marker m.id
-                  | `Unclassifiable | `Not_marker -> `Other))
+  let classify = function
+    | None -> `Nothing
+    | Some body -> (
+        match Manifest.of_body body with
+          | Some m -> `Manifest (m, body)
+          | None -> (
+              match Folder.classify_marker (Bigstring.to_string body) with
+                | `Marker m -> `Marker m.id
+                | `Unclassifiable | `Not_marker -> `Other))
+
+  (* §6.1 Reads: what the slots of one pass hold, read together. *)
+  let held_at places =
+    let read = Hashtbl.create 64 in
+    List.iter
+      (fun (key, body) -> Hashtbl.replace read key (classify body))
+      (Tsync_store.Store.read_keys store (List.map slot places));
+    fun p -> Option.value ~default:`Nothing (Hashtbl.find_opt read (slot p))
 
   (* §6.1: a version is saved only of the content the command replaces, so an
      entry applied again saves no second one. *)
-  let save_replaced ~write p before =
-    match (held p, Option.bind before Log_entry.identity) with
-      | `Manifest m, Some identity when Log_entry.identity_of m = identity ->
-          write (fun () -> R.save_version (slot p))
+  let save_replaced ~write p held before =
+    match (held, Option.bind before Log_entry.identity) with
+      | `Manifest (m, body), Some identity
+        when Log_entry.identity_of m = identity ->
+          write (fun () -> R.save_version ~body (slot p))
       | _ -> ()
 
-  let apply ~before_write (commands : Log_entry.command list) =
+  let apply ?(width = project_width) ~before_write
+      (commands : Log_entry.command list) =
+    (* publication §4.6: once a check fails no write is issued any more. *)
+    let failed = Atomic.make None in
     let write f =
-      before_write ();
+      Option.iter raise (Atomic.get failed);
+      (try before_write ()
+       with e ->
+         Atomic.set failed (Some e);
+         raise e);
       f ()
     in
-    let each f = List.iter f commands in
-    each (function
-      | `File (p, before, None) -> (
-          match held p with
-            | `Manifest _ ->
-                save_replaced ~write p before;
-                write (fun () -> ignore (store.delete (slot p)))
-            | `Marker _ | `Other | `Nothing -> ())
-      | `Folder (i, Some place, after) when after <> Some place -> (
-          match held place with
-            | `Marker j when Folder_id.equal i j ->
-                write (fun () -> ignore (store.delete (slot place)))
-            | _ -> ())
-      | _ -> ());
-    each (function
-      | `Folder (i, _, Some (place : Algebra.place)) ->
-          write (fun () ->
-              store.put (Key.anchor d i)
-                (Bigstring.of_string
-                   (Folder.anchor_body
-                      { parent = place.parent; aname = place.name })))
-      | _ -> ());
-    each (function
-      | `File (p, before, Some (Log_entry.Known m)) ->
-          save_replaced ~write p before;
-          let m = if m.name = p.name then m else Manifest.rename m p.name in
-          write (fun () -> R.put_manifest ~save:false (slot p) m)
-      | `File (p, _, Some (Identity _ | Unknown)) ->
-          Fail.corrupt "%s: an entry's value after is not a manifest" p.name
-      | `Folder (i, _, Some place) ->
-          write (fun () ->
-              store.put (slot place)
-                (Bigstring.of_string
-                   (Folder.marker_body { name = place.name; id = i })))
-      | _ -> ());
-    each (function
-      | `Folder (i, _, None) ->
-          write (fun () -> ignore (store.delete (Key.index d i)));
-          write (fun () -> ignore (store.delete (Key.anchor d i)))
-      | _ -> ())
+    let each f l = Rt.iter_bounded ~width:(max 1 width) f l in
+    let leaving =
+      List.filter_map
+        (function
+          | `File (p, before, None) -> Some (p, `File before)
+          | `Folder (i, Some place, after) when after <> Some place ->
+              Some (place, `Folder i)
+          | _ -> None)
+        commands
+    in
+    let held = held_at (List.map fst leaving) in
+    each
+      (fun (p, leaves) ->
+        match (leaves, held p) with
+          | `File before, (`Manifest _ as holds) ->
+              save_replaced ~write p holds before;
+              write (fun () -> ignore (store.delete (slot p)))
+          | `Folder i, `Marker j when Folder_id.equal i j ->
+              write (fun () -> ignore (store.delete (slot p)))
+          | _ -> ())
+      leaving;
+    each
+      (function
+        | `Folder (i, _, Some (place : Algebra.place)) ->
+            write (fun () ->
+                store.put (Key.anchor d i)
+                  (Bigstring.of_string
+                     (Folder.anchor_body
+                        { parent = place.parent; aname = place.name })))
+        | _ -> ())
+      commands;
+    let replaced =
+      if C.versioning then
+        List.filter_map
+          (function
+            | `File (p, Some _, Some (Log_entry.Known _)) -> Some p | _ -> None)
+          commands
+      else []
+    in
+    let held = held_at replaced in
+    each
+      (function
+        | `File (p, before, Some (Log_entry.Known m)) ->
+            save_replaced ~write p (held p) before;
+            let m = if m.name = p.name then m else Manifest.rename m p.name in
+            write (fun () -> R.put_manifest ~save:false (slot p) m)
+        | `File (p, _, Some (Identity _ | Unknown)) ->
+            Fail.corrupt "%s: an entry's value after is not a manifest" p.name
+        | `Folder (i, _, Some place) ->
+            write (fun () ->
+                store.put (slot place)
+                  (Bigstring.of_string
+                     (Folder.marker_body { name = place.name; id = i })))
+        | _ -> ())
+      commands;
+    each
+      (function
+        | `Folder (i, _, None) ->
+            write (fun () -> ignore (store.delete (Key.index d i)));
+            write (fun () -> ignore (store.delete (Key.anchor d i)))
+        | _ -> ())
+      commands
 
   (* 05 §4.7: an enumeration of the manifest area, so a folder is found by
      its namespace wherever its marker is. *)

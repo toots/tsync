@@ -1,3 +1,8 @@
+== one entry of every kind, one write in flight, slots read one by one
+  /a is aaaaaaaaaaaa-2, /b is aaaaaaaaaaaa-1, aaaaaaaaaaaa-1/c is aaaaaaaaaaaa-3, aaaaaaaaaaaa-1/keep=6, aaaaaaaaaaaa-1/new=5; versions kept: 2; slots read: 5, each once: true, the new file's: false
+  1 in flight, slots read together true: the same true
+  8 in flight, slots read together false: the same true
+  8 in flight, slots read together true: the same true
 writes: 5
 == two folders and a file
   #aaaaaaaaaaaa-1/one = 13 bytes

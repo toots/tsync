@@ -233,11 +233,14 @@ module Make (C : Context.S) = struct
 
   (* Best effort within [snapshot_deadline]: a failed snapshot is logged and
      never blocks the write. *)
-  let save_version key =
+  let save_version ?body key =
     if C.versioning then (
       try
         Rt.with_timeout ~detach:true snapshot_deadline (fun () ->
-            match store.get_opt key with
+            let body =
+              match body with Some _ -> body | None -> store.get_opt key
+            in
+            match body with
               | Some body when Manifest.is_manifest body ->
                   let group = group_of key in
                   store.put

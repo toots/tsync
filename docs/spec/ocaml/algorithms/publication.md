@@ -21,14 +21,14 @@ Not normative.
 | Fetch (§4.3) | `Cycle.fetch`, over `Log_store.read_entries` |
 | Arrive (§4.4) | `Cycle.arrive`, `merge_and_enact`, `steps_of`, `run_arrival`, `apply_step` |
 | Push and the choice of a batch (§4.5) | `Cycle.choose_batch`, `push`, `commit`, `won`, `chunks_refused` |
-| Projection (§4.6) | `Projection.apply` (`lib/remote`, the four passes); `Cycle.project` (who, the lease test, the settle and the quarantine) |
+| Projection (§4.6) | `Projection.apply` (`lib/remote`, the four passes, each reading its slots through `Store.read_keys` and writing `project_width` at a time); `Cycle.project` (who, the lease test, the settle and the quarantine) |
 | State read and arrival by state (§4.7) | `Projection.fold` (the walk of 05 §4.7), `Cycle.state_read`, `arrive_by_state` |
 | Crash recovery (§4.8) | `Cycle.recover_local` (steps 1 to 5), `complete_arrival`, `recover_in_flight`; called from `Engine.recover` |
 | Log retention (§4.9) | `Gc_plan.log`, `takeovers`; `Retention.expire` |
 | The lazy tree (§4.11) | `Cycle.pull_folder`, `push_position`, `views_of`, `commit_position`; positions beside the pull marker (`folder_position`) |
 | Bulk publishers (§4.12) | `Bulk` (`install`, `folder`, `await`), `Import`, `Rsync` |
 | The cycle (§4) | `Cycle.run_cycle`, `cycle_loop`; `Engine.resync`, `drain`, `poll` |
-| Parameters (§7) | constants at the top of `cycle.ml`; `Log_entry.max_bytes`, `max_commands`; `Log_store.retention`, `cursor_interval` |
+| Parameters (§7) | constants at the top of `cycle.ml`; `Log_entry.max_bytes`, `max_commands`; `Projection.project_width`; `Log_store.retention`, `cursor_interval` |
 
 `Engine.Make (C)` is one functor chain, each layer including the one below: `Local_ops`, `Uploads`,
 `Cycle`, `Bulk`, `Import`, `Rsync`, then `Engine` (the change feed, start and drain, status).
@@ -38,6 +38,8 @@ Not normative.
 - **The retry ladder of a store write is not under the lease test.** `Cycle.project` tests the
   lease before each record write and at least every `PROJECT_LEASE / 2`; a driver's own retries of
   that write are not re-tested. The quarantine (5 min) is what covers a write that lands late.
+  The fibers writing one pass make the test one at a time, under a fiber mutex, and
+  `Projection.apply` issues no write once it failed for one of them.
 - **A write whose answer was lost is repeated**, not read back first (§4.6). Applying is
   idempotent, so the repeat writes the same record.
 - **A parked folder can be listed.** `.tsync-park-<id>` is a real name of the root, escaped in the
