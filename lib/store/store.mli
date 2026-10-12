@@ -26,6 +26,7 @@ type domain_settings = {
   quarantine : float;
   settle : float;
   entry_commands : int;
+  projector : string option;
 }
 
 val policies : (string * [ `Keep | `Follow | `Skip ]) list

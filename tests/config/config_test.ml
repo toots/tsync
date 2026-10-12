@@ -117,6 +117,7 @@ let () =
         quarantine = 200.;
         settle = 420.;
         entry_commands = 1024;
+        projector = None;
       }
     in
     let wire =

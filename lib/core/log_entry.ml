@@ -84,7 +84,7 @@ let manifest_of_json : Yojson.Safe.t -> (value option, string) result = function
         | None -> Error "a manifest")
   | _ -> Error "a manifest"
 
-type t = { author : string; commands : command list }
+type t = { author : string; projector : string option; commands : command list }
 
 let command_to_json (c : command) : Yojson.Safe.t =
   let before, after =
@@ -140,7 +140,13 @@ let decode body =
               match (List.assoc_opt "author" fields, commands) with
                 | _, Error what -> `Corrupt what
                 | Some (`String author), Ok commands ->
-                    if distinct_keys commands then `Entry { author; commands }
+                    let projector =
+                      match List.assoc_opt "projector" fields with
+                        | Some (`String p) -> Some p
+                        | _ -> None
+                    in
+                    if distinct_keys commands then
+                      `Entry { author; projector; commands }
                     else `Corrupt "commands on distinct keys"
                 | _ -> `Corrupt "an author")
           | _ -> `Corrupt "a version")
@@ -169,11 +175,11 @@ let encode t =
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [
-           ("v", `Int 1);
-           ("author", `String t.author);
-           ("commands", `List (List.map command_to_json t.commands));
-         ])
+         ([("v", `Int 1); ("author", `String t.author)]
+         @ (match t.projector with
+           | Some p -> [("projector", `String p)]
+           | None -> [])
+         @ [("commands", `List (List.map command_to_json t.commands))]))
   in
   let sorted l =
     List.sort
@@ -183,6 +189,7 @@ let encode t =
   (match decode body with
     | `Entry read
       when read.author = t.author
+           && read.projector = t.projector
            && sorted read.commands = sorted (List.map as_read t.commands) ->
         ()
     | _ -> Fail.invalid "a log entry that does not read back as its batch");

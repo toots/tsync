@@ -16,6 +16,8 @@ let fields =
       f ~secret:true ~check:secret_length "secret" "Shared secret" String;
       f ~default:"false" "shares" "Serve share links" Bool;
       f ~default:"false" "readOnly" "Read-only" Bool;
+      f ~default:"true" "projectCommits" "Project the commits it receives" Bool;
+      f "maxEntryCommands" "Changes in one log entry" Int;
       f "max_put_body" "Largest PUT body" Size;
       f "max_bulk_body" "Largest bulk body" Size;
       f "max_body_memory" "Body memory" Size;

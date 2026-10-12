@@ -15,21 +15,23 @@ type domain_settings = {
   quarantine : float;
   settle : float;
   entry_commands : int;
+  projector : string option;
 }
 
 let policies = [("keep", `Keep); ("follow", `Follow); ("skip", `Skip)]
 
 let domain_settings_to_json s : Yojson.Safe.t =
   `Assoc
-    [
-      ("chunkSize", `Int s.chunk);
-      ( "symlinks",
-        `String (fst (List.find (fun (_, p) -> p = s.symlinks) policies)) );
-      ("projectLease", `Float s.lease);
-      ("projectQuarantine", `Float s.quarantine);
-      ("projectSettle", `Float s.settle);
-      ("maxEntryCommands", `Int s.entry_commands);
-    ]
+    ([
+       ("chunkSize", `Int s.chunk);
+       ( "symlinks",
+         `String (fst (List.find (fun (_, p) -> p = s.symlinks) policies)) );
+       ("projectLease", `Float s.lease);
+       ("projectQuarantine", `Float s.quarantine);
+       ("projectSettle", `Float s.settle);
+       ("maxEntryCommands", `Int s.entry_commands);
+     ]
+    @ match s.projector with Some p -> [("projector", `String p)] | None -> [])
 
 let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
   | `Assoc l -> (
@@ -62,7 +64,27 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
             Some settle,
             Some entry_commands )
           when 0. < lease && lease < quarantine && quarantine < settle ->
-            Some { chunk; symlinks; lease; quarantine; settle; entry_commands }
+            let projector =
+              match List.assoc_opt "projector" l with
+                | Some (`String p)
+                  when String.length p = 32
+                       && String.for_all
+                            (function
+                              | '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+                            p ->
+                    Some p
+                | _ -> None
+            in
+            Some
+              {
+                chunk;
+                symlinks;
+                lease;
+                quarantine;
+                settle;
+                entry_commands;
+                projector;
+              }
         | _ -> None)
   | _ -> None
 

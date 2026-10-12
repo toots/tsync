@@ -169,6 +169,7 @@ let engine t =
   end in
   (module Engine.Make (C) : Engine.S)
 
+let client_uuid t = Tsync_checkout.Identity.client_uuid t.data_dir
 let store t = Composite.store t.composite
 
 (* 05 §3.1: the disk-space record of the writable local member with the least

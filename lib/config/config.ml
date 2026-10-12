@@ -537,6 +537,7 @@ let stated (d : domain) : Tsync_store.Store.domain_settings =
     quarantine = t.project_quarantine;
     settle = t.project_settle;
     entry_commands = t.max_entry_commands;
+    projector = None;
   }
 
 (* 05 §2.1, domain-wide settings: the main's where it states them, and a

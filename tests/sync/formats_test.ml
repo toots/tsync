@@ -97,7 +97,7 @@ let () =
     ]
   in
   let author = "3f9a0c1b2d4e5f60718293a4b5c6d7e8" in
-  let body = Log_entry.encode { author; commands = batch } in
+  let body = Log_entry.encode { author; projector = None; commands = batch } in
   let shown =
     (* The manifest bodies are binary: only their place in the object shows. *)
       match Yojson.Safe.from_string body with
@@ -144,12 +144,14 @@ let () =
       | exception Fail.E e -> "refused: " ^ e.reason
   in
   p "an empty batch: %s\n"
-    (refused (fun () -> Log_entry.encode { author; commands = [] }));
+    (refused (fun () ->
+         Log_entry.encode { author; projector = None; commands = [] }));
   p "two commands on one key: %s\n"
     (refused (fun () ->
          Log_entry.encode
            {
              author;
+             projector = None;
              commands =
                [
                  `File (at "a", None, Some (Known one));
@@ -159,7 +161,11 @@ let () =
   p "a value after that is not a manifest: %s\n"
     (refused (fun () ->
          Log_entry.encode
-           { author; commands = [`File (at "a", None, Some Unknown)] }));
+           {
+             author;
+             projector = None;
+             commands = [`File (at "a", None, Some Unknown)];
+           }));
   List.iter
     (fun (what, body) ->
       p "%-34s %s\n" what

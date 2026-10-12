@@ -46,6 +46,9 @@ val context :
   t ->
   (module Tsync_remote.Context.S)
 
+(** This host's client uuid: the author of what its owners commit. *)
+val client_uuid : t -> string
+
 (** The composite store. *)
 val store : t -> Store.t
 

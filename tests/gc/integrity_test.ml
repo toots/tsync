@@ -73,7 +73,7 @@ let () =
       let commit ?(project = true) n commands =
         ignore
           (Log_store.create_entry log n
-             (Log_entry.encode { author = "a"; commands }));
+             (Log_entry.encode { author = "a"; projector = None; commands }));
         if project then (
           P.apply ~before_write:ignore commands;
           Log_store.raise_tree_head log n)
