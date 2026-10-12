@@ -230,7 +230,7 @@ let settings t : R.settings =
   let d = t.domain.domain and c = t.domain.config in
   {
     versioning = d.versioning;
-    symlinks = d.symlinks;
+    symlinks = Option.value ~default:Config.default_symlinks d.symlinks;
     chunk_size = Option.value ~default:Chunking.default_chunk_size d.chunk_size;
     chunk_size_default = d.chunk_size = None;
     cache_chunk_size =
