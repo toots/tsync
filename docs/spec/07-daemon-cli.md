@@ -780,7 +780,8 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   backend: type (default `local`); field prompts from the driver's option spec; role default
   `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
   from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs). The advanced mode adds the
-  backend's `link`.
+  backend's `link`. A frontend's *advanced* options are asked about in the advanced mode only, with
+  its other options.
 - **Frontends** are one yes-or-no question per frontend whose descriptor offers it on this system
   ([08 §2.1](08-frontends.md#21-frontend-descriptor) **wizard**), presenting ones first, with the
   descriptor's question. On a domain with no frontend yet the default answer is yes for a presenting

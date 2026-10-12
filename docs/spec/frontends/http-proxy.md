@@ -51,6 +51,8 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
 | `shares` | bool | false | per domain | never inherited; serve `/s/` for this domain |
 | `readOnly` | bool | false | per domain | never inherited |
+| `projectCommits` | bool | true | per domain | *advanced*; never inherited. The serving host's owner of the domain projects the entries created through this listener ([publication §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)): the listener states that owner as the domain's projector and wakes its cycle when a create of a log entry is won. `false` leaves each entry to its author |
+| `maxEntryCommands` | int ≥ 1 | 4096 with `projectCommits`, else the domain's | per domain | *advanced*; never inherited. The entry size the listener states to its clients ([05 §2.1](../05-ops-config.md#21-schema-and-validation), domain-wide settings): a projection that crosses no network takes thousands of commands in the time a remote one takes a few hundred |
 
 - An empty string equals unset.
 - Only `secret` inherits: a domain that sets none is either covered by the one value every other binding agrees on or refused. `shares` and `readOnly` change what the listener exposes or accepts for a domain, so they are taken from that domain's own binding alone; enabling share links for one domain never enables them for another.
@@ -72,7 +74,8 @@ At start the server builds one route per served domain:
 | `cursor` | the domain's cursor key |
 | `secret`, `read_only` | §A3; `read_only` = the domain's own read-only flag or the `readOnly` option |
 | `chunk_size` | the domain's configured chunk size, if any |
-| `domain_settings` | the domain-wide settings in force for the domain: configured, else the default |
+| `domain_settings` | the domain-wide settings in force for the domain: configured, else the default; `maxEntryCommands` from the option of that name; the `projector` with `projectCommits` |
+| `wake` | with `projectCommits`, a call that asks the domain's owner on this host for a cycle now; made when a create under the domain's log prefix is won |
 | `store` | the domain's composite store |
 | `shares` | whether the route serves `/s/` |
 | `peers`, `traffic` | peer sockets; per-domain byte counters |
