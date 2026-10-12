@@ -169,13 +169,26 @@ module Make (C : Engine_ctx.S) = struct
   let meta_holder = Atomic.make None
 
   (* Pitfall A-2.5: a long hold stalls every mutation of the domain, so one is
-     reported with the stack that held or waited. *)
+     reported with the place that held or waited. *)
   let slow_meta = 2.
+
+  (* The first frame outside the lock's own code. *)
+  let meta_caller () =
+    let own = [__FILE__; "fun.ml"] in
+    let outside slot =
+      match Printexc.Slot.location slot with
+        | Some l when not (List.mem l.filename own) ->
+            Some (Printf.sprintf "%s:%d" l.filename l.line_number)
+        | _ -> None
+    in
+    Option.bind
+      (Printexc.backtrace_slots (Printexc.get_callstack 16))
+      (Array.find_map outside)
 
   let report_slow_meta what seconds =
     if seconds > slow_meta then
-      Log.warn "metadata lock %s %.1f s at:\n%s" what seconds
-        (Printexc.raw_backtrace_to_string (Printexc.get_callstack 16))
+      Log.warn "metadata lock %s %.1f s at %s" what seconds
+        (Option.value ~default:"an unknown place" (meta_caller ()))
 
   (* Reentrant for its holder, so the request handler resolves a reference and
      acts on it in one hold (08 §3.5). *)

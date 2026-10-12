@@ -76,7 +76,7 @@ Companion to [../04-checkout-cache.md](../04-checkout-cache.md). Not normative. 
   named from those bytes.
 - **`with_meta` is reentrant by holder identity** (`Rt.self`, `Rt.same`), so a request handler
   resolves a reference and acts on it in one hold (`Engine_intf.S.atomically`). A wait or a hold
-  longer than 2 s is logged with the call stack (A-2.5).
+  longer than 2 s is logged in one line naming the place that asked for the lock (A-2.5).
 - **Lock order is in the helpers.** `with_keys` sorts and deduplicates its paths, and namespace
   operations take `with_key` inside `with_meta`. `Keyed_locks` drops the entry of a key nobody holds, waits
   for or ever bumped, so a walk locking every path leaves nothing behind.
