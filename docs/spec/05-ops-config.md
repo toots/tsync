@@ -116,8 +116,9 @@ it unasked. The config editor asks about it only in its advanced mode
    configuration error naming both values: the owner stops serving the domain once it has learned
    the main's. `maxEntryCommands` is a ceiling: a domain MAY configure less than its main states,
    and is refused only for more.
-4. The values are learned in the background from owner start on, and once per start: a change on
-   the main reaches a client when its owner restarts. Until then a local operation never waits on a
+4. The values are learned in the background from owner start on, and asked again every `SWEEP`
+   ([publication §7](algorithms/publication.md#7-parameters)): a change on the main reaches a
+   running client within that time, the projector it states included. Until then a local operation never waits on a
    store: the chunk size and the symlink policy are the configured one, else the default, and what
    was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
    client neither projects nor takes an entry over before it has learned them
