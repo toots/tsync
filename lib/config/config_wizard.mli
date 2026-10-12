@@ -12,8 +12,11 @@ type io = { ask : prompt -> string; say : string -> unit }
 
 (** From the current file's JSON, or a new one; [None] when the user quits
     without writing. Fails INVALID for a file whose top level is not an object.
-    The frontends offered are those of [system], this machine's by default. *)
+    The frontends offered are those of [system], this machine's by default. The
+    advanced keys (05 §2.1) are asked about only when [advanced], where the
+    answer [-] removes one. *)
 val edit :
+  ?advanced:bool ->
   ?system:[ `Linux | `Macos ] ->
   io ->
   Yojson.Safe.t option ->

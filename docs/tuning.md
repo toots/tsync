@@ -68,3 +68,37 @@ tsync paces its uploads so that they do not swamp your connection. While it uplo
 
 Limits hold for the whole machine: the service and any `import` or `mirror` you run share each link.
 
+## Advanced settings
+
+These keys have defaults that suit a normal setup. `tsync config --edit` does not ask about them;
+`tsync config --edit --advanced` does, and the answer `-` removes one so that its default applies
+again. A config that leaves them all out is complete.
+
+Per domain, shared by every machine of the domain:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `chunkSize` | 8 MiB | How new files are cut |
+| `symlinks` | `keep` | What is done with symlinks |
+| `maxEntryCommands` | 256 | Most changes committed in one step. A machine may set less than the server, not more |
+| `projectLease` | 30 | Seconds a machine writes a committed step to the store's tree between two checks |
+| `projectQuarantine` | 300 | Seconds a machine waits before finishing a step another machine left |
+| `projectSettle` | 600 | Seconds a step may wait before another machine takes it over |
+
+When a machine reaches its storage through another machine running tsync, that server states its
+values and the machine uses them for every key it leaves out. A machine configured with a
+different value stops syncing the domain and says which values disagree. Machines that share an
+object store directly are not told: set them alike.
+
+Per machine:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `batchDelay` | 10 | Seconds a domain gathers changes before committing them |
+| `projectWidth` | 8 | Writes to the store's tree in flight at once, per domain |
+| `cacheChunkSize` | 16 MiB | The unit of the local cache, per domain |
+| `maxChunkBuffers` | `maxUploads` | Chunk bodies held in memory |
+| a backend's `link`; `headroom`, `targetDelayMs`, `minRate`, `maxRate` of the uplink or of a link | | See [uplink](#uplink) |
+
+The three timings must satisfy lease < quarantine < settle. `tsync status` shows the ones that are
+not the default, and says when a value comes from the server.
