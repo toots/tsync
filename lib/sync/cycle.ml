@@ -1214,6 +1214,9 @@ module Make (C : Engine_ctx.S) = struct
     let cursor = ref None
     and last = ref neg_infinity
     and dirty_since = ref None
+    (* Whether a full entry pending is pushed before the delay: not after a
+       push that committed nothing, whose commands wait for their uploads. *)
+    and early = ref true
     and failing = ref None in
     let rec loop () =
       Stop.check ();
@@ -1246,7 +1249,11 @@ module Make (C : Engine_ctx.S) = struct
            then dirty_since := Some (Rt.now ());
            let push_due =
              match !dirty_since with
-               | Some at -> Rt.now () -. at >= batch_delay
+               | Some at ->
+                   Rt.now () -. at >= batch_delay
+                   || !early
+                      && Sync_state.pending_count sync_state
+                         >= Log_entry.max_commands
                | None -> false
            in
            let asked = Atomic.exchange asked false in
@@ -1256,13 +1263,14 @@ module Make (C : Engine_ctx.S) = struct
                 && (token <> !cursor || Rt.now () -. !last >= sweep)
            then (
              last := Rt.now ();
-             ignore (run_cycle ~push_now:(asked || push_due) ());
+             let ran = run_cycle ~push_now:(asked || push_due) () in
              cursor := token;
-             if asked || push_due then
+             if asked || push_due then (
+               early := ran.committed > 0;
                dirty_since :=
                  if Sync_state.pending_count sync_state > 0 then
                    Some (Rt.now ())
-                 else None)
+                 else None))
          with
           | () ->
               if !failing <> None then Log.info "cycles run again";
