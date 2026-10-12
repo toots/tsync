@@ -136,7 +136,7 @@ A command is a key, the value before and the value after
   `v` is the format version, `1`. `author` is the client uuid of the creator. An optional
   `projector` is the client uuid of the entry's generation-0 projector, when that is not its
   author ([publication.md](algorithms/publication.md) §4.6); a reader that finds none takes the
-  author. `commands` is the
+  author, and one that finds anything but 32 lowercase hexadecimal digits finds the entry CORRUPT. `commands` is the
   batch, a non-empty array of commands (§2.3) on distinct keys, in any order: a batch is a set
   ([change-algebra.md](algorithms/change-algebra.md) Definition 6).
 - **Writers** create an entry on the main only with `put_if_absent`, with the body bounded by
