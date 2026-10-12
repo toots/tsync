@@ -52,6 +52,7 @@ caps = { share_url: string?;       -- base URL of the share endpoint serving thi
          symlinks: keep | follow | skip ?;
          projection: {lease, quarantine, settle: seconds}?;
          max_entry_commands: int?;
+         projector: client uuid?;  -- who projects the entries created through this store (publication §4.6)
                                    -- with chunk_size, the domain-wide settings (05 §2.1)
          max_concurrency: int?;    -- object operations this store usefully serves at once
          verified: bool }          -- every chunk this store takes is checked against its name

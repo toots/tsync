@@ -302,7 +302,7 @@ ARRIVE():
 PUSH():
   with the metadata lock:
     B := the batch to push (below); if B = ∅: return
-    body := encode(author = this client, B)                   # 03 §2.4
+    body := encode(author = this client, projector = the main's when it states one, B)   # 03 §2.4, §4.6
     write the in-flight record (h + 1, body), durably
   r := put_if_absent(log entry h + 1, body)                   # through the gate, gc §5.4
   case r:
@@ -411,9 +411,20 @@ PROJECT():                                                     # one entry
   write the tree head := t + 1
 ```
 
-- **Who.** The projector of an entry at generation 0 is its author. The projector at generation
-  $g \ge 1$ is the client whose takeover object $(n, g)$ exists. A voided entry (§4.3) has no
-  author and is projected through a takeover.
+- **Who.** The projector of an entry at generation 0 is the client its `projector` field names, and
+  its author when it has none. The projector at generation $g \ge 1$ is the client whose takeover
+  object $(n, g)$ exists. A voided entry (§4.3) has no author and is projected through a takeover.
+- **Projection by the main's server.** A main that is an http-proxy peer MAY state a projector with
+  its domain-wide settings ([05 §2.1](../05-ops-config.md#21-schema-and-validation)): the owner of
+  the domain on the serving host. A client names that projector in every entry it creates through
+  such a main, and then does not project its own entries: the serving owner does, as their
+  generation-0 projector, woken by the listener when the create is won. The serving owner writes to
+  the main without a network between them, so the entry is in the tree at once, whatever the
+  author's link is and whether the author stays connected or not. Every client reads the projector
+  from the entry, so they agree on it without having asked the same peer, and the rest of this
+  section applies to the serving owner as to any projector: a client takes over an entry it left
+  unprojected for `PROJECT_SETTLE`. A main that states no projector, and any main reached as a plain
+  store, leaves each entry to its author.
 - **Short by construction.** Nothing tells a slow projector from a stopped one. An entry is one
   put, and its projection is at most `MAX_ENTRY_COMMANDS` commands and `MAX_ENTRY_BYTES` of
   records (or one record of any size): the caps are chosen so that a projection ends well within
@@ -664,7 +675,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 - **L2 — Inbound latency.** A committed entry is merged by a running owner within
   `CURSOR_INTERVAL` plus one store wait when the cursor note lands, and within `SWEEP` otherwise,
   unless the link is down or the domain is paused.
-- **L3 — Projection.** An entry is projected by its author right after its commit. An entry whose
+- **L3 — Projection.** An entry is projected by its generation-0 projector right after its commit. An entry whose
   projector stopped is projected within `PROJECT_SETTLE + PROJECT_QUARANTINE` of some running
   client seeing it, and the entries behind it follow.
 - **L4 — Arrival always possible.** A fetch answers entries or PRUNED; a state read answers the
@@ -691,7 +702,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 |---|---|---|
 | `BATCH_DELAY` | 10 s | the client's choice; trades commits for latency; nothing depends on it; the domain's `batchDelay` |
 | `MAX_ENTRY_BYTES` | 8 MiB | a larger batch is split into several entries; the put-body limit of a store on the way to the main is tied to it in [security-model.md](security-model.md) §11 |
-| `MAX_ENTRY_COMMANDS` | 256 | bounds the record writes of one projection (§4.6); a client MAY use less; the domain's `maxEntryCommands` |
+| `MAX_ENTRY_COMMANDS` | 256; 4096 through a main that projects | bounds the record writes of one projection (§4.6); a client MAY use less; the domain's `maxEntryCommands`, or what an http-proxy main states |
 | `SWEEP` | 60 s | worst-case latency when a cursor note is lost; one entry read per client per interval when idle |
 | `CURSOR_INTERVAL` | 2 s | MUST be ≥ the store's per-object write interval |
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |

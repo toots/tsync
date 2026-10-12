@@ -122,6 +122,10 @@ it unasked. The config editor asks about it only in its advanced mode
    was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
    client neither projects nor takes an entry over before it has learned them
    ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
+5. A main that states its values MAY state a projector with them
+   ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
+   client: a client names it in the entries it creates and leaves their projection to it
+   ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
 
 **Backend object**
 
