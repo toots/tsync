@@ -12,12 +12,99 @@ let root =
     (Filename.get_temp_dir_name ())
     (Printf.sprintf "tsync-projection-%d" (Unix.getpid ()))
 
+let d = Domain_name.v "photos"
+
+(* A client of [main], keeping versions. *)
+let context root (main : Store.t) : (module Context.S) =
+  let knowledge =
+    { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
+  in
+  let composite =
+    Composite.create ~domain:d
+      ~data_dir:(Filename.concat root "data")
+      ~owner:true ~poke:ignore ~knowledge
+      [{ name = "main"; role = Main; store = main }]
+  in
+  (module struct
+    let domain = d
+    let store = Composite.store composite
+    let composite = composite
+    let versioning = true
+    let chunk_size_config = Some 8
+    let max_downloads = 8
+    let max_chunk_buffers = 4
+  end)
+
+(* 09 "Version not saved": a projection removing one file and replacing
+   another while the write of a version fails. *)
+let version_not_saved () =
+  let root = Filename.concat root "versions" in
+  let inner = Local.create ~name:"main" (Filename.concat root "store") in
+  let versions = ref `Saved in
+  let main =
+    {
+      inner with
+      put =
+        (fun ?mode k b ->
+          if Key.under (Key.versions d) k then (
+            match !versions with
+              | `Saved -> ()
+              | `Link -> Fail.raise_ Fail.Link "the link is down"
+              | `Missing ->
+                  Fail.raise_ (Fail.Missing_chunks ["c"]) "chunks missing");
+          inner.put ?mode k b);
+    }
+  in
+  let module C = (val context root main) in
+  let module R = Remote.Make (C) in
+  let module P = Projection.Make (C) in
+  let at name = { Algebra.parent = Folder_id.root; name } in
+  let upload content =
+    Log_entry.Known
+      (R.upload_chunks ~name:"f" ~size:(String.length content) ~chunk_size:8
+         ~mtime:1. (fun _ -> Bytes (Bigstring.of_string content)))
+  in
+  let old = upload "old" and edited = upload "edited" in
+  let state () =
+    let files =
+      P.fold
+        (fun acc -> function
+          | `File ((pl : Algebra.place), (m : Manifest.t)) ->
+              Printf.sprintf "%s=%d" pl.name m.size :: acc
+          | `Folder _ -> acc)
+        []
+    in
+    Printf.sprintf "%s; versions kept: %d"
+      (String.concat ", " (List.sort compare files))
+      (List.fold_left (fun n (_, l) -> n + List.length l) 0 (R.all_versions ()))
+  in
+  let entry gone kept : Log_entry.command list =
+    [`File (at gone, Some old, None); `File (at kept, Some old, Some edited)]
+  in
+  let project what how gone kept =
+    versions := how;
+    let result =
+      match P.apply ~before_write:ignore (entry gone kept) with
+        | () -> "projected"
+        | exception Fail.E _ -> "failed"
+    in
+    p "  %s: %s; %s\n" what result (state ())
+  in
+  P.apply ~before_write:ignore
+    (List.map
+       (fun name -> `File (at name, None, Some old))
+       ["gone"; "kept"; "gone2"; "kept2"]);
+  p "== a version that cannot be saved\n";
+  p "  before: %s\n" (state ());
+  project "the link down" `Link "gone" "kept";
+  project "applied again, the link up" `Saved "gone" "kept";
+  project "the main lacks the chunks" `Missing "gone2" "kept2"
+
 (* 09 "Projection in parallel": one entry applied with [width] writes in
    flight, its slots read one by one or together; the records and versions it
    leaves, and the slots it read. *)
 let parallel ~width ~together =
   let root = Filename.concat root (Printf.sprintf "%d-%b" width together) in
-  let d = Domain_name.v "photos" in
   let inner = Local.create ~name:"main" (Filename.concat root "store") in
   let read = ref [] and reading = Mutex.create () in
   let note keys = Mutex.protect reading (fun () -> read := keys @ !read) in
@@ -50,24 +137,7 @@ let parallel ~width ~together =
          else None);
     }
   in
-  let knowledge =
-    { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
-  in
-  let composite =
-    Composite.create ~domain:d
-      ~data_dir:(Filename.concat root "data")
-      ~owner:true ~poke:ignore ~knowledge
-      [{ name = "main"; role = Main; store = main }]
-  in
-  let module C = struct
-    let domain = d
-    let store = Composite.store composite
-    let composite = composite
-    let versioning = true
-    let chunk_size_config = Some 8
-    let max_downloads = 8
-    let max_chunk_buffers = 4
-  end in
+  let module C = (val context root main) in
   let module R = Remote.Make (C) in
   let module P = Projection.Make (C) in
   let id n = Folder_id.mint ~uuid:"aaaaaaaaaaaaaaaa" ~counter:n in
@@ -132,7 +202,6 @@ let parallel ~width ~together =
 (* One write of a pass is refused: the writes issued, of the 40 it holds. *)
 let refused () =
   let root = Filename.concat root "refused" in
-  let d = Domain_name.v "photos" in
   let inner = Local.create ~name:"main" (Filename.concat root "store") in
   let issued = Atomic.make 0 and refusing = ref false in
   let main =
@@ -147,24 +216,7 @@ let refused () =
           inner.put ?mode k b);
     }
   in
-  let knowledge =
-    { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
-  in
-  let composite =
-    Composite.create ~domain:d
-      ~data_dir:(Filename.concat root "data")
-      ~owner:true ~poke:ignore ~knowledge
-      [{ name = "main"; role = Main; store = main }]
-  in
-  let module C = struct
-    let domain = d
-    let store = Composite.store composite
-    let composite = composite
-    let versioning = true
-    let chunk_size_config = Some 8
-    let max_downloads = 8
-    let max_chunk_buffers = 4
-  end in
+  let module C = (val context root main) in
   let module R = Remote.Make (C) in
   let module P = Projection.Make (C) in
   let content =
@@ -210,6 +262,7 @@ let () =
           (Projection.project_width, true);
         ];
       p "a refused write stops its pass: %s\n" (refused ());
+      version_not_saved ();
       let d = Domain_name.v "photos" in
       let main = Local.create ~name:"main" (Filename.concat root "store") in
       let knowledge =

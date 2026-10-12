@@ -8,7 +8,6 @@ type source =
 
 exception Source_changed of string
 
-let snapshot_deadline = 10.
 let corruption_ttl = 5.
 
 module Make (C : Context.S) = struct
@@ -231,27 +230,20 @@ module Make (C : Context.S) = struct
         Hashtbl.replace last_version group ts;
         ts)
 
-  (* Best effort within [snapshot_deadline]: a failed snapshot is logged and
-     never blocks the write. *)
+  (* data-model/backend §2.9: a write of the projection. A main that lacks the
+     manifest's chunks is passed: no version keeps content it does not hold. *)
   let save_version ?body key =
     if C.versioning then (
-      try
-        Rt.with_timeout ~detach:true snapshot_deadline (fun () ->
-            let body =
-              match body with Some _ -> body | None -> store.get_opt key
-            in
-            match body with
-              | Some body when Manifest.is_manifest body ->
-                  let group = group_of key in
-                  store.put
-                    (Key.version d ~group ~ns:(next_version_ts group))
-                    body
-              | _ -> ())
-      with
-        | (Stop.Stopping | Rt.Cancelled) as e -> raise e
-        | e ->
-            Log.warn "could not save a version of %s: %s" (Key.to_string key)
-              (Printexc.to_string e))
+      let body = match body with Some _ -> body | None -> store.get_opt key in
+      match body with
+        | Some body when Manifest.is_manifest body -> (
+            let group = group_of key in
+            try
+              store.put (Key.version d ~group ~ns:(next_version_ts group)) body
+            with Fail.E { kind = Missing_chunks _; _ } as e ->
+              Log.warn "no version of %s can be saved: %s" (Key.to_string key)
+                (Printexc.to_string e))
+        | _ -> ())
 
   let missing_of = function
     | Fail.E { kind = Missing_chunks l; _ } ->
