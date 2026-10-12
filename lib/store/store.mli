@@ -119,5 +119,8 @@ val max_batch_folders : int
     is re-asked key by key. *)
 val read_many : t -> entry list -> (Key.t * Bigstring.t option) list
 
+(** {!read_many} of keys no listing gave, batched by the key cap alone. *)
+val read_keys : t -> Key.t list -> (Key.t * Bigstring.t option) list
+
 val count_up : t -> int -> unit
 val count_down : t -> int -> unit

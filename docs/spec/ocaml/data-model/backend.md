@@ -24,7 +24,7 @@ the store-side seams are in [../02-remote-model.md](../02-remote-model.md); coll
 | Deferred debt (§2.20) | `Composite.job`, `Composite.record`; one `Dqueue` log per copy under `deferred-pending/<domain>/<escaped name>/` |
 | Members and roles (§5.3) | `Composite`: `role`, `members`, `readable`, `in_read_order`, `guard` |
 | Minting (§2.4) | `Identity.mint`, `Folder_id.mint` |
-| Apply (§6.1) | `Projection.Make.apply`; `Cycle.project` raises the tree head after it |
+| Apply (§6.1) | `Projection.Make.apply`: `held_at` reads the slots of a pass, `save_replaced` saves a version from the body read (`Remote.save_version ~body`); `Cycle.project` raises the tree head after it |
 | Settling by the anchor (§6.2) | `placed` in `Tree.Make`, applied to every marker in `children` and to every segment in `find` |
 | Expiry (§8) | `Retention.Make.expire`; the decisions are `Gc_plan.versions`, `log`, `takeovers`, `share` |
 | Tree findings (05 §4.10) | `Integrity.Make.report`: `Behind`, or the findings `Disowned`, `Unmarked`, `Unaccounted` |

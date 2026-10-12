@@ -1094,16 +1094,20 @@ module Make (C : Engine_ctx.S) = struct
   let project () =
     let apply ~t ~generation (e : Log_store.entry) commands =
       let checked = ref neg_infinity in
+      (* The fibers writing one pass share the check: one makes it, the others
+         wait for its answer. *)
+      let checking = Rt.Fmutex.create () in
       let before_write () =
-        if Rt.boottime () -. !checked >= project_lease /. 2. then (
-          let now = Rt.boottime () in
-          if
-            Log_store.tree_head log <> t
-            || fst (Log_store.takeover log e.n) <> generation
-          then
-            Fail.raise_ Fail.Link "the projection of entry %d was taken over"
-              e.n;
-          checked := now)
+        Rt.Fmutex.with_lock checking (fun () ->
+            if Rt.boottime () -. !checked >= project_lease /. 2. then (
+              let now = Rt.boottime () in
+              if
+                Log_store.tree_head log <> t
+                || fst (Log_store.takeover log e.n) <> generation
+              then
+                Fail.raise_ Fail.Link
+                  "the projection of entry %d was taken over" e.n;
+              checked := now))
       in
       P.apply ~before_write commands;
       before_write ();

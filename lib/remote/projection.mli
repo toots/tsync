@@ -4,11 +4,17 @@
 
 open Tsync_core
 
+(** publication §7, [PROJECT_WIDTH]. *)
+val project_width : int
+
 module Make (_ : Context.S) : sig
   (** Set each key of an entry to its value after, in the four passes of §6.1;
-      idempotent. [before_write] runs before every record write and raises to
-      stop the projection. *)
-  val apply : before_write:(unit -> unit) -> Log_entry.command list -> unit
+      idempotent. The slots of a pass are read together and its writes issued
+      [width] at a time. [before_write] runs before every record write, from any
+      of the fibers writing, and raises to stop the projection: no write is
+      issued after it raised once. *)
+  val apply :
+    ?width:int -> before_write:(unit -> unit) -> Log_entry.command list -> unit
 
   (** The folders that have a namespace in the manifest area, the root included
       (05 §4.7 step 2): one listing of the area. *)
