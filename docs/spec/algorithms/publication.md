@@ -429,7 +429,9 @@ PROJECT():
   ladder ([01](../01-core.md) §7) is a write issued anew and is made only under the same test, on
   the clock that counts suspended time. A write whose answer was lost is not repeated blindly:
   the projector reads the record or the tree head back first. The tree head is written only after
-  reading it and finding it lower.
+  reading it and finding it lower. Writes issued in parallel
+  ([data-model/backend.md](../data-model/backend.md) §6.1) are each under this test: once a check
+  fails none is issued any more, and those in flight are what the quarantine covers.
 - **The quarantine.** A client that takes over waits `PROJECT_QUARANTINE` before its first write,
   so every write the previous projector issued under its lease has landed or failed.
 - **Order.** An author whose entry is not the one after the tree head waits for the tree head to
@@ -680,6 +682,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |
 | `RETRY_FLOOR` | 2 s | back-off after a failed cycle |
 | `PROJECT_LEASE` | 30 s | how long a projector writes after one check |
+| `PROJECT_WIDTH` | 8 | the writes of one pass of a projection in flight at once; a client MAY use less |
 | `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
 | `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST exceed `PROJECT_QUARANTINE` by the time the slowest expected client takes to project a largest entry |
 | `LOG_RETENTION` | 30 days | how far back a returning client fetches entries instead of reading the tree |
@@ -717,9 +720,10 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
   recognises it, and a further local write to the same name makes no conflicted copy. A kill before
   the entry is created: the batch is pushed once. A kill at any step of an arrival ends in the
   state of an uninterrupted arrival.
-- **Projection.** After a commit the tree holds the entry's values and the tree head its number. A
-  projector killed mid-entry applies it again and ends in the same tree. An entry whose author
-  never returns is projected by another client after the settle and the quarantine, and not
+- **Projection.** After a commit the tree holds the entry's values and the tree head its number. The
+  records and the versions an entry leaves are the same whatever number of its writes were in flight
+  at once. A projector killed mid-entry applies it again and ends in the same tree. An entry whose
+  author never returns is projected by another client after the settle and the quarantine, and not
   before; a first projector that resumes after a takeover writes nothing more.
 - **Voided entry.** With an undecodable entry above the tree head, every client stops fetching
   and pushing and reports it. Once its void object exists, every client merges it as an empty

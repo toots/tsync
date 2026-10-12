@@ -490,7 +490,7 @@ This section owns what applying an entry writes.
 ### 6.1 Apply
 
 To apply an entry, its projector sets each key of the entry to its value after, in four passes over the
-entry's commands. A slot is read immediately before it is deleted or replaced.
+entry's commands. A pass ends before the next one starts.
 
 1. **Clear what leaves.**
    - A file command whose value after is ∅: if the slot holds a manifest, save it as a version when
@@ -509,13 +509,31 @@ entry's commands. A slot is read immediately before it is deleted or replaced.
 
 Then the projector raises the tree head to the entry's number.
 
+- **Reads.** A slot is read only where what it holds decides a write: always in pass 1, and in pass 3
+  for a file command that can save a version. A file command that can save none, because its value
+  before is ∅ or versioning is off, is put without a read. A slot is read once in a pass:
+  the body read is the one tested and the one saved as a version. It is read after the pass before
+  has ended and before any write of its own pass. The slots of a pass MAY be read together
+  ([06 §5](../06-backends.md#5-process-wide-services), batched reads).
+- **No order within a pass.** The commands of one pass write distinct records: a batch names each key
+  once, and neither the tree before it nor the tree after it holds two things at one place. Their
+  writes MAY be issued in parallel, at most `PROJECT_WIDTH` at a time
+  ([publication.md §7](../algorithms/publication.md#7-parameters)). The writes of one command keep
+  their order: the version is saved before the slot is deleted or replaced, and a folder's index is
+  deleted before its anchor.
+- **Nothing else writes these records.** One projector applies the entry (publication §4.6), so a slot
+  changes between its read and its write only by this projector's own passes, which is why the read
+  need not be the request just before the write.
 - **Idempotent.** Each pass tests what the slot holds before it deletes, and the passes after it only
-  overwrite. Applying an entry again from its start, after any prefix of its writes, ends in the same
-  records and saves no second version: a slot already at its value after no longer has the identity of
-  the value before.
+  overwrite. Applying an entry again from its start, after any of its writes that its passes allow, ends
+  in the same records and saves no second version: a slot already at its value after no longer has the
+  identity of the value before.
 - **No ordering between keys is needed.** A batch is a set, and a slot is overwritten whole. Two folders
-  that swap names lose both markers in pass 1 and gain them in pass 3; the temporary places of Theorem 3
-  are for trees whose records cannot be overwritten, which this one's can.
+  that swap names lose both markers in pass 1 and gain them in pass 3. The order and the temporary
+  places of Theorem 3 are for a tree that must be well-formed after each change, which these records
+  need not be: §6.2 and the replay of a state read
+  ([publication.md §4.7](../algorithms/publication.md#47-state-read-and-arrival-by-state)) say what a
+  reader finds between two writes.
 - **Manifests and versions pass the reference gate** on a collectable main
   ([algorithms/gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). The entry passed it at its
   commit, so the chunks are present.
