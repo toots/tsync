@@ -18,12 +18,29 @@ type entry = {
           computed to fill the field (06 §2.2) *)
 }
 
+(** The domain-wide settings in force on a main that states them (05 §2.1). *)
+type domain_settings = {
+  chunk : int;
+  symlinks : [ `Keep | `Follow | `Skip ];
+  lease : float;
+  quarantine : float;
+  settle : float;
+  entry_commands : int;
+}
+
+val policies : (string * [ `Keep | `Follow | `Skip ]) list
+val domain_settings_to_json : domain_settings -> Yojson.Safe.t
+
+(** [None] unless every field is well-formed. *)
+val domain_settings_of_json : Yojson.Safe.t -> domain_settings option
+
 type caps = {
   share_url : string option;
   chunk_size : int option;  (** recommended for new files *)
   max_concurrency : int option;
   verified : bool;
       (** every chunk this store takes is checked, by someone known to run *)
+  domain_settings : domain_settings option;
 }
 
 (** The answer to a conditional create: [Won] when the name holds exactly the

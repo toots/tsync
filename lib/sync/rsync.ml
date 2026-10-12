@@ -242,7 +242,7 @@ module Make (C : Engine_ctx.S) = struct
                     succeed rel 0
                 | _ -> (
                     let path = local_path src.path rel in
-                    match (Unix.lstat path, C.symlinks) with
+                    match (Unix.lstat path, symlinks ()) with
                       | { st_kind = S_LNK; _ }, `Skip ->
                           skipped := (rel, "symlinks are skipped") :: !skipped
                       | { st_kind = S_LNK; _ }, `Keep ->

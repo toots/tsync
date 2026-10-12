@@ -9,6 +9,7 @@ type route = {
   secret : string;
   read_only : bool;
   chunk_size : int option;
+  domain_settings : Store.domain_settings;
   store : Store.t;
   share : Share_server.t option;  (** [Some] when the route serves share links *)
 }
@@ -155,6 +156,7 @@ type op =
   | List_key of Key.t
   | Share_url of Key.prefix
   | Chunk_size of Key.prefix
+  | Domain_settings of Key.prefix
   | Max_concurrency of Key.prefix
   | Verified of Key.prefix
 
@@ -175,6 +177,7 @@ let tally = function
   | List _ | List_key _ -> "list"
   | Share_url _ -> "shareUrl"
   | Chunk_size _ -> "chunkSize"
+  | Domain_settings _ -> "domainSettings"
   | Max_concurrency _ -> "maxConcurrency"
   | Verified _ -> "verified"
 
@@ -312,6 +315,7 @@ let parse_op t (r : Server.request) params =
           | None, None -> bad_request t)
     | "GET", [""; "share-url"] -> Share_url (needs_prefix ())
     | "GET", [""; "chunk-size"] -> Chunk_size (needs_prefix ())
+    | "GET", [""; "domain-settings"] -> Domain_settings (needs_prefix ())
     | "GET", [""; "max-concurrency"] -> Max_concurrency (needs_prefix ())
     | "GET", [""; "verified"] -> Verified (needs_prefix ())
     | _ ->
@@ -331,7 +335,12 @@ let key_names = function
       [Key.to_string k]
   | Copy (s, d) -> [Key.to_string s; Key.to_string d]
   | List_key k -> [Key.to_string k]
-  | List (p, _) | Share_url p | Chunk_size p | Max_concurrency p | Verified p ->
+  | List (p, _)
+  | Share_url p
+  | Chunk_size p
+  | Domain_settings p
+  | Max_concurrency p
+  | Verified p ->
       [Key.prefix_to_string p]
   | Get_multi | Children_multi | Delete_multi -> []
 
@@ -782,6 +791,8 @@ let execute ?(partial = false) t route op body =
         match route.chunk_size with
           | Some n -> json (`Assoc [("chunkSize", `Int n)])
           | None -> text 404 "no chunk size")
+    | Domain_settings _ ->
+        json (Store.domain_settings_to_json route.domain_settings)
     | Max_concurrency _ -> json (`Assoc [("maxConcurrency", `Int t.bound)])
     | Verified p ->
         json (`Assoc [("verified", `Bool (s.capabilities p).verified)])
@@ -1234,6 +1245,7 @@ let run config =
                 secret = b.secret;
                 read_only = b.read_only;
                 chunk_size = b.domain.chunk_size;
+                domain_settings = Tsync_config.Config.stated b.domain;
                 store = Tsync_domain.Domain.store domain;
                 share =
                   (if b.shares then

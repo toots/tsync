@@ -21,13 +21,21 @@ module Make (C : Context.S) = struct
   let ranges = Rt.Semaphore.create ~name:"range reads" C.max_downloads
   let resolved_chunk_size = Atomic.make None
   let resolving_chunk_size = Atomic.make false
+  let stated_settings = Atomic.make `Unknown
 
   (* The main's chunk size, asked once in the background; a failure leaves it
      unknown, to be asked again by the next caller. *)
   let resolve_chunk_size () =
     if Atomic.compare_and_set resolving_chunk_size false true then
       Rt.spawn ~name:"chunk size" (fun () ->
-          match (store.capabilities (Key.domain_prefix d)).chunk_size with
+          match
+            let caps = store.capabilities (Key.domain_prefix d) in
+            Atomic.set stated_settings
+              (match caps.domain_settings with
+                | Some s -> `Stated s
+                | None -> `Unstated);
+            caps.chunk_size
+          with
             | Some cs
               when cs >= Chunking.chunk_size_min
                    && cs <= Chunking.chunk_size_max ->
@@ -66,6 +74,20 @@ module Make (C : Context.S) = struct
       | None, _ ->
           resolve_chunk_size ();
           own
+
+  (* 05 §2.1: the domain-wide settings the main states, learned with its chunk
+     size. [wait] asks the main now when they are unknown. *)
+  let stated ?(wait = false) () =
+    (match Atomic.get stated_settings with
+      | `Unknown when wait ->
+          let caps = store.capabilities (Key.domain_prefix d) in
+          Atomic.set stated_settings
+            (match caps.domain_settings with
+              | Some s -> `Stated s
+              | None -> `Unstated)
+      | `Unknown -> resolve_chunk_size ()
+      | _ -> ());
+    Atomic.get stated_settings
 
   let marked_m = Mutex.create ()
   let marked : (string, unit) Hashtbl.t = Hashtbl.create 16

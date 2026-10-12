@@ -88,7 +88,7 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) root name :
     let read_only = false
     let symlinks = `Keep
     let lazy_tree = false
-    let tuning () = tuning
+    let settings _ = (tuning, symlinks)
   end in
   (module Engine.Make (C))
 

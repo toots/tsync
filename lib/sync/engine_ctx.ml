@@ -9,9 +9,11 @@ module type S = sig
   val max_cache : int option
   val max_uploads : int
   val read_only : bool
-  val symlinks : [ `Keep | `Follow | `Skip ]
   val lazy_tree : bool
 
-  (** The advanced settings in force. *)
-  val tuning : unit -> Tsync_core.Tuning.t
+  (** The advanced settings and the symlink policy in force, given what the main
+      states (05 §2.1); INVALID when the configuration differs from it. *)
+  val settings :
+    Tsync_store.Store.domain_settings option ->
+    Tsync_core.Tuning.t * [ `Keep | `Follow | `Skip ]
 end

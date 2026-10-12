@@ -164,12 +164,8 @@ let engine t =
     let max_cache = t.domain.max_cache
     let max_uploads = t.config.max_uploads
     let read_only = t.domain.read_only
-
-    let symlinks =
-      Option.value ~default:Config.default_symlinks t.domain.symlinks
-
     let lazy_tree = t.lazy_tree
-    let tuning () = Config.tuning t.domain
+    let settings main = Config.in_force t.domain main
   end in
   (module Engine.Make (C) : Engine.S)
 

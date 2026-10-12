@@ -8,11 +8,70 @@ type entry = {
   checksum : Checksum.t option;
 }
 
+type domain_settings = {
+  chunk : int;
+  symlinks : [ `Keep | `Follow | `Skip ];
+  lease : float;
+  quarantine : float;
+  settle : float;
+  entry_commands : int;
+}
+
+let policies = [("keep", `Keep); ("follow", `Follow); ("skip", `Skip)]
+
+let domain_settings_to_json s : Yojson.Safe.t =
+  `Assoc
+    [
+      ("chunkSize", `Int s.chunk);
+      ( "symlinks",
+        `String (fst (List.find (fun (_, p) -> p = s.symlinks) policies)) );
+      ("projectLease", `Float s.lease);
+      ("projectQuarantine", `Float s.quarantine);
+      ("projectSettle", `Float s.settle);
+      ("maxEntryCommands", `Int s.entry_commands);
+    ]
+
+let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
+  | `Assoc l -> (
+      let number k =
+        match List.assoc_opt k l with
+          | Some (`Float f) -> Some f
+          | Some (`Int i) -> Some (float_of_int i)
+          | _ -> None
+      and positive k =
+        match List.assoc_opt k l with
+          | Some (`Int i) when i > 0 -> Some i
+          | _ -> None
+      and policy =
+        match List.assoc_opt "symlinks" l with
+          | Some (`String p) -> List.assoc_opt p policies
+          | _ -> None
+      in
+      match
+        ( positive "chunkSize",
+          policy,
+          number "projectLease",
+          number "projectQuarantine",
+          number "projectSettle",
+          positive "maxEntryCommands" )
+      with
+        | ( Some chunk,
+            Some symlinks,
+            Some lease,
+            Some quarantine,
+            Some settle,
+            Some entry_commands )
+          when 0. < lease && lease < quarantine && quarantine < settle ->
+            Some { chunk; symlinks; lease; quarantine; settle; entry_commands }
+        | _ -> None)
+  | _ -> None
+
 type caps = {
   share_url : string option;
   chunk_size : int option;
   max_concurrency : int option;
   verified : bool;
+  domain_settings : domain_settings option;
 }
 
 type claim = Won | Held of Bigstring.t
@@ -59,6 +118,7 @@ let no_caps =
     chunk_size = None;
     max_concurrency = None;
     verified = false;
+    domain_settings = None;
   }
 
 let new_traffic () = { uploaded = Atomic.make 0; downloaded = Atomic.make 0 }

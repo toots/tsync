@@ -12,7 +12,7 @@ module Make (C : Engine_ctx.S) = struct
         | Folder _ -> Skipped_exists
         | File { rel; path; _ } -> Imported (Bulk.upload_file run rel path)
         | Link { rel; path; target; _ } -> (
-            match C.symlinks with
+            match symlinks () with
               | `Skip -> Skipped_symlink
               | `Keep ->
                   Bulk.install_link run rel ~target
@@ -32,7 +32,7 @@ module Make (C : Engine_ctx.S) = struct
       | Import_plan.Folder _ -> 0
       | File { size; _ } | Link { size; _ } -> size
     in
-    let plan = Import_plan.plan ~only ~exclude ~symlinks:C.symlinks src in
+    let plan = Import_plan.plan ~only ~exclude ~symlinks:(symlinks ()) src in
     Narrate.say narrate "planned %s (%s) from %s"
       (Narrate.count plan.files "file")
       (Narrate.size plan.bytes) src;

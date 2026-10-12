@@ -47,6 +47,18 @@ val default_symlinks : [ `Keep | `Follow | `Skip ]
     (05 §2.1). *)
 val tuning : domain -> Tuning.t
 
+(** The domain-wide settings in force for a domain, as its http-proxy listener
+    states them. *)
+val stated : domain -> Tsync_store.Store.domain_settings
+
+(** The advanced settings and the symlink policy in force given what the main
+    states: the main's values where it states them. INVALID naming both values
+    when a configured one differs, or exceeds the main's entry size. *)
+val in_force :
+  domain ->
+  Tsync_store.Store.domain_settings option ->
+  Tuning.t * [ `Keep | `Follow | `Skip ]
+
 (** One link's uplink settings (06 §7). *)
 type link = {
   enabled : bool;

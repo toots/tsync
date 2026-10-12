@@ -189,10 +189,21 @@ let capabilities t prefix =
         let answers =
           ladder t "capabilities" (fun () ->
               Rt.map_concurrently (capability t prefix)
-                ["/share-url"; "/chunk-size"; "/max-concurrency"; "/verified"])
+                [
+                  "/share-url";
+                  "/chunk-size";
+                  "/max-concurrency";
+                  "/verified";
+                  "/domain-settings";
+                ])
         in
-        let share, chunk, conc, verified =
-          match answers with [a; b; c; d] -> (a, b, c, d) | _ -> assert false
+        let share, chunk, conc, verified, settings =
+          match answers with
+            | [a; b; c; d; e] -> (a, b, c, d, e)
+            | _ -> assert false
+        in
+        let domain_settings =
+          Option.bind settings Store.domain_settings_of_json
         in
         Atomic.set t.claims (Some (verified <> None));
         let share_url =
@@ -208,7 +219,11 @@ let capabilities t prefix =
         let c =
           {
             Store.share_url;
-            chunk_size = positive chunk "chunkSize";
+            chunk_size =
+              (match domain_settings with
+                | Some s -> Some s.chunk
+                | None -> positive chunk "chunkSize");
+            domain_settings;
             max_concurrency = positive conc "maxConcurrency";
             verified =
               (match verified with

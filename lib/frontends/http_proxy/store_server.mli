@@ -10,6 +10,7 @@ type route = {
   secret : string;
   read_only : bool;
   chunk_size : int option;
+  domain_settings : Tsync_store.Store.domain_settings;
   store : Tsync_store.Store.t;
   share : Share_server.t option;  (** [Some] when the route serves share links *)
 }

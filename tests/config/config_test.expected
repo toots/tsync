@@ -16,6 +16,14 @@ a negative delay       refused: domains[0].batchDelay: expected seconds, 0 or mo
 a lease of 0           refused: domains[0].projectLease: expected seconds above 0
 a bad policy           refused: domains[0].symlinks: expected keep, follow or skip
 
+== domain-wide settings against what the main states
+nothing configured         symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+the same as the main       symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+a smaller entry            symlinks follow, entry 64, lease 20, quarantine 200, settle 420, batch 1 s
+a larger entry             refused: F is configured with maxEntryCommands 4096, above the 1024 its main states
+another policy             refused: F is configured with symlinks keep and its main states follow
+another settle             refused: F is configured with projectSettle 500 s and its main states 420 s
+
 == refused, each naming its path
 unknown top-level key                    refused: unknown key(s) "maxUpload"
 unknown backend key                      refused: domains[0].backends[0]: unknown key(s) "bukcet"

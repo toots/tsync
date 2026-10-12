@@ -102,6 +102,50 @@ let () =
   in_force "a negative delay" {|,"batchDelay":-1|};
   in_force "a lease of 0" {|,"projectLease":0|};
   in_force "a bad policy" {|,"symlinks":"sometimes"|};
+  p "\n== domain-wide settings against what the main states\n";
+  let against what extra =
+    let bare =
+      Printf.sprintf
+        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
+        extra
+    in
+    let main : Tsync_store.Store.domain_settings =
+      {
+        chunk = 8 lsl 20;
+        symlinks = `Follow;
+        lease = 20.;
+        quarantine = 200.;
+        settle = 420.;
+        entry_commands = 1024;
+      }
+    in
+    let wire =
+      Tsync_store.Store.(domain_settings_of_json (domain_settings_to_json main))
+    in
+    match Config.of_string bare with
+      | { domains = [d]; _ } -> (
+          match Config.in_force d wire with
+            | t, symlinks ->
+                p
+                  "%-26s symlinks %s, entry %d, lease %g, quarantine %g, \
+                   settle %g, batch %g s\n"
+                  what
+                  (match symlinks with
+                    | `Keep -> "keep"
+                    | `Follow -> "follow"
+                    | `Skip -> "skip")
+                  t.max_entry_commands t.project_lease t.project_quarantine
+                  t.project_settle t.batch_delay
+            | exception Tsync_core.Fail.E f ->
+                p "%-26s refused: %s\n" what f.reason)
+      | _ -> p "%-26s not one domain\n" what
+  in
+  against "nothing configured" "";
+  against "the same as the main" {|,"symlinks":"follow","projectSettle":420|};
+  against "a smaller entry" {|,"maxEntryCommands":64,"batchDelay":1|};
+  against "a larger entry" {|,"maxEntryCommands":4096|};
+  against "another policy" {|,"symlinks":"keep"|};
+  against "another settle" {|,"projectSettle":500|};
   p "\n== refused, each naming its path\n";
   try_ "unknown top-level key" (config ~top:{|,"maxUpload":4|} [domain "Files"]);
   try_ "unknown backend key"

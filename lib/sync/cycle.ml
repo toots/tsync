@@ -1038,7 +1038,7 @@ module Make (C : Engine_ctx.S) = struct
     choose
       (removals_last
          (List.filter (fun c -> pushable c && not (held_back c)) all))
-      (Some (C.tuning ()).max_entry_commands)
+      (Some (tuning ()).max_entry_commands)
 
   (* The position a push is made from. On a lazy tree every folder that holds
      a pending key, and every ancestor, is pulled first, and all must stand at
@@ -1097,7 +1097,7 @@ module Make (C : Engine_ctx.S) = struct
         Rt.Fmutex.with_lock checking (fun () ->
             if
               (not !taken_over)
-              && Rt.boottime () -. !checked >= (C.tuning ()).project_lease /. 2.
+              && Rt.boottime () -. !checked >= (tuning ()).project_lease /. 2.
             then (
               let now = Rt.boottime () in
               taken_over :=
@@ -1108,7 +1108,7 @@ module Make (C : Engine_ctx.S) = struct
               Fail.raise_ Fail.Link "the projection of entry %d was taken over"
                 e.n)
       in
-      P.apply ~width:(C.tuning ()).project_width ~before_write commands;
+      P.apply ~width:(tuning ()).project_width ~before_write commands;
       before_write ();
       Log_store.raise_tree_head log e.n;
       Atomic.set tree_head_seen e.n
@@ -1119,6 +1119,8 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> None
     in
     let projected = ref false in
+    (* §4.6, one timing per domain: none before the main's is known. *)
+    ignore (R.stated ~wait:true ());
     let one () =
       let t = Log_store.tree_head log in
       Atomic.set tree_head_seen t;
@@ -1140,7 +1142,7 @@ module Make (C : Engine_ctx.S) = struct
               | true, Some commands -> (
                   match held !took e generation with
                     | Some since
-                      when now -. since >= (C.tuning ()).project_quarantine ->
+                      when now -. since >= (tuning ()).project_quarantine ->
                         apply ~t ~generation e commands;
                         projected := true
                     | Some _ -> ()
@@ -1151,7 +1153,7 @@ module Make (C : Engine_ctx.S) = struct
                   match held !watching e generation with
                     | Some since ->
                         if
-                          now -. since >= (C.tuning ()).project_settle
+                          now -. since >= (tuning ()).project_settle
                           && Log_store.takeover_create log e.n
                                ~generation:(generation + 1)
                                ~client:C.client_uuid
@@ -1245,9 +1247,9 @@ module Make (C : Engine_ctx.S) = struct
     let push_delay () =
       if
         Sync_state.pending_count sync_state - Dqueue.pending uploads
-        >= (C.tuning ()).max_entry_commands
+        >= (tuning ()).max_entry_commands
       then retry_floor
-      else (C.tuning ()).batch_delay
+      else (tuning ()).batch_delay
     in
     let rec loop () =
       Stop.check ();

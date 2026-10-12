@@ -122,6 +122,16 @@ module Make (C : Engine_ctx.S) = struct
   module T = Tree.Make (C)
 
   let d = C.domain
+
+  (* 05 §2.1, domain-wide settings: the main's where it states them. *)
+  let settings () =
+    C.settings
+      (match R.stated () with
+        | `Stated s -> Some s
+        | `Unstated | `Unknown -> None)
+
+  let tuning () = fst (settings ())
+  let symlinks () = snd (settings ())
   let mirror = Mirror.create ~cache_root:C.cache_root d
   let staged = Staged.create ~cache_root:C.cache_root d
   let applied = Applied.open_ (Filename.concat (Mirror.root mirror) "applied")
@@ -1585,7 +1595,7 @@ module Make (C : Engine_ctx.S) = struct
 
   let symlink path ~target ~exclusive =
     check_writable ();
-    if C.symlinks <> `Keep then
+    if symlinks () <> `Keep then
       Fail.raise_ Fail.Refused "symbolic links are not kept in this domain";
     with_meta (fun () ->
         if exclusive && exists path then
