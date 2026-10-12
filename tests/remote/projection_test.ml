@@ -232,9 +232,11 @@ let refused () =
       put =
         (fun ?mode k b ->
           if !refusing then (
-            let first = Atomic.fetch_and_add issued 1 = 0 in
-            Rt.sleep 0.005;
-            if first then Fail.raise_ Fail.Corrupt "refused");
+            (* The first is refused at once; the others are still in flight
+               when it is, so none of their fibers starts another. *)
+            if Atomic.fetch_and_add issued 1 = 0 then
+              Fail.raise_ Fail.Corrupt "refused";
+            Rt.sleep 0.05);
           inner.put ?mode k b);
     }
   in
