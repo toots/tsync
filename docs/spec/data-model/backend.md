@@ -169,9 +169,13 @@ objects added, existing ones immutable).
   group strictly increasing, so two snapshots never share a key.
 - **Attributes** the old manifest body verbatim (hence the recorded name of a deleted file).
 - **Mutability** immutable; **appended** per group.
-- **Lifecycle** created, when versioning is on, by a projection immediately before it replaces or
-  deletes a manifest. The snapshot is best effort: a failed snapshot MUST NOT block the projection, and
-  MUST be logged. Deleted by expiry by age.
+- **Lifecycle** created, when versioning is on, by a projection before it replaces or deletes a
+  manifest. A version is the one record that keeps the replaced content reachable, so it is a write of
+  the projection like the others: the manifest is replaced or deleted only once its version is saved,
+  and a version that cannot be saved fails the projection of its entry, which is applied again
+  ([§6.1](#61-apply)). One failure is passed: a store that refuses the version because it lacks the
+  chunks the manifest names (CORRUPT `missing_chunks`). That content is not on the main, no version can
+  keep it, and the failure MUST be logged. Deleted by expiry by age.
 - **Derived notion** a *deleted file* is a history group with versions and no live manifest at its
   location.
 
@@ -526,8 +530,9 @@ Then the projector raises the tree head to the entry's number.
   need not be the request just before the write.
 - **Idempotent.** Each pass tests what the slot holds before it deletes, and the passes after it only
   overwrite. Applying an entry again from its start, after any of its writes that its passes allow, ends
-  in the same records and saves no second version: a slot already at its value after no longer has the
-  identity of the value before.
+  in the same records. A slot already at its value after no longer has the identity of the value before,
+  so its version is not saved again; a command stopped between its version and the write of its slot
+  saves that version once more, with the same body.
 - **No ordering between keys is needed.** A batch is a set, and a slot is overwritten whole. Two folders
   that swap names lose both markers in pass 1 and gain them in pass 3. The order and the temporary
   places of Theorem 3 are for a tree that must be well-formed after each change, which these records
@@ -537,6 +542,9 @@ Then the projector raises the tree head to the entry's number.
 - **Manifests and versions pass the reference gate** on a collectable main
   ([algorithms/gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). The entry passed it at its
   commit, so the chunks are present.
+- **A version is saved before what it keeps is gone.** The save is under the same deadlines and retries
+  as the write it precedes, and has no bound of its own. When it fails, the slot is neither deleted nor
+  replaced, the pass stops, and the tree head is not raised (§2.9 names the one failure that is passed).
 - **Plain writes.** No projection step is conditional. One projector per entry is what makes that
   safe.
 
