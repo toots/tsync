@@ -436,8 +436,9 @@ find(id, names) -> File(entry) | Folder(id) | Missing
 fold_tree(id, root key, f(acc, containing dir key, entry) -> acc, acc0, on_unusable?) -> acc
 ```
 
-**History**: `save_version(slot)` (best effort, bounded by `snapshot_deadline`, recommended 10 s including
-retries; failures logged; called by `apply`), `list_versions(key)`, `get_version(version key)`, and the
+**History**: `save_version(slot)` (a record write of the projection, under the deadlines and retries of
+any other; called by `apply`, which says which failure it passes), `list_versions(key)`,
+`get_version(version key)`, and the
 pure helpers `parse(version key) -> (group, timestamp)?`,
 `versions_of(group)`, `manifest_of(group)`, `folder_versions(id)`. Reverting to a version is a local
 operation ([04](04-checkout-cache.md) §4.6).
@@ -605,7 +606,8 @@ Main flows:
   (absent is success), collection resume, the projection of an entry, the create of an entry with the
   same bytes.
 - **Offline**: reads fail; `Unresolved` is never cached; a corruption listing failure reads as "nothing
-  marked"; version snapshot failures are logged and swallowed within `snapshot_deadline`.
+  marked"; a version snapshot that fails fails the projection that asked for it
+  ([data-model/backend.md §2.9](data-model/backend.md#29-version)).
 - **Shared in-process state** MUST be updated atomically with respect to concurrent tasks: upload index
   allocation, the dedup and corruption memos, the per-domain registries, the run-open
   cache, the tree-walk frontier, and the counters for version timestamps and folder ids.
