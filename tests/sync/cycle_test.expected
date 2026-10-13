@@ -156,3 +156,9 @@
   A after the failed push: position none, 1 pending, a push in flight
   restarted and asked nothing: position none, 0 pending
 
+== a file whose mirror entry cannot be decoded, then written
+  A writes: done
+  A: 0 entries merged, 0 committed, 0 pending
+  A: f="abcd"  f (conflicted copy from A)="WXYZ"; position 2, 0 pending
+  B: f="abcd"  f (conflicted copy from A)="WXYZ"
+

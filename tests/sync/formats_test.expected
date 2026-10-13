@@ -57,6 +57,8 @@ a file of the root is still pending: true
 needs a state read: false
 an unparseable arrival reads as none: true
 after two unparseable records: pending 3, needs a state read true, set aside arrival.bad d-3f9a0c1b2d4e-40b.bad
+an unknown before-value: {"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":"unknown"}
+read back unknown: true, still pending: 3, needs a state read: true
 
 == upload records and local intents (04 §2.8)
 {"file":["3f9a0c1b2d4e-40a","report.txt"],"attempts":2,"lastError":{"kind":"transient/link","detail":"connection reset"}}

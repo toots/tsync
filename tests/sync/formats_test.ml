@@ -319,6 +319,19 @@ let () =
              (Fs.readdir before_dir
              @ Fs.readdir
                  (List.fold_left Filename.concat data_dir ["sync"; "photos"])))));
+  Sync_state.state_read damaged;
+  Sync_state.set_file damaged (at "one.jpg") (Some Unknown);
+  List.iter
+    (fun name ->
+      let body = Fs.read_file (Filename.concat before_dir name) in
+      if Text.contains body "unknown" then
+        p "an unknown before-value: %s\n" body)
+    (Fs.readdir before_dir);
+  let reopened = Sync_state.open_ ~data_dir d in
+  p "read back unknown: %b, still pending: %d, needs a state read: %b\n"
+    (Sync_state.before_file reopened (at "one.jpg") = Some (Some Unknown))
+    (Sync_state.pending_count reopened)
+    (Sync_state.needs_state reopened);
   Fs.rm_rf data_dir;
   p "\n== upload records and local intents (04 §2.8)\n";
   let upload =
