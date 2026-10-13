@@ -189,7 +189,8 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
 
 ### 4.6 Symlinks
 
-The domain setting `symlinks` is `keep`, `follow` or `skip`.
+The domain setting `symlinks` is `keep`, `follow` or `skip`. The mount reads the value in force
+([05](../05-ops-config.md) §2.1): the main's where it states one, else the configured one.
 
 - Only `keep` lets the mount create symlinks; `follow` and `skip` refuse `symlink()` with EPERM,
   since neither may put a symlink object in the domain and "follow" is undefined at creation time.
