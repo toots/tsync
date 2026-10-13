@@ -100,8 +100,8 @@ let faulty link (s : Store.t) : Store.t =
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
 let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
-    ?(projects_all = false) ?(refused = ref false) ?(read_only = false) root
-    name : (module Engine.S) =
+    ?(projects_all = false) ?(refused = ref false) ?(read_only = false)
+    ?(lazy_tree = false) root name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
@@ -138,7 +138,7 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
     let max_uploads = 1
     let read_only = read_only
     let symlinks = `Keep
-    let lazy_tree = false
+    let lazy_tree = lazy_tree
     let projects_all = projects_all
 
     (* 05 §2.1: a configuration its main contradicts is refused at each
@@ -151,10 +151,10 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
   (module Engine.Make (C))
 
 let started ?(background = false) ?link ?replica ?tuning ?stated ?projects_all
-    ?refused ?read_only root name =
+    ?refused ?read_only ?lazy_tree root name =
   let c =
-    client ?link ?replica ?tuning ?stated ?projects_all ?refused ?read_only root
-      name
+    client ?link ?replica ?tuning ?stated ?projects_all ?refused ?read_only
+      ?lazy_tree root name
   in
   let (module E) = c in
   E.start ~background ();
@@ -977,5 +977,21 @@ let () =
               (fun () -> Bigstring.to_string (B.read h ~off:0 ~len:4))
           in
           p "  B: x=%S… y=%S…\n" (first "x") (first "y"));
+      scenario "a lazy tree restarted with a create whose answer was lost"
+        (fun root ->
+          let link = { (link ()) with create = `Lost_answer } in
+          let a = started ~lazy_tree:true ~link root "A" in
+          ignore (sync a);
+          write a "f" "one";
+          settle a;
+          p "  A after the failed push: %s\n" (status a);
+          link.create <- `Through;
+          let a = started ~background:true ~lazy_tree:true ~link root "A" in
+          let (module A) = a in
+          let deadline = Rt.now () +. 10. in
+          while (A.activity ()).pushing && Rt.now () < deadline do
+            Rt.sleep 0.05
+          done;
+          p "  restarted and asked nothing: %s\n" (status a));
       Stop.request ());
   Test_support.finish base
