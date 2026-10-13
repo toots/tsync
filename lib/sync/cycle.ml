@@ -189,9 +189,15 @@ module Make (C : Engine_ctx.S) = struct
           | None -> []
           | Some path ->
               let aside = if late path then keep_aside path else [] in
-              if Staged.edit staged path <> None then (
-                ignore (discard_edit path);
-                cancel_upload path);
+              (match Staged.edit staged path with
+                | Some { state = Uploaded mine; _ }
+                  when Log_entry.identity_of mine = Log_entry.identity_of m ->
+                    (* The same bytes: its bodies become the cache's. *)
+                    promote_held path
+                | Some _ ->
+                    ignore (discard_edit path);
+                    cancel_upload path
+                | None -> ());
               end_lineage path;
               Mirror.write_file ~durable:false mirror path m;
               let fid = Mirror.ensure_file_id ~durable:false mirror path in
@@ -264,6 +270,18 @@ module Make (C : Engine_ctx.S) = struct
     let parked = Hashtbl.create 2 in
     let ops = List.concat_map (apply_step ~recovered parked) a.steps in
     if a.steps <> [] then Fs.syncfs (Mirror.root mirror);
+    (* 04 §4.7: before its before-value goes, and under the record. *)
+    List.iter
+      (function
+        | `File p, Sync_state.Drop ->
+            Option.iter
+              (fun path ->
+                match Staged.edit staged path with
+                  | Some { state = Uploaded _; _ } -> promote_held path
+                  | _ -> ())
+              (path_of p)
+        | _ -> ())
+      a.before;
     List.iter
       (fun ((key : Algebra.key), (settled : Sync_state.settled)) ->
         match (key, settled) with
@@ -296,17 +314,6 @@ module Make (C : Engine_ctx.S) = struct
           feed ~fids (List.map fst line))
         (lines ops);
     Sync_state.clear_arrival sync_state;
-    List.iter
-      (function
-        | `File p, Sync_state.Drop ->
-            Option.iter
-              (fun path ->
-                match Staged.edit staged path with
-                  | Some { state = Uploaded _; _ } -> promote_held path
-                  | _ -> ())
-              (path_of p)
-        | _ -> ())
-      a.before;
     List.concat_map (fun (op, _) -> Op.paths op) ops
 
   let removals_last : Log_entry.command list -> Log_entry.command list =
@@ -465,11 +472,31 @@ module Make (C : Engine_ctx.S) = struct
     let decide () =
       Algebra.merge ~equal:same ~aside ~l:l_base ~before:(before ()) ~theirs ()
     in
+    (* conflict-resolution §4.1, the same change on both sides: the key is
+       left as it is by the merge, and the main's manifest is the one every
+       client ends with (change-algebra §7.3). *)
+    let same_change (merged : Log_entry.value Algebra.merged) =
+      List.filter_map
+        (function
+          | `File (p, _, Some (Log_entry.Known m))
+            when not
+                   (List.exists
+                      (fun c -> Algebra.key_of c = `File p)
+                      merged.local) -> (
+              match l_base.file p with
+                | Some (Known mine)
+                  when Log_entry.identity_of mine = Log_entry.identity_of m
+                       && mine <> m ->
+                    Some (Sync_state.File (p, Some m))
+                | _ -> None)
+          | _ -> None)
+        theirs
+    in
     let arrival_of merged =
       {
         Sync_state.head;
         view;
-        steps = steps_of merged;
+        steps = steps_of merged @ same_change merged;
         before = settled_of ~theirs merged;
       }
     in
@@ -720,8 +747,9 @@ module Make (C : Engine_ctx.S) = struct
         (views_of batch)
     else Sync_state.set_position sync_state n
 
-  (* The [Won] step (publication §4.5): before-values, then the position, then
-     the in-flight record; then the staged edits it committed are promoted. *)
+  (* The [Won] step (publication §4.5): the staged edits it committed are
+     promoted, then the before-values, the position and the in-flight
+     record. *)
   let won n (batch : Log_entry.command list) =
     let paths =
       List.sort_uniq String.compare
@@ -732,6 +760,12 @@ module Make (C : Engine_ctx.S) = struct
     in
     with_meta (fun () ->
         with_keys paths (fun () ->
+            List.iter
+              (function
+                | `File (p, _, after) when same_file (l_base.file p) after ->
+                    Option.iter promote_held (path_of p)
+                | _ -> ())
+              batch;
             List.iter
               (function
                 | `File (p, _, after) ->
@@ -745,12 +779,7 @@ module Make (C : Engine_ctx.S) = struct
                     else Sync_state.set_folder sync_state i after)
               batch;
             commit_position n batch;
-            Sync_state.clear_in_flight sync_state;
-            List.iter
-              (fun path ->
-                if Sync_state.before_file sync_state (place_of path) = None then
-                  promote_held path)
-              paths));
+            Sync_state.clear_in_flight sync_state));
     Log_store.cursor_note log n;
     Rt.Signal.broadcast settled_signal
 
@@ -1435,15 +1464,19 @@ module Make (C : Engine_ctx.S) = struct
             if null c then Sync_state.drop sync_state (Algebra.key_of c))
           (pending ());
         List.iter
-          (fun (path, (e : Staged.edit)) ->
+          (fun (path, (_ : Staged.edit)) ->
             match place_opt path with
               | None -> ()
-              | Some p -> (
-                  match (e.state, Sync_state.before_file sync_state p) with
-                    | Owed, None ->
-                        Sync_state.record_file sync_state p (mirror_value path)
-                    | Uploaded _, None -> promote path
-                    | _ -> ()))
+              | Some p ->
+                  if
+                    (* publication §4.8 steps 3 and 4. *)
+                    Sync_state.before_file sync_state p = None
+                  then
+                    with_key path (fun () ->
+                        promote_clean path;
+                        if Staged.edit staged path <> None then
+                          Sync_state.record_file sync_state p
+                            (mirror_value path)))
           (Staged.edits staged));
     let recorded =
       List.filter_map

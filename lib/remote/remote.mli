@@ -63,15 +63,9 @@ module Make (_ : Context.S) : sig
       caller read the slot, else what the slot holds. Fails as the put does. *)
   val save_version : ?body:Bigstring.t -> Key.t -> unit
 
-  (** Put a manifest, saving a version first unless [save] is false; on a
-      "missing chunks" refusal the named chunks are re-sent from [resend] and
-      the put retried. A projection is its only caller. *)
-  val put_manifest :
-    ?resend:(Chunk_key.t -> Bigstring.t option) ->
-    ?save:bool ->
-    Key.t ->
-    Manifest.t ->
-    unit
+  (** Put a manifest, saving a version first unless [save] is false. A
+      projection is its only caller. *)
+  val put_manifest : ?save:bool -> Key.t -> Manifest.t -> unit
 
   (** Versions of a slot, newest first, with their timestamps in ns. *)
   val list_versions : Folder_id.t -> string -> (int64 * Store.entry) list

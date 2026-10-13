@@ -195,7 +195,7 @@ LOCAL(op), under the locks 04 §3.2 names (the metadata lock for a namespace cha
   for a namespace operation, at the next sync or close for a write. A before-value a write left
   for its next sync is made durable by a namespace operation on its key, and before the upload
   records its edit as Uploaded: an Uploaded edit with no before-value reads as committed (§4.8).
-  An Owed staged edit found at owner start with no
+  A staged edit found at owner start with no
   before-value takes the content identity of its base entry as its before-value, or ∅ when it has
   none ([04](../04-checkout-cache.md) §4.10): the key was clean when the edit began.
 - **A local intent** precedes a namespace operation whose local steps are not one atomic step on
@@ -294,6 +294,8 @@ ARRIVE():
   enactment records its own before-value under its key lock, and completing the record leaves it
   alone. The enactment holds the key lock of every file key whose before-value it settles, at the
   first enactment and at a completion alike.
+- **Promotion.** An Uploaded staged edit at a key the record drops the before-value of holds the
+  main's content, and is promoted before that before-value goes and before the record is cleared.
 - **The feed after an interrupted arrival.** The lines are appended before the record is cleared.
   A record completed later (at owner start, or at the next cycle) cannot tell which lines the
   interrupted enactment had appended, nor what the steps it had made looked like before. It
@@ -314,11 +316,11 @@ PUSH():
   case r:
     Won →
       with the metadata lock, and the key lock of each file key of B, in this order:
+        promote the staged edits of B whose content is B's value at their key   # 04 §4.7
         for k in B: if L(k) = B's value at k: drop before(k)
                     else: before(k) := B's value at k
         h := n                                                  # the entry's number
         clear the in-flight record
-      promote the staged edits of B whose before-value was dropped   # 04 §4.7
       cursor.note(h)
     Held(_) → ARRIVE(); then PUSH() again, in this cycle a bounded number of times, else in a later one
     missing chunks(C) → upload C from the staged bytes; issue the same create again
@@ -363,7 +365,10 @@ enacted as a move ([conflict-resolution.md](conflict-resolution.md) §4.1).
   `MAX_ENTRY_COMMANDS` commands, is pushed as several entries, each a batch (Proposition 4). An entry of one command is never split, whatever its
   size. The split keeps the rule above: commands that must be committed together (a swap of two
   files) share an entry, which MAY then exceed the limits.
-- **The `Won` step is three kinds of durable write, in that order.** Each is idempotent, and the
+- **The `Won` step promotes, then makes three kinds of durable write, in that order.** An edit is
+  promoted while its before-value is still there, so an Uploaded edit never stands without one
+  unless it holds what its base entry holds: a before-value that is missing is then never read as
+  a commit (§4.8). Each is idempotent, and the
   in-flight record goes last, so a crash inside the step leaves the record and recovery runs the
   whole step again (§4.8). Run again, a key that changed meanwhile gets the committed value as its
   before-value, which is what it must have.
@@ -535,10 +540,12 @@ Run at ownership start, in this order, before any request is served and before t
 2. **The arrival record.** Set $L$ to the recorded values on the recorded keys, write the recorded
    before-values and position, stamp a new resync generation (§4.4), clear the record. Each step
    is idempotent.
-3. **Before-values.** Drop each before-value equal to $L$ at its key. Give each **Owed** staged
-   edit that has none the content identity of its base entry (§4.1).
-4. **Promotion.** Promote each Uploaded staged edit whose key has no before-value: its commit
-   happened ([04](../04-checkout-cache.md) §4.7).
+3. **Before-values.** Drop each before-value equal to $L$ at its key.
+4. **Promotion.** Promote each Uploaded staged edit whose key has no before-value and whose
+   content is its base entry's: its key returned to what the main holds
+   ([04](../04-checkout-cache.md) §4.7). Give each staged edit that is left with no before-value,
+   Owed or Uploaded, the content identity of its base entry (§4.1): a commit promotes its edits
+   itself (§4.5), so an edit that is left was not committed.
 5. **Upload records.** Adopt every Owed staged edit that has no upload record
    ([04](../04-checkout-cache.md) §4.10).
 
@@ -574,8 +581,8 @@ already holds exactly these bytes ([06](../06-backends.md) §3.3).
 | the chunk uploads and the Uploaded state | chunks on the main, edit not Uploaded | uploaded again; existing chunks are skipped |
 | the in-flight record and the create | in-flight, no entry | the entry is absent above the tree head: created |
 | the create and the `Won` step | in-flight, entry exists | the entry holds this client's bytes: the `Won` step |
-| inside the `Won` step | in-flight, some before-values and perhaps the position already written | the `Won` step again, from its start |
-| the `Won` step and promotion | Uploaded staged edits with no before-value | promoted at owner start ([04](../04-checkout-cache.md) §4.10) |
+| inside the `Won` step | in-flight, some edits promoted, some before-values and perhaps the position already written | the `Won` step again, from its start: a promoted edit's key holds the committed value, and its before-value is dropped |
+| a before-value lost by local storage | an Uploaded staged edit with no before-value, whose content is not its base entry's | it takes its base entry's content as before-value (step 4) and is committed again |
 | the `Won` step and the end of the projection | tree head below this client's entry | the next cycle projects it again from its start |
 | the arrival record and the end of the local change | arrival record, $L$ partly changed | completed (step 2) |
 | the end of the local change and the clearing of the record | arrival record, $L$ changed | completed again, to the same state |

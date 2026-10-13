@@ -658,6 +658,43 @@ let () =
           p "  A: %s\n"
             (ignore (sync a);
              tree a));
+      scenario "an uploaded edit whose before-value is lost" (fun root ->
+          let a = started root "A" in
+          ignore (sync a);
+          write a "f" "abcd";
+          settle a;
+          write a "f" "WXYZ";
+          uploaded a;
+          Fs.rm_rf (Filename.concat root "A/data/sync/docs/before");
+          let a = started root "A" in
+          p "  A restarted: %s\n" (status a);
+          p "  A: %s\n" (sync a);
+          let b = started root "B" in
+          p "  B: %s\n"
+            (ignore (sync b);
+             tree b));
+      scenario "the same bytes written on two machines" (fun root ->
+          let a = started root "A" and b = started root "B" in
+          ignore (sync a);
+          ignore (sync b);
+          let mtime (module E : Engine.S) =
+            match
+              List.find_opt
+                (fun (e : E.entry) -> e.name = "f")
+                (E.list_children "")
+            with
+              | Some e -> e.st.mtime
+              | None -> nan
+          in
+          write a "f" "abcd";
+          Rt.sleep 0.05;
+          write b "f" "abcd";
+          uploaded b;
+          settle a;
+          let synced = sync b in
+          p "  B: %s; %s\n" synced (tree b);
+          p "  B has the file as the main holds it: %b\n" (mtime a = mtime b);
+          p "  entries: %d\n" (entries root));
       scenario "a read-only client leaves an entry to those that write"
         (fun root ->
           let quick =

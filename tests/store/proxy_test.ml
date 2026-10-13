@@ -24,7 +24,6 @@ let () =
           domain = Domain_name.v domain;
           secret;
           read_only;
-          chunk_size = Some 4096;
           domain_settings =
             {
               chunk = 4096;
