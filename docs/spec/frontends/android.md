@@ -186,7 +186,9 @@ showed an offline state clears it and re-lists what it displays.
   `list_all`, `cursor`, `full_resync`): a lazy tree holds only the folders it pulled, so there is no
   whole tree to list or to diff. The host re-lists what it displays on notices (§4.2).
 - Subscriptions: there is no socket. The notice sink carries the same events (§4.2).
-- Symlinks: the host's config sets `symlinks: "skip"`; the platform's document model has none.
+- Symlinks: the platform's document model has none, so the host creates none. Its config leaves
+  `symlinks` out and takes the policy its main states ([05](../05-ops-config.md) §2.1): a value of
+  its own would be refused wherever the main states another.
 - Ranged writes and `close`: the only write is whole-body adoption of a staged file.
 
 ## 4. Host environment

@@ -17,7 +17,7 @@ data class ServerConfig(
     fun encode(clientName: String): String {
         val backend = JSONObject().put("type", "http-proxy").put("name", "server").put("role", "main")
             .put("url", url.trim().trimEnd('/')).put("secret", secret)
-        val domain = JSONObject().put("name", domain).put("versioning", true).put("symlinks", "skip")
+        val domain = JSONObject().put("name", domain).put("versioning", true)
             .put("maxCache", maxCache.trim()).put("frontends", JSONArray().put("android"))
             .put("backends", JSONArray().put(backend))
         return JSONObject().put("name", clientName).put("domains", JSONArray().put(domain)).toString()
