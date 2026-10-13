@@ -152,3 +152,7 @@
   the swap made 1 entry, over the limit: true
   B: x="bbbb"… y="aaaa"…
 
+== a lazy tree restarted with a create whose answer was lost
+  A after the failed push: position none, 1 pending, a push in flight
+  restarted and asked nothing: position none, 0 pending
+
