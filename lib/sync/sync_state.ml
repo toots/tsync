@@ -47,8 +47,15 @@ let before_path t key = Filename.concat (before_dir t) (record_name key)
 
 let settled_fields = function
   | Drop -> [("drop", `Bool true)]
+  (* 03 §2.8: no value of [before] reads as an identity, so this one reads
+     back as unknown. *)
+  | Before_file (Some Unknown) -> [("before", `String "unknown")]
   | Before_file v -> [("before", Log_entry.guard_to_json v)]
   | Before_folder p -> [("before", Log_entry.place_to_json p)]
+
+(* An unknown before-value differs from every value: only an arrival by state,
+   which reads the main's value at its key, replaces it. *)
+let unknown = function Before_file (Some Unknown) -> true | _ -> false
 
 let encode_before key value =
   Yojson.Safe.to_string
@@ -62,8 +69,12 @@ let settled_of_json json : (Algebra.key * settled) option =
   match (field "drop", field "before", key) with
     | Some (`Bool true), _, _ -> Some (key, Drop)
     | _, Some v, `File _ ->
-        let* v = ok (Log_entry.guard_of_json v) in
-        Some (key, Before_file v)
+        Some
+          ( key,
+            Before_file
+              (match Log_entry.guard_of_json v with
+                | Ok v -> v
+                | Error _ -> Some Unknown) )
     | _, Some v, `Folder _ ->
         let* p = ok (Log_entry.place_of_json v) in
         Some (key, Before_folder p)
@@ -117,6 +128,7 @@ let open_ ~data_dir domain =
       if is_record name then (
         match Option.bind (Fs.read_file_opt path) decode_before with
           | Some (key, value) when record_name key = name ->
+              if unknown value then t.needs_state <- true;
               t.before <- Keys.add key value t.before
           | _ -> set_aside t path))
     (Fs.readdir (before_dir t));
@@ -155,6 +167,7 @@ let write ?(durable = true) t key value =
   if durable then Fs.durable_replace ~perm:0o600 path body
   else Fs.replace ~perm:0o600 path body;
   Mutex.protect t.m (fun () ->
+      if unknown value then t.needs_state <- true;
       t.before <- Keys.add key value t.before;
       t.soft <-
         (if durable then Keys.remove key t.soft else Keys.add key () t.soft))

@@ -776,6 +776,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Where no smaller batch can be chosen, the batch is sent as it is, over the limit (publication §4.5, splitting). Test two swapped files whose entry exceeds the byte limit: one entry, and a second client holds the swap.
 - **Seen** — rewrite (review of the publication log).
 
+### A-7.28 A value the client cannot read has no before-value to record
+- **Pitfall** — The before-value of a file whose mirror entry did not decode was unknown, and the record had no way to write one: every write, removal and rename at that name failed with an invalid-value error, and so did the recovery at start. The reader, by its specification, kept such a key pending as unknown; it set the record aside and the key read as clean.
+- **Check** — An unknown before-value is written and read back as one, keeps its key out of a push, and makes the next arrival one by state (03 §2.8). Test a file whose mirror entry is replaced by bytes that do not decode, then written: the write succeeds, the main's value returns, and the written content is a conflicted copy on both clients.
+- **Seen** — rewrite (review of the publication log).
+
 ## 8. Caches, the mirror and rebuilds
 
 ### A-8.1 Name lookups fall through to the store

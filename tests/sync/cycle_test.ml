@@ -993,5 +993,27 @@ let () =
             Rt.sleep 0.05
           done;
           p "  restarted and asked nothing: %s\n" (status a));
+      scenario "a file whose mirror entry cannot be decoded, then written"
+        (fun root ->
+          let a = started root "A" and b = started root "B" in
+          ignore (sync a);
+          write a "f" "abcd";
+          settle a;
+          Fs.write_file_for_test
+            (Filename.concat root "A/cache/docs/manifests/f")
+            "not a manifest";
+          let shown f =
+            try f () with e -> "failed: " ^ Printexc.to_string e
+          in
+          p "  A writes: %s\n"
+            (shown (fun () ->
+                 write a "f" "WXYZ";
+                 "done"));
+          settle a;
+          p "  A: %s\n" (shown (fun () -> sync a));
+          p "  A: %s; %s\n" (shown (fun () -> tree a)) (status a);
+          p "  B: %s\n"
+            (ignore (sync b);
+             tree b));
       Stop.request ());
   Test_support.finish base

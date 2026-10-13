@@ -235,7 +235,11 @@ made durable as [publication.md](algorithms/publication.md) §4.1 says, and remo
 - Local only: a before-value reaches the store only as the `before` of a command.
 - An unparseable record is set aside, and the client arrives by state before it pushes again. A
   record whose `before` alone does not parse keeps its key pending with an **unknown** before-value,
-  which differs from every value. A record whose key cannot be read is no before-value: a file
+  which differs from every value. A client writes one, as `"before":"unknown"`, for a file key
+  whose value it cannot read from its own tree (a mirror entry that does not decode). A key with an
+  unknown before-value is left out of every push, and the client arrives by state before it pushes
+  again: the arrival reads the main's value at the key, and what the client holds there that
+  differs is kept as a conflicted copy ([conflict-resolution.md](algorithms/conflict-resolution.md)). A record whose key cannot be read is no before-value: a file
   key's record name holds a hash of its leaf, so the key cannot be recovered from the name. Its
   key then reads as clean, and the arrival by state installs the main's value there unless a
   staged edit holds it ([publication.md](algorithms/publication.md) §4.8 step 3).

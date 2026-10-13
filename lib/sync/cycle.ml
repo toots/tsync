@@ -1067,13 +1067,13 @@ module Make (C : Engine_ctx.S) = struct
       (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
     changed > 0
 
-  (* publication §4.5, "which batch": the pushable commands, without the
-     removals an Owed edit still inherits from, as many as an entry holds; and
-     no removal of content that a command left out creates elsewhere. *)
   (* publication §4.5: the entry this client creates of a batch. *)
   let entry_of batch : Log_entry.t =
     { author = C.client_uuid; projector = projector (); commands = batch }
 
+  (* publication §4.5, "which batch": the pushable commands, without the
+     removals an Owed edit still inherits from, as many as an entry holds; and
+     no removal of content that a command left out creates elsewhere. *)
   let choose_batch () : Log_entry.command list =
     let all = List.filter (fun c -> not (null c)) (pending ()) in
     let created : Log_entry.command -> string option = function
@@ -1092,6 +1092,7 @@ module Make (C : Engine_ctx.S) = struct
         (Staged.edits staged)
     in
     let pushable : Log_entry.command -> bool = function
+      | `File (_, Some Unknown, _) -> false
       | `File (p, _, Some (Known m)) -> not (refused p m)
       | `File (_, _, Some (Identity _ | Unknown)) -> false
       | `File (_, _, None) | `Folder _ -> true
