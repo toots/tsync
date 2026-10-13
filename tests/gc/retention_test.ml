@@ -180,6 +180,12 @@ let () =
         | exception Fail.E f -> p "stopped: %s\n" f.reason);
       p "\n== expire, applied\n";
       show (R.expire ~apply:true ~now ~cutoff ());
+      p "\n== the log, from a host whose clock runs a year ahead\n";
+      let ahead = R.expire ~now:(now +. (365. *. day)) ~cutoff () in
+      p "log entries it would delete: %d of %d\n"
+        (List.length
+           (List.filter (fun k -> Key.under (Key.log d) k) ahead.deleted))
+        (List.length (main.list_prefix (Key.log d)));
       let dir rel =
         Fs.is_dir (Filename.concat store_root ("tsync/d/versions/" ^ rel))
       in

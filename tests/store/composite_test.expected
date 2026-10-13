@@ -18,6 +18,9 @@ replica: chunks true true, manifest true, log true, cursor true, index false
 backfill: chunks true true, manifest true, log false, cursor false, index false
 after delete, replica manifest false
 
+== an entry that names a chunk a copy lacks
+replica: the chunk false, the entry true
+
 == a bulk delete reaches a copy as one
 replica: 3 gone, by 0 single deletes and 1 bulk
 

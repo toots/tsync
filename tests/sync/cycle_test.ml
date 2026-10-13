@@ -300,6 +300,24 @@ let () =
           p "  B: %s\n"
             (ignore (sync b);
              tree b));
+      scenario "an entry whose answer was lost reaches the copies" (fun root ->
+          let link = { (link ()) with create = `Lost_answer } in
+          let replica =
+            Local.create ~name:"replica" (Filename.concat root "r")
+          in
+          let a = started ~link ~replica root "A" in
+          ignore (sync a);
+          write a "f" "one";
+          settle a;
+          link.create <- `Through;
+          p "  A, the next cycle: %s\n" (sync a);
+          settle a;
+          let deadline = Rt.now () +. 10. in
+          let copied () = replica.head_opt (Key.log_entry d 1) <> None in
+          while (not (copied ())) && Rt.now () < deadline do
+            Rt.sleep 0.02
+          done;
+          p "  the replica holds the entry: %b\n" (copied ()));
       scenario "a create that never left; the owner restarts" (fun root ->
           let link = { (link ()) with create = `Fails } in
           let a = started ~link root "A" in
@@ -487,6 +505,8 @@ let () =
           write a "f" "abcdefgh";
           settle a;
           let (module E) = a in
+          (* Not in its cache either: the client holds these bytes nowhere. *)
+          E.evict "f";
           E.rename ~src:"f" ~dst:"g" ~exclusive:true;
           ignore ((main root).delete (Key.chunk d (Chunk_key.of_body "efgh")));
           p "  A, renamed, a chunk gone from the main: %s\n" (sync a);
@@ -499,6 +519,37 @@ let () =
           p "  B: %s\n"
             (ignore (sync b);
              tree b));
+      scenario "a chunk the main lost, which the cache still holds" (fun root ->
+          let a = started root "A" in
+          ignore (sync a);
+          write a "f" "abcdefgh";
+          settle a;
+          let (module E) = a in
+          E.rename ~src:"f" ~dst:"g" ~exclusive:true;
+          ignore ((main root).delete (Key.chunk d (Chunk_key.of_body "efgh")));
+          p "  A, renamed, a chunk gone from the main: %s\n" (sync a);
+          p "  damaged: %d; the main holds the chunk again: %b\n"
+            (List.length (E.activity ()).damaged)
+            ((main root).head_opt (Key.chunk d (Chunk_key.of_body "efgh"))
+            <> None));
+      scenario "an edit that inherits a chunk the main lost" (fun root ->
+          let link = link () in
+          let a = started root "A" and b = started ~link root "B" in
+          let (module B) = b in
+          ignore (sync a);
+          write a "f" "abcdefghijkl";
+          settle a;
+          ignore (sync b);
+          (* B never read the file: it holds only the group it writes into. *)
+          link.create <- `Fails;
+          B.write "f" ~off:9 (Bigstring.of_string "Z");
+          B.close "f";
+          settle b;
+          ignore ((main root).delete (Key.chunk d (Chunk_key.of_body "abcd")));
+          link.create <- `Through;
+          p "  B, an inherited chunk gone from the main: %s\n" (sync b);
+          p "  damaged: %s\n" (String.concat " " (B.activity ()).damaged);
+          p "  B, a cycle later: %s\n" (sync b));
       scenario "a parked copy is retried, and the pause flag is where 07 says"
         (fun root ->
           let refusing = ref true in
@@ -673,6 +724,17 @@ let () =
           p "  B: %s\n"
             (ignore (sync b);
              tree b));
+      scenario "a write that fails leaves nothing pending" (fun root ->
+          let a = started root "A" in
+          let (module A) = a in
+          ignore (sync a);
+          A.mkdir "dir" ~exclusive:false;
+          ignore (sync a);
+          p "  a write to a folder: %s\n"
+            (match A.write "dir" ~off:0 (Bigstring.of_string "x") with
+              | () -> "accepted"
+              | exception Fail.E f -> "refused: " ^ f.reason);
+          p "  A: %s\n" (status a));
       scenario "the same bytes written on two machines" (fun root ->
           let a = started root "A" and b = started root "B" in
           ignore (sync a);

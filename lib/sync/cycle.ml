@@ -788,35 +788,88 @@ module Make (C : Engine_ctx.S) = struct
         Some (List.filter_map Chunk_key.of_string names)
     | _ -> None
 
-  (* publication §4.5, missing chunks: an edit whose bytes are staged is
-     uploaded again; a file with no bytes here is left out and reported. *)
+  (* The bytes of chunk [i] of [m] where this client holds them without
+     asking the main: a staged body, or a whole group of its cache. *)
+  let held path (m : Manifest.t) i =
+    let cc = Cache.cc cache in
+    let cached (m : Manifest.t) i =
+      let g = Cache.group_of ~cc m (Cache.group_index ~cc m i) in
+      if not (Cache.is_whole cache g.gkey) then None
+      else
+        Option.map
+          (Cache.verified_member cache g)
+          (List.find_opt (fun (x : Cache.member) -> x.index = i) g.members)
+    in
+    let bytes =
+      match Staged.edit staged path with
+        | Some ({ content = Whole _; _ } as e) -> Some (`Staged e)
+        | Some ({ content = Slots slots; _ } as e)
+          when i < Array.length slots && slots.(i) <> Staged.Inherit ->
+            Some (`Staged e)
+        | Some _ -> (
+            match cached m i with
+              | Some b -> Some (`Bytes b)
+              | None ->
+                  Option.bind (Mirror.manifest mirror path) (fun base ->
+                      if i < base.count then
+                        Option.map (fun b -> `Bytes b) (cached base i)
+                      else None))
+        | None -> Option.map (fun b -> `Bytes b) (cached m i)
+    in
+    let bytes =
+      match bytes with
+        | Some (`Bytes b) -> Some b
+        | Some (`Staged e) ->
+            Some
+              (read_staged path e ~off:(i * m.chunk_size)
+                 ~len:(Chunking.length ~size:m.size ~cs:m.chunk_size i))
+        | None -> None
+    in
+    match bytes with
+      | Some b
+        when Chunk_key.equal (Chunk_key.of_bigstring b) (Manifest.key m i) ->
+          Some b
+      | _ -> None
+
+  (* publication §4.5, missing chunks: each is sent again from the bytes this
+     client holds, its staged bodies or its cache; a file with a chunk it
+     holds nowhere is left out and reported. *)
   let chunks_refused (batch : Log_entry.command list) missing =
     R.drop_memo missing;
+    let lacks ck = List.exists (Chunk_key.equal ck) missing in
     List.iter
       (function
         | `File (p, _, Some (Log_entry.Known m))
-          when List.exists
-                 (fun ck -> List.exists (Chunk_key.equal ck) missing)
-                 (Manifest.keys m) -> (
+          when List.exists lacks (Manifest.keys m) -> (
             match path_of p with
               | None -> ()
               | Some path ->
                   with_key path (fun () ->
-                      match Staged.edit staged path with
-                        | Some ({ state = Uploaded _; _ } as e) ->
-                            Staged.write staged path { e with state = Owed };
-                            post_put path
-                        | Some _ -> ()
-                        | None ->
-                            (* ponytail: the local cache may hold the chunk;
-                               send it from there before giving the file up. *)
-                            Log.warn
-                              "%s: the main lacks its content and this client \
-                               has no bytes to send again"
-                              path;
-                            Mutex.protect damaged_m (fun () ->
-                                Hashtbl.replace damaged p
-                                  (path, Log_entry.identity_of m))))
+                      (* A value the key no longer holds is no longer pushed. *)
+                      if same_file (l_base.file p) (Some (Known m)) then (
+                        let sent i =
+                          let ck = Manifest.key m i in
+                          (not (lacks ck))
+                          ||
+                            match
+                              try held path m i with
+                                | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+                                | _ -> None
+                            with
+                            | Some b ->
+                                R.put_chunk ck b;
+                                true
+                            | None -> false
+                        in
+                        if not (List.for_all sent (List.init m.count Fun.id))
+                        then (
+                          Log.warn
+                            "%s: the main lacks its content and this client \
+                             has no bytes to send again"
+                            path;
+                          Mutex.protect damaged_m (fun () ->
+                              Hashtbl.replace damaged p
+                                (path, Log_entry.identity_of m))))))
         | _ -> ())
       batch
 
@@ -846,21 +899,29 @@ module Make (C : Engine_ctx.S) = struct
       | None -> ()
       | Some { n; body } -> (
           match Log_store.read_entry log n with
-            | Some e when e.bytes = body -> won n (batch_of_body body)
+            | Some e when e.bytes = body ->
+                (* The claim's answer never came, so nothing queued the entry
+                   for the copies. *)
+                Tsync_store.Composite.owe C.composite (Key.log_entry d n);
+                won n (batch_of_body body)
             | Some _ -> Sync_state.clear_in_flight sync_state
             | None when Log_store.tree_head log >= n ->
                 if C.lazy_tree then Sync_state.clear_in_flight sync_state
                 else ignore (arrive_by_state ())
             | None -> ignore (commit n body (batch_of_body body)))
 
+  (* The record is read under the metadata lock: one seen without it may be
+     that of an enactment still running, a host's pull on a lazy tree, which
+     clears it before it lets the lock go. *)
   let complete_arrival () =
-    match Sync_state.arrival sync_state with
-      | None -> ()
-      | Some a ->
-          changed
-            (with_meta (fun () ->
-                 with_keys (paths_of a) (fun () ->
-                     run_arrival ~recovered:true a)))
+    if Sync_state.arrival sync_state <> None then
+      changed
+        (with_meta (fun () ->
+             match Sync_state.arrival sync_state with
+               | None -> []
+               | Some a ->
+                   with_keys (paths_of a) (fun () ->
+                       run_arrival ~recovered:true a)))
 
   (* publication §4.4: what was merged, and how many paths it changed. *)
   let arrive ?narrate ?(full = false) () =
@@ -1202,12 +1263,14 @@ module Make (C : Engine_ctx.S) = struct
                                  ~client:C.client_uuid
                                = `Won
                           then
+                            (* The quarantine runs from the takeover's creation,
+                               not from before its request. *)
                             took :=
                               Some
                                 {
                                   entry = e.n;
                                   generation = generation + 1;
-                                  since = now;
+                                  since = Rt.boottime ();
                                 }
                       | None ->
                           watching :=
@@ -1321,6 +1384,9 @@ module Make (C : Engine_ctx.S) = struct
     (* The requests the running step took, given back when it fails. *)
     and took_asked = ref false
     and took_nudged = ref false in
+    (* A lazy tree cycles on no timer: its first cycle, which recovers an
+       in-flight record and projects an entry a crash left, is asked for. *)
+    if C.lazy_tree then Atomic.set nudged true;
     (* publication §4.5, "when": how long a push waits from [dirty_since]. The
        commands whose upload is owed are not pushable and do not fill an entry. *)
     let push_delay () =

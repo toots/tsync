@@ -97,6 +97,11 @@ val in_read_order : t -> member list
 val start : ?paused:bool -> t -> unit
 
 val rescan : t -> unit
+
+(** The copies are owed a key the main holds and whose write this composite
+    never saw answered: a claim won with its answer lost. *)
+val owe : t -> Key.t -> unit
+
 val rearm : t -> int
 val pause : t -> unit
 val resume : t -> unit

@@ -45,9 +45,6 @@ Not normative.
 - **A parked folder can be listed.** `.tsync-park-<id>` is a real name of the root, escaped in the
   mirror, for the time of one enactment under the metadata lock; a listing that takes no lock can
   show it.
-- **A refused commit for missing chunks is not answered from the local cache.** An edit whose
-  bytes are staged is uploaded again; a file with no staged bytes is reported as damaged, and a
-  later import or rsync of it uploads it again.
 - **An arrival by state holds its difference in memory**, and writes it whole in the arrival
   record. On a client whose mirror is current that is small; a first sync of a very large domain
   holds every manifest of it.

@@ -154,6 +154,14 @@ module Make (C : Context.S) = struct
             Cancel.race cancelled (fun () -> store.list_prefix prefix)
           in
           let entries = listed (Key.log d) in
+          (* publication §4.9, gc A9: an entry's age is told by the store's
+             own times, the newest entry's against its own, never by this
+             host's clock. *)
+          let now =
+            List.fold_left
+              (fun newest (e : Store.entry) -> max newest e.last_modified)
+              0. entries
+          in
           let doomed =
             Gc_plan.log ~now ~retention:Log_store.retention ~tree_head
               (List.map

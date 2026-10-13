@@ -761,6 +761,16 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Chunks, then log entries and takeovers, then tree records and versions, then the tree head, the cursor last; no log, tree head or cursor into a backfill (replication §4.10). Test the order of the areas and what a backfill holds after a mirror.
 - **Seen** — rewrite (review of the publication log).
 
+### A-7.25 The reference gate applied to a copy of a log entry
+- **Pitfall** — The driver's gate refused any write of a log entry whose chunks its store lacked. A replica on a local store receives its chunks on a best effort and its entries as copies: an entry that arrived before one of its chunks was refused with missing chunks, which is not retried, and its copy job was parked for good. An entry committed with its answer lost was never queued for the copies at all, since only a claim seen to win queued it.
+- **Check** — The gate guards the claim that creates an entry; a plain put of an entry is a copy and is taken whatever chunks the store holds (replication §4.6). An entry found to be this client's at recovery is owed to the copies. Test an entry naming a chunk a replica lacks, and a lost answer with a replica.
+- **Seen** — rewrite (review of the publication log).
+
+### A-7.26 A refused commit answered from one source of bytes only
+- **Pitfall** — A commit refused for missing chunks was answered by running the upload again. The upload trusts a chunk its edit inherits to be on the main and sends nothing for it, so the same commit was refused again at every cycle, and the file was never reported. A file with no staged edit was reported as damaged though its cache held the chunk. Rsync took a damaged file for one the domain holds and left it damaged.
+- **Check** — Each missing chunk is sent again from whatever holds its bytes here, a staged body or the cache; a file with a chunk held nowhere is reported and left out of later pushes (publication §4.5; gc §5.4). A bulk publisher uploads a damaged file again (05 §4.2). Test a chunk lost from the main and held in the cache, and one an edit inherits and holds nowhere.
+- **Seen** — rewrite (review of the publication log).
+
 ## 8. Caches, the mirror and rebuilds
 
 ### A-8.1 Name lookups fall through to the store

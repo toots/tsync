@@ -214,11 +214,14 @@ let create ?(verify_writes = true) ~name root =
   let read_opt key =
     Chunk_spaces.read spaces key (fun key -> read_opt ~mappable root key)
   in
+  (* replication §4.6: an entry is created by a claim, which the gate
+     guards; a plain put of one is a copy of it, taken whatever chunks this
+     store holds. *)
   let put ?mode:_ key body =
     fed (fun () ->
-        Chunk_spaces.gate spaces ~key
-          ~body:(fun () -> body)
-          (fun () -> with_key key (fun () -> durable_write root key body));
+        let write () = with_key key (fun () -> durable_write root key body) in
+        if Key.is_log_entry key then write ()
+        else Chunk_spaces.gate spaces ~key ~body:(fun () -> body) write;
         if verify_writes then verify_written ~read:read_opt root key)
   in
   (* local §5: the check and the rename are one step under the key's lock; a
