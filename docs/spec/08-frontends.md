@@ -355,8 +355,8 @@ The handler enforces these itself, whatever a frontend advertises:
   specifies; a refused path answers `denied`.
 - **write**, in order: cancel any upload of this key in flight (a write to a file being sent stops
   the send); check `base` and adopt the staging file by rename
-  ([04 §4.3](04-checkout-cache.md#43-staged-writes)); post its upload; with `await`, wait until this
-  key's content is committed ([publication.md §4.5](algorithms/publication.md#45-push)) or its
+  ([04 §4.3](04-checkout-cache.md#43-staged-writes)); post its upload; with `await`, wait until the
+  content written, at this key or at the conflicted copy a stale `base` made, is committed ([publication.md §4.5](algorithms/publication.md#45-push)) or its
   upload or push has started failing; report the size and mtime of what now resolves (staged or
   committed).
 

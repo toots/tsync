@@ -93,9 +93,10 @@ module type S = sig
   val create : string -> exclusive:bool -> unit
 
   (** Adopt a complete file by rename, then close; staged aside when [base] is
-      not the key's current content, nothing when the content is the same. *)
+      not the key's current content, nothing when the content is the same. The
+      path that holds what was written. *)
   val write_whole :
-    string -> src:string -> ?base:string -> exclusive:bool -> unit -> unit
+    string -> src:string -> ?base:string -> exclusive:bool -> unit -> string
 
   (** Returns once the key's change is committed or its upload started failing
       (08 §3.5 [write] with [await]), or the domain is paused. *)

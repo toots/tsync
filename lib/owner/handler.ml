@@ -925,7 +925,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
         (match r.at with Child d -> pull_destination d | _ -> ());
-        let path, item =
+        let path, written, item =
           mutate (fun () ->
               let path =
                 match r.at with
@@ -935,11 +935,13 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
                       if E.kind p <> `File then invalid "write names a file";
                       p
               in
-              occupied t path (fun () ->
-                  E.write_whole path ~src:r.staging ?base:r.base
-                    ~exclusive:r.exclusive ());
+              let written =
+                occupied t path (fun () ->
+                    E.write_whole path ~src:r.staging ?base:r.base
+                      ~exclusive:r.exclusive ())
+              in
               keys_changed t [path];
-              (path, row_or_unnamed t path))
+              (path, written, row_or_unnamed t path))
         in
         (* The row is the write's, read under its hold. After a wait it is read
            again for [isUploaded]; a file renamed or removed meanwhile still
@@ -947,7 +949,9 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         let item =
           if not r.await then item
           else (
-            E.await_upload path;
+            (* On a stale base the content is a conflicted copy's, and the row
+               stays the named file's. *)
+            E.await_upload written;
             try row_or_unnamed t path with Fail.E _ -> item)
         in
         { Protocol.size = item.size; mtime = item.mtime; item }

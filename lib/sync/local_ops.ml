@@ -1291,7 +1291,8 @@ module Make (C : Engine_ctx.S) = struct
           ignore (Mirror.ensure_file_id mirror path);
           bump path;
           post_put path;
-          feed_put path e.size))
+          feed_put path e.size));
+    path
 
   (* 04 §2.8 [fids]: read before the local half, which may remove a marker. *)
   let fid_of_op op =

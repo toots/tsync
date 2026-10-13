@@ -18,6 +18,7 @@ write by ref, same content         {"ok":true,"size":11,"mtime":"<t>","item":{"r
   uploads queued by it: 0
 write by ref on its base           {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
 write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+  uploads left when it answers: 0
   a now holds: f (conflicted copy from test).txt, f.txt
 create onto a file, exclusive      {"ok":false,"code":"exists","error":"a/f.txt exists","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
 rename onto its own place          {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
