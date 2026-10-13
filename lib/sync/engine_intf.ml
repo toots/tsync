@@ -17,7 +17,7 @@ type activity = {
   position : int option;  (** the last entry merged *)
   pending : int;  (** keys with a before-value *)
   pushing : bool;  (** an in-flight record exists *)
-  tree_head : int;  (** as last read *)
+  tree_head : int;  (** as last read, below 0 until it was *)
   unfollowed : (int * string) option;
       (** an entry this client cannot follow, and why *)
   failing : string option;

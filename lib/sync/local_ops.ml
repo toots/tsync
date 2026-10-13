@@ -1422,25 +1422,23 @@ module Make (C : Engine_ctx.S) = struct
 
   (* 04 §4.5 [remove_tree]: children before parents, one command per item;
      the ops of its feed line with the ids of the files they name. *)
-  let rec remove_tree_held path =
-    let below =
-      List.concat_map
-        (fun (e : entry) ->
-          let p = Names.join path e.name in
-          if e.is_dir then remove_tree_held p
-          else (
-            let fid = Mirror.file_id mirror p in
-            with_key p (fun () -> delete_held p);
-            [(Op.Delete p, fid)]))
-        (list_children path)
-    in
+  (* Each removal is noted as it is made, so that what was removed before a
+     failure is still told to the feed. *)
+  let rec remove_tree_held made path =
+    List.iter
+      (fun (e : entry) ->
+        let p = Names.join path e.name in
+        if e.is_dir then remove_tree_held made p
+        else (
+          let fid = Mirror.file_id mirror p in
+          with_key p (fun () -> delete_held p);
+          made := (Op.Delete p, fid) :: !made))
+      (list_children path);
     match Mirror.folder_id mirror path with
       | Some id ->
           rmdir_held path id;
-          below @ [(Op.Rmdir { path; id = Some id }, None)]
-      | None ->
-          Mirror.remove_folder mirror path;
-          below
+          made := (Op.Rmdir { path; id = Some id }, None) :: !made
+      | None -> Mirror.remove_folder mirror path
 
   let remove_tree path =
     check_writable ();
@@ -1453,11 +1451,17 @@ module Make (C : Engine_ctx.S) = struct
           Dqueue.Records.create intents
             (encode_intent (Op.Rmdir { path; id = Some id }))
         in
-        let ops =
+        let made = ref [] in
+        let failure =
           Fun.protect
             ~finally:(fun () -> Dqueue.Records.complete intents intent)
-            (fun () -> remove_tree_held path)
+            (fun () ->
+              match remove_tree_held made path with
+                | () -> None
+                | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+                | exception e -> Some e)
         in
+        let ops = List.rev !made in
         feed
           ~fids:
             (List.concat
@@ -1467,7 +1471,8 @@ module Make (C : Engine_ctx.S) = struct
                   ops))
           (List.map fst ops);
         changed (List.concat_map (fun (op, _) -> Op.paths op) ops);
-        wake_cycle ())
+        wake_cycle ();
+        Option.iter raise failure)
 
   (* Every staged edit a rename moved is posted again under its new key. *)
   let repost_moved moved =
@@ -1532,7 +1537,7 @@ module Make (C : Engine_ctx.S) = struct
           ignore (Mirror.record_folder mirror path id))
     | Rmdir { id = Some id; _ } -> (
         match Mirror.key_of_id mirror id with
-          | Some p -> ignore (remove_tree_held p)
+          | Some p -> remove_tree_held (ref []) p
           | None -> ())
     | Rename { is_dir = false; src; dst; _ } ->
         if kind src <> `Absent && kind dst = `Absent then
@@ -1629,26 +1634,27 @@ module Make (C : Engine_ctx.S) = struct
       | Some m -> Cache.evict cache m
       | None -> ()
 
-  (* 08 §3.3 status [downloading]: the transfers of file bytes running now. *)
-  type download = { size : int; started : float; done_ : int Atomic.t }
+  (* 08 §3.3 status [downloading] and [uploading]: the transfers of file
+     bytes running now, each with what it moved since it began. *)
+  type running = { size : int; started : float; done_ : int Atomic.t }
+  type transfers = (int, string * running) Hashtbl.t
 
-  let downloads_m = Mutex.create ()
-  let running_downloads : (int, string * download) Hashtbl.t = Hashtbl.create 8
-  let download_ids = Atomic.make 0
+  let transfers_m = Mutex.create ()
+  let running_downloads : transfers = Hashtbl.create 8
+  let running_uploads : transfers = Hashtbl.create 8
+  let transfer_ids = Atomic.make 0
 
-  let downloading path ~size f =
-    let id = Atomic.fetch_and_add download_ids 1 in
+  let transferring (table : transfers) path ~size f =
+    let id = Atomic.fetch_and_add transfer_ids 1 in
     let d = { size; started = Unix.gettimeofday (); done_ = Atomic.make 0 } in
-    Mutex.protect downloads_m (fun () ->
-        Hashtbl.replace running_downloads id (path, d));
+    Mutex.protect transfers_m (fun () -> Hashtbl.replace table id (path, d));
     Fun.protect
       ~finally:(fun () ->
-        Mutex.protect downloads_m (fun () ->
-            Hashtbl.remove running_downloads id))
+        Mutex.protect transfers_m (fun () -> Hashtbl.remove table id))
       (fun () -> f (fun n -> ignore (Atomic.fetch_and_add d.done_ n)))
 
-  let downloads () =
-    Mutex.protect downloads_m (fun () ->
+  let running (table : transfers) =
+    Mutex.protect transfers_m (fun () ->
         Hashtbl.fold
           (fun _ (path, d) acc ->
             {
@@ -1658,7 +1664,12 @@ module Make (C : Engine_ctx.S) = struct
               started = d.started;
             }
             :: acc)
-          running_downloads [])
+          table [])
+
+  let downloading path = transferring running_downloads path
+  let uploading path = transferring running_uploads path
+  let downloads () = running running_downloads
+  let uploads_running () = running running_uploads
 
   let pin path ~keep =
     let pin_manifest (m : Manifest.t) =

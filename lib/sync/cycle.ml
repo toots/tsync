@@ -31,7 +31,9 @@ module Make (C : Engine_ctx.S) = struct
   type stuck = { n : int; why : [ `Undecodable of string | `Version of int ] }
 
   let stuck : stuck option Atomic.t = Atomic.make None
-  let tree_head_seen = Atomic.make 0
+
+  (* The tree head as last read, below 0 until it was. *)
+  let tree_head_seen = Atomic.make (-1)
 
   (* Files whose commit was refused for chunks this client cannot send again
      (publication §4.5): the path, and the content that was refused. Another

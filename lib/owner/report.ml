@@ -280,7 +280,7 @@ let domain_body t : R.domain_body =
         in_flight =
           Option.bind a.position (fun h ->
               if a.pushing then Some (h + 1) else None);
-        tree_head = (if a.tree_head > 0 then Some a.tree_head else None);
+        tree_head = (if a.tree_head >= 0 then Some a.tree_head else None);
         cannot_follow =
           Option.map (fun (entry, reason) -> { R.entry; reason }) a.unfollowed;
         failing = a.failing;

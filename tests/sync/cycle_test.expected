@@ -18,6 +18,13 @@
   A: f="two"; position 2, 0 pending; entries: 2
   B: f="two"
 
+== a main that does not answer, from the start
+  A, the main down: dir/  f="made offline"; position none, 2 pending
+  a cycle: failed: no main answered [unreachable]
+  A after it: position none, 2 pending
+  the main back: position 1, 0 pending
+  B: dir/  f="made offline"
+
 == an entry whose answer was lost reaches the copies
   A, the next cycle: 0 entries merged, 0 committed, 0 pending
   the replica holds the entry: true

@@ -309,20 +309,6 @@ module Make (C : Engine_ctx.S) = struct
   let upload_path id =
     Option.bind (upload_of id) (fun (u : Local_ops.upload) -> path_of u.file)
 
-  let uploads_running () =
-    List.filter_map
-      (fun id ->
-        Option.map
-          (fun path ->
-            {
-              Engine_intf.path;
-              size = size_of path;
-              bytes = 0;
-              started = Unix.gettimeofday ();
-            })
-          (upload_path id))
-      (Dqueue.running uploads)
-
   let activity () : Engine_intf.activity =
     let parked = Dqueue.parked uploads and retrying = Dqueue.retrying uploads in
     {
