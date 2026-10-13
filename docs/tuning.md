@@ -107,5 +107,9 @@ On a server, per domain, in the options of its `http-proxy` frontend:
 | `projectCommits` | `true` | The server writes each change committed through it to the store's tree itself. Machines behind it then never do, however slow their link. `false` leaves that to the machine that made the change |
 | `maxEntryCommands` | 4096 with `projectCommits` | Most changes a machine behind this server commits in one step |
 
+`projectCommits` assumes every other machine reaches the storage through the server. Set it to
+`false` when one of them also uses the same bucket or disk directly. How changes are published is
+described under [how it works](README.md#how-it-works).
+
 The three timings must satisfy lease < quarantine < settle. `tsync status` shows the ones that are
 not the default, and says when a value comes from the server.

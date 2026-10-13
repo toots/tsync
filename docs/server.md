@@ -39,6 +39,10 @@ Two options per domain:
 - `"shares": true` makes the server answer public share links itself ([share links](sharing.md#share-links)).
 - `"readOnly": true` refuses writes from clients, while the server's own mount still writes.
 
+**One way in.** Give the other machines the server's address, not the bucket or the disk: a server expects to be the only way to its storage. A setup where a machine also uses that storage directly needs `projectCommits` turned off ([advanced settings](tuning.md#advanced-settings)).
+
+**Pause.** `tsync pause` on the server holds the server's own changes only: what its clients publish still goes through.
+
 ## Behind a reverse proxy
 
 If you already run nginx, Caddy or Traefik, let it hold the certificate. Leave out the `ssl_*` options, pick a port, and proxy to it:
