@@ -419,7 +419,9 @@
         // Phones have no in-page PDF viewer: a frame would stay empty.
         if (k === "pdf" && navigator.pdfViewerEnabled === false) {
           body.textContent =
-            "This browser cannot show a PDF inside a page. Use Download to open it.";
+            "This browser cannot show a PDF inside a page. Downloading it instead; use Download if nothing starts.";
+          // A file share's `f` is always inline.
+          location.href = DATA.file ? B + "/download" : fileUrl(f.name, "&dl=1");
           return;
         }
         body.innerHTML = "Loading…";
