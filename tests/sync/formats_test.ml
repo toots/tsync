@@ -22,7 +22,7 @@ let () =
     (fun s ->
       p "%-56S %s\n" s
         (match Feed_key.parse s with
-          | Some k -> Feed_key.to_string k ^ " month " ^ Feed_key.month k
+          | Some k -> Feed_key.to_string k
           | None -> "not a key"))
     [
       "1788134400000-3f9a0c1b2d4e5f60718293a4b5c6d7e8";

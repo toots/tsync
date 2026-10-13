@@ -25,6 +25,7 @@ type link = {
   mutable chunks : [ `Through | `Blocked ];
   mutable chunk_puts : int;
   mutable before_create : unit -> unit;
+  mutable before_chunk_read : unit -> unit;
 }
 
 let link () =
@@ -33,6 +34,7 @@ let link () =
     chunks = `Through;
     chunk_puts = 0;
     before_create = ignore;
+    before_chunk_read = ignore;
   }
 
 let faulty link (s : Store.t) : Store.t =
@@ -56,6 +58,21 @@ let faulty link (s : Store.t) : Store.t =
             Fail.raise_ Fail.Link "chunks do not pass";
           link.chunk_puts <- link.chunk_puts + 1);
         s.put ?mode k b);
+    get_opt =
+      (fun k ->
+        if Key.chunk_of k <> None then link.before_chunk_read ();
+        s.get_opt k);
+    get_range =
+      (fun k off len ->
+        if Key.chunk_of k <> None then link.before_chunk_read ();
+        s.get_range k off len);
+    get_many =
+      Option.map
+        (fun get keys ->
+          if List.exists (fun k -> Key.chunk_of k <> None) keys then
+            link.before_chunk_read ();
+          get keys)
+        s.get_many;
   }
 
 let main root = Local.create ~name:"main" (Filename.concat root "store")
@@ -104,10 +121,11 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
   end in
   (module Engine.Make (C))
 
-let started ?link ?replica ?tuning ?stated ?projects_all root name =
+let started ?(background = false) ?link ?replica ?tuning ?stated ?projects_all
+    root name =
   let c = client ?link ?replica ?tuning ?stated ?projects_all root name in
   let (module E) = c in
-  E.start ~background:false ();
+  E.start ~background ();
   c
 
 let tree (module E : Engine.S) =
@@ -585,5 +603,103 @@ let () =
           p "  B: %s\n" (tree b);
           p "  A: %s\n"
             (ignore (sync a);
-             tree a)));
+             tree a));
+      scenario "a file written again with the bytes it had" (fun root ->
+          let a = started root "A" in
+          ignore (sync a);
+          write a "f" "abcd";
+          settle a;
+          write a "f" "abcd";
+          uploaded a;
+          p "  A, once the upload ended: %s\n" (status a));
+      scenario "a write that waits for its base while another file arrives"
+        (fun root ->
+          let link = link () in
+          let a = started root "A" and b = started ~link root "B" in
+          let (module B) = b in
+          ignore (sync a);
+          write a "f" "abcdefgh";
+          settle a;
+          ignore (sync b);
+          write a "other" "x";
+          settle a;
+          let reading = Rt.Promise.create () and go_on = Rt.Promise.create () in
+          link.before_chunk_read <-
+            (fun () ->
+              link.before_chunk_read <- ignore;
+              Rt.Promise.resolve reading ();
+              Rt.Promise.await go_on);
+          let written =
+            Rt.async (fun () ->
+                B.write "f" ~off:1 (Bigstring.of_string "Z");
+                B.close "f")
+          in
+          Rt.with_timeout 10. (fun () -> Rt.Promise.await reading);
+          (* An arrival that waited for the key of this write would never
+             return: the write goes on only after it. *)
+          p "  B, its write waiting: %s\n"
+            (try Rt.with_timeout 20. (fun () -> sync b)
+             with _ -> "the arrival waits for the write");
+          Rt.Promise.resolve go_on ();
+          Rt.Promise.await written;
+          uploaded b;
+          p "  B, the write made: %s\n" (status b);
+          p "  B: %s\n" (sync b);
+          p "  A: %s\n"
+            (ignore (sync a);
+             tree a));
+      (* Last: its cycle runs in the background until the process stops. *)
+      scenario "a paused client leaves another's entry to its projector"
+        (fun root ->
+          let quick =
+            {
+              Tuning.default with
+              project_lease = 0.01;
+              project_quarantine = 0.02;
+              project_settle = 0.03;
+            }
+          in
+          let a =
+            started
+              ~stated:
+                {
+                  chunk = 4;
+                  symlinks = `Keep;
+                  lease = 30.;
+                  quarantine = 300.;
+                  settle = 600.;
+                  entry_commands = 256;
+                  projector = Some (String.make 32 'f');
+                }
+              root "A"
+          in
+          ignore (sync a);
+          write a "f" "abcd";
+          uploaded a;
+          ignore (sync a);
+          (* Paused before its cycle starts: a first cycle would watch the
+             entry and take it over. *)
+          let flag =
+            Engine.pause_flag ~data_dir:(Filename.concat root "B/data") d
+          in
+          Fs.mkdir_p (Filename.dirname flag);
+          Fs.write_file_for_test flag "";
+          let b = started ~background:true ~tuning:quick root "B" in
+          let (module B) = b in
+          Rt.sleep 3.5;
+          p "  B paused: the tree head %d of %d, takeovers %d\n"
+            (Log_store.tree_head (log root))
+            (entries root)
+            (fst (Log_store.takeover (log root) 1));
+          B.set_paused false;
+          let deadline = Rt.now () +. 20. in
+          while Log_store.tree_head (log root) < 1 && Rt.now () < deadline do
+            ignore (sync b);
+            Rt.sleep 0.05
+          done;
+          p "  B resumed: the tree head %d of %d, takeovers %d\n"
+            (Log_store.tree_head (log root))
+            (entries root)
+            (fst (Log_store.takeover (log root) 1));
+          Stop.request ()));
   Test_support.finish base

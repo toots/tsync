@@ -26,7 +26,7 @@ resource "google_storage_bucket" "store" {
   # middle, so no wildcard spans domains and a domain nobody named never
   # archives. matches_prefix takes a list, but each domain carries its own age,
   # so they cannot be collapsed into one rule. Everything outside these prefixes
-  # stays STANDARD: manifests, versions, the journal and the cursor are read on
+  # stays STANDARD: manifests, versions, the log and the cursor are read on
   # every sync, and shares are the application's to expire.
   dynamic "lifecycle_rule" {
     for_each = var.archive_domains

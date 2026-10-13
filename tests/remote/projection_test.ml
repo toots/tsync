@@ -262,8 +262,8 @@ let refused () =
       | exception Fail.E _ -> true
   in
   Printf.sprintf "it fails %b, no more than %d writes were issued %b" failed
-    Projection.project_width
-    (Atomic.get issued <= Projection.project_width)
+    Tuning.default.project_width
+    (Atomic.get issued <= Tuning.default.project_width)
 
 let () =
   Fs.rm_rf root;
@@ -282,8 +282,8 @@ let () =
             width together (records = one_by_one) (peak > 1))
         [
           (1, true);
-          (Projection.project_width, false);
-          (Projection.project_width, true);
+          (Tuning.default.project_width, false);
+          (Tuning.default.project_width, true);
         ];
       p "a refused write stops its pass: %s\n" (refused ());
       version_not_saved ();

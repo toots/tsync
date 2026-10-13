@@ -61,7 +61,5 @@ val cursor_note : t -> int -> unit
 (** Writes the pending number; a failure is logged and dropped. *)
 val cursor_flush : t -> unit
 
-val cursor_interval : float
-
 (** [LOG_RETENTION] (publication §7). *)
 val retention : float

@@ -79,5 +79,5 @@ let () =
           let all f = List.init n (fun i -> f (place folder i)) in
           timed "creations" width (all (fun p -> `File (p, None, Some content)));
           timed "removals" width (all (fun p -> `File (p, Some content, None))))
-        [1; Projection.project_width]);
+        [1; Tuning.default.project_width]);
   Fs.rm_rf root

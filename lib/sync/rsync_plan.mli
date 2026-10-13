@@ -38,12 +38,6 @@ type decision =
   | Assemble of Manifest.t
   | Patch_local of Manifest.t * int list  (** the chunk indices that differ *)
 
-(** Identity is bytes, never mtime. *)
-val unchanged : local -> Manifest.t -> bool
-
-(** The chunks of [m] the local copy lacks, when that can be told. *)
-val differing : local -> Manifest.t -> [ `Unknown | `Indices of int list ]
-
 val decide : move:bool -> source -> target -> decision
 
 (** Whether the source is dropped after the decision ran. *)

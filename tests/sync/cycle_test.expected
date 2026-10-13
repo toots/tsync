@@ -88,3 +88,16 @@
   B: f="from A"  mine="from B"  shared="from A"  shared (conflicted copy from B)="from B"
   A: f="from A"  mine="from B"  shared="from A"  shared (conflicted copy from B)="from B"
 
+== a file written again with the bytes it had
+  A, once the upload ended: position 1, 0 pending
+
+== a write that waits for its base while another file arrives
+  B, its write waiting: 1 entries merged, 0 committed, 1 pending
+  B, the write made: position 2, 1 pending
+  B: 0 entries merged, 1 committed, 0 pending
+  A: f="aZcdefgh"  other="x"
+
+== a paused client leaves another's entry to its projector
+  B paused: the tree head 0 of 1, takeovers 0
+  B resumed: the tree head 1 of 1, takeovers 1
+

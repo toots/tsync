@@ -65,6 +65,10 @@ module Make (C : Engine_ctx.S) = struct
                 with_key path (fun () ->
                     if generation path <> g || Atomic.get cancel then
                       raise Rt.Cancelled;
-                    Staged.write staged path { e with state = Uploaded m });
+                    (* An Uploaded edit with no before-value reads as
+                       committed (publication §4.8 step 4). *)
+                    Sync_state.harden sync_state (`File (place_of path));
+                    Staged.write staged path { e with state = Uploaded m };
+                    settle_uploaded path);
                 wake_cycle ())
 end

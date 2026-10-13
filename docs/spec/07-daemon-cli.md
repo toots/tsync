@@ -194,8 +194,10 @@ progress rather than by a total deadline (§4.3):
 
 - the cycle: nothing is fetched, merged, pushed or projected
   ([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)), but for the entries
-  other clients created through this machine's listener, which it goes on projecting
-  ([§4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log));
+  other clients created through this machine's listener, which it goes on projecting with any
+  entry of its own committed before the pause
+  ([§4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)). A pause made while
+  the cycle waits holds the cycle that was due;
 - the upload queue;
 - forwarding deferred work to replicas and backfills;
 - owner requests and jobs that change the domain's stores or run a cycle (`revert`, `share`, `sync`,

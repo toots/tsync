@@ -788,13 +788,26 @@ module Make (C : Engine_ctx.S) = struct
 
   let promote path = with_key path (fun () -> promote_held path)
 
+  (* publication §4.2: an upload that ends on the before-value's content left
+     [L] where the main is; the key is clean and its edit is promoted. *)
+  let settle_uploaded path =
+    let p = place_of path in
+    match Sync_state.before_file sync_state p with
+      | Some before when same_file before (local_file path) ->
+          Sync_state.drop sync_state (`File p);
+          promote_held path
+      | _ -> ()
+
   (* 04 §4.3: an Uploaded edit of a clean key was committed and is promoted
-     before the key changes; then the key's before-value is recorded. *)
-  let begin_change ?durable path =
+     before the key changes; then the key's before-value is recorded. A
+     before-value a write left soft is made durable for an operation
+     acknowledged as durable (publication §4.1). *)
+  let begin_change ?(durable = true) path =
     let p = place_of path in
     if Sync_state.before_file sync_state p = None then (
       promote_held path;
-      Sync_state.record_file ?durable sync_state p (mirror_value path))
+      Sync_state.record_file ~durable sync_state p (mirror_value path))
+    else if durable then Sync_state.harden sync_state (`File p)
 
   let size_of path =
     match resolve path with

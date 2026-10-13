@@ -286,7 +286,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "store" {
   # chunk is "tsync/<domain>/chunks/<shard>/<key>" — the domain sits in the
   # middle, and a rule filter holds one literal prefix, so each domain needs its
   # own rule and a domain nobody named never archives. Everything outside these
-  # prefixes stays in STANDARD: manifests, versions, the journal and the cursor
+  # prefixes stays in STANDARD: manifests, versions, the log and the cursor
   # are read on every sync, and shares are the application's to expire.
   dynamic "rule" {
     for_each = var.archive_domains

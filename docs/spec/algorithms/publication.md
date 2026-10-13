@@ -192,7 +192,10 @@ LOCAL(op), under the locks 04 §3.2 names (the metadata lock for a namespace cha
   whatever the folder contains.
 - **Durability.** A before-value is always written before $L$ changes at its key. It is durable
   at the level the operation is acknowledged at ([durable-queue.md](durable-queue.md) §6): at once
-  for a namespace operation, at the next sync or close for a write. An Owed staged edit found at owner start with no
+  for a namespace operation, at the next sync or close for a write. A before-value a write left
+  for its next sync is made durable by a namespace operation on its key, and before the upload
+  records its edit as Uploaded: an Uploaded edit with no before-value reads as committed (§4.8).
+  An Owed staged edit found at owner start with no
   before-value takes the content identity of its base entry as its before-value, or ∅ when it has
   none ([04](../04-checkout-cache.md) §4.10): the key was clean when the edit began.
 - **A local intent** precedes a namespace operation whose local steps are not one atomic step on
@@ -212,6 +215,7 @@ UPLOAD QUEUE (keyed: at most one job per file key), not gated by the cycle:
   job k:
     upload the chunks of the staged edit at k that the main lacks
     build the manifest; record it in the staged edit (state Uploaded)
+    if L(k) = before(k): drop before(k); promote the edit    # the bytes written are the main's
 ```
 
 - An upload writes chunks only. It writes no manifest, no log entry and no tree record, so it
@@ -285,9 +289,11 @@ ARRIVE():
   before any other fetch or merge, at owner start or at the next cycle, so no second merge is ever
   computed over a half-changed tree. A record that cannot be completed stops the cycle and is
   reported.
-- **Only the keys fetched.** The record carries the before-values of the keys the entries name,
-  not of every key: a write to another file during the enactment records its own before-value
-  under its key lock, and completing the record leaves it alone.
+- **Only the keys fetched.** The record carries the before-values of the keys the entries name
+  and of the keys the merge changes in $L$, not of every key: a write to another file during the
+  enactment records its own before-value under its key lock, and completing the record leaves it
+  alone. The enactment holds the key lock of every file key whose before-value it settles, at the
+  first enactment and at a completion alike.
 - **The feed after an interrupted arrival.** The lines are appended before the record is cleared.
   A record completed later (at owner start, or at the next cycle) cannot tell which lines the
   interrupted enactment had appended, nor what the steps it had made looked like before. It
@@ -429,7 +435,9 @@ PROJECT():                                                     # one entry
   main reached as a plain store, leaves each entry to its author. The serving owner projects such an
   entry before it merges it into its own tree, so a merge that fails or takes long there holds up
   nobody else, and it goes on projecting them while it is paused: a pause holds this machine's own
-  changes, not those of the clients it serves. The serving owner of a domain whose listener projects
+  changes, not those of the clients it serves. An entry of its own that it committed before the
+  pause is projected with them, since theirs wait behind it. Any other paused client projects
+  nothing and takes nothing over. The serving owner of a domain whose listener projects
   is the projector of every entry of that domain, whatever the entry names and whoever wrote it: the
   domain has one projector. Such a main MUST be written by no machine but through that listener, the
   serving owner apart; it is the operator who knows that, which is why `projectCommits` is an
