@@ -267,13 +267,17 @@ let () =
       (* One upload at a time keeps the feed's order fixed. *)
       drained 100;
       show "write on a stale base"
-        (ask
-           [
-             ("action", "write");
-             ("ref", f_ref);
-             ("staging", staging "s4" "stale edit");
-             ("base", content_id w);
-           ]);
+        (Ipc.call socket
+           (`Assoc
+              [
+                ("domain", `String "docs");
+                ("action", `String "write");
+                ("ref", `String f_ref);
+                ("staging", `String (staging "s4" "stale edit"));
+                ("base", `String (content_id w));
+                ("await", `Bool true);
+              ]));
+      p "  uploads left when it answers: %d" (pending ());
       p "  a now holds: %s"
         (match ask [("action", "list_dir"); ("ref", a_ref)] with
           | `Assoc l -> (
