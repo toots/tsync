@@ -9,13 +9,8 @@ val parse : string -> t option
 
 val to_string : t -> string
 val ms : t -> int64
-val client : t -> string
 val compare : t -> t -> int
 val equal : t -> t -> bool
-
-(** The UTC [YYYY-MM] of its milliseconds: its shard. *)
-val month : t -> string
-
 val make : ms:int64 -> client:string -> t
 
 type minter

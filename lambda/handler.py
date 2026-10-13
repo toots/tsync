@@ -109,7 +109,7 @@ def chunk_key(chunk_prefix, key):
 # (body has "name", "chunks", "size") or a folder marker (body {dir,name,id}).
 # Names live in the bodies, so the Lambda never hashes — it lists a namespace and
 # reads each child. A dir share stores the folder's id, whose namespace is
-# <...>/manifests/<id>/; resync/tsync never expose the .tsync-trash namespace.
+# <...>/manifests/<id>/.
 
 
 def ns_base(dir_prefix):

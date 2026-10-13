@@ -1,7 +1,5 @@
 open Tsync_core
 
-let project_width = 8
-
 module Make (C : Context.S) = struct
   module R = Remote.Make (C)
   module T = Tree.Make (C)
@@ -46,7 +44,7 @@ module Make (C : Context.S) = struct
                   (Printexc.to_string e))
       | _ -> ()
 
-  let apply ?(width = project_width) ~before_write
+  let apply ?(width = Tuning.default.project_width) ~before_write
       (commands : Log_entry.command list) =
     (* publication §4.6: once the lease test fails no write is issued. §6.1:
        once a write fails no command is started, and one that saved its

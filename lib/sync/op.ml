@@ -107,12 +107,3 @@ let paths = function
   | Put { path; _ } | Delete path | Mkdir { path; _ } | Rmdir { path; _ } ->
       [path]
   | Rename { dst; src; _ } -> [dst; src]
-
-let list_to_json ops = `List (List.map to_json ops)
-
-(* In an applied-log line an op the reader cannot decode is dropped, not the
-   line. *)
-let list_of_json_lenient = function
-  | `List l ->
-      Some (List.filter_map (fun j -> try of_json j with Bad _ -> None) l)
-  | _ -> None

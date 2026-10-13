@@ -389,29 +389,43 @@ module Make (C : Engine_ctx.S) = struct
             | None, `Park (i, _, place) -> Some (Folder (i, Some place)))
         ordered
 
-  let settled_of (merged : Log_entry.value Algebra.merged) =
-    List.map
+  (* publication §4.4, "Only the keys fetched": a key the entries do not name
+     and the merge leaves as it is keeps its before-value, which a local
+     operation in progress may have just recorded. *)
+  let settled_of ~(theirs : Log_entry.command list)
+      (merged : Log_entry.value Algebra.merged) =
+    let keys = List.map Algebra.key_of (theirs @ merged.local) in
+    List.filter_map
       (fun (c : Log_entry.command) ->
-        ( Algebra.key_of c,
-          if null c then Sync_state.Drop
-          else (
-            match c with
-              | `File (_, m, _) -> Before_file m
-              | `Folder (_, m, _) -> Before_folder m) ))
+        let key = Algebra.key_of c in
+        if not (List.mem key keys) then None
+        else
+          Some
+            ( key,
+              if null c then Sync_state.Drop
+              else (
+                match c with
+                  | `File (_, m, _) -> Before_file m
+                  | `Folder (_, m, _) -> Before_folder m) ))
       merged.pending
 
   (* Every local path whose key lock an enactment needs: the file keys it
-     changes and the staged keys under the folders it moves. *)
-  let paths_of (merged : Log_entry.value Algebra.merged) =
+     changes or settles and the staged keys under the folders it moves. *)
+  let paths_of (a : Sync_state.arrival) =
     List.sort_uniq String.compare
       (List.concat_map
-         (function
-           | `File (p, _, _) -> Option.to_list (path_of p)
-           | `Folder (i, _, _) -> (
-               match Mirror.key_of_id mirror i with
-                 | Some dir -> List.map fst (Staged.edits_under staged dir)
-                 | None -> []))
-         merged.local)
+         (fun (step : Sync_state.step) ->
+           match step with
+             | Move (src, dst) -> List.filter_map path_of [src; dst]
+             | File (p, _) -> Option.to_list (path_of p)
+             | Folder (i, _) -> (
+                 match Mirror.key_of_id mirror i with
+                   | Some dir -> List.map fst (Staged.edits_under staged dir)
+                   | None -> []))
+         a.steps
+      @ List.concat_map
+          (function `File p, _ -> Option.to_list (path_of p) | _ -> [])
+          a.before)
 
   let describe_clash (merged : Log_entry.value Algebra.merged) =
     let key : Algebra.key -> string = function
@@ -451,23 +465,24 @@ module Make (C : Engine_ctx.S) = struct
     let decide () =
       Algebra.merge ~equal:same ~aside ~l:l_base ~before:(before ()) ~theirs ()
     in
+    let arrival_of merged =
+      {
+        Sync_state.head;
+        view;
+        steps = steps_of merged;
+        before = settled_of ~theirs merged;
+      }
+    in
     let rec attempt paths rounds =
       let outcome =
         with_keys paths (fun () ->
             let merged = decide () in
-            let need = paths_of merged in
+            let arrival = arrival_of merged in
+            let need = paths_of arrival in
             let held = Hashtbl.create (List.length paths) in
             List.iter (fun p -> Hashtbl.replace held p ()) paths;
             if List.for_all (Hashtbl.mem held) need then (
               describe_clash merged;
-              let arrival =
-                {
-                  Sync_state.head;
-                  view;
-                  steps = steps_of merged;
-                  before = settled_of merged;
-                }
-              in
               Sync_state.set_arrival sync_state arrival;
               `Done (run_arrival arrival))
             else `Again need)
@@ -481,7 +496,7 @@ module Make (C : Engine_ctx.S) = struct
     in
     let touched =
       with_meta (fun () ->
-          keeping_dirs (fun () -> attempt (paths_of (decide ())) 8))
+          keeping_dirs (fun () -> attempt (paths_of (arrival_of (decide ()))) 8))
     in
     Rt.Signal.broadcast settled_signal;
     changed touched;
@@ -813,20 +828,10 @@ module Make (C : Engine_ctx.S) = struct
     match Sync_state.arrival sync_state with
       | None -> ()
       | Some a ->
-          let paths =
-            List.sort_uniq String.compare
-              (List.concat_map
-                 (fun (step : Sync_state.step) ->
-                   List.filter_map path_of
-                     (match step with
-                       | Move (src, dst) -> [src; dst]
-                       | File (p, _) -> [p]
-                       | Folder _ -> []))
-                 a.steps)
-          in
           changed
             (with_meta (fun () ->
-                 with_keys paths (fun () -> run_arrival ~recovered:true a)))
+                 with_keys (paths_of a) (fun () ->
+                     run_arrival ~recovered:true a)))
 
   (* publication §4.4: what was merged, and how many paths it changed. *)
   let arrive ?narrate ?(full = false) () =
@@ -1087,7 +1092,7 @@ module Make (C : Engine_ctx.S) = struct
 
   (* publication §4.6: one entry, and whether it was projected. The settle
      and the quarantine are waited out across cycles, never inside one. *)
-  let project ?(others_only = false) () =
+  let project () =
     let apply ~t ~generation (e : Log_store.entry) commands =
       let checked = ref neg_infinity and taken_over = ref false in
       (* The fibers writing one pass share the check: one makes it, the others
@@ -1133,22 +1138,15 @@ module Make (C : Engine_ctx.S) = struct
           | Some e -> (
               let generation, holder = Log_store.takeover log e.n in
               let now = Rt.boottime () in
-              let own =
-                match e.read with
-                  | Entry { author; _ } -> author = C.client_uuid
-                  | _ -> false
-              in
               let mine =
-                (not (others_only && own))
-                && ((* §4.6: one projector for a domain its listener
-                       projects. *)
-                    C.projects_all
-                   ||
-                     match (holder, e.read) with
-                     | Some client, _ -> client = C.client_uuid
-                     | None, Entry { author; projector; _ } ->
-                         Option.value ~default:author projector = C.client_uuid
-                     | None, _ -> false)
+                (* §4.6: one projector for a domain its listener projects. *)
+                C.projects_all
+                ||
+                  match (holder, e.read) with
+                  | Some client, _ -> client = C.client_uuid
+                  | None, Entry { author; projector; _ } ->
+                      Option.value ~default:author projector = C.client_uuid
+                  | None, _ -> false
               in
               match (mine, Log_store.commands e) with
                 | true, Some commands when generation = 0 ->
@@ -1216,12 +1214,13 @@ module Make (C : Engine_ctx.S) = struct
         let pushed = if push_now then push () else `Nothing in
         (arrival, changed, pushed, projected || project ()))
 
-  (* 07 §2.6: a paused owner goes on projecting the entries other clients
-     created through its listener. *)
-  let project_for_clients () =
-    Rt.Fmutex.with_lock cycle_lock (fun () ->
+  (* 07 §2.6: paused, the one projector of a domain goes on projecting, and
+     any other client projects nothing and takes nothing over. *)
+  let project_while_paused () =
+    C.projects_all
+    && Rt.Fmutex.with_lock cycle_lock (fun () ->
         ignore (R.stated ~wait:true ());
-        project ~others_only:true ())
+        project ())
 
   (* Cycles until one neither pushes nor projects, for a caller that waits for
      the result. A push refused a few times in a row is left to a later call.
@@ -1290,7 +1289,7 @@ module Make (C : Engine_ctx.S) = struct
       if Atomic.get paused then (
         if
           not
-            (try project_for_clients () with
+            (try project_while_paused () with
               | Stop.Stopping as e -> raise e
               | _ -> false)
         then Stop.sleep 1.;
@@ -1303,7 +1302,9 @@ module Make (C : Engine_ctx.S) = struct
                 max 0.05 (min sweep (push_delay () -. (Rt.now () -. at)))
             | None -> sweep
         in
-        if not !again then (
+        (* A request made before [since] was read sent its wake before it
+           too: the wait would not see it (pitfall A-2.8). *)
+        if not (!again || Atomic.get asked || Atomic.get nudged) then (
           try
             Rt.first ~detach:true
               ((if C.lazy_tree then []
@@ -1315,62 +1316,65 @@ module Make (C : Engine_ctx.S) = struct
           with
             | Stop.Stopping -> raise Stop.Stopping
             | _ -> ());
-        (match
-           let token =
-             if C.lazy_tree then None else Log_store.cursor_token log
-           in
-           if Sync_state.pending_count sync_state > 0 && !dirty_since = None
-           then dirty_since := Some (Rt.now ());
-           let push_due =
-             match !dirty_since with
-               | Some at -> Rt.now () -. at >= push_delay ()
-               | None -> false
-           in
-           let was_asked = Atomic.exchange asked false in
-           let ran = !again || Atomic.exchange nudged false in
-           again := false;
-           if
-             was_asked || push_due || ran
-             || (not C.lazy_tree)
-                && (token <> !cursor || Rt.now () -. !last >= sweep)
-           then (
-             last := Rt.now ();
-             let _, _, pushed, projected =
-               step ~push_now:(was_asked || push_due) ()
-             in
-             cursor := token;
-             let pending = Sync_state.pending_count sync_state > 0 in
-             (match pushed with
-               | `Committed _ ->
-                   refused := 0;
-                   (* What is left was due with what was pushed. *)
-                   if not pending then dirty_since := None
-                   else if was_asked then Atomic.set asked true
-               | `Refused -> incr refused
-               | `Nothing ->
-                   refused := 0;
-                   if was_asked || push_due then
-                     dirty_since := if pending then Some (Rt.now ()) else None);
-             again :=
-               projected
-               ||
-                 match pushed with
-                 | `Committed _ -> true
-                 | `Refused -> !refused <= 3
-                 | `Nothing -> false)
-         with
-          | () ->
-              if !failing <> None then Log.info "cycles run again";
-              failing := None;
-              Atomic.set cycle_failing None
-          | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
-          | exception e ->
-              let reason = Printexc.to_string e in
-              if !failing <> Some reason then
-                Log.info "cycle failed, retrying until it runs: %s" reason;
-              failing := Some reason;
-              Atomic.set cycle_failing (Some reason);
-              Stop.sleep retry_floor);
+        (* 07 §2.6: a pause made during the wait holds the cycle that was
+           due. *)
+        if not (Atomic.get paused) then (
+          match
+            let token =
+              if C.lazy_tree then None else Log_store.cursor_token log
+            in
+            if Sync_state.pending_count sync_state > 0 && !dirty_since = None
+            then dirty_since := Some (Rt.now ());
+            let push_due =
+              match !dirty_since with
+                | Some at -> Rt.now () -. at >= push_delay ()
+                | None -> false
+            in
+            let was_asked = Atomic.exchange asked false in
+            let ran = !again || Atomic.exchange nudged false in
+            again := false;
+            if
+              was_asked || push_due || ran
+              || (not C.lazy_tree)
+                 && (token <> !cursor || Rt.now () -. !last >= sweep)
+            then (
+              last := Rt.now ();
+              let _, _, pushed, projected =
+                step ~push_now:(was_asked || push_due) ()
+              in
+              cursor := token;
+              let pending = Sync_state.pending_count sync_state > 0 in
+              (match pushed with
+                | `Committed _ ->
+                    refused := 0;
+                    (* What is left was due with what was pushed. *)
+                    if not pending then dirty_since := None
+                    else if was_asked then Atomic.set asked true
+                | `Refused -> incr refused
+                | `Nothing ->
+                    refused := 0;
+                    if was_asked || push_due then
+                      dirty_since := if pending then Some (Rt.now ()) else None);
+              again :=
+                projected
+                ||
+                  match pushed with
+                  | `Committed _ -> true
+                  | `Refused -> !refused <= 3
+                  | `Nothing -> false)
+          with
+            | () ->
+                if !failing <> None then Log.info "cycles run again";
+                failing := None;
+                Atomic.set cycle_failing None
+            | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+            | exception e ->
+                let reason = Printexc.to_string e in
+                if !failing <> Some reason then
+                  Log.info "cycle failed, retrying until it runs: %s" reason;
+                failing := Some reason;
+                Atomic.set cycle_failing (Some reason);
+                Stop.sleep retry_floor);
         loop ())
     in
     try loop () with Stop.Stopping -> ()

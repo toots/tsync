@@ -126,8 +126,13 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-1.25 Merge recomputed after a crash
 - **Pitfall** — An arrival changes many keys of the local tree. A crash partway leaves the tree half-changed; a merge computed again from it takes the half already installed for local changes, and a move aside is derived a second time under a second name.
-- **Check** — The arrival record holds the merge's result (the steps, the complete set of before-values, the position) and is durable before the local tree is touched; owner start completes it and computes nothing (publication §4.4, §4.8; 03 §2.7). Every step is idempotent. A kill at each step of an arrival ends in the state of an uninterrupted one.
+- **Check** — The arrival record holds the merge's result (the steps, the before-values it settles, the position) and is durable before the local tree is touched; owner start completes it and computes nothing (publication §4.4, §4.8; 03 §2.7). Every step is idempotent. A kill at each step of an arrival ends in the state of an uninterrupted one.
 - **Seen** — design; the second aside name of A-1.13 is the same shape.
+
+### A-1.26 A before-value less durable than what rests on it, or never dropped
+- **Pitfall** — A write records its before-value without a directory sync, to be made durable at the next sync or close. A delete or a rename of the same key found a before-value present and recorded nothing, so an operation acknowledged as durable rested on one that a power cut removed, and the removal was never published. The same before-value outlived an upload that ended on the content the main already held: nothing compared them when the edit became Uploaded, the key stayed pending with a null command, and a request waiting for its commit never returned.
+- **Check** — A namespace operation hardens the before-value it finds, and the upload hardens it before it records Uploaded (publication §4.1). The upload drops a before-value its manifest returns to and promotes the edit (publication §4.2). Test a file rewritten with the bytes it had: nothing pending once the upload ends.
+- **Seen** — rewrite (review of the publication log).
 
 ## 2. Concurrency, atomicity and exclusion
 
@@ -169,7 +174,7 @@ This file covers mistakes that are true of any implementation in any language: s
 ### A-2.8 Lost wake-up
 - **Pitfall** — "Record written" to "uploader sends it" used a bare condition; a signal with no waiter was lost and the upload waited for the next start.
 - **Check** — A wake-up channel carries the work item (queue + condition). Every state change that can satisfy a wait signals it; check each gate and pause transition.
-- **Seen** — b6ede846, 93f40a22, 440f3ee8. recurred ×2, rewrite.
+- **Seen** — b6ede846, 93f40a22, 440f3ee8. recurred ×3, rewrite: a cycle asked for while the loop slept through a pause had sent its wake before the loop read the signal, and the request was only looked at after a wait of a whole sweep.
 
 ### A-2.9 Register-then-send gap for a late subscriber
 - **Pitfall** — Handing a late subscriber the recovery notice after registration could race events published in between.
@@ -195,6 +200,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Pitfall** — Rename-race scenarios relied on a rename being published when its step returned; once a queue took the store half, the kept log came out in either order one run in eight.
 - **Check** — Any change that makes an operation asynchronous audits callers relying on completion on return; tests drain explicitly.
 - **Seen** — 13541674, 6468cf84.
+
+### A-2.14 A before-value settled for a key whose lock is not held
+- **Pitfall** — An arrival decided every key that had a before-value and locked only those it changed. A write records its before-value first and stages its edit last, under its key lock alone: an arrival for other files met the key in between, found it unchanged, and dropped the before-value. The edit was never pushed, and its next change promoted it as committed.
+- **Check** — An arrival settles only the keys its entries name or its merge changes, and holds the key lock of each (publication §4.4); a completed record takes the same locks as the first enactment. Test a write blocked between its before-value and its edit while a peer's entry arrives.
+- **Seen** — rewrite (review of the publication log).
 
 ## 3. Namespace identity and conflicts
 
@@ -905,7 +915,7 @@ This file covers mistakes that are true of any implementation in any language: s
 ### A-10.14 Pause consulted by one loop, held per process
 - **Pitfall** — Pause held uploads only: renames, deletes and peer entries still changed the tree. Pause was a per-process ref, so the converging parent never saw `tsync pause`, and it did not persist.
 - **Check** — One persistent pause switch owned by the owner, consulted by every state-changing loop; test each loop's check. An owner that does not start its queues (a read-only one-shot) still reports the durable switch.
-- **Seen** — bde81092, notes (07 B.2). recurred ×3, rewrite: the flag was read only when the queues started, so `status` from the next `tsync android` process answered `paused: false`.
+- **Seen** — bde81092, notes (07 B.2). recurred ×4, rewrite: the flag was read only when the queues started, so `status` from the next `tsync android` process answered `paused: false`; the cycle read it before its wait and not after, so a push due during the wait went out after the pause; and every paused client went on reading the tree head each second and took projections over.
 
 ### A-10.15 A destructive walk built on a listing that does not list what it removes
 - **Pitfall** — `rmdir` of a non-empty folder deleted every file under it, then removed its subfolders from `list_tree`, which recurses into folders but lists only files. No subfolder was removed, the final `rmdir` failed "not empty", and the client got an error after its files were already gone; a nested empty folder failed the same way.

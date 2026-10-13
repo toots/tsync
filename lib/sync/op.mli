@@ -28,8 +28,3 @@ val of_json : Yojson.Safe.t -> t option
 
 (** The paths an op concerns: [[key]], or [[key; src]] for a rename. *)
 val paths : t -> string list
-
-val list_to_json : t list -> Yojson.Safe.t
-
-(** Ops of an applied-log line, dropping the ones that do not decode. *)
-val list_of_json_lenient : Yojson.Safe.t -> t list option

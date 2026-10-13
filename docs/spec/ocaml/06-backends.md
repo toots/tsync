@@ -23,7 +23,7 @@ Companion to the language-neutral spec [../06-backends.md](../06-backends.md). S
 | Retry ladder and breaker | `Retry.ladder ~health ~op`, `Retry.until_held`; `Tsync_core.Health` |
 | Admission seam (§6) | `Uplink.t`, handed to `Driver.create` as `~admission`; `Uplink.admitted t mode bytes f` wraps one attempt; `Uplink.none` for a linkless store |
 | Write modes (§6) | `Store.mode` (`Wait \| Best_effort`), the optional argument of `put` |
-| Traffic counters (§6) | `Store.traffic` (two `int Atomic.t`), `Store.count_up`, `count_down` |
+| Traffic counters (§6) | `Store.traffic` (two `int Atomic.t`), `Store.count_down`; each driver adds what it uploads |
 | Uplink configuration (§7) | `Config.link`, `Config.link_settings`, `Config.uplink_settings`; `Uplink.link name settings` (first settings named win); `Uplink.attach` registers the store's probe and health |
 | Governor roles | `Uplink.own` (the supervisor), `Uplink.lease` (every other process), `Uplink.renewal`; `Uplink_law` and `Uplink_lease` are pure |
 | Bucket function confirmation (§3.8) | `Bucket_function` (the saved confirmation and the single probe in flight), `Composite.probe`, `Composite.function_confirmed`, `Composite.queue_verification`; `Discards` is a copy's log of pending discard requests |

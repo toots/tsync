@@ -17,14 +17,8 @@ let parse s =
 
 let to_string k = k
 let ms k = Int64.of_string (String.sub k 0 13)
-let client k = String.sub k 14 (String.length k - 14)
 let compare = String.compare
 let equal = String.equal
-
-let month k =
-  let tm = Unix.gmtime (Int64.to_float (ms k) /. 1000.) in
-  Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
-
 let make ~ms ~client = Printf.sprintf "%013Ld-%s" ms client
 
 (* 03 §2.2: only the owner mints, never re-using a

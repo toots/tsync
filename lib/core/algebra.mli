@@ -5,14 +5,11 @@
     A state is a {!base}, read on demand, with changes over it, so a merge costs
     what the changed keys cost and never walks the tree. An arrival calls
     {!merge} over the local tree, then {!order} to enact the result; a push
-    builds [R] with {!apply} and tests its batch with {!is_batch}; a projection
+    builds [R] with {!apply} and chooses its batch with {!take}; a projection
     calls {!order}. ['f] is a file's value, compared by the [equal] each
     function takes. *)
 
 type place = { parent : Folder_id.t; name : string }
-
-module Places : Map.S with type key = place
-
 type key = [ `File of place | `Folder of Folder_id.t ]
 
 val compare_key : key -> key -> int
@@ -46,14 +43,6 @@ val empty : 'f t
 
 val file : 'f t -> place -> 'f option
 val folder : 'f t -> Folder_id.t -> place option
-
-(** The folder or the root. *)
-val present : 'f t -> Folder_id.t -> bool
-
-(** The keys that occupy a place. *)
-val occupants : 'f t -> place -> key list
-
-val children : 'f t -> Folder_id.t -> key list
 
 (** A well-formed state read as a base. *)
 val to_base : 'f t -> 'f base

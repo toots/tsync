@@ -28,10 +28,6 @@ module Make (_ : Context.S) : sig
     unit ->
     [ `Unknown | `Unstated | `Stated of Store.domain_settings ]
 
-  (** A chunk marked corrupt on a verifying member (memo refreshed every 5 s).
-  *)
-  val is_marked : Chunk_key.t -> bool
-
   (** Drop chunks from the deduplication memo (after a "missing chunks"
       refusal). *)
   val drop_memo : Chunk_key.t list -> unit

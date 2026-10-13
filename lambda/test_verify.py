@@ -245,7 +245,7 @@ def test_a_delete_request_may_name_only_chunks(store_and_verify):
         f"tsync/d/chunks.from/{key[:3]}/{key}",
         f"tsync/corrupted/d/{key[:3]}/{key}",
         f"tsync/d/chunks/{key[:3]}/not-a-chunk-key",
-        "tsync/d/journal",
+        "tsync/d/log/0000000000000001",
     ]
     for path in off_limits:
         st.put_bytes(path, b"x")

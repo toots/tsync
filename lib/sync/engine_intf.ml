@@ -62,10 +62,6 @@ module type S = sig
 
   val list_tree : string -> (string * Local_ops.stat) list
   val readlink : string -> string
-
-  (** The content identity [h1] of what a key resolves to, when known. *)
-  val content_id : string -> string option
-
   val availability : string -> [ `Online_only | `Cached | `Pinned of float ]
 
   (** Cache groups of a file whole on this machine, and its groups. *)
@@ -217,9 +213,6 @@ module type S = sig
   val set_changed_hook : (string list -> unit) -> unit
 
   val applied : Applied.t
-
-  (** The resync generation stamp, [""] when never stamped. *)
-  val resync_generation : unit -> string
 
   (** Stamps a new generation and clears the feed watermark (08 §3.6). *)
   val stamp_generation : unit -> unit

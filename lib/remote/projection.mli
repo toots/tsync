@@ -4,9 +4,6 @@
 
 open Tsync_core
 
-(** publication §7, [PROJECT_WIDTH]. *)
-val project_width : int
-
 module Make (_ : Context.S) : sig
   (** Set each key of an entry to its value after, in the four passes of §6.1;
       idempotent. The slots of a pass are read together and its writes issued

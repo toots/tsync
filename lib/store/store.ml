@@ -239,8 +239,5 @@ let read_keys s keys =
          { key; size = 0; last_modified = 0.; etag = None; checksum = None })
        keys)
 
-let count_up s n =
-  Option.iter (fun t -> ignore (Atomic.fetch_and_add t.uploaded n)) s.traffic
-
 let count_down s n =
   Option.iter (fun t -> ignore (Atomic.fetch_and_add t.downloaded n)) s.traffic

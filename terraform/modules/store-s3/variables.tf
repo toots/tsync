@@ -43,7 +43,7 @@ variable "archive_domains" {
   description = <<-EOT
     Cold-storage transition per tsync domain, keyed by domain name: chunks under
     tsync/<domain>/chunks/ move to storage_class after after_days. Off by
-    default, and it reaches nothing else — manifests, versions, the journal, the
+    default, and it reaches nothing else — manifests, versions, the log, the
     cursor and tsync/shares/ are read far too often to archive.
 
     The domain has to be named because it sits in the middle of a chunk key and

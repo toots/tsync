@@ -352,7 +352,7 @@ def gcp_verify(event, context=None):
     """GCP entry point: an OBJECT_FINALIZE notification delivered over Pub/Sub.
 
     Pub/Sub rather than an Eventarc storage trigger, which has no prefix filter
-    and would fire this on every manifest and journal write in the bucket.
+    and would fire this on every manifest and log write in the bucket.
 
     [context] is the second argument of the background convention, unused: the
     message attributes carry the object name, and the delivery's own identifiers
