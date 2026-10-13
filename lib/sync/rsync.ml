@@ -16,14 +16,17 @@ module Make (C : Engine_ctx.S) = struct
         | `Dir -> `Folder
         | `Absent -> `Missing
         | `File -> (
-            match local_file rel with
-              | Some (Known m) -> `File m
+            (* A damaged file is one the domain does not hold (05 §4.2): it
+               is uploaded again, as an import does. *)
+              match local_file rel with
+              | Some (Known m) when not (is_damaged (place_of rel)) -> `File m
               | _ -> `Missing)
     in
     let hash path cs =
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
           let size = (Unix.fstat fd).st_size in
-          List.init (Chunking.count ~size ~cs) (fun i ->
+          (* An empty file is one empty chunk, as its manifest has it. *)
+          List.init (Chunking.manifest_count ~size ~cs) (fun i ->
               let len = Chunking.length ~size ~cs i in
               let buf = Bigstring.create len in
               let n = Fs.pread_full fd buf ~boff:0 ~len ~off:(i * cs) in

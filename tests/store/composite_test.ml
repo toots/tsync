@@ -156,6 +156,30 @@ let () =
       ignore (s.delete manifest);
       Composite.settle ~timeout:10. c;
       p "after delete, replica manifest %b\n" (has replica manifest);
+      p "\n== an entry that names a chunk a copy lacks\n";
+      let lone = Chunk_key.of_body "lone" in
+      main.put (Key.chunk d lone) (Bigstring.of_string "lone");
+      let cs = Chunking.chunk_size_min in
+      Contract.put s (Key.log_entry d 2)
+        (Log_entry.encode
+           {
+             author = "a";
+             projector = None;
+             commands =
+               [
+                 `File
+                   ( { parent = Folder_id.root; name = "l" },
+                     None,
+                     Some
+                       (Log_entry.Known
+                          (Manifest.make ~name:"l" ~size:cs ~mtime:0.
+                             ~chunk_size:cs [lone])) );
+               ];
+           });
+      Composite.settle ~timeout:10. c;
+      p "replica: the chunk %b, the entry %b\n"
+        (has replica (Key.chunk d lone))
+        (has replica (Key.log_entry d 2));
       p "\n== a bulk delete reaches a copy as one\n";
       let doomed =
         List.init 3 (fun i -> k (Printf.sprintf "tsync/d/doomed/%d" i))

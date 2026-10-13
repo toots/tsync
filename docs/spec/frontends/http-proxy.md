@@ -18,6 +18,8 @@ The http-proxy frontend is an HTTP(S) server that does both:
 
 It is not a presenter of files: it installs no request-handler hooks, answers no item references and keeps no view that change notices refresh.
 
+**One server deep.** This document specifies a listener whose domain's main is a store it reaches directly. A listener whose domain's main is itself an http-proxy backend, one server behind another, is outside it: nothing here says what such a listener states to its clients or which machine projects their entries, and no test covers it. An operator may still build one, with `projectCommits` off where needed; it comes with no guarantee.
+
 ---
 
 ## A2. Mapping onto the frontend contract

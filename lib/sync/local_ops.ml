@@ -802,6 +802,16 @@ module Make (C : Engine_ctx.S) = struct
       Sync_state.record_file ~durable sync_state p (mirror_value path))
     else if durable then Sync_state.harden sync_state (`File p)
 
+  (* publication §4.1: a change that fails after its before-value was
+     recorded left [L] where it was, and the before-value is dropped. *)
+  let changing ?durable path change =
+    begin_change ?durable path;
+    match change () with
+      | v -> v
+      | exception e ->
+          (try settle path with _ -> ());
+          raise e
+
   let size_of path =
     match resolve path with
       | Some (Published m) -> m.size
@@ -1009,7 +1019,7 @@ module Make (C : Engine_ctx.S) = struct
   let write path ~off data =
     check_writable ();
     with_key path (fun () ->
-        begin_change ~durable:false path;
+        changing ~durable:false path @@ fun () ->
         let before = Staged.edit staged path in
         let e0 = staged_for path in
         let e = e0 in
@@ -1056,7 +1066,7 @@ module Make (C : Engine_ctx.S) = struct
   let truncate path size =
     check_writable ();
     with_key path (fun () ->
-        begin_change ~durable:false path;
+        changing ~durable:false path @@ fun () ->
         let before = Staged.edit staged path in
         let e = staged_for path in
         let cs = e.chunk_size in
@@ -1121,7 +1131,7 @@ module Make (C : Engine_ctx.S) = struct
           Fail.raise_ Fail.Exists "%s exists" path;
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
-        begin_change ~durable:false path;
+        changing ~durable:false path @@ fun () ->
         let before = Staged.edit staged path in
         let e =
           {
@@ -1234,7 +1244,7 @@ module Make (C : Engine_ctx.S) = struct
     with_key path (fun () ->
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
-        begin_change path;
+        changing path @@ fun () ->
         let before = Staged.edit staged path in
         let current = content_id path in
         with_new_bodies path @@ fun register ->

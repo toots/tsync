@@ -843,6 +843,7 @@ let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
 let store t = t.whole
 let source t = t.source_store
 let domain t = t.core.domain
+let owe t key = fill t.core (Put key)
 
 let members t =
   t.core.mains @ List.map (fun c -> c.member) t.core.copies @ t.core.archives

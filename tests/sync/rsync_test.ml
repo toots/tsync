@@ -101,6 +101,7 @@ let () =
     String.init 210000 (fun _ -> Char.chr (Random.int 256))
   in
   file src "top.txt" "top";
+  file src "empty.txt" "";
   file src "notes/a.txt" "alpha";
   file src "notes/big.bin" big;
   Rt.run_sync (fun () ->

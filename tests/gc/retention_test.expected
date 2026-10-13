@@ -37,6 +37,9 @@ versions 2, log 4, shares 6
   delete tsync/shares/cache/aa09.jpg
   delete tsync/shares/aa05
   unparseable share left: tsync/shares/aa04
+
+== the log, from a host whose clock runs a year ahead
+log entries it would delete: 0 of 4
 group directories: kept true, emptied false, its folder false
 share held only by the replica, expired there: true
 left on the store:

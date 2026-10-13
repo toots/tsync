@@ -18,6 +18,10 @@
   A: f="two"; position 2, 0 pending; entries: 2
   B: f="two"
 
+== an entry whose answer was lost reaches the copies
+  A, the next cycle: 0 entries merged, 0 committed, 0 pending
+  the replica holds the entry: true
+
 == a create that never left; the owner restarts
   A after the failed push: position 0, 1 pending, a push in flight; entries on the main: 0
   restarted: 0 entries merged, 0 committed, 0 pending
@@ -60,8 +64,8 @@
 
 == a chunk the main lost before the commit
   A, its create failing: position 0, 1 pending, a push in flight
-  A, the chunk gone from the main: 0 entries merged, 0 committed, 1 pending
-  A: position 0, 1 pending
+  A, the chunk gone from the main: 0 entries merged, 1 committed, 0 pending
+  A: position 1, 0 pending
   after the upload ran again: position 1, 0 pending; entries: 1
   B: f="abcdefgh"
 
@@ -70,6 +74,15 @@
   damaged: g
   A, g written again: position 2, 0 pending; damaged: 0
   B: g="ijkl"
+
+== a chunk the main lost, which the cache still holds
+  A, renamed, a chunk gone from the main: 0 entries merged, 1 committed, 0 pending
+  damaged: 0; the main holds the chunk again: true
+
+== an edit that inherits a chunk the main lost
+  B, an inherited chunk gone from the main: 0 entries merged, 0 committed, 1 pending
+  damaged: f
+  B, a cycle later: 0 entries merged, 0 committed, 1 pending
 
 == a parked copy is retried, and the pause flag is where 07 says
   the replica refusing, it holds the chunk: false
@@ -101,6 +114,10 @@
   A restarted: position 1, 1 pending
   A: 0 entries merged, 1 committed, 0 pending
   B: f="WXYZ"
+
+== a write that fails leaves nothing pending
+  a write to a folder: refused: dir is a folder
+  A: position 1, 0 pending
 
 == the same bytes written on two machines
   B: 1 entries merged, 0 committed, 0 pending; f="abcd"
