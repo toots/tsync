@@ -9,7 +9,6 @@ type route = {
   domain : Tsync_core.Domain_name.t;
   secret : string;
   read_only : bool;
-  chunk_size : int option;
   domain_settings : Tsync_store.Store.domain_settings;
   wake : unit -> unit;
       (** asks the domain's owner on this host for a cycle: it projects the

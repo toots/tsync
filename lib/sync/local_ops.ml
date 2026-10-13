@@ -771,26 +771,34 @@ module Make (C : Engine_ctx.S) = struct
           release_unnamed e None
       | _ -> ()
 
-  let promote path = with_key path (fun () -> promote_held path)
-
   (* publication §4.2: an upload that ends on the before-value's content left
      [L] where the main is; the key is clean and its edit is promoted. *)
   let settle_uploaded path =
     let p = place_of path in
     match Sync_state.before_file sync_state p with
       | Some before when same_file before (local_file path) ->
-          Sync_state.drop sync_state (`File p);
+          promote_held path;
+          Sync_state.drop sync_state (`File p)
+      | _ -> ()
+
+  (* 04 §4.7: an edit is promoted inside the step that commits it, so an
+     Uploaded edit of a key with no before-value holds what its base entry
+     holds, and is promoted; one that holds anything else lost its
+     before-value and was never committed. *)
+  let promote_clean path =
+    match Staged.edit staged path with
+      | Some { state = Uploaded m; _ }
+        when same_file (Some (Known m)) (mirror_value path) ->
           promote_held path
       | _ -> ()
 
-  (* 04 §4.3: an Uploaded edit of a clean key was committed and is promoted
-     before the key changes; then the key's before-value is recorded. A
-     before-value a write left soft is made durable for an operation
-     acknowledged as durable (publication §4.1). *)
+  (* 04 §4.3: the key's before-value is recorded before the key changes, its
+     base entry's content. A before-value a write left soft is made durable
+     for an operation acknowledged as durable (publication §4.1). *)
   let begin_change ?(durable = true) path =
     let p = place_of path in
     if Sync_state.before_file sync_state p = None then (
-      promote_held path;
+      promote_clean path;
       Sync_state.record_file ~durable sync_state p (mirror_value path))
     else if durable then Sync_state.harden sync_state (`File p)
 

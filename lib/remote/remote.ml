@@ -280,33 +280,11 @@ module Make (C : Context.S) = struct
             store.put (Key.version d ~group ~ns:(next_version_ts group)) body
         | _ -> ())
 
-  let missing_of = function
-    | Fail.E { kind = Missing_chunks l; _ } ->
-        Some (List.filter_map Chunk_key.of_string l)
-    | _ -> None
-
-  (* 02 §4.1 step 3: on a "missing chunks" refusal the named chunks are dropped
-     from the memo, re-sent from [resend], and the put is retried. *)
-  let put_manifest ?(resend = fun _ -> None) ?(save = true) key (m : Manifest.t)
-      =
+  (* A "missing chunks" refusal is the commit's to answer (publication §4.5):
+     a projection writes what an entry already committed. *)
+  let put_manifest ?(save = true) key (m : Manifest.t) =
     if save then save_version key;
-    let rec attempt n =
-      match store.put key (Bigstring.of_string m.body) with
-        | () -> ()
-        | exception e -> (
-            match missing_of e with
-              | Some cks when n < 2 ->
-                  drop_memo cks;
-                  List.iter
-                    (fun ck ->
-                      match resend ck with
-                        | Some b -> put_chunk ck b
-                        | None -> raise e)
-                    cks;
-                  attempt (n + 1)
-              | _ -> raise e)
-    in
-    attempt 0
+    store.put key (Bigstring.of_string m.body)
 
   let list_versions parent leaf =
     let group = group_of (slot parent leaf) in

@@ -487,9 +487,11 @@ mirror entry, or ∅ when it has none ([publication](algorithms/publication.md) 
 - a staged edit with a whole body: first **split** it: for each group of the domain's current
   chunk size, a new group body holding that group's bytes, one slot per chunk; replace the
   staged manifest; release the whole body once the new manifest is durable (R3);
-- an Uploaded staged edit whose key has no before-value: its commit happened; promote it first
-  (§4.7), then continue from the mirror entry, so an edit's base is always the value its
-  before-value names;
+- an Uploaded staged edit whose key has no before-value and whose content is the mirror
+  entry's: promote it first (§4.7), then continue from the mirror entry, so an edit's base is
+  always the value its before-value names. One that holds other content lost its before-value and
+  was never committed: it is continued from as any other staged edit, with the mirror entry's
+  content recorded as its before-value;
 - any other staged edit: as is (an Uploaded edit becomes Owed with the same slots);
 - no edit, a mirror entry: every slot Inherit, size and chunk size from the entry, mtime now;
 - neither: empty, with the domain's chunk size.
@@ -626,10 +628,12 @@ cycle commits it, and the commit's gate checks that the main still holds the ver
 
 ### 4.7 Promotion
 
-Promotion turns a committed staged edit into the mirror entry. It runs under the key lock, after
-the `Won` step of a push for every staged edit of the batch whose before-value that step dropped,
-and at owner start for every Uploaded staged edit whose key has no before-value (§4.10). Each
-step is idempotent.
+Promotion turns a committed staged edit into the mirror entry. It runs under the key lock, inside
+the step that commits the edit and before that step drops its before-value: the `Won` step of a
+push, for every staged edit of the batch that holds the value committed; an arrival, for a key it
+finds holding the main's content; an upload that ends on its before-value's content. Outside those
+it runs for an Uploaded staged edit whose key has no before-value and whose content is its mirror
+entry's, at owner start (§4.10) and before the key's next change (§4.3). Each step is idempotent.
 
 1. Re-read the staged manifest. If it is not Uploaded, stop: a later mutation retired the
    upload's result, and its own close or adoption owes the newer state.
@@ -711,7 +715,9 @@ brings the checkout to a consistent state:
    the before-values
    ([publication §4.8](algorithms/publication.md#48-crash-recovery) steps 1–3). This needs no
    network.
-5. Promote every Uploaded staged edit whose key has no before-value (§4.7): its commit happened.
+5. Promote every Uploaded staged edit whose key has no before-value and whose content is its
+   mirror entry's (§4.7); any other staged edit with no before-value takes that content as its
+   before-value ([publication §4.8](algorithms/publication.md#48-crash-recovery) step 4).
 6. Release every staged body not in the named set. The release is exact, with no grace
    period, because only the owner writes the staged tree and nothing else runs yet.
 7. **Adopt** every Owed staged edit that no upload record names: post a fresh record for it (the

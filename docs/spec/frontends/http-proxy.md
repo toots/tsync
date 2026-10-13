@@ -73,7 +73,6 @@ At start the server builds one route per served domain:
 | `roots` | the domain's four roots `tsync/<d>/`, `tsync/corrupted/<d>/`, `tsync/verify-jobs/<d>/`, `tsync/gc-jobs/<d>/` ([02-remote-model](../02-remote-model.md) key layout) |
 | `cursor` | the domain's cursor key |
 | `secret`, `read_only` | §A3; `read_only` = the domain's own read-only flag or the `readOnly` option |
-| `chunk_size` | the domain's configured chunk size, if any |
 | `domain_settings` | the domain-wide settings in force for the domain: configured, else the default; `maxEntryCommands` from the option of that name; the `projector` with `projectCommits` |
 | `wake` | with `projectCommits`, a call that asks the domain's owner on this host for a cycle that projects, without asking it to push; made when a create under the domain's log prefix is won, beside the answer and never awaited by it |
 | `store` | the domain's composite store |
@@ -121,7 +120,6 @@ Given the operation's first key or prefix `k`:
 | delete-multi | none | writable check (no share exemption); `B.delete_multi` → 200 |
 | copy | none | writable check on `dst`; `B.copy` server-side → 200 |
 | list | none | `B.list_prefix`; listing JSON with etags and checksums. On the share space, manifest keys are filtered out ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)) |
-| chunk-size | none | the route's configured chunk size, else 404. Not chained through `B` |
 | max-concurrency | none | the listener's bound (§A5), else 404 |
 | share-url | none | route serves shares → `{"self":true}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
 | verified | none | `{"verified": B.capabilities(prefix).verified}` |
@@ -385,7 +383,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 5. **One watch per cursor, dropped with its last waiter; read on arrival.**
 6. **Gate data, not metadata; 503 past a bounded queue.**
 7. **children-multi decided from listed sizes before reading**, so one huge folder cannot swell an answer.
-8. **`chunk-size` not chained; `verified` and `max-concurrency` chained**: a chunk size is this domain's config; a claim about verification is what the store behind can back; the bound is set by the slowest participant.
+8. **Domain settings not chained; `verified` and `max-concurrency` chained**: the settings a listener states are this domain's config; a claim about verification is what the store behind can back; the bound is set by the slowest participant.
 9. **`share-url` answers `{"self":true}`**: behind TLS termination the server cannot know its public URL; the client knows the one it reached.
 10. **A preview image is made wherever FFmpeg is linked, and never required.** The creator usually has it and the resources; a small server or a cloud function may have neither. Reading through the link fetches only what the decoder seeks, so an online-only file and a server's remote store cost a few chunks, not the file.
 11. **Shares served from the store, not the mirror or a local cache; one predicate for "who serves shares"** for both manifest writes and `/s/` reads. The store server owns no domain state.

@@ -8,7 +8,6 @@ type route = {
   domain : Domain_name.t;
   secret : string;
   read_only : bool;
-  chunk_size : int option;
   domain_settings : Store.domain_settings;
   wake : unit -> unit;
   store : Store.t;
@@ -156,7 +155,6 @@ type op =
   | List of Key.prefix * int option
   | List_key of Key.t
   | Share_url of Key.prefix
-  | Chunk_size of Key.prefix
   | Domain_settings of Key.prefix
   | Max_concurrency of Key.prefix
   | Verified of Key.prefix
@@ -177,7 +175,6 @@ let tally = function
   | Copy _ -> "copy"
   | List _ | List_key _ -> "list"
   | Share_url _ -> "shareUrl"
-  | Chunk_size _ -> "chunkSize"
   | Domain_settings _ -> "domainSettings"
   | Max_concurrency _ -> "maxConcurrency"
   | Verified _ -> "verified"
@@ -315,7 +312,6 @@ let parse_op t (r : Server.request) params =
           | None, Some k -> List_key k
           | None, None -> bad_request t)
     | "GET", [""; "share-url"] -> Share_url (needs_prefix ())
-    | "GET", [""; "chunk-size"] -> Chunk_size (needs_prefix ())
     | "GET", [""; "domain-settings"] -> Domain_settings (needs_prefix ())
     | "GET", [""; "max-concurrency"] -> Max_concurrency (needs_prefix ())
     | "GET", [""; "verified"] -> Verified (needs_prefix ())
@@ -338,7 +334,6 @@ let key_names = function
   | List_key k -> [Key.to_string k]
   | List (p, _)
   | Share_url p
-  | Chunk_size p
   | Domain_settings p
   | Max_concurrency p
   | Verified p ->
@@ -792,10 +787,6 @@ let execute ?(partial = false) t route op body =
           match (s.capabilities p).share_url with
             | Some u -> json (`Assoc [("url", `String u)])
             | None -> text 404 "no share endpoint")
-    | Chunk_size _ -> (
-        match route.chunk_size with
-          | Some n -> json (`Assoc [("chunkSize", `Int n)])
-          | None -> text 404 "no chunk size")
     | Domain_settings _ ->
         json (Store.domain_settings_to_json route.domain_settings)
     | Max_concurrency _ -> json (`Assoc [("maxConcurrency", `Int t.bound)])
@@ -1262,7 +1253,6 @@ let run config =
                 domain = b.domain.name;
                 secret = b.secret;
                 read_only = b.read_only;
-                chunk_size = b.domain.chunk_size;
                 domain_settings =
                   (* publication §4.6: nothing is projected for a read-only
                      domain. *)

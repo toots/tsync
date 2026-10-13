@@ -121,8 +121,8 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-1.24 Staged bytes promoted or released before the commit
 - **Pitfall** — An upload leaves chunks that nothing on the main names until the entry carrying their manifest exists, and a collection may delete them. A client that promotes the staged edit or releases its staged bodies when the upload ends has nothing to send when the commit is refused for missing chunks: the command can never be committed.
-- **Check** — A staged edit is promoted only after the `Won` step dropped its before-value, and at owner start only when it is Uploaded and its key has no before-value (04 §4.7, §4.10). The staged bodies stay until then (publication §4.2). A commit refused for missing chunks uploads them again from the staged bytes and issues the same create (gc §5.3, §5.4). A test collects between an upload and its commit.
-- **Seen** — design.
+- **Check** — A staged edit is promoted inside the step that commits it, before that step drops its before-value, and outside one only when it is Uploaded, its key has no before-value and its content is its mirror entry's (04 §4.7, §4.10). The staged bodies stay until then (publication §4.2). A commit refused for missing chunks uploads them again from the staged bytes and issues the same create (gc §5.3, §5.4). A test collects between an upload and its commit.
+- **Seen** — design; rewrite: "Uploaded with no before-value" was read as "committed", so every way of losing a before-value (A-1.26, A-2.14) promoted content the main never held.
 
 ### A-1.25 Merge recomputed after a crash
 - **Pitfall** — An arrival changes many keys of the local tree. A crash partway leaves the tree half-changed; a merge computed again from it takes the half already installed for local changes, and a move aside is derived a second time under a second name.
@@ -332,6 +332,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Pitfall** — An application saved a file by deleting it and creating it again, on a machine with no peer. The delete erased the client's record of what the store held at the name, so the create was recorded as "new file, nothing expected"; the upload found a file where it expected none, took it for a peer's, and published the content as a conflicted copy of the client's own file.
 - **Check** — A local operation never changes R: it records the key's current value as its before-value only when the key has none, and leaves an existing one alone (publication §4.1, S1; change-algebra Proposition 5). R changes only in the `Won` step and in a merge. A delete then a create of one name pushes one command guarded by the old content, and a single client never produces a conflicted copy (conflict-resolution INV-own).
 - **Seen** — 17209c24 (change-algebra §2).
+
+### A-3.27 The same change kept under two manifests
+- **Pitfall** — Two clients wrote the same bytes at one name. The merge left the key as it was on the second, since the values were equal by content, and that client promoted its own manifest: it kept its own modification time for good while every other client had the main's, with nothing pending to bring them together.
+- **Check** — A key both sides changed to the same content takes the main's manifest (conflict-resolution §4.1; change-algebra §7.3). Test the same bytes written on two machines: both end with the manifest the main holds.
+- **Seen** — rewrite (review of the publication log).
 
 ## 4. Failure classification: absent, unknown, transient, permanent, cancelled
 

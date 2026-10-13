@@ -97,6 +97,16 @@
   B: 0 entries merged, 1 committed, 0 pending
   A: f="aZcdefgh"  other="x"
 
+== an uploaded edit whose before-value is lost
+  A restarted: position 1, 1 pending
+  A: 0 entries merged, 1 committed, 0 pending
+  B: f="WXYZ"
+
+== the same bytes written on two machines
+  B: 1 entries merged, 0 committed, 0 pending; f="abcd"
+  B has the file as the main holds it: true
+  entries: 1
+
 == a read-only client leaves an entry to those that write
   read-only B: f="abcd"; the tree head 0, takeovers 0
   C, which writes: the tree head 1, takeovers 1

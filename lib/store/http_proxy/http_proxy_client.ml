@@ -182,7 +182,7 @@ let positive j k =
    change of its domain-wide settings reaches a running client. *)
 let caps_age = 60.
 
-(* §8.4: four questions at once, the answer kept per prefix for the instance's
+(* §8.4: the questions at once, the answer kept per prefix for the instance's
    life; claims are known supported once /verified answers. *)
 let capabilities t prefix =
   let key = Key.prefix_to_string prefix in
@@ -195,16 +195,13 @@ let capabilities t prefix =
               Rt.map_concurrently (capability t prefix)
                 [
                   "/share-url";
-                  "/chunk-size";
                   "/max-concurrency";
                   "/verified";
                   "/domain-settings";
                 ])
         in
-        let share, chunk, conc, verified, settings =
-          match answers with
-            | [a; b; c; d; e] -> (a, b, c, d, e)
-            | _ -> assert false
+        let share, conc, verified, settings =
+          match answers with [a; b; c; d] -> (a, b, c, d) | _ -> assert false
         in
         let domain_settings =
           Option.bind settings Store.domain_settings_of_json
@@ -224,9 +221,9 @@ let capabilities t prefix =
           {
             Store.share_url;
             chunk_size =
-              (match domain_settings with
-                | Some s -> Some s.chunk
-                | None -> positive chunk "chunkSize");
+              Option.map
+                (fun (s : Store.domain_settings) -> s.chunk)
+                domain_settings;
             domain_settings;
             max_concurrency = positive conc "maxConcurrency";
             verified =
