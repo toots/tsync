@@ -398,11 +398,8 @@ let rename t src dst (flags : Fuse.rename_flags) =
 
 let symlink t target path =
   check_mutation t;
-  if
-    Option.value ~default:Config.default_symlinks t.domain.domain.symlinks
-    <> `Keep
-  then errno EPERM;
   let (module E : Tsync_sync.Engine.S) = t.engine in
+  if E.symlinks () <> `Keep then errno EPERM;
   call (fun () -> E.symlink (rel path) ~target ~exclusive:true)
 
 (* fuse §4.5: the tightest writable local member, else unbounded. *)
