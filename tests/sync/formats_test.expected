@@ -63,7 +63,7 @@ after two unparseable records: pending 3, needs a state read true, set aside arr
 round trip: true; key 3f9a0c1b2d4e-40a/report.txt
 no attempts, no error: true
 a folder key: set aside
-{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false},"fids":["6c1e0b9a2f4d47e8a3b5c7d9e1f20384"]}
+{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false}}
 round trip: true
 an op this reader does not know: set aside
 

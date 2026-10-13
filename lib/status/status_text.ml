@@ -122,6 +122,10 @@ let sync b (d : domain_body) =
         (Printf.sprintf "log entry %d: %s; nothing is fetched or pushed" c.entry
            c.reason))
     s.cannot_follow;
+  Option.iter
+    (fun reason ->
+      row b "  " "SYNC FAILING" (reason ^ "; retried until it runs"))
+    s.failing;
   if d.set_aside > 0 then
     row b "  " "SET ASIDE"
       (plural d.set_aside "record" "records"

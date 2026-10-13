@@ -20,6 +20,8 @@ type activity = {
   tree_head : int;  (** as last read *)
   unfollowed : (int * string) option;
       (** an entry this client cannot follow, and why *)
+  failing : string option;
+      (** why the last background cycle failed, until one runs again *)
   damaged : string list;
       (** files whose content the main lacks and this client cannot send again
       *)
@@ -180,8 +182,7 @@ module type S = sig
 
   (** One cycle now, its arrival by state when [full] (05 §4.7). Refused while
       paused and on a lazy tree. *)
-  val resync :
-    ?narrate:Narrate.t -> ?full:bool -> ?parallelism:int -> unit -> synced
+  val resync : ?narrate:Narrate.t -> ?full:bool -> unit -> synced
 
   val set_paused : bool -> unit
   val is_paused : unit -> bool

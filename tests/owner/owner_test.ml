@@ -217,12 +217,33 @@ let () =
                 | _ -> -1)
           | _ -> -1
       in
-      (* A poll asks for a cycle at once, which commits what is uploaded. *)
+      (* A sync commits what is uploaded at once; a poll would leave it to the
+         batch delay. *)
       let rec drained n =
         if pending () > 0 && n > 0 then (
-          ignore (ask [("action", "poll")]);
+          ignore (ask [("action", "sync")]);
           Rt.sleep 0.1;
           drained (n - 1))
+      in
+      (* A version is saved by the projection of the entry that replaces it,
+         which follows the commit: a revert waits for the tree, not for the
+         commit alone. *)
+      let projected () =
+        let log =
+          Tsync_remote.Log_store.create (Domain_name.v "docs")
+            (Tsync_store.Local.create ~name:"main"
+               (Filename.concat root "store"))
+        in
+        let behind () =
+          Tsync_remote.Log_store.tree_head log
+          < List.length (Tsync_remote.Log_store.read_entries log 1)
+        in
+        let rec wait n =
+          if behind () && n > 0 then (
+            Rt.sleep 0.1;
+            wait (n - 1))
+        in
+        wait 200
       in
       let before = pending () in
       show "write by ref, same content"
@@ -417,6 +438,7 @@ let () =
         (ask
            [("action", "write"); ("ref", r); ("staging", staging "r2" "second")]);
       drained 100;
+      projected ();
       show "revert to the latest version"
         (ask [("action", "revert"); ("ref", r); ("arg", "")]);
       drained 100;

@@ -266,14 +266,12 @@ A file rename and a move aside rewrite the record's key with the staged manifest
 whose local steps are in progress (§4.5). Body, a JSON object:
 
 ```json
-{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false},
- "fids":["6c1e0b9a2f4d47e8a3b5c7d9e1f20384"]}
+{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false}}
 ```
 
 | Field | Rule |
 |---|---|
 | `op` | one feed op ([03](03-journal-sync.md) §2.9). An op this reader does not know makes the record unparseable (set aside), never run with the op dropped |
-| `fids` | optional: the file ids of the files the op names, read before the first step, so the feed line names them after a delete removed their marker |
 
 Readers ignore unknown fields. An intent is created before the first local step and removed after
 the last; it is never published, and it says nothing about what is owed to the main.

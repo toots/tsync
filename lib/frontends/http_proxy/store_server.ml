@@ -1264,7 +1264,12 @@ let run config =
                 read_only = b.read_only;
                 chunk_size = b.domain.chunk_size;
                 domain_settings =
-                  (let stated = Tsync_config.Config.stated b.domain in
+                  (* publication §4.6: nothing is projected for a read-only
+                     domain. *)
+                  (let project_commits =
+                     b.project_commits && not b.domain.read_only
+                   in
+                   let stated = Tsync_config.Config.stated b.domain in
                    let local_main =
                      List.exists
                        (fun (m : Tsync_config.Config.backend) ->
@@ -1276,17 +1281,18 @@ let run config =
                      entry_commands =
                        Option.value
                          ~default:
-                           (if b.project_commits && local_main then
+                           (if project_commits && local_main then
                               projected_entry_commands
                             else stated.entry_commands)
                          b.max_entry_commands;
                      projector =
-                       (if b.project_commits then
+                       (if project_commits then
                           Some (Tsync_domain.Domain.client_uuid domain)
                         else None);
                    });
                 wake =
-                  (if b.project_commits then owner_wake b.domain.name
+                  (if b.project_commits && not b.domain.read_only then
+                     owner_wake b.domain.name
                    else ignore);
                 store = Tsync_domain.Domain.store domain;
                 share =

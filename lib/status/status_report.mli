@@ -108,6 +108,7 @@ type sync = {
   in_flight : int option;
   tree_head : int option;
   cannot_follow : cannot_follow option;
+  failing : string option;
 }
 [@@deriving yojson]
 

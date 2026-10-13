@@ -1132,7 +1132,8 @@ module Make (C : Engine_ctx.S) = struct
     let one () =
       let t = Log_store.tree_head log in
       Atomic.set tree_head_seen t;
-      if not served then (
+      (* A read-only client writes nothing to the main (§4.6, "Who"). *)
+      if not (served || C.read_only) then (
         match Log_store.read_entry log (t + 1) with
           | None -> ()
           | Some e -> (
@@ -1202,9 +1203,17 @@ module Make (C : Engine_ctx.S) = struct
         (* 05 §2.1: nothing is pushed or projected before the main was asked
            for its settings, the projector it states among them. *)
         ignore (R.stated ~wait:true ());
-        (* §4.6: before the arrival, so that a merge that fails or takes long
-           here holds up no client whose entries this owner projects. *)
-        let projected = project () in
+        (* §4.6, "When": the one projector of a domain projects before its
+           arrival, so that a merge that fails or takes long here holds up no
+           client it serves; its failure waits for the arrival and the push.
+           Any other client projects after both. *)
+        let first =
+          if not C.projects_all then `Projected false
+          else (
+            try `Projected (project ()) with
+              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+              | e -> `Failed e)
+        in
         let arrival, changed =
           if C.lazy_tree then (
             recover_in_flight ();
@@ -1212,7 +1221,12 @@ module Make (C : Engine_ctx.S) = struct
           else arrive ?narrate ~full ()
         in
         let pushed = if push_now then push () else `Nothing in
-        (arrival, changed, pushed, projected || project ()))
+        let projected =
+          match first with
+            | `Failed e -> raise e
+            | `Projected first -> first || project ()
+        in
+        (arrival, changed, pushed, projected))
 
   (* 07 §2.6: paused, the one projector of a domain goes on projecting, and
      any other client projects nothing and takes nothing over. *)
@@ -1274,7 +1288,10 @@ module Make (C : Engine_ctx.S) = struct
        once, and the pushes refused in a row. *)
     and again = ref false
     and refused = ref 0
-    and failing = ref None in
+    and failing = ref None
+    (* The requests the running step took, given back when it fails. *)
+    and took_asked = ref false
+    and took_nudged = ref false in
     (* publication §4.5, "when": how long a push waits from [dirty_since]. The
        commands whose upload is owed are not pushable and do not fill an entry. *)
     let push_delay () =
@@ -1286,6 +1303,8 @@ module Make (C : Engine_ctx.S) = struct
     in
     let rec loop () =
       Stop.check ();
+      took_asked := false;
+      took_nudged := false;
       if Atomic.get paused then (
         if
           not
@@ -1299,7 +1318,14 @@ module Make (C : Engine_ctx.S) = struct
         let wait =
           match !dirty_since with
             | Some at ->
-                max 0.05 (min sweep (push_delay () -. (Rt.now () -. at)))
+                (* A configuration the main refuses fails the step below, where
+                   it is reported; it must not end the loop here. *)
+                let delay =
+                  try push_delay () with
+                    | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+                    | _ -> retry_floor
+                in
+                max 0.05 (min sweep (delay -. (Rt.now () -. at)))
             | None -> sweep
         in
         (* A request made before [since] was read sent its wake before it
@@ -1331,7 +1357,10 @@ module Make (C : Engine_ctx.S) = struct
                 | None -> false
             in
             let was_asked = Atomic.exchange asked false in
-            let ran = !again || Atomic.exchange nudged false in
+            let was_nudged = Atomic.exchange nudged false in
+            took_asked := was_asked;
+            took_nudged := was_nudged;
+            let ran = !again || was_nudged in
             again := false;
             if
               was_asked || push_due || ran
@@ -1350,7 +1379,11 @@ module Make (C : Engine_ctx.S) = struct
                     (* What is left was due with what was pushed. *)
                     if not pending then dirty_since := None
                     else if was_asked then Atomic.set asked true
-                | `Refused -> incr refused
+                | `Refused ->
+                    incr refused;
+                    (* publication §4.5: refused that often, the push is left
+                       to the next delay, not tried again at every wake. *)
+                    if !refused > 3 then dirty_since := Some (Rt.now ())
                 | `Nothing ->
                     refused := 0;
                     if was_asked || push_due then
@@ -1374,6 +1407,8 @@ module Make (C : Engine_ctx.S) = struct
                   Log.info "cycle failed, retrying until it runs: %s" reason;
                 failing := Some reason;
                 Atomic.set cycle_failing (Some reason);
+                if !took_asked then Atomic.set asked true;
+                if !took_nudged then Atomic.set nudged true;
                 Stop.sleep retry_floor);
         loop ())
     in
@@ -1389,7 +1424,7 @@ module Make (C : Engine_ctx.S) = struct
           | `Body body -> (
               match Local_ops.decode_intent body with
                 | None -> Dqueue.Records.set_aside intents id
-                | Some (op, _) ->
+                | Some op ->
                     with_meta (fun () -> redo op);
                     Dqueue.Records.complete intents id))
       (Dqueue.Records.list intents);

@@ -158,11 +158,11 @@ let float_field path l k =
   match get l k with
     | None -> None
     | Some (`Int i) -> Some (float_of_int i)
-    | Some (`Float f) -> Some f
+    | Some (`Float f) when Float.is_finite f -> Some f
     | Some (`String s) -> (
         match float_of_string_opt (String.trim s) with
-          | Some f -> Some f
-          | None -> fail (sub path k) "expected a number")
+          | Some f when Float.is_finite f -> Some f
+          | _ -> fail (sub path k) "expected a number")
     | Some _ -> fail (sub path k) "expected a number"
 
 let size_field path l k =
@@ -515,11 +515,23 @@ let parse_domain path j =
       project_settle;
     }
   in
+  (* 05 §2.1: behind a main that states its settings a timing left out is the
+     main's, so only those configured are compared here, and {!in_force}
+     refuses one that differs from the main's. *)
+  let stated_by_main =
+    List.exists
+      (fun b -> b.role = Tsync_store.Composite.Main && b.btype = "http-proxy")
+      d.backends
+  in
   let t = tuning d in
+  let lease, quarantine, settle =
+    if stated_by_main then
+      (d.project_lease, d.project_quarantine, d.project_settle)
+    else (Some t.project_lease, Some t.project_quarantine, Some t.project_settle)
+  in
+  let below a b = match (a, b) with Some a, Some b -> a < b | _ -> true in
   if
-    not
-      (t.project_lease < t.project_quarantine
-      && t.project_quarantine < t.project_settle)
+    not (below lease quarantine && below quarantine settle && below lease settle)
   then
     fail path
       "the projection timings in force must satisfy projectLease < \

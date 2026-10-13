@@ -62,6 +62,11 @@ collectable main owes its deletions to every replica and backfill (`targets` in 
 - The dry run holds its referenced set as packed 16-byte keys (`Chunk_set`), not a table of strings
   (finding 82).
 - Domain names hold no `/`: keys are parsed by segment, never by searching for `/chunks/`.
+- The run record carries no tree head and marking has no `l/<n>` cursor units (gc §3, §5.5;
+  02 §2.12). The collector reads the tree head once the exclusive publish lock is released, marks
+  every entry above it, and marks them all again on resume. An entry at or below the head as read
+  was projected through the gate, before the open or with the run record present, so its chunks
+  are promoted either way.
 
 ## Resource choices (not normative)
 

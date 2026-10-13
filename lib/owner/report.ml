@@ -238,8 +238,12 @@ let settings t : R.settings =
   {
     versioning = d.versioning;
     symlinks;
-    chunk_size = Option.value ~default:Chunking.default_chunk_size d.chunk_size;
-    chunk_size_default = d.chunk_size = None;
+    (* 01 §3.5: the main's chunk size is binding where it states one. *)
+    chunk_size =
+      (match main with
+        | Some m -> m.Tsync_store.Store.chunk
+        | None -> Option.value ~default:Chunking.default_chunk_size d.chunk_size);
+    chunk_size_default = d.chunk_size = None && main = None;
     cache_chunk_size =
       Option.value ~default:Tsync_checkout.Cache.default_cache_chunk_size
         d.cache_chunk_size;
@@ -279,6 +283,7 @@ let domain_body t : R.domain_body =
         tree_head = (if a.tree_head > 0 then Some a.tree_head else None);
         cannot_follow =
           Option.map (fun (entry, reason) -> { R.entry; reason }) a.unfollowed;
+        failing = a.failing;
       };
     set_aside = a.set_aside;
     cache =

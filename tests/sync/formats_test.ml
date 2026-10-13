@@ -350,12 +350,11 @@ let () =
            size = None;
            id = None;
          })
-      ["6c1e0b9a2f4d47e8a3b5c7d9e1f20384"]
   in
   print_endline intent;
   p "round trip: %b\n"
     (match Local_ops.decode_intent intent with
-      | Some (Op.Rename { dst = "b/new.txt"; _ }, [_]) -> true
+      | Some (Op.Rename { dst = "b/new.txt"; _ }) -> true
       | _ -> false);
   p "an op this reader does not know: %s\n"
     (match Local_ops.decode_intent {|{"op":{"op":"chmod","key":"a"}}|} with

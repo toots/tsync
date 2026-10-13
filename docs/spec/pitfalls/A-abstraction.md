@@ -629,6 +629,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A state read takes the tree head, reads the records, then replays over them every entry from the tree head + 1 to the head (publication §4.7); a lazy pull does the same for one folder (04 §3.5). Nothing read from the tree enters R any other way (publication §4.6). A state read taken during a projection equals the tree at the head it reports.
 - **Seen** — design.
 
+### A-6.30 A client that may not write made a projector
+- **Pitfall** — Whether an owner projects every entry of its domain came from one option of its listener, on by default, and from nothing else: a read-only domain that kept a listener for its share links became the projector of every entry, beside the authors that wrote the main directly. The cycle itself asked no client whether it may write before it took an entry over.
+- **Check** — A client of a read-only domain projects nothing and takes nothing over, and its listener states no projector (publication §4.6, "Who"). Test a read-only client beside an entry left unprojected: no takeover, and a writing client takes it.
+- **Seen** — rewrite (review of the publication log).
+
 ## 7. Store contract, replication, GC and content integrity
 
 ### A-7.1 Content not verified against its key
@@ -745,6 +750,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Pitfall** — A committed entry is not in the tree until it is projected. A collection that marks only from the manifests present in the tree deletes the chunks of an entry committed and not yet projected; its projection then writes manifests naming chunks that are gone.
 - **Check** — Marking also covers the manifests carried by every log entry above the tree head, the tree head being read under the exclusive publish lock at the open (gc §5.3). Expiry never deletes such an entry (publication §4.9). A test collects between a commit and its projection.
 - **Seen** — design.
+
+### A-7.24 A copy written out of the order its referrers need
+- **Pitfall** — The mirror wrote the tree records before the log entries that give them their values, the tree head and the cursor together, and all of the log into a backfill, which carries none. Interrupted, it left tree records with no entry behind them.
+- **Check** — Chunks, then log entries and takeovers, then tree records and versions, then the tree head, the cursor last; no log, tree head or cursor into a backfill (replication §4.10). Test the order of the areas and what a backfill holds after a mirror.
+- **Seen** — rewrite (review of the publication log).
 
 ## 8. Caches, the mirror and rebuilds
 
@@ -922,6 +932,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A recursive removal walks the tree itself, level by level, and removes each folder after its contents. A listing's contract (files only, or every entry) is in its name or its interface, and a test removes a tree holding folders, empty ones included.
 - **Seen** — rewrite (review of PR #114).
 
+### A-10.16 A wake that also decides
+- **Pitfall** — The request that wakes the cycle after a rescan was the request that asks for a push now. Housekeeping sent it every minute, so a batch delay longer than a minute was never waited out, and the test that drained an owner relied on it.
+- **Check** — Waking the cycle and asking it to push are two requests; `poll` wakes, and the cycle alone decides when a push is due (publication §4.5; 03 §3.4). Test a poll with a change inside its batch delay: nothing is committed.
+- **Seen** — rewrite (review of the publication log).
+
 ## 11. Deadlines, health, liveness and shutdown
 
 ### A-11.1 Request without a deadline
@@ -1019,6 +1034,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A failed attempt returns to a state from which the next caller starts a fresh one; a promise belongs to one attempt, not to the object that may need several.
 - **Seen** — rewrite (review of PR #114); rewrite (resource inventory: replaying the changes made during the build, or the spawn itself, could still raise past the reset). recurred ×2.
 
+### A-11.20 A loop that fails, spins or forgets outside its failure handler
+- **Pitfall** — The cycle's loop read the settings in force to compute its wait, outside the handler that reports a failing cycle: a configuration the main refuses raised there and ended the loop for good. A push refused four times in a row left the loop waking every 50 ms, each wake a push. A request to cycle, taken before a step that failed, was not given back, and waited for the next sweep.
+- **Check** — Nothing that can raise runs in a loop outside its handler; every repeated failure has a floor between two attempts; a request consumed by a failed attempt is restored (publication §4.5). Test a refusal that lasts and then ends: the loop reports it, survives it and commits afterwards.
+- **Seen** — rewrite (review of the publication log).
+
 ## 12. Truthful reporting, accounting and rate control
 
 ### A-12.1 Reporting an effect that did not happen
@@ -1080,6 +1100,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Pitfall** — A subscriber connection was two loops raced, the winner cancelling the loser; a client leaving arrived only as an undocumented exception from `read_line`. Waking the stop promise twice raised, guarded by a flag nobody tested.
 - **Check** — Peer disconnect is a value. Stop is idempotent. The read side signals the write side and the two are joined, not cancelled from outside.
 - **Seen** — 674b0ec7, 62b52a6e.
+
+### A-12.13 A failure or a setting reported from the wrong source
+- **Pitfall** — A background cycle that failed wrote its reason to the log and nothing to the status: a store that refused every commit showed as changes pending, with no cause. The status gave the configured chunk size, marked "default", behind a main that stated another, which is the one in force. A configuration was checked against the application's defaults where its main's values apply, so one that agreed with its main was refused, and `nan` or an infinity passed as a number of seconds. Settings whose `projector` was malformed were read as stating none.
+- **Check** — The status carries the reason of a failing cycle until one runs (07 §5.5) and reports each domain-wide setting in force (05 §2.1). A check of settings in force uses the source that is in force; a number is finite; settings with one ill-formed field are not stated at all.
+- **Seen** — rewrite (review of the publication log).
 
 ## Review checklist
 

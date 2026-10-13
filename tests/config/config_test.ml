@@ -102,6 +102,8 @@ let () =
   in_force "a negative delay" {|,"batchDelay":-1|};
   in_force "a lease of 0" {|,"projectLease":0|};
   in_force "a bad policy" {|,"symlinks":"sometimes"|};
+  in_force "a delay that is no number" {|,"batchDelay":"nan"|};
+  in_force "a settle without end" {|,"projectSettle":"inf"|};
   p "\n== domain-wide settings against what the main states\n";
   let against what extra =
     let bare =
@@ -147,6 +149,46 @@ let () =
   against "a larger entry" {|,"maxEntryCommands":4096|};
   against "another policy" {|,"symlinks":"keep"|};
   against "another settle" {|,"projectSettle":500|};
+  p "\n== behind a server, a timing left out is the server's\n";
+  let behind what extra =
+    match
+      Config.of_string
+        (Printf.sprintf
+           {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"http-proxy","name":"nas","role":"main","url":"https://nas.example:8443","secret":"0123456789abcdef0123456789abcdef"}],"frontends":["android"]%s}]}|}
+           extra)
+    with
+      | _ -> p "%-34s accepted\n" what
+      | exception Config.Invalid e -> p "%-34s refused: %s\n" what e
+  in
+  behind "a lease above the default quarantine" {|,"projectLease":400|};
+  behind "two of them out of order"
+    {|,"projectLease":400,"projectQuarantine":300|};
+  p "\n== a projector that is no client id\n";
+  List.iter
+    (fun (what, projector) ->
+      p "%-22s %s\n" what
+        (match
+           Tsync_store.Store.domain_settings_of_json
+             (`Assoc
+                ([
+                   ("chunkSize", `Int (8 lsl 20));
+                   ("symlinks", `String "keep");
+                   ("projectLease", `Int 30);
+                   ("projectQuarantine", `Int 300);
+                   ("projectSettle", `Int 600);
+                   ("maxEntryCommands", `Int 256);
+                 ]
+                @ projector))
+         with
+          | Some { projector = Some p; _ } -> "stated, projector " ^ p
+          | Some { projector = None; _ } -> "stated, no projector"
+          | None -> "not stated"))
+    [
+      ("none", []);
+      ("a client id", [("projector", `String (String.make 32 'a'))]);
+      ("not a client id", [("projector", `String "the server")]);
+      ("not a string", [("projector", `Int 7)]);
+    ];
   p "\n== refused, each naming its path\n";
   try_ "unknown top-level key" (config ~top:{|,"maxUpload":4|} [domain "Files"]);
   try_ "unknown backend key"

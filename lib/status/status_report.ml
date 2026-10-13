@@ -149,6 +149,7 @@ type sync = {
   in_flight : int option; [@key "inFlight"] [@default None]
   tree_head : int option; [@key "treeHead"] [@default None]
   cannot_follow : cannot_follow option; [@key "cannotFollow"] [@default None]
+  failing : string option; [@default None]
 }
 [@@deriving yojson { strict = false }]
 

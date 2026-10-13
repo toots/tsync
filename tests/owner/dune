@@ -8,6 +8,7 @@
   tsync_ipc
   tsync_owner
   tsync_store
+  tsync_remote
   unix
   yojson))
 

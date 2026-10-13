@@ -539,7 +539,7 @@ changed after it was compared is copied as read, or found by the next run.
 
 ### 4.7 Sync (`tsync sync`)
 
-`sync ?full ~parallelism` → `{arrival: Entries n | State{files, folders}; changed; committed;
+`sync ?full` → `{arrival: Entries n | State{files, folders}; changed; committed;
 pending}`: the log entries merged, or the file records and anchors a state read found; the keys the
 merge changed in the local tree; the entries this client created; the commands still pending
 afterwards. It runs in the domain's owner (the `sync` bulk action when requested over IPC,
@@ -630,7 +630,8 @@ age, and is warned at every start; `retry_outstanding()` re-delivers each job as
 - `tree_report()`: read-only, answered by the main. It reads the tree head and whether the entry
   after it exists. If it does, a projection is owed or in progress, the records are legitimately
   between two trees ([data-model/backend.md §4.2](data-model/backend.md#42-temporarily-violated-and-who-repairs)),
-  and the report says so with the two numbers and makes no finding. Otherwise the tree head is at
+  and the report says so with the two numbers and makes no finding: a tree behind its log is
+  not unhealthy, and `data-integrity` exits 0 on it. Otherwise the tree head is at
   the head, and the report lists every namespace of the manifest area (as a state read does, §4.7)
   and finds, in this order:
   - `Disowned{marker, anchor}`: a marker its folder's anchor does not name, or whose folder has no

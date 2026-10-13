@@ -342,7 +342,8 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
               (Chunk_key.to_string c.chunk)
               c.member)
           r.corrupt));
-    if Integrity.healthy r then 0 else 1)
+    (* 05 §4.10: a tree behind its log is not unhealthy. *)
+    if Integrity.healthy r || (findings = [] && r.corrupt = []) then 0 else 1)
   else (
     let chunks =
       I.repair_chunks ~narrate:io.narrate ~apply ?source ~cancelled:io.cancelled
