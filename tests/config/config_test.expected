@@ -15,6 +15,8 @@ an entry of 0          refused: domains[0].maxEntryCommands: expected an integer
 a negative delay       refused: domains[0].batchDelay: expected seconds, 0 or more
 a lease of 0           refused: domains[0].projectLease: expected seconds above 0
 a bad policy           refused: domains[0].symlinks: expected keep, follow or skip
+a delay that is no number refused: domains[0].batchDelay: expected a number
+a settle without end   refused: domains[0].projectSettle: expected a number
 
 == domain-wide settings against what the main states
 nothing configured         symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
@@ -23,6 +25,16 @@ a smaller entry            symlinks follow, entry 64, lease 20, quarantine 200, 
 a larger entry             refused: F is configured with maxEntryCommands 4096, above the 1024 its main states
 another policy             refused: F is configured with symlinks keep and its main states follow
 another settle             refused: F is configured with projectSettle 500 s and its main states 420 s
+
+== behind a server, a timing left out is the server's
+a lease above the default quarantine accepted
+two of them out of order           refused: domains[0]: the projection timings in force must satisfy projectLease < projectQuarantine < projectSettle, and are 400, 300 and 600
+
+== a projector that is no client id
+none                   stated, no projector
+a client id            stated, projector aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+not a client id        not stated
+not a string           not stated
 
 == refused, each naming its path
 unknown top-level key                    refused: unknown key(s) "maxUpload"

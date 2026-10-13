@@ -67,6 +67,7 @@ let idle_sync =
     in_flight = None;
     tree_head = Some 1444;
     cannot_follow = None;
+    failing = None;
   }
 
 let no_queues =
@@ -296,6 +297,7 @@ let degraded : machine =
                 tree_head = Some 1438;
                 cannot_follow =
                   Some { entry = 1441; reason = "it is of version 2" };
+                failing = Some "s3: this store cannot claim a name [refused]";
               };
             set_aside = 2;
             cache =

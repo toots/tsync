@@ -163,7 +163,7 @@ CYCLE (the owner, per domain):
       the store says the cursor may have changed        (at most SWEEP)
       SWEEP elapsed since the last fetch
       the pending set has held a pushable command for BATCH_DELAY, or its pushable commands fill an entry
-      a request asks for a cycle now (poll, sync, await, drain)
+      a request asks for a cycle now (sync, await, drain, and poll, which pushes only what is due)
       the last cycle pushed an entry or projected one    (at once)
     ARRIVE()                                             # §4.3, §4.4, §4.7
     if a pushable batch is due: PUSH()                   # §4.5, one entry
@@ -417,7 +417,9 @@ PROJECT():                                                     # one entry
   write the tree head := t + 1
 ```
 
-- **Who.** The projector of an entry at generation 0 is the client its `projector` field names, and
+- **Who.** A client of a read-only domain ([05](../05-ops-config.md) §2.1) writes nothing to the
+  main: it projects no entry and takes none over, and `projectCommits` has no effect there. The
+  projector of an entry at generation 0 is the client its `projector` field names, and
   its author when it has none. The projector at generation $g \ge 1$ is the client whose takeover
   object $(n, g)$ exists. A voided entry (§4.3) has no author and is projected through a takeover.
 - **Projection by the main's server.** A main that is an http-proxy peer MAY state a projector with
@@ -442,6 +444,10 @@ PROJECT():                                                     # one entry
   domain has one projector. Such a main MUST be written by no machine but through that listener, the
   serving owner apart; it is the operator who knows that, which is why `projectCommits` is an
   advanced setting.
+- **When.** A client projects after it has arrived and pushed (§4), so a projection that fails or
+  waits holds up neither. The owner of a domain whose listener projects is the exception stated
+  above: it projects first, and a projection of its own that fails is reported once its arrival
+  and its push have run, not in their place.
 - **Short by construction.** Nothing tells a slow projector from a stopped one. An entry is one
   put, and its projection is at most `MAX_ENTRY_COMMANDS` commands and `MAX_ENTRY_BYTES` of
   records (or one record of any size): the caps are chosen so that a projection ends well within

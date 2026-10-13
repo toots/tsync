@@ -267,5 +267,35 @@ let () =
       run "skip-chunks" Skip_chunks;
       Gc_record.clear main d;
       p "\n== an unknown source\n";
-      run "source" ~source:"nowhere" All);
+      run "source" ~source:"nowhere" All;
+      p "\n== into a backfill\n";
+      let fill = Local.create ~name:"fill" (Filename.concat root "fill") in
+      let composite =
+        Composite.create ~domain:d
+          ~data_dir:(Filename.concat root "data-fill")
+          ~owner:true ~poke:ignore
+          ~knowledge:
+            { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "fill"; role = Backfill; store = fill };
+          ]
+      in
+      let module F = Store_mirror.Make (struct
+        let domain = d
+        let store = Composite.store composite
+        let composite = composite
+        let versioning = true
+        let chunk_size_config = None
+        let max_downloads = 1
+        let max_chunk_buffers = 4
+      end) in
+      ignore (F.mirror All);
+      p
+        "the backfill holds manifests: %b, log entries: %b, the tree head: %b, \
+         the cursor: %b\n"
+        (fill.list_prefix (Key.manifests d) <> [])
+        (fill.list_prefix (Key.log d) <> [])
+        (fill.head_opt (Key.tree_head d) <> None)
+        (fill.head_opt (Key.cursor d) <> None));
   Test_support.finish root

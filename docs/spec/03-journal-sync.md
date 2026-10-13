@@ -367,10 +367,12 @@ arrive()                           → changes made to the local tree (publicati
 arrive_by_state()                  → changes made to the local tree (publication §4.7)
 push()                             → committed n | refused | nothing to push (publication §4.5)
 project()                          → the tree head reached (publication §4.6)
-poll()                             ends the current wait; a cycle runs now
+poll()                             ends the current wait; a cycle runs now and pushes what is due,
+                                     not what the batch delay still holds
 status()                           → position, pending count, in-flight?, the tree head as last read,
                                      an entry that cannot be followed, if any: its number, and whether it does not
-                                     decode or is of an unknown version
+                                     decode or is of an unknown version; why the last background
+                                     cycle failed, until one runs again
 ```
 
 The cycle is parameterised by the log store, the sync state, the applied log, the staged-edit

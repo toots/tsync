@@ -699,10 +699,11 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   domain-wide setting in force comes from; `projector` is the client uuid the main states for the
   entries created through it, absent when each entry is its author's to project; the text form
   says which in a `projection` row), `mainOffline?`, `paused`, `sync {position?,
-  pending, inFlight?, treeHead?, cannotFollow?: {entry, reason}}` (the cycle's `status()`,
+  pending, inFlight?, treeHead?, cannotFollow?: {entry, reason}, failing?}` (the cycle's `status()`,
   [03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner): the position, absent when the
   client has none; the count of pending commands; the number of the entry being created; the tree
-  head as the cycle last read it; the entry this client cannot follow), `setAside?` (the count of
+  head as the cycle last read it; the entry this client cannot follow; the reason the last
+  background cycle failed, absent once one runs again), `setAside?` (the count of
   set-aside objects, §5.3),
   `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`, `queues {pendingFiles, parked,
   inFlight: [FIFO], bytesOwed, lastError?}` (the upload queue: pending and parked counted in files;

@@ -113,10 +113,12 @@ module Make (C : Engine_ctx.S) = struct
 
   let trim_cache () = ignore (Cache.enforce_cap cache)
 
+  (* 03 §3.4: a cycle now, which pushes what is due and leaves the rest to
+     the batch delay. *)
   let poll () =
     Dqueue.rescan uploads;
     Tsync_store.Composite.rescan C.composite;
-    request_cycle ()
+    nudge ()
 
   (* 04 §4.6: the version's manifest becomes the key's local value, a local
      operation the cycle commits. *)
@@ -280,7 +282,7 @@ module Make (C : Engine_ctx.S) = struct
     if left > 0. then Tsync_store.Composite.settle ~timeout:left C.composite;
     Mirror.save_file_ids mirror
 
-  let resync ?narrate ?(full = false) ?parallelism:_ () : Engine_intf.synced =
+  let resync ?narrate ?(full = false) () : Engine_intf.synced =
     if C.lazy_tree then
       Fail.raise_ Fail.Refused "a lazy tree pulls its folders; it has no sync";
     if Atomic.get paused then
@@ -336,6 +338,7 @@ module Make (C : Engine_ctx.S) = struct
                 | `Undecodable why -> "it does not decode: " ^ why
                 | `Version v -> Printf.sprintf "it is of version %d" v ))
           (Atomic.get stuck);
+      failing = Atomic.get cycle_failing;
       damaged = damaged_paths ();
       stuck = List.length parked;
       retrying = List.length retrying;

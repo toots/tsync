@@ -166,8 +166,11 @@ let engine t =
     let read_only = t.domain.read_only
     let lazy_tree = t.lazy_tree
 
+    (* publication §4.6: nothing is projected for a read-only domain. *)
     let projects_all =
-      match Config.frontend t.domain "http-proxy" with
+      (not read_only)
+      &&
+        match Config.frontend t.domain "http-proxy" with
         | Some f -> (
             match List.assoc_opt "projectCommits" f.options with
               | Some (Config.B b) -> b

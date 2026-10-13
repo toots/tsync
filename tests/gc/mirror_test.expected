@@ -7,18 +7,19 @@ index copied: false
 chunk shard progress never goes back: true, ends at 1: true
 manifests listings shown before comparing: true
 said:  copy: chunks, 3 checked, 0 copied (0 B)
+said:  copy: log, listed 1 object on main
+said:  copy: log, listed 1 object on copy
+said:  copy: takeovers, listed 0 objects on main
+said:  copy: takeovers, listed 0 objects on copy
+said:  copy: log, 1 checked, 0 copied (0 B)
 said:  copy: manifests, listed 4 objects on main
 said:  copy: manifests, listed 4 objects on copy
 said:  copy: manifests, 4 checked, 0 copied (0 B)
 said:  copy: versions, listed 1 object on main
 said:  copy: versions, listed 1 object on copy
 said:  copy: versions, 1 checked, 0 copied (0 B)
-said:  copy: log, listed 1 object on main
-said:  copy: log, listed 1 object on copy
-said:  copy: takeovers, listed 0 objects on main
-said:  copy: takeovers, listed 0 objects on copy
-said:  copy: log, 1 checked, 0 copied (0 B)
-said:  copy: tree head and cursor, 1 checked, 0 copied (0 B)
+said:  copy: tree head, 0 checked, 0 copied (0 B)
+said:  copy: cursor, 1 checked, 0 copied (0 B)
 said:  copy: 10 checked, 0 copied (0 B)
 
 == again
@@ -54,3 +55,6 @@ skip-chunks: main -> copy, 9 checked, 0 copied (0 bytes), 0 refused, 0 changed, 
 
 == an unknown source
 source: refused: d has no member named nowhere
+
+== into a backfill
+the backfill holds manifests: true, log entries: false, the tree head: false, the cursor: false

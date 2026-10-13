@@ -97,6 +97,18 @@
   B: 0 entries merged, 1 committed, 0 pending
   A: f="aZcdefgh"  other="x"
 
+== a read-only client leaves an entry to those that write
+  read-only B: f="abcd"; the tree head 0, takeovers 0
+  C, which writes: the tree head 1, takeovers 1
+
+== a poll leaves a change to its batch delay
+  A, a second after a poll: position 0, 1 pending
+  A, asked to sync: 0 entries merged, 1 committed, 0 pending
+
+== a configuration the main refuses, then set right
+  A: position 0, 1 pending; failing: configured against what the main states [invalid]
+  set right: position 1, 0 pending; failing: no
+
 == a paused client leaves another's entry to its projector
   B paused: the tree head 0 of 1, takeovers 0
   B resumed: the tree head 1 of 1, takeovers 1

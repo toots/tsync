@@ -78,7 +78,8 @@ let faulty link (s : Store.t) : Store.t =
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
 let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
-    ?(projects_all = false) root name : (module Engine.S) =
+    ?(projects_all = false) ?(refused = ref false) ?(read_only = false) root
+    name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
@@ -113,17 +114,26 @@ let client ?(link = link ()) ?replica ?(tuning = Tuning.default) ?stated
     let cache_chunk_size = 8
     let max_cache = None
     let max_uploads = 1
-    let read_only = false
+    let read_only = read_only
     let symlinks = `Keep
     let lazy_tree = false
     let projects_all = projects_all
-    let settings _ = (tuning, symlinks)
+
+    (* 05 §2.1: a configuration its main contradicts is refused at each
+       read of the settings in force. *)
+    let settings _ =
+      if !refused then
+        Tsync_core.Fail.invalid "%s" "configured against what the main states";
+      (tuning, symlinks)
   end in
   (module Engine.Make (C))
 
 let started ?(background = false) ?link ?replica ?tuning ?stated ?projects_all
-    root name =
-  let c = client ?link ?replica ?tuning ?stated ?projects_all root name in
+    ?refused ?read_only root name =
+  let c =
+    client ?link ?replica ?tuning ?stated ?projects_all ?refused ?read_only root
+      name
+  in
   let (module E) = c in
   E.start ~background ();
   c
@@ -648,7 +658,93 @@ let () =
           p "  A: %s\n"
             (ignore (sync a);
              tree a));
-      (* Last: its cycle runs in the background until the process stops. *)
+      scenario "a read-only client leaves an entry to those that write"
+        (fun root ->
+          let quick =
+            {
+              Tuning.default with
+              project_lease = 0.01;
+              project_quarantine = 0.02;
+              project_settle = 0.03;
+            }
+          in
+          let a =
+            started
+              ~stated:
+                {
+                  chunk = 4;
+                  symlinks = `Keep;
+                  lease = 30.;
+                  quarantine = 300.;
+                  settle = 600.;
+                  entry_commands = 256;
+                  projector = Some (String.make 32 'f');
+                }
+              root "A"
+          in
+          ignore (sync a);
+          write a "f" "abcd";
+          uploaded a;
+          ignore (sync a);
+          let cycles c =
+            for _ = 1 to 4 do
+              ignore (sync c);
+              Rt.sleep 0.05
+            done
+          in
+          let b = started ~tuning:quick ~read_only:true root "B" in
+          cycles b;
+          p "  read-only B: %s; the tree head %d, takeovers %d\n" (tree b)
+            (Log_store.tree_head (log root))
+            (fst (Log_store.takeover (log root) 1));
+          let c = started ~tuning:quick root "C" in
+          cycles c;
+          p "  C, which writes: the tree head %d, takeovers %d\n"
+            (Log_store.tree_head (log root))
+            (fst (Log_store.takeover (log root) 1)));
+      (* From here on the cycles run in the background, until the process
+         stops. *)
+      scenario "a poll leaves a change to its batch delay" (fun root ->
+          let a = started ~background:true root "A" in
+          let (module A) = a in
+          ignore (sync a);
+          write a "f" "abcd";
+          uploaded a;
+          A.poll ();
+          Rt.sleep 1.;
+          p "  A, a second after a poll: %s\n" (status a);
+          p "  A, asked to sync: %s\n" (sync a));
+      scenario "a configuration the main refuses, then set right" (fun root ->
+          let refused = ref false in
+          let a =
+            started ~background:true ~refused
+              ~tuning:{ Tuning.default with batch_delay = 0.05 }
+              root "A"
+          in
+          let (module A) = a in
+          ignore (sync a);
+          refused := true;
+          write a "f" "abcd";
+          let until what f =
+            let deadline = Rt.now () +. 20. in
+            while (not (f ())) && Rt.now () < deadline do
+              Rt.sleep 0.05
+            done;
+            if not (f ()) then p "  never: %s\n" what
+          in
+          until "the cycle reports it" (fun () ->
+              (A.activity ()).failing <> None);
+          p "  A: %s; failing: %s\n" (status a)
+            (Option.value ~default:"no" (A.activity ()).failing);
+          (* Past the retry floor, so the loop has computed a wait again. *)
+          Rt.sleep (2. *. Cycle.retry_floor);
+          refused := false;
+          until "the change is committed" (fun () ->
+              (A.activity ()).pending = 0);
+          until "the failure is cleared" (fun () ->
+              (A.activity ()).failing = None);
+          p "  set right: %s; failing: %s\n" (status a)
+            (Option.value ~default:"no" (A.activity ()).failing));
       scenario "a paused client leaves another's entry to its projector"
         (fun root ->
           let quick =
@@ -700,6 +796,6 @@ let () =
           p "  B resumed: the tree head %d of %d, takeovers %d\n"
             (Log_store.tree_head (log root))
             (entries root)
-            (fst (Log_store.takeover (log root) 1));
-          Stop.request ()));
+            (fst (Log_store.takeover (log root) 1)));
+      Stop.request ());
   Test_support.finish base

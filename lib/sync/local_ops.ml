@@ -90,30 +90,15 @@ let upload_kind =
     accepts = (fun _ -> true);
   }
 
-(* 04 §2.8: one feed op and the ids of the files it names, read before the
-   first local step. *)
-let encode_intent op fids =
-  Yojson.Safe.to_string
-    (`Assoc
-       [
-         ("op", Op.to_json op);
-         ("fids", `List (List.map (fun f -> `String f) fids));
-       ])
+(* 04 §2.8: one feed op. *)
+let encode_intent op = Yojson.Safe.to_string (`Assoc [("op", Op.to_json op)])
 
 let decode_intent body =
   match Yojson.Safe.from_string body with
     | exception _ -> None
     | `Assoc l -> (
         match Option.map Op.of_json (List.assoc_opt "op" l) with
-          | Some (Some op) ->
-              Some
-                ( op,
-                  match List.assoc_opt "fids" l with
-                    | Some (`List fids) ->
-                        List.filter_map
-                          (function `String f -> Some f | _ -> None)
-                          fids
-                    | _ -> [] )
+          | Some (Some op) -> Some op
           | Some None | None | (exception Op.Bad _) -> None)
     | _ -> None
 
@@ -1325,9 +1310,7 @@ module Make (C : Engine_ctx.S) = struct
      line, then the intent's removal. *)
   let namespace_op op local =
     let fid = fid_of_op op in
-    let id =
-      Dqueue.Records.create intents (encode_intent op (Option.to_list fid))
-    in
+    let id = Dqueue.Records.create intents (encode_intent op) in
     Fun.protect ~finally:(fun () -> Dqueue.Records.complete intents id) local;
     let known = match fid with Some f -> [(0, f)] | None -> [] in
     feed ~fids:(note_fids ~known [op]) [op];
@@ -1450,7 +1433,7 @@ module Make (C : Engine_ctx.S) = struct
         let id = require_id path in
         let intent =
           Dqueue.Records.create intents
-            (encode_intent (Op.Rmdir { path; id = Some id }) [])
+            (encode_intent (Op.Rmdir { path; id = Some id }))
         in
         let ops =
           Fun.protect

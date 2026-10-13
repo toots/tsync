@@ -394,20 +394,30 @@ module Make (C : Context.S) = struct
                             windows later
                       in
                       windows (List.init 4096 Fun.id));
+                (* replication §4.10, phases 2 to 4: a log entry before the
+                   tree records it gives a value to, both before the tree
+                   head, the cursor last; a backfill carries no log. *)
+                let carries_log = dst.role <> Composite.Backfill in
+                let one label key =
+                  area label (fun () ->
+                      headed label
+                        (Option.to_list (src.store.head_opt key))
+                        ~chunks:false)
+                in
                 chunks_then (fun () ->
+                    if carries_log then
+                      area "log" (fun () ->
+                          listed_batch "log" (Key.log d) ~chunks:false;
+                          listed_batch "takeovers" (Key.takeovers d)
+                            ~chunks:false);
                     area "manifests" (fun () ->
                         listed_batch "manifests" (Key.manifests d) ~chunks:false
                           ~source:(fun _ -> manifest_area src.store));
                     area "versions" (fun () ->
                         listed_batch "versions" (Key.versions d) ~chunks:false);
-                    area "log" (fun () ->
-                        listed_batch "log" (Key.log d) ~chunks:false;
-                        listed_batch "takeovers" (Key.takeovers d) ~chunks:false);
-                    area "tree head and cursor" (fun () ->
-                        headed "tree head and cursor"
-                          (List.filter_map src.store.head_opt
-                             [Key.tree_head d; Key.cursor d])
-                          ~chunks:false))
+                    if carries_log then (
+                      one "tree head" (Key.tree_head d);
+                      one "cursor" (Key.cursor d)))
             | Path _, Some (chunks, keys) ->
                 area "chunks" (fun () -> headed "chunks" chunks ~chunks:true);
                 chunks_then (fun () ->

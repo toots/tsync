@@ -63,22 +63,26 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
             Some quarantine,
             Some settle,
             Some entry_commands )
-          when 0. < lease && lease < quarantine && quarantine < settle ->
-            let projector =
-              match List.assoc_opt "projector" l with
-                | Some (`String p) when Log_entry.is_client_uuid p -> Some p
-                | _ -> None
+          when 0. < lease && lease < quarantine && quarantine < settle -> (
+            let stated projector =
+              Some
+                {
+                  chunk;
+                  symlinks;
+                  lease;
+                  quarantine;
+                  settle;
+                  entry_commands;
+                  projector;
+                }
             in
-            Some
-              {
-                chunk;
-                symlinks;
-                lease;
-                quarantine;
-                settle;
-                entry_commands;
-                projector;
-              }
+            (* A projector that is no client id is not "no projector": the
+               client would project what the server projects. *)
+              match List.assoc_opt "projector" l with
+              | None -> stated None
+              | Some (`String p) when Log_entry.is_client_uuid p ->
+                  stated (Some p)
+              | Some _ -> None)
         | _ -> None)
   | _ -> None
 
