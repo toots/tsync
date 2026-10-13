@@ -891,6 +891,15 @@ let panel w =
   owner w "photos";
   start_tray w;
   ignore (shows w "photos — Idle");
+  let warnings () =
+    List.length
+      (List.filter
+         (fun l -> Text.contains l "no StatusNotifier host is running")
+         (lines (path w "tray.err")))
+  in
+  (* The tray looks for a host on a fiber of its own: the watcher appears only
+     once it has looked. *)
+  ignore (wait_until (fun () -> warnings () > 0));
   say w "started before the watcher: %d registrations"
     (List.length (locked w (fun () -> w.registrations)));
   own w watcher;
@@ -915,13 +924,7 @@ let panel w =
          List.length (signals ~since:before w "NewIcon") = 2
          && List.length (signals ~since:before w "NewToolTip") = 2));
   Rt.sleep (2. *. poll_interval);
-  let warnings =
-    List.length
-      (List.filter
-         (fun l -> Text.contains l "no StatusNotifier host is running")
-         (lines (path w "tray.err")))
-  in
-  say w "with no host at start it runs and warns once: %d" warnings
+  say w "with no host at start it runs and warns once: %d" (warnings ())
 
 (* §9 "Session", "Quit". *)
 let session w =

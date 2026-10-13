@@ -16,7 +16,10 @@ let () =
   in
   Fs.rm_rf root;
   let inner = Local.create ~name:"main" (Filename.concat root "main") in
-  let child_reads = ref 0 and index_reads = ref 0 and index_writes = ref 0 in
+  (* Children are read on several domains at once. *)
+  let child_reads = Atomic.make 0
+  and index_reads = Atomic.make 0
+  and index_writes = Atomic.make 0 in
   let is_index k = Key.leaf k = ".tsync-index" in
   let tagged =
     {
@@ -37,11 +40,11 @@ let () =
             (inner.list_prefix ?max_keys p));
       get_opt =
         (fun k ->
-          if is_index k then incr index_reads else incr child_reads;
+          Atomic.incr (if is_index k then index_reads else child_reads);
           inner.get_opt k);
       put =
         (fun ?mode k b ->
-          if is_index k then incr index_writes;
+          if is_index k then Atomic.incr index_writes;
           inner.put ?mode k b);
     }
   in
@@ -81,12 +84,13 @@ let () =
         Tree.Make
           ((val context [{ name = "main"; role = Main; store = tagged }])) in
       let read label ?write_index () =
-        child_reads := 0;
-        index_reads := 0;
-        index_writes := 0;
+        Atomic.set child_reads 0;
+        Atomic.set index_reads 0;
+        Atomic.set index_writes 0;
         let n = List.length (T.children ?write_index Folder_id.root) in
         p "%-44s %d children: %d child reads, %d index reads, %d index writes\n"
-          label n !child_reads !index_reads !index_writes
+          label n (Atomic.get child_reads) (Atomic.get index_reads)
+          (Atomic.get index_writes)
       in
       read "no index, a reader that may not write" ();
       read "no index, the rebuild walker" ~write_index:true ();
@@ -110,12 +114,13 @@ let () =
                         Local.create ~name:"copy" (Filename.concat root "copy");
                     };
                   ])) in
-      child_reads := 0;
-      index_reads := 0;
-      index_writes := 0;
+      Atomic.set child_reads 0;
+      Atomic.set index_reads 0;
+      Atomic.set index_writes 0;
       let n = List.length (T2.children ~write_index:true Folder_id.root) in
       p "%-44s %d children: %d child reads, %d index reads, %d index writes\n"
-        "two readable members" n !child_reads !index_reads !index_writes;
+        "two readable members" n (Atomic.get child_reads)
+        (Atomic.get index_reads) (Atomic.get index_writes);
       p "a rewritten child reads its new body: %b\n"
         (List.exists
            (fun (e : Tree.entry) ->
