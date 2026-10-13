@@ -1,5 +1,5 @@
 == expire, dry run (cutoff 10 days ago)
-versions 2, log 4, shares 6
+versions 2, log 2, shares 6
   delete version of 40 days ago in 0000000000a1-1/h
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago
@@ -23,7 +23,7 @@ cancelled: true
 stopped: cancelled
 
 == expire, applied
-versions 2, log 4, shares 6
+versions 2, log 2, shares 6
   delete version of 40 days ago in 0000000000a1-1/h
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago

@@ -1110,7 +1110,7 @@ module Make (C : Engine_ctx.S) = struct
     let fits batch =
       List.length batch <= 1
       || String.length (Log_entry.encode (entry_of batch))
-         <= Log_entry.max_bytes
+         <= (tuning ()).max_entry_bytes
     in
     let rec choose candidates limit =
       let steps, _ = Algebra.take ?limit ~temp:park_name r candidates in
@@ -1131,8 +1131,12 @@ module Make (C : Engine_ctx.S) = struct
         choose (List.filter (fun c -> not (List.memq c early)) candidates) limit
       else if batch = [] && candidates <> [] && limit <> None then
         choose candidates None
-      else if not (fits batch) then
-        choose candidates (Some (List.length batch / 2))
+      else if not (fits batch) then (
+        (* publication §4.5, splitting: commands that only commit together
+           share an entry, whatever its size. *)
+          match choose candidates (Some (List.length batch / 2)) with
+          | [] -> batch
+          | smaller -> smaller)
       else batch
     in
     choose

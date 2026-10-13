@@ -628,7 +628,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `set-aside [--remove NAME... \| --remove-all]` | owner | lists the domain's set-aside objects (staged manifests, sync-state records and queue records that could not be decoded) with their size and time, or removes the named ones after the user inspected them ([durable-queue.md §3.3](algorithms/durable-queue.md#33-ordering-rules), [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery)); owner action `set_aside` |
 | `versions [PATH]` | read | versions of a file, newest first (`time  human  size`), or every deleted file of the domain |
 | `versions --revert PATH [--version TS]` | owner | `revert` (latest when no version) |
-| `expire DATE [--apply]` | owner | [05 §4.8](05-ops-config.md); cutoff `YYYY-MM-DD` at local midnight; prints the versions, log entries and shares removed, or, without `--apply`, those it would remove |
+| `expire DATE [--apply]` | owner | [05 §4.8](05-ops-config.md); cutoff `YYYY-MM-DD` at local midnight; prints the versions, log entries and shares removed, or, without `--apply`, those it would remove; a takeover record removed with the log is not counted |
 | `gc [...]` | owner | [05 §4.9](05-ops-config.md) |
 | `sync [--full] [-j N]` | owner | one cycle now, or with `--full` an arrival by state ([05 §4.7](05-ops-config.md)), in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N log entries merged, C changes; K entries committed, P changes pending`, the first part reading `state read: F files, D folders` for an arrival by state; exit 1 if the cycle failed |
 | `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |

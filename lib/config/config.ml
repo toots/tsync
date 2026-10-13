@@ -52,6 +52,7 @@ let tuning (d : domain) : Tuning.t =
     batch_delay = v d.batch_delay t.batch_delay;
     project_width = v d.project_width t.project_width;
     max_entry_commands = v d.max_entry_commands t.max_entry_commands;
+    max_entry_bytes = t.max_entry_bytes;
     project_lease = v d.project_lease t.project_lease;
     project_quarantine = v d.project_quarantine t.project_quarantine;
     project_settle = v d.project_settle t.project_settle;

@@ -147,3 +147,8 @@
   B paused: the tree head 0 of 1, takeovers 0
   B resumed: the tree head 1 of 1, takeovers 1
 
+== two files swapped, over the bytes of one entry
+  A: 0 entries merged, 1 committed, 0 pending
+  the swap made 1 entry, over the limit: true
+  B: x="bbbb"… y="aaaa"…
+

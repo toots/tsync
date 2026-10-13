@@ -943,5 +943,39 @@ let () =
             (Log_store.tree_head (log root))
             (entries root)
             (fst (Log_store.takeover (log root) 1)));
+      scenario "two files swapped, over the bytes of one entry" (fun root ->
+          let tuning = { Tuning.default with max_entry_bytes = 1000 } in
+          let a = started ~tuning root "A" and b = started root "B" in
+          ignore (sync a);
+          let repeated c = String.make 40 c in
+          write a "x" (repeated 'a');
+          write a "y" (repeated 'b');
+          settle a;
+          ignore (sync a);
+          let before = entries root in
+          let (module A) = a in
+          A.rename ~src:"x" ~dst:"t" ~exclusive:true;
+          A.rename ~src:"y" ~dst:"x" ~exclusive:true;
+          A.rename ~src:"t" ~dst:"y" ~exclusive:true;
+          p "  A: %s\n" (sync a);
+          let size n =
+            (Unix.stat
+               (Filename.concat
+                  (Filename.concat root "store")
+                  (Key.to_string (Key.log_entry d n))))
+              .st_size
+          in
+          p "  the swap made %d entry, over the limit: %b\n"
+            (entries root - before)
+            (size (entries root) > tuning.max_entry_bytes);
+          ignore (sync b);
+          let (module B) = b in
+          let first path =
+            let h = B.open_read path in
+            Fun.protect
+              ~finally:(fun () -> B.close_read h)
+              (fun () -> Bigstring.to_string (B.read h ~off:0 ~len:4))
+          in
+          p "  B: x=%S… y=%S…\n" (first "x") (first "y"));
       Stop.request ());
   Test_support.finish base
