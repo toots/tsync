@@ -72,6 +72,8 @@ A symlink another machine stored under `keep` is shown as a symlink everywhere.
 | `unsignedPayload` | no | `false` | Skip hashing request bodies for the signature |
 | `etagIsMd5` | no | `true` | Set to `false` for a service whose ETags are not MD5 sums. `tsync mirror` then compares by hashing. |
 
+The service must support conditional writes (`PUT` with `If-None-Match: *`), as AWS S3 does. Without them nothing is published and the log says "this store cannot claim a name".
+
 **`gcs`**
 
 | Field | Required | Meaning |

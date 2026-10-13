@@ -45,4 +45,14 @@ Both are the same program and the same config file. A server is a domain with an
 
 Provisioning a bucket for tsync on AWS or Google Cloud: [terraform/README.md](../terraform/README.md).
 
-[spec/](spec/README.md) is for people working on tsync itself: the specification it is built from, with the known [pitfalls](spec/pitfalls/README.md) and past [reviews](spec/review/) beside it.
+## How it works
+
+For the curious, three documents of the specification stand on their own:
+
+| Document | What it covers |
+|---|---|
+| [Conflict resolution](spec/algorithms/conflict-resolution.md) | What a machine does when its changes meet another's, with the outcome of every pair of clashing operations |
+| [Publication](spec/algorithms/publication.md) | How a change reaches the storage and the other machines: the numbered log, pushing and fetching, crash recovery |
+| [The change algebra](spec/algorithms/change-algebra.md) | The theory behind both: the definitions, the merge, and a proof of each claim the design relies on |
+
+The rest of [spec/](spec/README.md) is for people working on tsync itself: the specification it is built from, with the known [pitfalls](spec/pitfalls/README.md) and past [reviews](spec/review/) beside it.

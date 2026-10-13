@@ -35,3 +35,5 @@ tsync is built for one person with several machines. Edits are applied locally a
 4. **Two edits of one file are two files.** The one published first is the file; the other is its conflicted copy. Contents are never merged.
 
 Every machine reaches the same result without talking to the others.
+
+These rules are the short form. [How it works](README.md#how-it-works) lists where the outcome of every pair of clashing changes, the way changes are published and the proofs are written down.

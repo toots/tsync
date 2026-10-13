@@ -13,6 +13,8 @@
 | A file will not open offline | It was online-only. While connected, `tsync cache --fetch PATH`, or *Make Available Offline* in the file manager. |
 | Opening a folder downloads everything in it | Something is generating thumbnails. Keep `mountSubtype` at its default. |
 | A file named "conflicted copy" appeared | Two machines changed the same name. Keep the one you want and delete the other. See [when two machines change the same thing](machines.md#when-two-machines-change-the-same-thing). |
+| Changes stay pending and the log says "this store cannot claim a name" | The S3-compatible service lacks conditional writes. See [backend types](config.md#backend-types). |
+| A share link or `tsync versions` misses a change the other machines already have | The machine that made it went offline too soon. It catches up when that machine is back, or within about a quarter of an hour. |
 | This machine does not show what another one did | `tsync sync`; if it still differs, `tsync sync --full`. |
 | Finder disagrees with the store (macOS) | `tsync fileprovider reimport`, then `tsync fileprovider reset`. |
 | A client gets "unauthorized" from a server | The secrets differ, the domain names differ, or the clocks are more than 5 minutes apart. |
