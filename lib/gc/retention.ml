@@ -146,13 +146,15 @@ module Make (C : Context.S) = struct
           delete expired;
           if apply then remove_empty_groups expired)
     in
+    let listed prefix =
+      Cancel.race cancelled (fun () -> store.list_prefix prefix)
+    in
+    let passed = ref None in
     let log_deleted =
       count (fun () ->
           let log = Log_store.create d store in
           let tree_head = Log_store.tree_head log in
-          let listed prefix =
-            Cancel.race cancelled (fun () -> store.list_prefix prefix)
-          in
+          passed := Some tree_head;
           let entries = listed (Key.log d) in
           (* publication §4.9, gc A9: an entry's age is told by the store's
              own times, the newest entry's against its own, never by this
@@ -175,12 +177,18 @@ module Make (C : Context.S) = struct
                "entry is")
             tree_head
             (Narrate.date (now -. Log_store.retention));
-          delete doomed;
-          delete
-            (Gc_plan.takeovers ~tree_head
-               (List.map
-                  (fun (e : Store.entry) -> e.key)
-                  (listed (Key.takeovers d)))))
+          delete doomed)
+    in
+    let (_ : int) =
+      count (fun () ->
+          Option.iter
+            (fun tree_head ->
+              delete
+                (Gc_plan.takeovers ~tree_head
+                   (List.map
+                      (fun (e : Store.entry) -> e.key)
+                      (listed (Key.takeovers d)))))
+            !passed)
     in
     let shares_deleted =
       count (fun () ->

@@ -5,6 +5,7 @@ type t = {
   batch_delay : float;
   project_width : int;
   max_entry_commands : int;
+  max_entry_bytes : int;  (** [MAX_ENTRY_BYTES]; no setting changes it *)
   project_lease : float;
   project_quarantine : float;
   project_settle : float;

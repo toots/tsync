@@ -771,6 +771,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Each missing chunk is sent again from whatever holds its bytes here, a staged body or the cache; a file with a chunk held nowhere is reported and left out of later pushes (publication §4.5; gc §5.4). A bulk publisher uploads a damaged file again (05 §4.2). Test a chunk lost from the main and held in the cache, and one an edit inherits and holds nowhere.
 - **Seen** — rewrite (review of the publication log).
 
+### A-7.27 A batch that cannot be made smaller is never sent
+- **Pitfall** — A batch over the entry's byte limit was halved until it fit. Two swapped files commit only together, so each half was set aside as removing content the other still had to create, the chooser returned no command, and the swap stayed pending at every cycle with no error.
+- **Check** — Where no smaller batch can be chosen, the batch is sent as it is, over the limit (publication §4.5, splitting). Test two swapped files whose entry exceeds the byte limit: one entry, and a second client holds the swap.
+- **Seen** — rewrite (review of the publication log).
+
 ## 8. Caches, the mirror and rebuilds
 
 ### A-8.1 Name lookups fall through to the store

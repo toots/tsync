@@ -7,7 +7,7 @@ open Tsync_core
 
 type counts = {
   versions_deleted : int;
-  log_deleted : int;  (** log entries, and takeovers the tree head passed *)
+  log_deleted : int;  (** log entries; takeovers removed are not counted *)
   shares_deleted : int;  (** share bodies and artifacts *)
 }
 
