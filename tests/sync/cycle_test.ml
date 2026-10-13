@@ -26,6 +26,7 @@ type link = {
   mutable chunk_puts : int;
   mutable before_create : unit -> unit;
   mutable before_chunk_read : unit -> unit;
+  mutable down : bool;
 }
 
 let link () =
@@ -35,13 +36,30 @@ let link () =
     chunk_puts = 0;
     before_create = ignore;
     before_chunk_read = ignore;
+    down = false;
   }
 
 let faulty link (s : Store.t) : Store.t =
+  let up () =
+    if link.down then Fail.raise_ Fail.Link "the main does not answer"
+  in
   {
     s with
+    capabilities =
+      (fun p ->
+        up ();
+        s.capabilities p);
+    head_opt =
+      (fun k ->
+        up ();
+        s.head_opt k);
+    list_prefix =
+      (fun ?max_keys p ->
+        up ();
+        s.list_prefix ?max_keys p);
     put_if_absent =
       (fun k b ->
+        up ();
         if not (Key.is_log_entry k) then s.put_if_absent k b
         else (
           link.before_create ();
@@ -53,6 +71,7 @@ let faulty link (s : Store.t) : Store.t =
                 Fail.raise_ Fail.Link "the answer was lost"));
     put =
       (fun ?mode k b ->
+        up ();
         if Key.chunk_of k <> None then (
           if link.chunks = `Blocked then
             Fail.raise_ Fail.Link "chunks do not pass";
@@ -60,15 +79,18 @@ let faulty link (s : Store.t) : Store.t =
         s.put ?mode k b);
     get_opt =
       (fun k ->
+        up ();
         if Key.chunk_of k <> None then link.before_chunk_read ();
         s.get_opt k);
     get_range =
       (fun k off len ->
+        up ();
         if Key.chunk_of k <> None then link.before_chunk_read ();
         s.get_range k off len);
     get_many =
       Option.map
         (fun get keys ->
+          up ();
           if List.exists (fun k -> Key.chunk_of k <> None) keys then
             link.before_chunk_read ();
           get keys)
@@ -296,6 +318,31 @@ let () =
           p "  restarted, then a write to the same name: %s\n" (sync a);
           settle a;
           p "  A: %s; %s; entries: %d\n" (tree a) (status a) (entries root);
+          let b = started root "B" in
+          p "  B: %s\n"
+            (ignore (sync b);
+             tree b));
+      scenario "a main that does not answer, from the start" (fun root ->
+          let link = { (link ()) with down = true } in
+          let a =
+            match Rt.with_timeout 20. (fun () -> started ~link root "A") with
+              | a -> a
+              | exception e ->
+                  p "  A does not start: %s\n" (Printexc.to_string e);
+                  raise e
+          in
+          let (module A) = a in
+          write a "f" "made offline";
+          A.mkdir "dir" ~exclusive:false;
+          p "  A, the main down: %s; %s\n" (tree a) (status a);
+          p "  a cycle: %s\n"
+            (try Rt.with_timeout 20. (fun () -> sync a)
+             with _ -> "does not return");
+          p "  A after it: %s\n" (status a);
+          link.down <- false;
+          ignore (A.rearm ());
+          settle a;
+          p "  the main back: %s\n" (status a);
           let b = started root "B" in
           p "  B: %s\n"
             (ignore (sync b);

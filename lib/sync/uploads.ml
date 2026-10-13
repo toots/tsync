@@ -58,9 +58,10 @@ module Make (C : Engine_ctx.S) = struct
             | (`Absent | `Edit { state = Uploaded _; _ }), _ -> ()
             | `Edit e, g ->
                 let m =
-                  R.upload_chunks ~cancel ~name:(Names.leaf_of path)
-                    ~size:e.size ~chunk_size:e.chunk_size ~mtime:e.mtime
-                    (source path e)
+                  uploading path ~size:e.size (fun progress ->
+                      R.upload_chunks ~cancel ~progress
+                        ~name:(Names.leaf_of path) ~size:e.size
+                        ~chunk_size:e.chunk_size ~mtime:e.mtime (source path e))
                 in
                 with_key path (fun () ->
                     if generation path <> g || Atomic.get cancel then
