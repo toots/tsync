@@ -19,6 +19,7 @@ a.MP3        true
 a.mp4        true
 a.jpg        true
 a.pdf        true
+a.m3u8       false
 a.txt        false
 a.html       false
 a.json       false
@@ -51,6 +52,17 @@ a2 / -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filena
 a2 /f -> 200 text/plain; charset=utf-8 | inline; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
 a2 / [text/html] -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
 a3 / [text/html] -> 404 text/plain; charset=utf-8 | - | not found
+== an HLS playlist and what it names, through p/ (§A9.3)
+a4 / [text/html] -> 200 application/vnd.apple.mpegurl | attachment; filename="index.m3u8"; filename*=UTF-8''index.m3u8 | #EXTM3U
+seg 0.ts
+d1 /p/index.m3u8 -> 200 application/vnd.apple.mpegurl | inline; filename="index.m3u8"; filename*=UTF-8''index.m3u8 | #EXTM3U
+seg 0.ts
+d1 /p/seg%200.ts -> 200 text/plain; charset=utf-8 | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
+d1 /p//seg%200.ts -> 200 text/plain; charset=utf-8 | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
+d1 /p/nope.ts -> 404 text/plain; charset=utf-8 | - | not found
+d1 /p/%2E%2E/x -> 400 text/plain; charset=utf-8 | - | bad path
+d1 /p/%zz -> 400 text/plain; charset=utf-8 | - | bad path
+d1 /p/ -> 404 text/plain; charset=utf-8 | - | not found
 == link previews (§A9.3, §A9.6, §A9.8)
 a1 / [*/*] [user-agent: WhatsApp/2.24.1.6 A] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://localhost/s/a1/preview
 a1 / [user-agent: curl/8.0] -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ

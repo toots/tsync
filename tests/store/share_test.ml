@@ -108,6 +108,12 @@ let routes () =
       share "a1" "</script>.mp3" (Some "0123456789abcdefXYZ");
       share "a2" "notes.txt" (Some "plain words");
       share "a3" "gone.mp4" None;
+      share "a4" "index.m3u8" (Some "#EXTM3U\nseg 0.ts\n");
+      share "a5" "seg 0.ts" (Some "tsdata");
+      C.store.put
+        (Option.get (Key.share "d1"))
+        (Bigstring.of_string
+           {|{"v":1,"domain":"photos","type":"dir","folderId":".tsync-root","filename":"all.zip","expires":9999999999}|});
       let t = S.of_context (module C) in
       let get ?accept ?(headers = []) token sub params =
         let r =
@@ -175,6 +181,15 @@ let routes () =
       get "a2" "f" [];
       get ~accept:"text/html" "a2" "" [];
       get ~accept:"text/html" "a3" "" [];
+      p "== an HLS playlist and what it names, through p/ (§A9.3)";
+      get ~accept:"text/html" "a4" "" [];
+      get "d1" "p/index.m3u8" [];
+      get "d1" "p/seg%200.ts" [];
+      get "d1" "p//seg%200.ts" [];
+      get "d1" "p/nope.ts" [];
+      get "d1" "p/%2E%2E/x" [];
+      get "d1" "p/%zz" [];
+      get "d1" "p/" [];
       p "== link previews (§A9.3, §A9.6, §A9.8)";
       let whatsapp = [("user-agent", "WhatsApp/2.24.1.6 A")] in
       get ~accept:"*/*" ~headers:whatsapp "a1" "" [];
@@ -241,6 +256,7 @@ let () =
       "a.mp4";
       "a.jpg";
       "a.pdf";
+      "a.m3u8";
       "a.txt";
       "a.html";
       "a.json";

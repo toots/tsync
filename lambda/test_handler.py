@@ -414,6 +414,44 @@ def test_dir_per_file_json_and_redirect(s3):
     assert body == b"livedata"
 
 
+def test_hls_playlist_through_p(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    playlist = b"#EXTM3U\n#EXTINF:6,\nseg 0.ts\n#EXT-X-ENDLIST\n"
+    put_folder(s3, "alb", "my show", "show")
+    put_file(s3, "show", "index.m3u8", [("llll-6666", playlist)])
+    put_file(s3, "show", "seg 0.ts", [("mmmm-7777", b"tsdata")])
+    assert h.PREVIEW_KINDS["m3u8"] == "hls"
+    # The playlist is answered in place, so its relative URIs stay in the share.
+    resp = h.handler(event(tok, "p/my%20show/index.m3u8"), None)
+    assert resp["statusCode"] == 200, resp
+    assert resp["headers"]["Content-Type"] == "application/vnd.apple.mpegurl"
+    assert resp["body"].encode() == playlist
+    # What the player resolves "seg 0.ts" to.
+    body, _ = follow(s3, h.handler(event(tok, "p/my%20show/seg%200.ts"), None))
+    assert body == b"tsdata"
+    assert h.handler(event(tok, "p/my%20show/nope.ts"), None)["statusCode"] == 404
+    assert h.handler(event(tok, "p/%2E%2E/x"), None)["statusCode"] == 400
+    assert h.handler(event(tok, "p/%ff"), None)["statusCode"] == 400
+    assert h.handler(event(tok, "p"), None)["statusCode"] == 400
+
+
+def test_hls_playlist_too_large(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    big = b"#" * (h.PLAYLIST_MAX_BYTES + 1)
+    put_file(s3, "alb", "big.m3u8", [("nnnn-8888", big)])
+    assert h.handler(event(tok, "p/big.m3u8"), None)["statusCode"] == 413
+
+
+def test_hls_file_share_downloads(s3):
+    h = load_handler()
+    key = put_file(s3, "alb", "a.m3u8", [("oooo-9999", b"#EXTM3U\n")])
+    tok = file_share(s3, "ae", key, "a.m3u8")
+    resp = h.handler(event(tok, accept=BROWSER), None)
+    assert resp["statusCode"] == 302
+
+
 def test_dir_missing_file(s3):
     h = load_handler()
     tok = _folder_share(s3)

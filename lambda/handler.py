@@ -37,6 +37,7 @@ import os
 import re
 import time
 import traceback
+import urllib.parse
 import zipfile
 
 import manifest
@@ -294,6 +295,11 @@ def mime_type(name):
     return MIME.get(ext)
 
 
+HLS_MIME = "application/vnd.apple.mpegurl"
+# object-store-common §6: a playlist is answered its bytes, never redirected.
+PLAYLIST_MAX_BYTES = 1024 * 1024
+
+
 def preview_kind(mime):
     """How browse.html should preview a file with this MIME type."""
     mime = mime.split(";", 1)[0].strip()
@@ -303,6 +309,8 @@ def preview_kind(mime):
         return "audio"
     if mime.startswith("video/"):
         return "video"
+    if mime == HLS_MIME:
+        return "hls"
     if mime == "application/pdf":
         return "pdf"
     if mime == "text/html":
@@ -442,7 +450,8 @@ def list_response(share, path):
     )
 
 
-def serve_file(share, path, as_download, want_json):
+def shared_file(share, path):
+    """(relative path, manifest, cached key) of a file under a folder share."""
     rel = safe_rel(path)
     if not rel:
         raise ShareError(400, "not a file")
@@ -453,7 +462,40 @@ def serve_file(share, path, as_download, want_json):
     cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
         assemble(m, chunk_prefix(share), cache_key)
+    return rel, m, cache_key
+
+
+def serve_file(share, path, as_download, want_json):
+    rel, m, cache_key = shared_file(share, path)
     return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
+
+
+def serve_path(share, raw):
+    """http-proxy §A9.3 `p/<path>`. A player resolves a playlist's relative
+    URIs against the URL it finally read, so a playlist is answered here
+    rather than redirected into the bucket."""
+    try:
+        parts = [urllib.parse.unquote(p, errors="strict") for p in raw.split("/") if p]
+    except UnicodeDecodeError:
+        raise ShareError(400, "bad path")
+    if any("/" in p for p in parts):
+        raise ShareError(404, "file not found")
+    rel, m, cache_key = shared_file(share, "/".join(parts))
+    name = os.path.basename(rel)
+    if mime_type(name) != HLS_MIME:
+        return file_answer(cache_key, name, m.size, as_download=False, want_json=False)
+    if m.size > PLAYLIST_MAX_BYTES:
+        raise ShareError(413, "playlist too large")
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": HLS_MIME,
+            "Cache-Control": "private",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+        "body": get_bytes(cache_key).decode("utf-8", errors="replace"),
+    }
 
 
 PREVIEW_FETCHERS = (
@@ -577,6 +619,8 @@ def handler(event, context):
             return serve_shared_file(token, share, want_json=q.get("json") == "1")
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
+        if is_dir and sub == "p":
+            return serve_path(share, (event.get("rawPath", "").split("/", 3) + [""])[3])
         if is_dir and sub == "f":
             return serve_file(
                 share, q.get("path", ""),
@@ -599,7 +643,8 @@ def gcp_handler(request):
     Flask (body, status, headers) tuple. The core [handler] stays AWS-shaped so
     the moto tests exercise it directly."""
     event = {
-        "rawPath": request.path,
+        # Encoded, as a function URL's rawPath is: `p/<path>` decodes it.
+        "rawPath": urllib.parse.quote(request.path),
         "queryStringParameters": dict(request.args),
         "headers": {k.lower(): v for k, v in request.headers.items()},
     }

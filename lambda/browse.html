@@ -265,6 +265,7 @@
         image: "🖼",
         audio: "🎵",
         video: "🎬",
+        hls: "🎬",
         pdf: "📕",
         html: "🌐",
         text: "📄",
@@ -424,6 +425,7 @@
           location.href = DATA.file ? B + "/download" : fileUrl(f.name, "&dl=1");
           return;
         }
+        if (k === "hls") return showHls(body, f, autoplay);
         body.innerHTML = "Loading…";
         let url;
         try {
@@ -446,6 +448,19 @@
         el.src = url;
         body.innerHTML = "";
         body.appendChild(el);
+      }
+      // Played natively from `p/`, so the playlist's relative URIs resolve to
+      // their own files in the share.
+      function showHls(body, f, autoplay) {
+        const v = document.createElement("video");
+        if (!v.canPlayType("application/vnd.apple.mpegurl")) {
+          body.textContent = "This browser cannot play HLS streams.";
+          return;
+        }
+        Object.assign(v, { controls: true, autoplay });
+        v.src = B + "/p/" + [...path, f.name].map(encodeURIComponent).join("/");
+        body.innerHTML = "";
+        body.appendChild(v);
       }
       document.getElementById("pvx").onclick = () => pv.close();
       pv.addEventListener("close", () => {

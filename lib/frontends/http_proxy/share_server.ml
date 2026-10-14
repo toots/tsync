@@ -2,6 +2,7 @@ open Tsync_core
 open Tsync_store
 open Tsync_remote
 open Tsync_http
+module W = Tsync_http_proxy_client.Proxy_wire
 
 type t = {
   domain : Domain_name.t;
@@ -104,6 +105,7 @@ let preview_kind m =
   if String.starts_with ~prefix:"image/" m then Some "image"
   else if String.starts_with ~prefix:"audio/" m then Some "audio"
   else if String.starts_with ~prefix:"video/" m then Some "video"
+  else if m = "application/vnd.apple.mpegurl" then Some "hls"
   else if m = "application/pdf" then Some "pdf"
   else if String.starts_with ~prefix:"text/html" m then Some "html"
   else if String.starts_with ~prefix:"text/" m || m = "application/json" then
@@ -387,10 +389,24 @@ let live_folder t id =
   if (not (Folder_id.is_root id)) && t.anchor id = None then
     refuse 404 "not found"
 
-let path_parts path =
-  let parts = List.filter (( <> ) "") (String.split_on_char '/' path) in
+let checked_parts parts =
   if List.exists (fun p -> p = "." || p = "..") parts then refuse 400 "bad path";
   parts
+
+let path_parts path =
+  checked_parts (List.filter (( <> ) "") (String.split_on_char '/' path))
+
+(* §A9.3 [p/]: decoded after the split, so an escaped [/] stays in its name. *)
+let url_path_parts path =
+  checked_parts
+    (List.filter_map
+       (function
+         | "" -> None
+         | p -> (
+             match W.unescape p with
+               | Some p -> Some p
+               | None -> refuse 400 "bad path"))
+       (String.split_on_char '/' path))
 
 let listing t id =
   let dirs, files =
@@ -599,6 +615,17 @@ let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
             t.find id (path_parts (Option.value ~default:"" (param "path")))
           with
             | `Folder f -> json (listing t f)
+            | _ -> refuse 404 "not found")
+      | `Dir id, sub when String.starts_with ~prefix:"p/" sub -> (
+          live_folder t id;
+          let parts =
+            url_path_parts (String.sub sub 2 (String.length sub - 2))
+          in
+          match t.find id parts with
+            | `File m when parts <> [] ->
+                file_response t r
+                  ~name:(List.nth parts (List.length parts - 1))
+                  ~inline:true m
             | _ -> refuse 404 "not found")
       | `Dir id, "f" -> (
           live_folder t id;
