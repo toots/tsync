@@ -13,6 +13,9 @@ val watch_max : float
     byte outside the allowed sets as upper-case [%XX]. *)
 val canonical_query : (string * string) list -> string
 
+(** Percent-decoding; [None] for a malformed escape. *)
+val unescape : string -> string option
+
 (** A server's parse of a raw query, in received order; [None] for a malformed
     escape, a part without [=], or a repeated name. *)
 val parse_query : string -> (string * string) list option
