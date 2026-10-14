@@ -62,7 +62,8 @@ d1 /p//seg%200.ts -> 200 text/plain; charset=utf-8 | inline; filename="seg 0.ts"
 d1 /p/nope.ts -> 404 text/plain; charset=utf-8 | - | not found
 d1 /p/%2E%2E/x -> 400 text/plain; charset=utf-8 | - | bad path
 d1 /p/%zz -> 400 text/plain; charset=utf-8 | - | bad path
-d1 /p/ -> 404 text/plain; charset=utf-8 | - | not found
+d1 /p/ -> 400 text/plain; charset=utf-8 | - | bad path
+d1 /p -> 400 text/plain; charset=utf-8 | - | bad path
 == link previews (§A9.3, §A9.6, §A9.8)
 a1 / [*/*] [user-agent: WhatsApp/2.24.1.6 A] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://localhost/s/a1/preview
 a1 / [user-agent: curl/8.0] -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ

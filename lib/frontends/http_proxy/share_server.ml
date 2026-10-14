@@ -616,13 +616,14 @@ let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
           with
             | `Folder f -> json (listing t f)
             | _ -> refuse 404 "not found")
-      | `Dir id, sub when String.starts_with ~prefix:"p/" sub -> (
+      | `Dir id, sub when sub = "p" || String.starts_with ~prefix:"p/" sub -> (
           live_folder t id;
           let parts =
-            url_path_parts (String.sub sub 2 (String.length sub - 2))
+            url_path_parts (String.sub sub 1 (String.length sub - 1))
           in
+          if parts = [] then refuse 400 "bad path";
           match t.find id parts with
-            | `File m when parts <> [] ->
+            | `File m ->
                 file_response t r
                   ~name:(List.nth parts (List.length parts - 1))
                   ~inline:true m

@@ -190,6 +190,7 @@ let routes () =
       get "d1" "p/%2E%2E/x" [];
       get "d1" "p/%zz" [];
       get "d1" "p/" [];
+      get "d1" "p" [];
       p "== link previews (§A9.3, §A9.6, §A9.8)";
       let whatsapp = [("user-agent", "WhatsApp/2.24.1.6 A")] in
       get ~accept:"*/*" ~headers:whatsapp "a1" "" [];
