@@ -434,11 +434,16 @@ def test_hls_playlist_through_p(s3):
     assert resp["statusCode"] == 206, resp
     assert resp["headers"]["Content-Range"] == "bytes 2-3/6"
     assert base64.b64decode(resp["body"]) == b"da"
-    # A wider or open range is cut to the per-answer ceiling.
+    # An open range is cut to the per-answer ceiling; a wider bounded one is
+    # redirected, since a client may not accept it cut.
     h.RANGE_MAX_BYTES = 4
     resp = h.handler(event(tok, seg, headers={"range": "bytes=1-"}), None)
     assert resp["headers"]["Content-Range"] == "bytes 1-4/6"
     assert base64.b64decode(resp["body"]) == b"sdat"
+    resp = h.handler(event(tok, seg, headers={"range": "bytes=0-3"}), None)
+    assert resp["statusCode"] == 206
+    assert follow(s3, h.handler(event(tok, seg, headers={"range": "bytes=0-4"}), None))[0] == b"tsdata"
+    assert follow(s3, h.handler(event(tok, seg, headers={"range": "bytes=-5"}), None))[0] == b"tsdata"
     assert h.handler(event(tok, seg, headers={"range": "bytes=6-"}), None)["statusCode"] == 416
     # Without a range, the usual redirect.
     body, _ = follow(s3, h.handler(event(tok, seg), None))
