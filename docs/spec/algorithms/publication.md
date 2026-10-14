@@ -747,7 +747,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 
 An implementation MUST exhibit the following; the method (scenarios, crash injection, power-loss
 states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
-[change-algebra.md](change-algebra.md) §11 are part of this list.
+[change-algebra.md](change-algebra.md) §10 are part of this list.
 
 - **Before-values.** A delete then a create of one name, publication held, pushes one command
   guarded by the old content. A create then a delete leaves no before-value and pushes nothing. A
