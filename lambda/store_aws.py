@@ -41,6 +41,11 @@ class Store:
                 raise FileNotFoundError(key)
             raise
 
+    def get_range(self, key, start, end):
+        """Bytes [start, end], both inclusive."""
+        r = self.s3.get_object(Bucket=self.bucket, Key=key, Range="bytes=%d-%d" % (start, end))
+        return r["Body"].read()
+
     def exists(self, key):
         try:
             self.s3.head_object(Bucket=self.bucket, Key=key)

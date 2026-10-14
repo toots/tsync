@@ -43,6 +43,7 @@ def test_single_chunk(store):
     store.put_bytes("p/.chunks/a", b"AAAA")
     store.assemble(["p/.chunks/a"], "p/.shares/one.data")
     assert store.get_bytes("p/.shares/one.data") == b"AAAA"
+    assert store.get_range("p/.shares/one.data", 1, 2) == b"AA"
 
 
 def test_multi_chunk_one_compose(store):

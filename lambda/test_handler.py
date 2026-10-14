@@ -10,6 +10,7 @@ fixtures don't need any hashing: a child's key can be any unique suffix under it
 folder's namespace (here, a slug of its name).
 """
 
+import base64
 import hashlib
 import importlib
 import io
@@ -427,8 +428,20 @@ def test_hls_playlist_through_p(s3):
     assert resp["statusCode"] == 200, resp
     assert resp["headers"]["Content-Type"] == "application/vnd.apple.mpegurl"
     assert resp["body"].encode() == playlist
-    # What the player resolves "seg 0.ts" to.
-    body, _ = follow(s3, h.handler(event(tok, "p/my%20show/seg%200.ts"), None))
+    # What the player resolves "seg 0.ts" to: a range is answered in place.
+    seg = "p/my%20show/seg%200.ts"
+    resp = h.handler(event(tok, seg, headers={"range": "bytes=2-3"}), None)
+    assert resp["statusCode"] == 206, resp
+    assert resp["headers"]["Content-Range"] == "bytes 2-3/6"
+    assert base64.b64decode(resp["body"]) == b"da"
+    # A wider or open range is cut to the per-answer ceiling.
+    h.RANGE_MAX_BYTES = 4
+    resp = h.handler(event(tok, seg, headers={"range": "bytes=1-"}), None)
+    assert resp["headers"]["Content-Range"] == "bytes 1-4/6"
+    assert base64.b64decode(resp["body"]) == b"sdat"
+    assert h.handler(event(tok, seg, headers={"range": "bytes=6-"}), None)["statusCode"] == 416
+    # Without a range, the usual redirect.
+    body, _ = follow(s3, h.handler(event(tok, seg), None))
     assert body == b"tsdata"
     assert h.handler(event(tok, "p/my%20show/nope.ts"), None)["statusCode"] == 404
     assert h.handler(event(tok, "p/%2E%2E/x"), None)["statusCode"] == 400

@@ -41,6 +41,10 @@ class Store:
         except NotFound:
             raise FileNotFoundError(key)
 
+    def get_range(self, key, start, end):
+        """Bytes [start, end], both inclusive."""
+        return self.bucket.blob(key).download_as_bytes(start=start, end=end)
+
     def exists(self, key):
         return self.bucket.blob(key).exists()
 
