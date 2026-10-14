@@ -54,6 +54,7 @@ val clear_in_flight : t -> unit
 
 (** One change of the local tree an arrival makes (03 §2.7). *)
 type step =
+  | Reidentify of Folder_id.t * Folder_id.t
   | Move of Algebra.place * Algebra.place
   | File of Algebra.place * Manifest.t option
   | Folder of Folder_id.t * Algebra.place option

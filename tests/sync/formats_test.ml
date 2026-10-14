@@ -269,6 +269,7 @@ let () =
       view = None;
       steps =
         [
+          Reidentify (sub, folder);
           Move (at "a.txt", at "a (conflicted copy from laptop).txt");
           File (at "a.txt", Some (Manifest.rename one "a.txt"));
           File (at "b.txt", None);

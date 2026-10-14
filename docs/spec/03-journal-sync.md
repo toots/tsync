@@ -196,7 +196,8 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
 
 ```json
 {"head":1234567,
- "steps":[{"move":["3f9a0c1b2d4e-40a","a.txt"],"to":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"]},
+ "steps":[{"reidentify":"5c2e81d07a3b-3","as":"3f9a0c1b2d4e-40a"},
+          {"move":["3f9a0c1b2d4e-40a","a.txt"],"to":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"]},
           {"file":["3f9a0c1b2d4e-40a","a.txt"],"value":"<base64 of a manifest body>"},
           {"folder":"3f9a0c1b2d4e-40b","value":[".tsync-root","Pics"]}],
  "before":[{"file":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"],"before":null}]}
@@ -206,7 +207,9 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
 - `view` (lazy tree only): the id of the folder whose position the arrival sets
   ([publication.md](algorithms/publication.md) §4.11). Absent on a full tree.
 - `steps`, in an order in which each can be applied to the local tree
-  ([change-algebra.md](algorithms/change-algebra.md) Theorem 3): `move` takes the local file at
+  ([change-algebra.md](algorithms/change-algebra.md) Theorem 3): `reidentify` gives the local
+  folder held under one id the other id where it stands, with what it holds, when the first id is
+  held ([conflict-resolution.md](algorithms/conflict-resolution.md) §4.2); `move` takes the local file at
   one key to another key when the source is present and the destination absent;
   `file` and `folder` set a key to `value` (`null` for ∅). A folder parked at a temporary place is
   a `folder` step whose value names the root and the leaf `.tsync-park-<folder id>`, followed

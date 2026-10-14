@@ -646,6 +646,8 @@ opened. It runs the same protocol **per folder**:
   the merge (R1): entries it holds from an older pull of its own are a view, not changes of this
   client, and are dropped with it. A subfolder moved into a folder this client does not hold is
   dropped locally, and comes back when that folder is pulled.
+- **A folder merged into another** ([conflict-resolution.md](conflict-resolution.md) §4.2) has no
+  view under the main's id, whatever the local folder had: it is a folder never pulled.
 - **The cycle still runs**, to push: it wakes on a local change and on the batch delay, never on
   the cursor or on `SWEEP`.
 

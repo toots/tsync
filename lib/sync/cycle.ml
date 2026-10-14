@@ -159,6 +159,33 @@ module Make (C : Engine_ctx.S) = struct
     if Fs.is_dir (Mirror.path mirror dir) then
       Fs.durable_replace (folder_position_path dir) (Key.entry_number n)
 
+  let pulled_marker dir =
+    Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
+
+  (* Every item under a folder, as it would be reported if it had just arrived:
+     a host that drops a removed folder's subtree learns it again. *)
+  let announce dir =
+    let rec walk dir =
+      List.concat_map
+        (fun (c : Mirror.child) ->
+          let path = Names.join dir c.name in
+          match c.kind with
+            | `Dir id -> (Op.Mkdir { path; id }, None) :: walk path
+            | `File m ->
+                [(Op.Put { path; size = m.size }, Mirror.file_id mirror path)])
+        (Mirror.list mirror dir)
+    in
+    let staged_only =
+      List.filter_map
+        (fun (path, _) ->
+          if kind path = `File && Mirror.manifest mirror path = None then
+            Some
+              (Op.Put { path; size = size_of path }, Mirror.file_id mirror path)
+          else None)
+        (Staged.edits_under staged dir)
+    in
+    walk dir @ staged_only
+
   let move_file ~src ~dst =
     let size = size_of src in
     repost_moved (rename_local ~src ~dst ~is_dir:false);
@@ -181,6 +208,24 @@ module Make (C : Engine_ctx.S) = struct
       Sync_state.step -> (Op.t * string option) list =
     let late path = recovered && Staged.edit staged path <> None in
     function
+    | Reidentify (i, j) -> (
+        match Mirror.key_of_id mirror i with
+          | Some here ->
+              forget_dirs ();
+              (* An upload record names its file by key (04 §2.8). *)
+              let moved = Staged.edits_under staged here in
+              List.iter (fun (path, _) -> supersede path) moved;
+              ignore
+                (Mirror.record_folder ~durable:false ~on_other:`Replace mirror
+                   here j);
+              repost_moved moved;
+              (* publication §4.11: the main's folder has no view here. *)
+              List.iter Fs.unlink_quiet
+                [pulled_marker here; folder_position_path here];
+              (Op.Rmdir { path = here; id = Some i }, None)
+              :: (Op.Mkdir { path = here; id = Some j }, None)
+              :: announce here
+          | None -> [])
     | Move (src, dst) -> (
         match (path_of src, path_of dst) with
           | Some s, Some d when kind s = `File && kind d = `Absent ->
@@ -326,10 +371,12 @@ module Make (C : Engine_ctx.S) = struct
         in
         compare (rank a) (rank b))
 
-  (* The steps that take [L] to [N]: files moved aside first, to names free in
-     both, then the rest in an order Theorem 3 allows. *)
+  (* The steps that take [L] to [N]: folders merged into another re-identified
+     first, then files moved aside, to names free in both, then the rest in an
+     order Theorem 3 allows. *)
   let steps_of (merged : Log_entry.value Algebra.merged) : Sync_state.step list
       =
+    let start = Algebra.file merged.start in
     let targets = List.map snd merged.asides in
     let rest =
       List.filter
@@ -337,10 +384,10 @@ module Make (C : Engine_ctx.S) = struct
         merged.local
     in
     let moved =
-      Algebra.apply (Algebra.of_base l_base)
+      Algebra.apply merged.start
         (List.concat_map
            (fun (src, dst) ->
-             [`File (src, None, None); `File (dst, None, l_base.file src)])
+             [`File (src, None, None); `File (dst, None, start src)])
            merged.asides)
     in
     let ordered =
@@ -381,7 +428,8 @@ module Make (C : Engine_ctx.S) = struct
           | _ -> (moves, used))
         ([], []) ordered
     in
-    List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
+    List.map (fun (i, j) -> Sync_state.Reidentify (i, j)) merged.merged_into
+    @ List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
     @ List.filter_map
         (fun (j, step) ->
           match (List.find_opt (fun (at, _, _) -> at = j) moves, step) with
@@ -403,7 +451,21 @@ module Make (C : Engine_ctx.S) = struct
      operation in progress may have just recorded. *)
   let settled_of ~(theirs : Log_entry.command list)
       (merged : Log_entry.value Algebra.merged) =
-    let keys = List.map Algebra.key_of (theirs @ merged.local) in
+    let merged_folder i =
+      List.exists
+        (fun (a, b) -> Folder_id.equal i a || Folder_id.equal i b)
+        merged.merged_into
+    in
+    let keys =
+      List.map Algebra.key_of (theirs @ merged.local)
+      @ List.filter_map
+          (fun c ->
+            match Algebra.key_of c with
+              | `File p when merged_folder p.parent -> Some (`File p)
+              | `Folder i when merged_folder i -> Some (`Folder i)
+              | _ -> None)
+          merged.pending
+    in
     List.filter_map
       (fun (c : Log_entry.command) ->
         let key = Algebra.key_of c in
@@ -425,6 +487,10 @@ module Make (C : Engine_ctx.S) = struct
       (List.concat_map
          (fun (step : Sync_state.step) ->
            match step with
+             | Reidentify (i, _) -> (
+                 match Mirror.key_of_id mirror i with
+                   | Some dir -> List.map fst (Staged.edits_under staged dir)
+                   | None -> [])
              | Move (src, dst) -> List.filter_map path_of [src; dst]
              | File (p, _) -> Option.to_list (path_of p)
              | Folder (i, _) -> (
@@ -485,7 +551,7 @@ module Make (C : Engine_ctx.S) = struct
                    (List.exists
                       (fun c -> Algebra.key_of c = `File p)
                       merged.local) -> (
-              match l_base.file p with
+              match Algebra.file merged.start p with
                 | Some (Known mine)
                   when Log_entry.identity_of mine = Log_entry.identity_of m
                        && mine <> m ->
@@ -971,9 +1037,6 @@ module Make (C : Engine_ctx.S) = struct
     List.filter
       (fun c -> Hashtbl.mem touched (Algebra.key_of c))
       (theirs_of entries)
-
-  let pulled_marker dir =
-    Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
 
   (* publication §4.11, a pull: an arrival for one folder, by the entries
      after its position, or by state when it has none or they are pruned;

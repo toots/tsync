@@ -210,7 +210,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-3.1 Contested slot written with an unconditional put
 - **Pitfall** — Two clients creating one directory each wrote the store's record for the name; the last won and the loser's files sat on every backend, listed by nothing: an acknowledged write gone with no report. The neighbouring test missed it because the losing namespace was empty.
-- **Check** — The one contested write is the creation of entry h + 1: a store-native conditional create that returns the holder, where losing is an ordinary outcome followed by an arrival (publication §2 A2, §4.5). Never HEAD+PUT, never a plain put on a store that refuses the conditional create. Tree records are written only by an entry's projector (publication §4.6). Naming-race tests write content under the contested name and find both folders, each with its content (conflict-resolution §8.3, D6).
+- **Check** — The one contested write is the creation of entry h + 1: a store-native conditional create that returns the holder, where losing is an ordinary outcome followed by an arrival (publication §2 A2, §4.5). Never HEAD+PUT, never a plain put on a store that refuses the conditional create. Tree records are written only by an entry's projector (publication §4.6). Naming-race tests write content under the contested name and find one folder holding both sides' content (conflict-resolution §8.3, D6).
 - **Seen** — 284521fd, 0265e0e5, c51dba7f, PR #38. recurred ×3.
 
 ### A-3.2 Conditional-create protocol gaps

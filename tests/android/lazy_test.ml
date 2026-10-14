@@ -506,6 +506,61 @@ let () =
     (String.concat ", " (peer_root ()));
   ignore (list ~extra:[s "pull" "now"] "root" "root");
 
+  p "== a folder made offline where a peer made one";
+  ignore (list ~extra:[s "pull" "now"] "root" "root");
+  peer_does (fun (module E) -> E.mkdir "camera" ~exclusive:true);
+  peer_writes "camera/theirs.jpg" "theirs";
+  Atomic.set mode `Down;
+  wait_stale ();
+  let made = action "mkdir" [s "parentRef" "root"; s "name" "camera"] in
+  let mine = text (Option.get (field made "item")) "ref" in
+  p "  %-34s %s" "mkdir camera" (outcome made);
+  p "  %-34s %s" "write camera/ours.jpg"
+    (outcome
+       (action "write"
+          [
+            s "parentRef" mine;
+            s "name" "ours.jpg";
+            s "staging" (staged "s9" "ours");
+          ]));
+  Atomic.set mode `Up;
+  let l = list ~extra:[s "pull" "now"] "root" "root" in
+  ignore (list ~extra:[s "pull" "now"] "camera" (ref_of l "camera"));
+  p "  %-34s %s" "the folder made offline"
+    (text (action "list_dir" [s "ref" mine]) "code");
+  let camera = ref_of l "camera" in
+  let deadline = Unix.gettimeofday () +. 20. in
+  while
+    field
+      (action "stat" [s "parentRef" camera; s "name" "ours.jpg"])
+      "isUploaded"
+    <> Some (`Bool true)
+    && Unix.gettimeofday () < deadline
+  do
+    Thread.delay 0.05
+  done;
+  ignore (list ~extra:[s "pull" "now"] "camera, upload done" camera);
+  let peer_camera () =
+    let names = ref [] in
+    peer_does (fun (module E) ->
+        names :=
+          List.map (fun (e : E.entry) -> e.name) (E.list_children "camera"));
+    List.sort compare !names
+  in
+  let deadline = Unix.gettimeofday () +. 20. in
+  while
+    (not (List.mem "ours.jpg" (peer_camera ())))
+    && Unix.gettimeofday () < deadline
+  do
+    Thread.delay 0.05
+  done;
+  p "  %-34s [%s]" "the peer's camera" (String.concat ", " (peer_camera ()));
+  p "  %-34s [%s]" "the peer's root"
+    (String.concat ", "
+       (List.filter
+          (fun n -> String.length n >= 6 && String.sub n 0 6 = "camera")
+          (until_peer_sees "camera")));
+
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in
