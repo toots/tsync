@@ -282,15 +282,22 @@ applied to them as the set it is, and they may be no well-formed tree until
 its last write: what a reader finds meanwhile is specified with them
 ([data-model/backend.md](../data-model/backend.md) §6), not here.
 
-**Definition 6 (batch).** A subset $B \subseteq P$ is a *batch* if $R$, with
-the keys of $B$ set to their values in $L$, is well-formed. That state is
-written $B\,R$.
+**Definition 6 (batch).** Let $R$ and $L$ be well-formed states and
+$P = \mathit{diff}(R, L)$. For a subset $B \subseteq P$, $B\,R$ is the state
+$R$ with the key of each command of $B$ set to its value after. $P$ has one
+command per key (Definition 5), so $B\,R$ does not depend on an order. $B$ is
+a *batch* of $P$ if $B\,R$ is well-formed.
 
-**Proposition 4 (batches).** $P$ itself is a batch. If $B$ is a batch, then
-$\mathit{diff}(B\,R, L) = P \setminus B$.
+**Proposition 4 (batches).** With $R$, $L$ and $P$ as in Definition 6, $P$ is
+a batch of itself, and for every batch $B$ of $P$,
+$\mathit{diff}(B\,R, L) = P \setminus B$: once $B$ is committed, what remains
+pending is the rest of $P$.
 
-*Proof.* $P\,R = L$, which is well-formed. The second claim is immediate from
-Definition 5: the keys of $B$ now agree with $L$. $\square$
+*Proof.* $P$ sets every key where $R$ and $L$ differ to its value in $L$, so
+$P\,R = L$, which is well-formed. $B\,R$ holds $L$'s value at the keys of $B$
+and at every key where $R$ and $L$ agree; at every other key it holds $R$'s
+value, which differs from $L$'s there, and those keys are exactly the keys of
+$P \setminus B$, with the same values before and after. $\square$
 
 A batch is a *set*, not a sequence: it is the difference between two trees.
 Whoever applies it to a real tree orders it for that tree, by Theorem 3.
@@ -484,8 +491,11 @@ applies, in the order R1, R2, R3, until none applies:
   absent from $M$ and is never the one chosen: R1 would restore it again.
 
 A *fresh name* is free in $N$ as computed so far and in $L$, and generated
-only by this client. Being free in $L$ lets the client move a file aside
-before it changes anything else in its tree.
+only by this client. Once a folder is merged into another (Definition 8),
+$L$ is read with what that folder held under the folder it was merged into:
+a name taken there by one of its files is not free for another. Being free in
+$L$ lets the client move a file aside before it changes anything else in its
+tree.
 
 **Definition 8 (merging a folder into another).** Let $i$ and $j$ be folders
 absent from $R$, $j$ with its value from $M$. Merging $i$ into $j$ sets

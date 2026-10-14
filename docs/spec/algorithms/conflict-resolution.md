@@ -193,7 +193,8 @@ with the keys concerned and the three values of each.
 
 `aside(L)` is `conflict_name(L, n)` for the smallest `n ≥ 1` whose name is free in the folder,
 in $N$ as computed so far and in $L$ (staged edits included), so that moving a file aside is
-always possible as the first step of an enactment (§4.3).
+always possible as the first step of an enactment (§4.3). Once a folder is merged into another
+(§4.2), $L$ is read as re-identified: what the folder held counts under the main's folder.
 
 - File `name.ext` → `name (conflicted copy from C).ext`, where the extension starts at the **last**
   `.` of the leaf; a leaf with no `.`, or whose only `.` is its first character, has no extension.
