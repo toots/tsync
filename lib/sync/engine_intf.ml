@@ -248,6 +248,10 @@ module type S = sig
   (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
   val pulled_at : string -> float option
 
+  (** Whether this client created the folder and has not published it: then the
+      main holds nothing there that it lacks (publication §4.11). *)
+  val created_here : string -> bool
+
   (** Until when the folder's view is answered whatever its age. *)
   val view_hold : string -> float option
 

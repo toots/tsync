@@ -142,8 +142,14 @@ let for_listing t ~pull dir =
           Rt.Promise.await done_;
           fresh ())
 
+(* publication §4.11: a folder with no view has nothing a name could be checked
+   against, unless this client made it. *)
 let before_mutation t dir =
-  if not (is_fresh t dir) then ignore (wait_patiently t (start t dir))
+  let (module E : Engine.S) = t.engine in
+  if not (is_fresh t dir) then
+    if E.pulled_at dir = None && not (E.created_here dir) then
+      Rt.Promise.await (start t dir)
+    else ignore (wait_patiently t (start t dir))
 
 let for_walk t dir = if not (is_fresh t dir) then Rt.Promise.await (start t dir)
 

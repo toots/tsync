@@ -402,6 +402,11 @@ module Make (C : Engine_ctx.S) = struct
   let pulled_at dir = read_seconds (pulled_marker dir)
   let view_hold dir = read_seconds (hold_marker dir)
 
+  let created_here dir =
+    match Mirror.folder_id mirror dir with
+      | Some id -> Sync_state.before_folder sync_state id = Some None
+      | None -> false
+
   let hold_views dir ~until =
     let rec up dir =
       (match view_hold dir with
