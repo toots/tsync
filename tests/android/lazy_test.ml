@@ -506,6 +506,24 @@ let () =
     (String.concat ", " (peer_root ()));
   ignore (list ~extra:[s "pull" "now"] "root" "root");
 
+  p "== a write into a folder never pulled";
+  peer_does (fun (module E) -> E.mkdir "fresh" ~exclusive:true);
+  let fresh = ref_of (list ~extra:[s "pull" "now"] "root" "root") "fresh" in
+  let write_fresh label =
+    p "  %-34s %s" label
+      (outcome
+         (action "write"
+            [
+              s "parentRef" fresh;
+              s "name" "f.txt";
+              s "staging" (staged "s10" "f");
+            ]))
+  in
+  Atomic.set mode `Down;
+  write_fresh "write, the store down";
+  Atomic.set mode `Up;
+  write_fresh "write, the store back";
+
   p "== a folder made offline where a peer made one";
   ignore (list ~extra:[s "pull" "now"] "root" "root");
   peer_does (fun (module E) -> E.mkdir "camera" ~exclusive:true);

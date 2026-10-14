@@ -166,8 +166,12 @@ when the mirror or the cache can answer it.
   without the store.
 
 **Mutations: accepted, pushed later.**
-- The destination pull of rule 2 waits at most `pull_patience`. Without it the mutation proceeds on
-  the local view, records its before-values and is answered
+- A destination never pulled, and not created by this client, has no view to check a name
+  against: the mutation waits for its pull and fails with the pull's code, as a listing does
+  ([publication.md](../algorithms/publication.md) §4.11). A folder this client created and has not
+  published needs no pull: the main holds nothing in it.
+- Otherwise the destination pull of rule 2 waits at most `pull_patience`. Without it the mutation
+  proceeds on the local view, records its before-values and is answered
   ([publication §4.1](../algorithms/publication.md#41-a-local-operation)); it stays pending, across
   restarts, until a push commits it once the store returns.
 - An exclusive creation checked against an out-of-date view may meet a name a peer took meanwhile.

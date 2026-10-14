@@ -34,8 +34,9 @@ val for_listing : t -> pull:Protocol.pull -> string -> view
 (** The view a page after the first continues: never pulls. *)
 val continued : t -> string -> view
 
-(** Rule 2: the destination folder's pull, waited for at most the patience;
-    never fails. *)
+(** Rule 2: the destination folder's pull, waited for at most the patience. A
+    folder never pulled and not created here waits for its pull and raises its
+    failure. *)
 val before_mutation : t -> string -> unit
 
 (** Rule 3: the file's current manifest, waited for at most the patience. *)
