@@ -214,7 +214,7 @@ to the user.
 
 A peer edits a file this client renamed, or the reverse. The theory keeps both: the old name holds
 the edit, the new name holds the content as it was when renamed
-([change-algebra.md](change-algebra.md) §11). Nothing is lost, and there are two files where one
+([change-algebra.md](change-algebra.md) §10). Nothing is lost, and there are two files where one
 was meant.
 
 An implementation MAY refine the merge with its local file ids: when $M$ changes the content at a

@@ -381,7 +381,7 @@ boards without a real-time clock sets it far off at boot), and peers' wall clock
   debounce intervals.
 - The **wall clock** is used only for a time that is **persisted** or **compared with another
   host**: feed keys, retention ages (a log entry's age is the store's own modification time,
-  [publication.md](algorithms/publication.md) A8), request-signature windows, GC run
+  [publication.md](algorithms/publication.md) A7), request-signature windows, GC run
   names, version timestamps, pin expiry, temp-file and orphan ages derived from file
   times, credential expiry claims, and human-readable timestamps in logs and status.
 - Every wall-clock comparison MUST tolerate a step: the result of a step is at most an early or

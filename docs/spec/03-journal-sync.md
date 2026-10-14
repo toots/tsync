@@ -64,7 +64,7 @@ All text is UTF-8. "Durable replace" and "durable create-if-absent" are the prim
   before using its first id. A forked child leases its own block. Leases are never removed. Minting
   never contacts the store and never waits on another process.
 - A minted id is final: it is the folder's identity on every client, and nothing on the store
-  arbitrates or replaces it (assumption A5 of
+  arbitrates or replaces it (assumption A4 of
   [change-algebra.md](algorithms/change-algebra.md)).
 
 ### 2.2 Feed key

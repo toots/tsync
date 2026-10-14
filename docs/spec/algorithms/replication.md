@@ -16,7 +16,7 @@ Goals:
 - **G2 Roles as policy.** A member's role fixes what it promises to hold, when, and whether reads may reach it.
 - **G3 Writes are not slowed by copies.** A write returns once the main has it and every copy has durably recorded that it owes it. Copies catch up in the background, across crashes and restarts.
 - **G4 Partial coverage, never partial files.** A copy may lag, but a referrer reaches it only after everything the referrer names is there.
-- **G5 Honest reads.** A read of content fails over past an unreachable member, and never reports "not found" because a member could not be asked. A read that decides what the tree is (the log, the tree head, a tree record) is answered by the main or fails ([change-algebra.md](change-algebra.md) Proposition 12).
+- **G5 Honest reads.** A read of content fails over past an unreachable member, and never reports "not found" because a member could not be asked. A read that decides what the tree is (the log, the tree head, a tree record) is answered by the main or fails ([publication.md](publication.md) S9).
 - **G6 Copies are never ahead of the truth.** No copy is written while the main is offline.
 - **G7 Nothing is dropped, and divergence is visible.** A job that cannot run is kept and retried, the copy is reported degraded meanwhile, and whole-store divergence (corruption, a new empty member) is repaired by an explicit operation.
 - **G8 Forwarding never competes with the user.** Best-effort chunk forwards use upload bandwidth only when the link has room.
@@ -273,7 +273,7 @@ read(k, f):
   return none
 ```
 
-- **Only chunks fail over.** A chunk is named by its bytes, so a copy that lags can lack it but cannot hold another body under its name. Every other key (a log entry, the tree head, a takeover, the cursor, a manifest, a marker, an anchor, a version) says what the tree is or was: a copy's answer would be an older truth, which a client would take for a peer's change ([change-algebra.md](change-algebra.md) §9). Those reads are the main's or fail.
+- **Only chunks fail over.** A chunk is named by its bytes, so a copy that lags can lack it but cannot hold another body under its name. Every other key (a log entry, the tree head, a takeover, the cursor, a manifest, a marker, an anchor, a version) says what the tree is or was: a copy's answer would be an older truth, which a client would take for a peer's change ([publication.md](publication.md) S9). Those reads are the main's or fail.
 - A main that answers "absent" means *not found*. A replica holds the same chunks or fewer, and is not asked.
 - A main that is unreachable means the replica answers for chunks.
 - Archives are asked for chunks both when the main misses and when it is unreachable. In a domain with no main, the first archive answers as the main would (every key that is not a chunk, and listings), and the others answer chunks only.

@@ -54,7 +54,7 @@ non-hermetic check that lacks its credentials or configuration MUST report "not 
 | Retention and garbage collection | [algorithms/gc.md](algorithms/gc.md) |
 | Commands, log entry, cursor, tree head, local sync records, applied log, change feed formats | [03-journal-sync.md](03-journal-sync.md) |
 | Before-values, upload, fetch, push, projection, state read, recovery, log retention | [algorithms/publication.md](algorithms/publication.md) |
-| The cases every suite covers, each tied to a result of the theory (§12 there) | [algorithms/change-algebra.md](algorithms/change-algebra.md) |
+| The cases every suite covers, each tied to a result of the theory (§11 there) | [algorithms/change-algebra.md](algorithms/change-algebra.md) |
 | Enacting a merge, outcomes by operation pair, the invariants after quiescence (§10 there) | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
 | Local formats, file operations, staged writes | [04-checkout-cache.md](04-checkout-cache.md) |
 | Local entities and the owner's state | [data-model/local-cache.md](data-model/local-cache.md) |
