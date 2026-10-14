@@ -209,23 +209,40 @@ module Make (C : Engine_ctx.S) = struct
     let late path = recovered && Staged.edit staged path <> None in
     function
     | Reidentify (i, j) -> (
-        match Mirror.key_of_id mirror i with
-          | Some here ->
-              forget_dirs ();
-              (* An upload record names its file by key (04 §2.8). *)
-              let moved = Staged.edits_under staged here in
-              List.iter (fun (path, _) -> supersede path) moved;
-              ignore
-                (Mirror.record_folder ~durable:false ~on_other:`Replace mirror
-                   here j);
-              repost_moved moved;
-              (* publication §4.11: the main's folder has no view here. *)
-              List.iter Fs.unlink_quiet
-                [pulled_marker here; folder_position_path here];
+        (* A replay finds the folder under [j] and does each part again. *)
+        let reidentify here =
+          forget_dirs ();
+          (* publication §4.11: the main's folder has no view here. *)
+          List.iter Fs.unlink_quiet
+            [pulled_marker here; folder_position_path here];
+          (* An upload record names its file by key (04 §2.8). *)
+          let moved = Staged.edits_under staged here in
+          List.iter (fun (path, _) -> supersede path) moved;
+          ignore
+            (Mirror.record_folder ~durable:false ~on_other:`Replace mirror here
+               j);
+          (* A subfolder's reverse entry names its parent by id. *)
+          List.iter
+            (fun (c : Mirror.child) ->
+              match c.kind with
+                | `Dir (Some id) ->
+                    ignore
+                      (Mirror.record_folder ~durable:false mirror
+                         (Names.join here c.name) id)
+                | `Dir None | `File _ -> ())
+            (Mirror.list mirror here);
+          repost_moved moved
+        in
+        match (Mirror.key_of_id mirror i, Mirror.key_of_id mirror j) with
+          | Some here, _ ->
+              reidentify here;
               (Op.Rmdir { path = here; id = Some i }, None)
               :: (Op.Mkdir { path = here; id = Some j }, None)
               :: announce here
-          | None -> [])
+          | None, Some here when recovered ->
+              reidentify here;
+              []
+          | _ -> [])
     | Move (src, dst) -> (
         match (path_of src, path_of dst) with
           | Some s, Some d when kind s = `File && kind d = `Absent ->
@@ -456,20 +473,22 @@ module Make (C : Engine_ctx.S) = struct
         (fun (a, b) -> Folder_id.equal i a || Folder_id.equal i b)
         merged.merged_into
     in
-    let keys =
-      List.map Algebra.key_of (theirs @ merged.local)
-      @ List.filter_map
-          (fun c ->
-            match Algebra.key_of c with
-              | `File p when merged_folder p.parent -> Some (`File p)
-              | `Folder i when merged_folder i -> Some (`Folder i)
-              | _ -> None)
-          merged.pending
-    in
+    let keys = Hashtbl.create 64 in
+    List.iter
+      (fun c -> Hashtbl.replace keys (Algebra.key_of c) ())
+      (theirs @ merged.local);
+    List.iter
+      (fun c ->
+        match Algebra.key_of c with
+          | (`File { Algebra.parent = i; _ } | `Folder i) as k
+            when merged_folder i ->
+              Hashtbl.replace keys k ()
+          | _ -> ())
+      merged.pending;
     List.filter_map
       (fun (c : Log_entry.command) ->
         let key = Algebra.key_of c in
-        if not (List.mem key keys) then None
+        if not (Hashtbl.mem keys key) then None
         else
           Some
             ( key,
@@ -483,6 +502,21 @@ module Make (C : Engine_ctx.S) = struct
   (* Every local path whose key lock an enactment needs: the file keys it
      changes or settles and the staged keys under the folders it moves. *)
   let paths_of (a : Sync_state.arrival) =
+    (* A key of a folder re-identified by this arrival is found under the id
+       its local folder still has. *)
+    let renamed =
+      List.filter_map
+        (function Sync_state.Reidentify (i, j) -> Some (j, i) | _ -> None)
+        a.steps
+    in
+    let path_of (p : Algebra.place) =
+      match path_of p with
+        | Some _ as found -> found
+        | None -> (
+            match List.assoc_opt p.parent renamed with
+              | Some i -> path_of { p with parent = i }
+              | None -> None)
+    in
     List.sort_uniq String.compare
       (List.concat_map
          (fun (step : Sync_state.step) ->
@@ -507,8 +541,11 @@ module Make (C : Engine_ctx.S) = struct
       | `File p -> Folder_id.to_string p.parent ^ "/" ^ p.name
       | `Folder i -> Folder_id.to_string i
     in
-    if merged.asides <> [] || merged.restored <> [] then
-      Log.info "%s: merge clashed on %s; %d kept aside, %d folders restored"
+    if merged.asides <> [] || merged.restored <> [] || merged.merged_into <> []
+    then
+      Log.info
+        "%s: merge clashed on %s; %d kept aside, %d folders restored, %d \
+         merged into another"
         (Domain_name.to_string d)
         (String.concat ", "
            (List.filter_map
@@ -516,6 +553,7 @@ module Make (C : Engine_ctx.S) = struct
               merged.pending))
         (List.length merged.asides)
         (List.length merged.restored)
+        (List.length merged.merged_into)
 
   (* Whether a command is on a key of a folder's view (publication §4.11): a
      file key under it, or a folder key whose place is or was in it. *)

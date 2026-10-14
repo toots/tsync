@@ -42,12 +42,24 @@
   B's X2/f.txt: <id9>
   B: Y2/f.txt=none
   last applied: delete Y2/f.txt fid=<id9>
+== a folder merged into a peer's keeps its files' ids
+  B before: M/ours.txt=<id10>
+  <id10> resolves to M/ours.txt
+  B after: M/ours.txt=<id10>  M/theirs.txt=<id11>
+  B applied: rmdir M fid=-
+  B applied: mkdir M fid=-
+  B applied: mkdir M/sub fid=-
+  B applied: put M/ours.txt fid=<id10>
+  B applied: put M/sub/s.txt fid=<id12>
+  B applied: put M/theirs.txt fid=<id11>
+  M renamed N: its subfolder is at N/sub
+  A: N/ours.txt=<id13>  N/theirs.txt=<id14>  N/sub/s.txt=<id15>
 == owner start gives an id to a file found without one
   B before: q.txt=<id6>
   B without its marker: q.txt=none
   a start after a complete pass: 0
   the first pass: 1
-  B after: q.txt=<id10>
+  B after: q.txt=<id16>
   the next one: 0
 == cycles started together run one at a time
   feed lines noted: 1 new, noted twice: 0
