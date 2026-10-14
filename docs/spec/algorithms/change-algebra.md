@@ -8,12 +8,12 @@ The vocabulary and the shape of the theory come from the algebraic theory of
 filesystems of E. P. Csirmaz and L. Csirmaz, and the tree of identified
 folders from Kleppmann et al. The state used here is keyed by folder
 identity, which neither source does in this form, so the proofs are given
-here and are not inherited. Section 10 relates each result to its source.
+here and are not inherited. Section 9 relates each result to its source.
 
 The proofs are sketches. They show why a claim holds and what it depends on,
 so that an implementation can be checked against them. Theorem 3 and the five
 properties of Theorem 8 have also been checked on every pair and every triple
-of small trees (section 11, case 21), with no counter-example.
+of small trees (section 10, case 21), with no counter-example.
 
 This document owns the model: keys, values, commands, batches, the merge and
 the properties claimed of them. How tsync realises it is owned elsewhere: the
@@ -43,17 +43,8 @@ Assumptions:
   an entry only as section 6 allows.
 
 A2 is provided by a store that can create an object only if it is absent,
-directly or through a proxy in front of it. Where neither exists, the
-deployment must have a single writer. tsync requires the conditional create of
-every store it pushes to ([publication.md](publication.md) §2), so the last
-case does not arise there.
-
-Two deployments are covered.
-
-- **Shared.** Several clients publish to one main through A2. This is the
-  general case and uses the whole theory.
-- **Single writer.** One client writes the main and no other does. The
-  concurrent case of section 7 never arises.
+directly or through a proxy in front of it. tsync requires it of every store
+it pushes to ([publication.md](publication.md) §2).
 
 The goal:
 
@@ -71,7 +62,7 @@ with open(path, 'wb') as f:
     f.write(content)
 ```
 
-This happened on a single-writer deployment. No other client was involved.
+Only one client wrote to the main: no other client was involved.
 
 1. The local delete erased the client's record of what the main held at that
    name.
@@ -86,7 +77,8 @@ The client took its own earlier version for a peer's. The error is in the
 algebra of one client's own operations: the delete and the create were
 treated as two independent changes, each with its own expectation, where
 they are one change whose expectation is that of the delete. Proposition 2
-states this precisely.
+states this precisely, and Proposition 5 is the rule the client broke: a local
+delete changed $R$.
 
 ## 3. Model
 
@@ -549,7 +541,7 @@ locally.
 and a cycle always has one that is present in $M$: $M$ has no cycle, $L$ has
 none, and a folder the client created is reached only through folders it
 placed. That a cycle through a folder R1 restored also has one is checked on
-small trees only (section 11, case 21). R1 only restores folders
+small trees only (section 10, case 21). R1 only restores folders
 that exist in $R$ or $M$, of which there are finitely many. R2 moves a key
 to a name nothing else uses, or merges a folder absent from $R$ and $M$ into
 another: that folder is then $\varnothing$ for good, since nothing is placed
@@ -615,22 +607,7 @@ This sketch is the weakest proof in this document.
 While the main is unreachable, local operations continue and $P$ grows. A
 client does not see changes that peers publish in the meantime.
 
-## 9. The single-writer deployment
-
-With one client, the head moves only by that client's commits. A fetch finds
-nothing, section 7 never runs, and every push is accepted. The theory
-reduces to sections 3 to 6: record before-values, upload, commit batches.
-
-The same rules run, the append included. On a store that cannot provide A2,
-a client would check the head and then create the entry in two steps; should
-a second client write the main against the assumption, the two may create the
-same entry number. This is the one thing the single-writer assumption is there
-to exclude.
-
-The incident of section 2 occurred in this deployment. It is a failure of
-Proposition 5 alone: a local delete changed $R$.
-
-## 10. Relation to the sources
+## 9. Relation to the sources
 
 **Keyed by path or by identity.** [C16] and [C23] key the state by path:
 the nodes form a fixed tree, a directory is a value like any other, and all
@@ -673,7 +650,7 @@ one was meant. A client that tracks files by a local identity can do better,
 by applying the peer's edit to the file it now holds at $b$. That is a
 refinement of step 1 which Theorem 8 permits; it is not required.
 
-## 11. Cases a test suite should cover
+## 10. Cases a test suite should cover
 
 Each follows from a numbered result.
 
@@ -728,12 +705,12 @@ Each follows from a numbered result.
     (Definition 8). A peer that moves an existing folder to the place where
     the client created one: both exist, the client's under a fresh name.
 
-## 12. Open questions
+## 11. Open questions
 
 1. Is the progress argument (Theorem 11) sound, and is there a cleaner
    measure?
 2. The repair of the merge is confluent up to fresh names on every triple of
-   small trees (section 11, case 21). A proof for all trees is missing.
+   small trees (section 10, case 21). A proof for all trees is missing.
 3. R1 restores a removed folder under its own identity. Is there a case
    where a new identity would be the better outcome?
 4. Does anything a conflict policy could use get lost by deriving $P$ from
