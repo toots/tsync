@@ -112,7 +112,10 @@ process completed a pull of it less than `pull_freshness` ago, measured on the m
    since, not a listing. The open then serves what its reference resolves to, and answers
    `not_found` when that is nothing.
 4. `restore` of a folder pulls each folder of the subtree as it walks, so the subtree restored is the
-   one the store holds. `evict` walks the mirror only.
+   one the store holds. `rmdir` pulls the same way before it removes anything, and fails, removing
+   nothing, when a folder of the subtree cannot be read: a removal of the folder alone would leave
+   on the main what it held, which every other client then puts back
+   ([conflict-resolution.md](../algorithms/conflict-resolution.md) R1). `evict` walks the mirror only.
 
 Concurrent pulls of one folder share one store read. `stat` never pulls: it answers from the mirror.
 

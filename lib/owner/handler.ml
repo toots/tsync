@@ -988,6 +988,14 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             if E.kind path = `Dir then invalid "a folder is removed with rmdir";
             E.delete path)
     | Rmdir item ->
+        (* android §3.2 rule 4: what is removed is the subtree the store holds,
+           and a folder that cannot be read fails the removal whole. *)
+        Option.iter
+          (fun pulls ->
+            List.iter
+              (function `Unread (_, e) -> raise e | `File _ -> ())
+              (pulled_files_under t pulls (target t item)))
+          t.pulls;
         mutate (fun () ->
             let path = target t item in
             if path = "" then invalid "the root cannot be removed";

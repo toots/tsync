@@ -482,6 +482,30 @@ let () =
   p "  %-34s %s" "restore root"
     (Yojson.Safe.to_string (action "restore" [s "ref" "root"]));
 
+  p "== a folder removed over views that grew old";
+  peer_writes "archive/old/again/kept.txt" "kept";
+  (* The restore above pulled these folders: their views are let grow old. *)
+  wait_stale ();
+  let l = list ~extra:[s "pull" "now"] "root" "root" in
+  p "  %-34s %s" "rmdir archive"
+    (Yojson.Safe.to_string (action "rmdir" [s "ref" (ref_of l "archive")]));
+  let peer_root () =
+    let names = ref [] in
+    peer_does (fun (module E) ->
+        names := List.map (fun (e : E.entry) -> e.name) (E.list_children ""));
+    List.sort compare !names
+  in
+  let deadline = Unix.gettimeofday () +. 20. in
+  while List.mem "archive" (peer_root ()) && Unix.gettimeofday () < deadline do
+    Thread.delay 0.05
+  done;
+  (* A peer that still held something under the folder would restore it
+     (conflict-resolution R1) and publish that. *)
+  ignore (peer_root ());
+  p "  %-34s [%s]" "the peer's root, settled"
+    (String.concat ", " (peer_root ()));
+  ignore (list ~extra:[s "pull" "now"] "root" "root");
+
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

@@ -83,5 +83,10 @@
   restore root                       {"ok":false,"code":"unreachable","error":"the store is down"}
   evict root                         {"ok":true,"evicted":4,"failed":0}
   restore root                       {"ok":true,"restored":4,"failed":0}
+== a folder removed over views that grew old
+  root                               [archive/, c.txt, mine.txt, n2.txt, offline/, sub/] read the store
+  rmdir archive                      {"ok":true}
+  the peer's root, settled           [c.txt, mine.txt, n2.txt, offline, sub]
+  root                               [c.txt, mine.txt, n2.txt, offline/, sub/] read the store
 == status
   names the frontend                 true
