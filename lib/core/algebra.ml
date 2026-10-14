@@ -409,7 +409,7 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
     | `File p -> same (file n p) (file m p)
     | `Folder i -> folder n i = folder m i
   in
-  let restore n d =
+  let restore ~start n d =
     match (folder m d, folder r d) with
       | Some p, _ -> p
       | None, Some p when occupants n p = [] && present n p.parent -> p
@@ -423,7 +423,7 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
           let name =
             match rv with Some p -> p.name | None -> Folder_id.to_string d
           in
-          fresh ~start:l n ~is_dir:true { parent = up d; name }
+          fresh ~start n ~is_dir:true { parent = up d; name }
   in
   (* Definition 8: two folders absent from [R], [j] from [M]. *)
   let created_on_both_sides i j =
@@ -475,7 +475,8 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
     | Missing d ->
         {
           acc with
-          tree = set_folder acc.tree d (Some (restore acc.tree d));
+          tree =
+            set_folder acc.tree d (Some (restore ~start:acc.start acc.tree d));
           keys = Keys.add (`Folder d) acc.keys;
           back = d :: acc.back;
         }

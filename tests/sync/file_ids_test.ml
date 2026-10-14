@@ -189,6 +189,38 @@ let () =
       peer_delete_under_renamed_folder ~published:false "X" "Y";
       p "== the same with the rename published\n";
       peer_delete_under_renamed_folder ~published:true "X2" "Y2";
+      p "== a folder merged into a peer's keeps its files' ids\n";
+      A.mkdir "M" ~exclusive:false;
+      write a "M/theirs.txt" "theirs";
+      B.mkdir "M" ~exclusive:false;
+      write b "M/ours.txt" "ours";
+      B.mkdir "M/sub" ~exclusive:false;
+      write b "M/sub/s.txt" "s";
+      let ours = Option.get (Mirror.file_id B.mirror "M/ours.txt") in
+      let sub = Option.get (Mirror.folder_id B.mirror "M/sub") in
+      show "B before" b ["M/ours.txt"];
+      drain a;
+      pass b;
+      p "  %s resolves to %s\n" (alias ours)
+        (Option.value ~default:"nothing" (Mirror.path_of_file_id B.mirror ours));
+      show "B after" b ["M/ours.txt"; "M/theirs.txt"];
+      (match Applied.since B.applied None 1000 with
+        | `Page pg -> (
+            match List.rev pg.entries with
+              | (_, ops) :: _ ->
+                  List.iter
+                    (fun (o : Applied.op) ->
+                      p "  B applied: %s fid=%s\n" (op_name o.op)
+                        (match o.fid with Some id -> alias id | None -> "-"))
+                    ops
+              | [] -> ())
+        | `Stale -> p "  stale\n");
+      B.rename ~src:"M" ~dst:"N" ~exclusive:false;
+      p "  M renamed N: its subfolder is at %s\n"
+        (Option.value ~default:"nothing" (Mirror.key_of_id B.mirror sub));
+      drain b;
+      pass a;
+      show "A" a ["N/ours.txt"; "N/theirs.txt"; "N/sub/s.txt"];
       p "== owner start gives an id to a file found without one\n";
       let marker =
         Filename.concat (Mirror.path B.mirror "")
