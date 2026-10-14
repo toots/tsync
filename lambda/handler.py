@@ -505,15 +505,19 @@ SERVED_HEADERS = {
 
 
 def range_response(cache_key, name, size, header):
-    """A range of a file, at most RANGE_MAX_BYTES of it; None when the request
-    names no range."""
+    """A range of a file, at most RANGE_MAX_BYTES of it; None, for a redirect,
+    when the request names no range or a bounded one wider than that, which a
+    client may not accept cut."""
     r = parse_range(size, header)
     if r == "whole":
         return None
     if r == "unsatisfiable":
         return {"statusCode": 416, "headers": {"Content-Range": "bytes */%d" % size}, "body": ""}
     a, b = r
-    b = min(b, a + RANGE_MAX_BYTES - 1)
+    if header.endswith("-"):
+        b = min(b, a + RANGE_MAX_BYTES - 1)
+    elif b - a + 1 > RANGE_MAX_BYTES:
+        return None
     return {
         "statusCode": 206,
         "headers": dict(
