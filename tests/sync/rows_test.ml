@@ -255,6 +255,30 @@ let () =
           o.mv "e" "d";
           o.mv "t" "e")
         ~a:nothing;
+      row "D12" ~setup:nothing
+        ~b:(fun o ->
+          o.mkdir "d";
+          o.write "d/f" "B")
+        ~a:(fun o ->
+          o.mkdir "d";
+          o.write "d/f" "A");
+      row "D13" ~setup:nothing
+        ~b:(fun o ->
+          o.mkdir "d";
+          o.mkdir "d/sub";
+          o.write "d/sub/ours" "ours")
+        ~a:(fun o ->
+          o.mkdir "d";
+          o.mkdir "d/sub";
+          o.write "d/sub/theirs" "theirs");
+      row "D14"
+        ~setup:(fun o ->
+          o.mkdir "e";
+          o.write "e/in" "in")
+        ~b:(fun o ->
+          o.mkdir "d";
+          o.mv "e" "d/e")
+        ~a:(fun o -> o.mkdir "d");
       row "K1" ~setup:nothing
         ~b:(fun o -> o.write "x" "file")
         ~a:(fun o ->

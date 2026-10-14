@@ -20,12 +20,15 @@ D2: e/
 D3: e/  e/x="x"
 D4: f/
 D5: e/  e/theirs="theirs"  e (conflicted copy from B)/  e (conflicted copy from B)/ours="ours"
-D6: d/  d/theirs="theirs"  d (conflicted copy from B)/  d (conflicted copy from B)/ours="ours"
+D6: d/  d/ours="ours"  d/theirs="theirs"
 D7: 
 D8: d/  d/new="new"  d/sub/  d/sub/new="new"
 D9: e/  e/x="x"
 D10: d/  d/e/
 D11: d/  d/in-e="e"  e/  e/in-d="d"
+D12: d/  d/f="A"  d/f (conflicted copy from B)="B"
+D13: d/  d/sub/  d/sub/ours="ours"  d/sub/theirs="theirs"
+D14: d/  d/e/  d/e/in="in"
 K1: x/  x/in="in"  x (conflicted copy from B)="file"
 K2: x="file"  x (conflicted copy from B)/  x (conflicted copy from B)/in="in"
-30 rows, 0 diverged or not quiet
+33 rows, 0 diverged or not quiet

@@ -476,7 +476,9 @@ applies, in the order R1, R2, R3, until none applies:
   at the place it had in $R$ if that is free and its folder present;
   otherwise at a fresh name in its nearest ancestor in $R$ that is present.
 - **R2 (same place).** Two keys occupy one place. The one whose value comes
-  from $M$ stays. The other moves to a fresh name in the same folder.
+  from $M$ stays. If both are folders absent from $R$, the other is merged
+  into it (Definition 8). Otherwise the other moves to a fresh name in the
+  same folder.
 - **R3 (cycle).** Some folder on a cycle has a value that comes from $L$ and
   is present in $M$. Set it to its value in $M$. A folder that R1 restored is
   absent from $M$ and is never the one chosen: R1 would restore it again.
@@ -484,6 +486,27 @@ applies, in the order R1, R2, R3, until none applies:
 A *fresh name* is free in $N$ as computed so far and in $L$, and generated
 only by this client. Being free in $L$ lets the client move a file aside
 before it changes anything else in its tree.
+
+**Definition 8 (merging a folder into another).** Let $i$ and $j$ be folders
+absent from $R$, $j$ with its value from $M$. Merging $i$ into $j$ sets
+$N(i) = \varnothing$ and empties $i$ into $j$:
+
+- a folder placed at $(i, a)$ is placed at $(j, a)$;
+- a file key $(i, a)$ becomes $\varnothing$. Its content $f$ goes to the key
+  $(j, a)$ when that key is $\varnothing$; when $(j, a)$ holds $f$ already,
+  nothing more is done; otherwise $f$ goes to a fresh key $(j, a')$.
+
+A folder moved into $j$ that meets another folder there is one more clash for
+R2, and is merged in turn when both are absent from $R$.
+
+Two folders absent from $R$ were created by the two sides since $R$: the
+client minted $i$, and $j$ came from a peer. A folder has no content of its
+own, so creating one at a place is the same change whatever identity it is
+given, and the third row of step 1 applies to it as to equal values: one
+folder, the main's. Merging the client's into it is what that row means for
+folders. Nothing is lost: everything $i$ held is in $j$, a file content at
+its name or, against a different content at that name, at a fresh one.
+Nothing outside this client names $i$, since it was never published.
 
 The order of the rules matters only for names: applying them in another order
 gives the same tree up to which fresh name each loser gets.
@@ -514,9 +537,12 @@ locally.
    $N(k) = M(k)$, unless $M(k) = R(k)$ and the client changed $k$.
 4. **Nothing local is lost.** Every file content the client wrote
    ($L(k) \neq R(k)$, $L(k) \neq \varnothing$) is in $N$, at $k$ or at a
-   fresh key in the same folder, and that folder is present.
+   fresh key in the same folder, or, where that folder was merged into
+   another, at the same name or a fresh one in that other; and the folder
+   that holds it is present.
 5. **Confined.** Every key where $N$ differs from $M$ has a command in $P$,
-   is a fresh key the merge made, or is a folder restored by R1.
+   is a key the merge made (a fresh key, or a key of a folder another was
+   merged into), or is a folder restored by R1.
 
 *Proof sketch.* (1) R3 lowers the number of folder values taken from $L$,
 and a cycle always has one that is present in $M$: $M$ has no cycle, $L$ has
@@ -524,13 +550,19 @@ none, and a folder the client created is reached only through folders it
 placed. That a cycle through a folder R1 restored also has one is checked on
 small trees only (section 12, case 22). R1 only restores folders
 that exist in $R$ or $M$, of which there are finitely many. R2 moves a key
-to a name nothing else uses. When none applies, W1 to W3 hold. (2) Step 1
+to a name nothing else uses, or merges a folder absent from $R$ and $M$ into
+another: that folder is then $\varnothing$ for good, since nothing is placed
+in it afterwards and R1 restores only folders of $R$ or $M$, and there are
+finitely many such folders. When none applies, W1 to W3 hold. (2) Step 1
 gives $L$, respectively $M$, which is well-formed, so step 2 does nothing.
 (3) Step 1 gives $m$ whenever $m \neq r$ and $m \neq \varnothing$. R2 moves
-only the key that is not from $M$, R3 resets to $M$, R1 touches only absent
-folders. (4) Step 1 keeps $l$ at $k$, or at a fresh key in the same folder
-when the main wins. R2 may move it again, within the folder. R1 keeps the
-folder. (5) By inspection of both steps. $\square$
+only the key that is not from $M$; a merge into another sets a folder absent
+from $M$, and a file key $(j, a)$ only where $M$ holds $\varnothing$ or the
+same content. R3 resets to $M$, R1 touches only absent folders. (4) Step 1
+keeps $l$ at $k$, or at a fresh key in the same folder when the main wins.
+R2 may move it again, within the folder, or carry it into the folder its own
+was merged into. R1 keeps the folder. (5) By inspection of both steps.
+$\square$
 
 Property 3 is the merge's form of Proposition 6(2): the merge never replaces
 a value of the main that the client had not seen.
@@ -540,6 +572,11 @@ differently, the main's place wins and the client's rename is dropped.
 Nothing is lost, since the content follows the identity. [C23, III.E] notes
 of its own rolled-back commands that they "can only be reintroduced in a
 different form"; for a rename there is nothing to reintroduce.
+
+Nor is a folder merged into another when either is present in $R$. A peer
+that moved an existing folder to the place where the client created one meant
+that folder, and the client holds it elsewhere in $L$; a folder the client
+moved there has an identity its peers know. Both are named apart by R2.
 
 **Proposition 9 (a removal never destroys what it did not see).** If a
 client's removal of a folder is pending when a peer commits something in
@@ -566,7 +603,8 @@ reaches an empty pending set after finitely many commits and arrivals.
 some client always advances. For termination, follow each change a user made.
 It commits once, or a merge alters it once per clash. After clash (a) or (c)
 it sits at a fresh name, which no peer writes, so it cannot meet (a) or (c)
-again. It can meet (b) again only if a peer's removal of the folder commits
+again, or in a folder its own was merged into, which happens once per folder
+the client created. It can meet (b) again only if a peer's removal of the folder commits
 first, and (d) only against a peer's move; there are finitely many such user
 changes and each commits once. So the number of alterations is bounded.
 $\square$
@@ -688,8 +726,9 @@ Each follows from a numbered result.
     returns with the file in it (R1).
 16. The client removes a folder in which a peer created a file: the removal
     is undone locally (Proposition 9).
-17. Both sides create a folder with one name: both exist, the client's under
-    a fresh name, each with its own content (R2).
+17. Both sides create a folder with one name: one folder, the main's, with
+    both sides' content; a name both wrote with different contents holds
+    the main's, and the client's is at a fresh name (R2, Definition 8).
 18. Both sides rename one folder differently: the main's name, no copy.
 19. Each side moves one folder into the other's: the client's move is
     dropped (R3).
@@ -703,6 +742,11 @@ Each follows from a numbered result.
     trees: the difference applied in an order Theorem 3 gives passes only
     through well-formed trees and reaches its target, and every subset of it
     taken as a batch is one.
+23. Both sides create a folder with one name, each with a subfolder of one
+    name inside, and the client moves a folder it had into its own: one
+    folder at each level, and the folder moved in keeps its identity
+    (Definition 8). A peer that moves an existing folder to the place where
+    the client created one: both exist, the client's under a fresh name.
 
 ## 13. Open questions
 

@@ -88,5 +88,15 @@
   rmdir archive                      {"ok":true}
   the peer's root, settled           [c.txt, mine.txt, n2.txt, offline, sub]
   root                               [c.txt, mine.txt, n2.txt, offline/, sub/] read the store
+== a folder made offline where a peer made one
+  root                               [c.txt, mine.txt, n2.txt, offline/, sub/] read the store
+  mkdir camera                       ok
+  write camera/ours.jpg              ok
+  root                               [c.txt, camera/, mine.txt, n2.txt, offline/, sub/] read the store
+  camera                             [ours.jpg (not uploaded), theirs.jpg] read the store
+  the folder made offline            not_found
+  camera, upload done                [ours.jpg, theirs.jpg] read the store
+  the peer's camera                  [ours.jpg, theirs.jpg]
+  the peer's root                    [camera]
 == status
   names the frontend                 true

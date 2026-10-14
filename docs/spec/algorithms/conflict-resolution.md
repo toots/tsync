@@ -35,7 +35,8 @@ refused whenever the head moved, and the client arrives first.
 3. **An edit outlives a delete, and a removal never destroys what it did not see.** A file the
    client edited survives a peer's delete of it; a folder that received a file survives its
    removal, from either side.
-4. **No merge of contents, no guess at intent.** Two contents for one name are two files.
+4. **No merge of contents, no guess at intent.** Two contents for one name are two files. Two
+   folders created at one name are one folder: a folder has no content of its own.
 
 Only the client that arrives second acts. The first to commit learns of the clash as ordinary
 entries: the conflicted copy the other client published.
@@ -146,12 +147,24 @@ For each file key $k$ where $N(k) \neq L(k)$, and for each fresh key the merge m
 For each folder key $i$ where $N(i) \neq L(i)$: create the folder, move it, or remove it. A folder
 restored by R1 comes back with its id; a folder moved by R2 keeps its id and everything in it.
 
+**A folder merged into another** ([change-algebra.md](change-algebra.md) Definition 8) stands where
+the main's folder is, so it is not moved: the local folder takes the main's id where it is, and
+what it holds stays in it, staged edits, file ids and open handles included; an upload queued
+under the old id's keys is posted again under the new. The remaining changes
+are taken from the local tree so re-identified: a file whose name the main's folder holds with
+another content is moved aside within it, and the main's files are installed beside the local
+ones. The local folder's view, if a lazy tree held one, is dropped: the main's folder is pulled
+before it is pushed to ([publication.md](publication.md) §4.11). Hosts are told of the old id's
+removal, of the new id's creation at the same path, and of every item beneath it, whose file ids
+are unchanged.
+
 ### 4.3 Order
 
 The changes are a difference of two trees and are applied to the local tree in an order Theorem 3
 allows: a folder exists before anything is placed in it, a place is freed before it is occupied
 again, a folder is empty before it is removed, and a cycle is broken through a temporary place.
-Files kept aside (§4.1) are moved first: their fresh names are free in the tree as it stands. A
+Folders merged into another (§4.2) are re-identified first, outermost first. Files kept aside
+(§4.1) are moved next: their fresh names are free in the tree as it stands. A
 temporary place is never recorded as a before-value and never reported in the change feed; an
 implementation SHOULD keep it out of listings.
 
@@ -242,7 +255,7 @@ pending; A committed first.
 | Both create one name with different content | A's at the name, B's aside |
 | B renames onto a name A wrote | A's at the name, B's aside |
 | B creates a file, A a folder, one name (or the reverse) | A's at the name, B's aside with everything in it |
-| Both create a folder with one name | both exist, B's aside, each with its own content |
+| Both create a folder with one name | one folder, A's, with both sides' content; a name both wrote with different contents holds A's, B's aside |
 | B adds under a folder A removed | the folder is back, with B's addition |
 | B removes a folder A added to | the folder stays, with A's addition; B's removals of what it saw are kept |
 | Both rename one folder differently | A's name; one folder |
@@ -290,12 +303,15 @@ main. `cc` abbreviates "conflicted copy".
 | D3 | renames d→e | adds d/x | e/x |
 | D4 | renames d→e | renames d→f | f |
 | D5 | renames d→e, writes e/ours | creates e, writes e/theirs | A's e/theirs, `e (cc from B)/ours` |
-| D6 | creates d, writes d/ours | creates d, writes d/theirs | A's d, `d (cc from B)`, each with its file |
+| D6 | creates d, writes d/ours | creates d, writes d/theirs | A's d with ours and theirs |
 | D7 | removes d | removes d | d removed |
 | D8 | adds d/new, d/sub, d/sub/new | removes d | d with new, sub, sub/new |
 | D9 | adds d/x | renames d→e | e/x |
 | D10 | moves d into e | moves e into d | A's move; d holds e |
 | D11 | swaps the names of d and e | — | swapped; no temporary name in the entry |
+| D12 | creates d, writes d/f | creates d, writes d/f with other content | A's d with A's f, B's at `f (cc from B)` |
+| D13 | creates d and d/sub, writes d/sub/ours | creates d and d/sub, writes d/sub/theirs | A's d and d/sub, with ours and theirs |
+| D14 | creates d, moves e into it | creates d | A's d holding e |
 | K1 | creates file x | creates folder x, x/in | A's folder x, B's file at `x (cc from B)` |
 | K2 | creates folder x, x/in | creates file x | A's file x, B's folder `x (cc from B)` with its file |
 
@@ -354,6 +370,11 @@ an empty pending set, both arrived at the head, one more cycle each):
   only rule every client can apply alone.
 - **The second to arrive is the only one that acts.** If each side moved its own item aside on
   seeing the other's, the two would swap names and stay divergent.
+- **Merge two creations of one folder.** Each side mints its own id, but both made the same
+  change: a folder at that name. Keeping both would turn a race, or a lazy tree that had not yet
+  read the folder, into a conflicted copy holding a part of the user's files. A folder that
+  existed before is not merged: its id is known to every client, and a move that brought it there
+  meant that folder.
 - **Restore a folder under its own id.** Additions made under a removed folder stay keyed by it;
   one command brings the folder back and they are where they were. A copy of the folder under
   another name would need every addition moved.

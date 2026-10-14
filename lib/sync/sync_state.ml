@@ -3,6 +3,7 @@ open Tsync_core
 type in_flight = { n : int; body : string }
 
 type step =
+  | Reidentify of Folder_id.t * Folder_id.t
   | Move of Algebra.place * Algebra.place
   | File of Algebra.place * Manifest.t option
   | Folder of Folder_id.t * Algebra.place option
@@ -229,6 +230,12 @@ let clear t name = if Fs.release (file t name) then Fs.fsync_dir t.dir
 let clear_in_flight t = clear t "in-flight"
 
 let step_to_json : step -> Yojson.Safe.t = function
+  | Reidentify (i, j) ->
+      `Assoc
+        [
+          ("reidentify", `String (Folder_id.to_string i));
+          ("as", `String (Folder_id.to_string j));
+        ]
   | Move (src, dst) ->
       `Assoc
         [
@@ -256,8 +263,14 @@ let step_of_json json =
     let* v = field name in
     Option.join (ok (Log_entry.place_of_json v))
   in
-  match (place "move", place "to") with
-    | Some src, Some dst -> Some (Move (src, dst))
+  let id name =
+    match field name with
+      | Some (`String s) -> Folder_id.of_string s
+      | _ -> None
+  in
+  match (id "reidentify", id "as", place "move", place "to") with
+    | Some i, Some j, _, _ -> Some (Reidentify (i, j))
+    | _, _, Some src, Some dst -> Some (Move (src, dst))
     | _ -> (
         let* value = field "value" in
         match ok (Log_entry.key_of_json json) with

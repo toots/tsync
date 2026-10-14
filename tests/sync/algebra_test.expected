@@ -1,5 +1,5 @@
-one folder, two names, one file: 19 states, 6859 triples, 1136 with a copy, 720 with a restored folder, 1020 local folder places dropped, 0 where the order of the repair changes a fresh name
-two folders, one name, one file: 15 states, 3375 triples, 742 with a copy, 704 with a restored folder, 1086 local folder places dropped, 48 where the order of the repair changes a fresh name
-three folders, one name: 16 states, 4096 triples, 0 with a copy, 498 with a restored folder, 3780 local folder places dropped, 0 where the order of the repair changes a fresh name
+one folder, two names, one file: 19 states, 6859 triples, 1136 with a copy, 720 with a restored folder, 0 with a folder merged into another, 1020 local folder places dropped, 0 where the order of the repair changes a fresh name
+two folders, one name, one file: 15 states, 3375 triples, 754 with a copy, 704 with a restored folder, 54 with a folder merged into another, 1032 local folder places dropped, 48 where the order of the repair changes a fresh name
+three folders, one name: 16 states, 4096 triples, 0 with a copy, 498 with a restored folder, 60 with a folder merged into another, 3726 local folder places dropped, 0 where the order of the repair changes a fresh name
 14034 subsets of a difference taken as a batch
 every property holds

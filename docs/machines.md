@@ -31,6 +31,8 @@ tsync is built for one person with several machines. Edits are applied locally a
    ```
 
    `laptop` is that machine's `name`. The extension is kept, so the copy still opens.
+
+   Two folders created under one name are the exception: they become one folder, holding what both machines put in it. Only a file both put in it under one name gets a conflicted copy. A folder that existed before and was renamed onto the name still goes aside, as `plans` above.
 3. **An edit outlives a delete.** A file you edited survives its deletion elsewhere. Files you added under a folder that was removed elsewhere bring the folder back with them, and a folder you removed comes back if another machine added to it.
 4. **Two edits of one file are two files.** The one published first is the file; the other is its conflicted copy. Contents are never merged.
 

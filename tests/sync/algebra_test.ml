@@ -164,6 +164,7 @@ type tally = {
   mutable triples : int;
   mutable copies : int;
   mutable restores : int;
+  mutable merged_into : int;
   mutable dropped_moves : int;
   mutable renamed : int;
 }
@@ -273,13 +274,25 @@ let check tally ~r ~l ~m =
   match merge () with
     | exception Failure e -> fail ("merge raised: " ^ e) ~r ~l ~m ~n:"-"
     | merged -> (
-        let extra = List.map snd merged.asides in
+        let rec home d =
+          match List.assoc_opt d merged.merged_into with
+            | Some j -> home j
+            | None -> d
+        in
+        let extra =
+          List.map snd merged.asides
+          @ List.map
+              (fun ((p : A.place), _) -> { p with parent = home p.parent })
+              l.files
+        in
         let n = read merged.n ~of_:[r; l; m] ~extra in
         let fail what = fail what ~r ~l ~m ~n:(show n) in
         let file s p = List.assoc_opt p s.files
         and folder s i = List.assoc_opt i s.folders in
         if merged.asides <> [] then tally.copies <- tally.copies + 1;
         if merged.restored <> [] then tally.restores <- tally.restores + 1;
+        if merged.merged_into <> [] then
+          tally.merged_into <- tally.merged_into + 1;
         if not (naive_well_formed n) then fail "1 well-formed";
         let sorted s =
           {
@@ -305,6 +318,7 @@ let check tally ~r ~l ~m =
         List.iter
           (fun ((p : A.place), v) ->
             if file r p <> Some v then (
+              let p = { p with parent = home p.parent } in
               let kept (q : A.place) =
                 q.parent = p.parent && file n q = Some v
               in
@@ -318,7 +332,11 @@ let check tally ~r ~l ~m =
             let k = A.key_of c in
             let made =
               match k with
-                | `File p -> List.exists (fun (_, q) -> q = p) merged.asides
+                | `File p ->
+                    List.exists (fun (_, q) -> q = p) merged.asides
+                    || List.exists
+                         (fun (_, j) -> j = p.parent)
+                         merged.merged_into
                 | `Folder i -> List.mem i merged.restored
             in
             if not (List.mem k ours || made) then fail "5 confined")
@@ -335,7 +353,8 @@ let check tally ~r ~l ~m =
             if
               folder r i <> Some p
               && folder n i <> Some p
-              && not (List.mem i merged.restored && folder m i = None)
+              && (not (List.mem i merged.restored && folder m i = None))
+              && not (List.mem_assoc i merged.merged_into)
             then tally.dropped_moves <- tally.dropped_moves + 1)
           l.folders;
         List.iter
@@ -346,27 +365,32 @@ let check tally ~r ~l ~m =
               | other ->
                   let other =
                     read other.n ~of_:[r; l; m]
-                      ~extra:(List.map snd other.asides)
+                      ~extra:(extra @ List.map snd other.asides)
                   in
                   if other <> n then
                     if unnamed other = unnamed n then
                       tally.renamed <- tally.renamed + 1
                     else fail "the repair depends on its order")
           (List.tl priorities);
-        match A.order ~temp (A.of_base (A.to_base (build l))) merged.local with
+        match A.order ~temp merged.start merged.local with
           | exception Failure e -> fail ("enacting raised: " ^ e)
           | steps ->
               let reached =
-                read
-                  (A.run (A.of_base (A.to_base (build l))) steps)
-                  ~of_:[r; l; m] ~extra
+                read (A.run merged.start steps) ~of_:[r; l; m] ~extra
               in
               if reached <> n then fail "enacting diff(L, N) does not reach N")
 
 let run u =
   let all = states u in
   let tally =
-    { triples = 0; copies = 0; restores = 0; dropped_moves = 0; renamed = 0 }
+    {
+      triples = 0;
+      copies = 0;
+      restores = 0;
+      merged_into = 0;
+      dropped_moves = 0;
+      renamed = 0;
+    }
   in
   List.iter
     (fun from ->
@@ -382,11 +406,11 @@ let run u =
     all;
   Printf.printf
     "%s: %d states, %d triples, %d with a copy, %d with a restored folder, %d \
-     local folder places dropped, %d where the order of the repair changes a \
-     fresh name\n\
+     with a folder merged into another, %d local folder places dropped, %d \
+     where the order of the repair changes a fresh name\n\
      %!"
     u.label (List.length all) tally.triples tally.copies tally.restores
-    tally.dropped_moves tally.renamed
+    tally.merged_into tally.dropped_moves tally.renamed
 
 let () =
   let a = id 1 and b = id 2 and c = id 3 in
