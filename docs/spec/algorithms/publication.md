@@ -57,7 +57,7 @@ projection, §4.6).
 
 ## 2. System model and assumptions
 
-The assumptions A1–A6 of [change-algebra.md](change-algebra.md) §1 hold. This section states how
+The assumptions A1–A5 of [change-algebra.md](change-algebra.md) §1 hold. This section states how
 tsync provides each.
 
 **A1 — One main.** A domain has at most one main ([replication.md](replication.md) §3.2). A domain
@@ -68,28 +68,24 @@ read below.
 ([06](../06-backends.md) §3.3). Every store driver evaluates it atomically. A store that answers
 REFUSED cannot be a main that is pushed to: a push never falls back to a plain put.
 
-**A3 — Replicas follow.** Copies are filled from the main by their job logs
-([replication.md](replication.md)). Nothing read from a copy enters $R$, a guard, a fetch or a
-state read ([replication.md](replication.md) §4.6).
-
-**A4 — Content is immutable.** A file's bytes are chunks named by a hash of their bytes
+**A3 — Content is immutable.** A file's bytes are chunks named by a hash of their bytes
 ([01](../01-core.md)). A file's value in a command is its manifest, compared by content identity
 ([conflict-resolution.md](conflict-resolution.md) §2).
 
-**A5 — Folders have identities.** Folder ids are minted locally and unique across clients
+**A4 — Folders have identities.** Folder ids are minted locally and unique across clients
 ([03](../03-journal-sync.md) §2.1). No other party ever assigns or changes one.
 
-**A6 — Clients follow the rules.** A client creates entry $n+1$ only from position $n$, with a
+**A5 — Clients follow the rules.** A client creates entry $n+1$ only from position $n$, with a
 batch in the sense of Definition 6.
 
-**A7 — Store consistency.** After a mutation returns, every later read of that key reflects it
+**A6 — Store consistency.** After a mutation returns, every later read of that key reflects it
 ([06](../06-backends.md) §3.1). A request whose answer was lost may or may not have landed.
 
-**A8 — Clocks.** No decision compares the clocks of two machines. The settle, lease and quarantine
+**A7 — Clocks.** No decision compares the clocks of two machines. The settle, lease and quarantine
 of §4.6 are durations on one machine, measured on a clock that counts time spent suspended. The age
 of a log entry is the store-assigned modification time, compared on one store ([gc.md](gc.md) §4).
 
-**A9 — Failures.** Processes crash at any point and machines lose power. Every local record the
+**A8 — Failures.** Processes crash at any point and machines lose power. Every local record the
 protocol relies on is durable before it is relied on (P2, [durable-queue.md](durable-queue.md) §3).
 The link can be down for arbitrarily long.
 
@@ -219,7 +215,7 @@ UPLOAD QUEUE (keyed: at most one job per file key), not gated by the cycle:
 ```
 
 - An upload writes chunks only. It writes no manifest, no log entry and no tree record, so it
-  changes no client's view and cannot conflict (A4).
+  changes no client's view and cannot conflict (A3).
 - An upload is never wasted: if the file loses a merge, the same content is the conflicted copy.
 - **The staged bytes stay** until the command that carries the manifest is committed. Content
   uploaded and not yet committed is named by nothing on the main and a collection may delete it;
@@ -751,7 +747,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 
 An implementation MUST exhibit the following; the method (scenarios, crash injection, power-loss
 states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
-[change-algebra.md](change-algebra.md) §12 are part of this list.
+[change-algebra.md](change-algebra.md) §11 are part of this list.
 
 - **Before-values.** A delete then a create of one name, publication held, pushes one command
   guarded by the old content. A create then a delete leaves no before-value and pushes nothing. A

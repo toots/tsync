@@ -521,7 +521,7 @@ CAMLprim value tsync_drop_mapped_pages(value v) {
   return Val_unit;
 }
 
-/* Seconds on a clock that counts time spent suspended (publication A8). */
+/* Seconds on a clock that counts time spent suspended (publication A7). */
 CAMLprim value tsync_boottime(value unit) {
   struct timespec ts;
 #if defined(__linux__)

@@ -8,12 +8,12 @@ The vocabulary and the shape of the theory come from the algebraic theory of
 filesystems of E. P. Csirmaz and L. Csirmaz, and the tree of identified
 folders from Kleppmann et al. The state used here is keyed by folder
 identity, which neither source does in this form, so the proofs are given
-here and are not inherited. Section 11 relates each result to its source.
+here and are not inherited. Section 10 relates each result to its source.
 
 The proofs are sketches. They show why a claim holds and what it depends on,
 so that an implementation can be checked against them. Theorem 3 and the five
 properties of Theorem 8 have also been checked on every pair and every triple
-of small trees (section 12, case 22), with no counter-example.
+of small trees (section 11, case 21), with no counter-example.
 
 This document owns the model: keys, values, commands, batches, the merge and
 the properties claimed of them. How tsync realises it is owned elsewhere: the
@@ -29,22 +29,17 @@ operations are immediate and never wait for the network.
 A **main** is the one store that holds the shared tree. Every change by every
 client is published to it.
 
-**Replicas** are other stores filled from the main, one way. Nothing but that
-replication writes to them.
-
 Assumptions:
 
 - **A1. One main.** Each shared tree has exactly one main.
 - **A2. Atomic append.** The main is a numbered log, and offers one atomic
   step: create entry $n+1$ if it does not exist. It checks nothing else.
-- **A3. Replicas follow.** A replica is written only by replication from the
-  main.
-- **A4. Content is immutable.** File content is stored in objects named by a
+- **A3. Content is immutable.** File content is stored in objects named by a
   hash of their bytes.
-- **A5. Folders have identities.** A folder is created with an identity that
+- **A4. Folders have identities.** A folder is created with an identity that
   is unique across all clients and never changes. Renaming or moving a folder
   keeps its identity.
-- **A6. Clients follow the rules.** Every client is well-intended: it creates
+- **A5. Clients follow the rules.** Every client is well-intended: it creates
   an entry only as section 6 allows.
 
 A2 is provided by a store that can create an object only if it is absent,
@@ -60,14 +55,10 @@ Two deployments are covered.
 - **Single writer.** One client writes the main and no other does. The
   concurrent case of section 7 never arises.
 
-A client may also read from a replica when the main is unreachable. Section
-9 shows this is safe.
-
 The goal:
 
 > When every client has published all its changes and observed all of the
-> main's, every local tree equals the main's tree, and every replica
-> converges to it.
+> main's, every local tree equals the main's tree.
 
 ## 2. The incident that motivated this
 
@@ -158,7 +149,7 @@ and the reason for the guard is theirs [C23, II.B]:
 | rename or move a file | a delete at one key and a create at another |
 
 **A folder rename is one command on one key.** Nothing beneath the folder is
-touched, because what it contains is keyed by its identity. This is what A5
+touched, because what it contains is keyed by its identity. This is what A4
 buys, and it is why a folder rename is not a delete and a create.
 
 A *null* command has $x = y$. The *inverse* of $\langle k, x, y \rangle$ is
@@ -388,7 +379,7 @@ A2 the entry is created once or not at all. A client creates entry $h+1$
 only from position $h$, so it has no other entry after $h$. $\square$
 
 **Uploads and concurrency are separate.** An upload can take hours; a commit
-is one small write. Because content is named by its hash (A4), uploading it
+is one small write. Because content is named by its hash (A3), uploading it
 early can never conflict with anything, and an upload is never wasted: if
 the file loses a merge, the same content becomes the conflicted copy. The
 only window in which two clients can interfere is the creation of one entry,
@@ -558,7 +549,7 @@ locally.
 and a cycle always has one that is present in $M$: $M$ has no cycle, $L$ has
 none, and a folder the client created is reached only through folders it
 placed. That a cycle through a folder R1 restored also has one is checked on
-small trees only (section 12, case 22). R1 only restores folders
+small trees only (section 11, case 21). R1 only restores folders
 that exist in $R$ or $M$, of which there are finitely many. R2 moves a key
 to a name nothing else uses, or merges a folder absent from $R$ and $M$ into
 another: that folder is then $\varnothing$ for good, since nothing is placed
@@ -621,29 +612,10 @@ $\square$
 
 This sketch is the weakest proof in this document.
 
-**Replicas.** By A3 a replica is a function of the main's log, so it
-converges to the main by ordinary one-way replication. No conflict can
-arise at a replica.
-
-## 9. Reading from a replica
-
-**Proposition 12.** Suppose a client reads only content objects from a
-replica, never the tree and never the log. Then every result above still
-holds, and the client reads either the right bytes or nothing.
-
-*Proof.* By A4 a content object is named by the hash of its bytes, so a
-replica that lags can lack an object but cannot hold a different one under
-the same name. Nothing read from the replica enters $R$, a guard, or an
-arrival. $\square$
-
-The rule this imposes: **whatever sets $R$ or checks a guard is answered by
-the main, never by a replica.** A lagging replica would show an older value
-than $R$, which the client would take for a peer's change.
-
 While the main is unreachable, local operations continue and $P$ grows. A
 client does not see changes that peers publish in the meantime.
 
-## 10. The single-writer deployment
+## 9. The single-writer deployment
 
 With one client, the head moves only by that client's commits. A fetch finds
 nothing, section 7 never runs, and every push is accepted. The theory
@@ -658,7 +630,7 @@ to exclude.
 The incident of section 2 occurred in this deployment. It is a failure of
 Proposition 5 alone: a local delete changed $R$.
 
-## 11. Relation to the sources
+## 10. Relation to the sources
 
 **Keyed by path or by identity.** [C16] and [C23] key the state by path:
 the nodes form a fixed tree, a directory is a value like any other, and all
@@ -666,7 +638,7 @@ directories are equal. Their results are proved for that model. A state
 keyed as in section 3 projects to a path-keyed state, and the two theories
 agree on every change that renames no folder.
 
-They differ on folder renames, which is the point of A5. The sources leave
+They differ on folder renames, which is the point of A4. The sources leave
 moves out of the algebra. [C16, section 2.2]:
 
 > in this model we will not consider a move (rename) command. This turns out
@@ -680,7 +652,7 @@ and [R01]:
 
 With folders as keys, a folder move affects one key, and the objection does
 not arise. A file has no shared identity, so a file rename remains a delete
-and a create on two keys, as the sources recommend. By A4 the create uploads
+and a create on two keys, as the sources recommend. By A3 the create uploads
 nothing.
 
 | Here | Source | Relation |
@@ -701,7 +673,7 @@ one was meant. A client that tracks files by a local identity can do better,
 by applying the peer's edit to the file it now holds at $b$. That is a
 refinement of step 1 which Theorem 8 permits; it is not required.
 
-## 12. Cases a test suite should cover
+## 11. Cases a test suite should cover
 
 Each follows from a numbered result.
 
@@ -743,27 +715,25 @@ Each follows from a numbered result.
 19. Each side moves one folder into the other's: the client's move is
     dropped (R3).
 20. Both sides make the same change: nothing is sent and nothing is copied.
-21. A read from a lagging replica during an outage: right bytes or absence,
-    and no change to $R$ (Proposition 12).
-22. Every triple $(R, L, M)$ of well-formed trees over a small universe (two
+21. Every triple $(R, L, M)$ of well-formed trees over a small universe (two
     or three folders, one or two names, two contents): the five properties of
     Theorem 8, the pending set equal to $\mathit{diff}(M, N)$, and the same
     $N$ up to fresh names under every order of R1 to R3. Every pair of such
     trees: the difference applied in an order Theorem 3 gives passes only
     through well-formed trees and reaches its target, and every subset of it
     taken as a batch is one.
-23. Both sides create a folder with one name, each with a subfolder of one
+22. Both sides create a folder with one name, each with a subfolder of one
     name inside, and the client moves a folder it had into its own: one
     folder at each level, and the folder moved in keeps its identity
     (Definition 8). A peer that moves an existing folder to the place where
     the client created one: both exist, the client's under a fresh name.
 
-## 13. Open questions
+## 12. Open questions
 
 1. Is the progress argument (Theorem 11) sound, and is there a cleaner
    measure?
 2. The repair of the merge is confluent up to fresh names on every triple of
-   small trees (section 12, case 22). A proof for all trees is missing.
+   small trees (section 11, case 21). A proof for all trees is missing.
 3. R1 restores a removed folder under its own identity. Is there a case
    where a new identity would be the better outcome?
 4. Does anything a conflict policy could use get lost by deriving $P$ from

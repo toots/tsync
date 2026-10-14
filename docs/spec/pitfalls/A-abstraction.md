@@ -616,7 +616,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-6.26 Two clients projecting onto one record; a stalled projector resuming
 - **Pitfall** — Applying an entry is many plain writes. Two clients applying different entries to one record out of order leave it at the older value, and a collection marking from that record deletes the newer content. A projector that stalls (a suspend, a slow request) and resumes after another client took its entry over writes old values over the new projector's.
-- **Check** — Each entry is projected by one client, in number order: its author, or the holder of the highest takeover generation (publication §4.6). A projector writes only within `PROJECT_LEASE` of a check that the tree head and the generation are unchanged, and stops when a check fails. A client that takes over waits `PROJECT_QUARANTINE` before its first write. Both durations are measured on a clock that counts time spent suspended (publication §2 A8). A test resumes a first projector after a takeover and sees no write.
+- **Check** — Each entry is projected by one client, in number order: its author, or the holder of the highest takeover generation (publication §4.6). A projector writes only within `PROJECT_LEASE` of a check that the tree head and the generation are unchanged, and stops when a check fails. A client that takes over waits `PROJECT_QUARANTINE` before its first write. Both durations are measured on a clock that counts time spent suspended (publication §2 A7). A test resumes a first projector after a takeover and sees no write.
 - **Seen** — design.
 
 ### A-6.27 Expiry deletes the head entry or an entry above the tree head
@@ -748,7 +748,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-7.22 Log, tree head or tree record read from a replica
 - **Pitfall** — A replica lags. With the main unreachable, a read that fails over to it answers an older entry, tree head or record; the client merges that as a peer's change and reverts committed work, or pushes from a head that is not the head.
-- **Check** — Only chunks fail over to a copy; every other read is the main's or fails UNREACHABLE (replication §4.6; change-algebra §9, Proposition 12; publication S9). With the main down, the position and the before-values do not move. A test serves a lagging replica during an outage.
+- **Check** — Only chunks fail over to a copy; every other read is the main's or fails UNREACHABLE (replication §4.6; publication S9). With the main down, the position and the before-values do not move. A test serves a lagging replica during an outage.
 - **Seen** — design; A-7.14 is the same mistake in a replication job.
 
 ### A-7.23 Marking from the tree alone
