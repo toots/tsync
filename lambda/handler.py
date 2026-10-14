@@ -296,8 +296,9 @@ def mime_type(name):
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
-# object-store-common §6: a playlist is answered its bytes, never redirected.
+# object-store-common §6: what `p/` answers itself rather than redirecting.
 PLAYLIST_MAX_BYTES = 1024 * 1024
+RANGE_MAX_BYTES = 4 * 1024 * 1024
 
 
 def preview_kind(mime):
@@ -470,10 +471,69 @@ def serve_file(share, path, as_download, want_json):
     return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
 
 
-def serve_path(share, raw):
-    """http-proxy §A9.3 `p/<path>`. A player resolves a playlist's relative
-    URIs against the URL it finally read, so a playlist is answered here
-    rather than redirected into the bucket."""
+def parse_range(size, header):
+    """http-proxy §A9.5: one range -> (a, b) inclusive, "whole" or
+    "unsatisfiable"."""
+    if not header or not header.startswith("bytes="):
+        return "whole"
+    parts = header[6:].split("-")
+    if len(parts) != 2:
+        return "whole"
+    a, b = parts
+    digits = lambda s: s.isascii() and s.isdigit()
+    if digits(a) and digits(b):
+        a, b = int(a), int(b)
+        if a > b:
+            return "whole"
+        return "unsatisfiable" if a >= size else (a, min(b, size - 1))
+    if digits(a) and b == "":
+        a = int(a)
+        return "unsatisfiable" if a >= size else (a, size - 1)
+    if a == "" and digits(b):
+        n = int(b)
+        if n == 0:
+            return "whole"
+        return "unsatisfiable" if size == 0 else (max(0, size - n), size - 1)
+    return "whole"
+
+
+SERVED_HEADERS = {
+    "Cache-Control": "private",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+}
+
+
+def range_response(cache_key, name, size, header):
+    """A range of a file, at most RANGE_MAX_BYTES of it; None when the request
+    names no range."""
+    r = parse_range(size, header)
+    if r == "whole":
+        return None
+    if r == "unsatisfiable":
+        return {"statusCode": 416, "headers": {"Content-Range": "bytes */%d" % size}, "body": ""}
+    a, b = r
+    b = min(b, a + RANGE_MAX_BYTES - 1)
+    return {
+        "statusCode": 206,
+        "headers": dict(
+            SERVED_HEADERS,
+            **{
+                "Content-Type": mime_type(name) or "application/octet-stream",
+                "Content-Range": "bytes %d-%d/%d" % (a, b, size),
+                "Accept-Ranges": "bytes",
+            },
+        ),
+        "body": base64.b64encode(store.get_range(cache_key, a, b)).decode(),
+        "isBase64Encoded": True,
+    }
+
+
+def serve_path(share, raw, range_header):
+    """http-proxy §A9.3 `p/<path>`, answered from this origin
+    (object-store-common §6): a player resolves a playlist's relative URIs
+    against the URL it finally read, and a browser's HLS player does not take
+    segments through a redirect to another origin."""
     try:
         parts = [urllib.parse.unquote(p, errors="strict") for p in raw.split("/") if p]
     except UnicodeDecodeError:
@@ -483,17 +543,14 @@ def serve_path(share, raw):
     rel, m, cache_key = shared_file(share, "/".join(parts))
     name = os.path.basename(rel)
     if mime_type(name) != HLS_MIME:
-        return file_answer(cache_key, name, m.size, as_download=False, want_json=False)
+        return range_response(cache_key, name, m.size, range_header) or file_answer(
+            cache_key, name, m.size, as_download=False, want_json=False
+        )
     if m.size > PLAYLIST_MAX_BYTES:
         raise ShareError(413, "playlist too large")
     return {
         "statusCode": 200,
-        "headers": {
-            "Content-Type": HLS_MIME,
-            "Cache-Control": "private",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "sandbox",
-        },
+        "headers": dict(SERVED_HEADERS, **{"Content-Type": HLS_MIME}),
         "body": get_bytes(cache_key).decode("utf-8", errors="replace"),
     }
 
@@ -620,7 +677,11 @@ def handler(event, context):
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
         if is_dir and sub == "p":
-            return serve_path(share, (event.get("rawPath", "").split("/", 3) + [""])[3])
+            return serve_path(
+                share,
+                (event.get("rawPath", "").split("/", 3) + [""])[3],
+                (event.get("headers") or {}).get("range"),
+            )
         if is_dir and sub == "f":
             return serve_file(
                 share, q.get("path", ""),
