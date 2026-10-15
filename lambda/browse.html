@@ -400,8 +400,7 @@
           container: body,
           tracks,
           start: f,
-          // From the share's origin, so its ranges reach the function.
-          resolveUrl: async (name) => fileUrl(name, ""),
+          resolveUrl: signedUrl,
           onTrack: (t) => {
             document.getElementById("pvt").textContent = t.name;
             document.getElementById("pvdl").href = fileUrl(t.name, "&dl=1");
@@ -430,10 +429,7 @@
         body.innerHTML = "Loading…";
         let url;
         try {
-          url =
-            k === "audio" || k === "video"
-              ? fileUrl(f.name, "")
-              : await signedUrl(f.name);
+          url = await signedUrl(f.name);
         } catch (e) {
           body.textContent = "Preview failed (" + e.message + ")";
           return;
@@ -453,16 +449,41 @@
         body.innerHTML = "";
         body.appendChild(el);
       }
-      // Played natively from `p/`, so the playlist's relative URIs resolve to
-      // their own files in the share.
-      function showHls(body, f, autoplay) {
-        const v = document.createElement("video");
-        if (!v.canPlayType("application/vnd.apple.mpegurl")) {
+      // Played from `p/`, so the playlist's relative URIs resolve to their own
+      // files in the share. hls.js fetches segments by script, through the
+      // share function's redirects into the bucket; its integrity hash pins
+      // the CDN's bytes, and no referrer keeps the share URL off the CDN.
+      const HLS_JS = {
+        src: "https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js",
+        integrity: "sha384-R2JqybiEexSXz60H6Zz28MdsqWWnMQlP+NDb7nIhDHWxx6sM7Otw7OWCq9EBCPsz",
+        crossOrigin: "anonymous",
+        referrerPolicy: "no-referrer",
+      };
+      let hlsLoaded;
+      const loadHls = () =>
+        (hlsLoaded ||= new Promise((ok) => {
+          const s = Object.assign(document.createElement("script"), HLS_JS);
+          s.onload = s.onerror = ok;
+          document.head.appendChild(s);
+        }));
+      async function showHls(body, f, autoplay) {
+        body.textContent = "Loading…";
+        const src = B + "/p/" + [...path, f.name].map(encodeURIComponent).join("/");
+        const v = Object.assign(document.createElement("video"), { controls: true, autoplay });
+        await loadHls();
+        if (window.Hls && Hls.isSupported()) {
+          const hls = new Hls();
+          hls.on(Hls.Events.ERROR, (_, d) => {
+            if (d.fatal) body.textContent = "Playback failed (" + d.details + ")";
+          });
+          hls.loadSource(src);
+          hls.attachMedia(v);
+          pv.addEventListener("close", () => hls.destroy(), { once: true });
+        } else if (v.canPlayType("application/vnd.apple.mpegurl")) v.src = src;
+        else {
           body.textContent = "This browser cannot play HLS streams.";
           return;
         }
-        Object.assign(v, { controls: true, autoplay });
-        v.src = B + "/p/" + [...path, f.name].map(encodeURIComponent).join("/");
         body.innerHTML = "";
         body.appendChild(v);
       }
