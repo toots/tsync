@@ -231,7 +231,7 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 | dir | `download` | streamed ZIP of the folder (§A9.7) |
 | dir | `list?path=` | resolve `path` inside the shared folder; a folder → `{"dirs":[names],"files":[{"name","size"}]}`, each sorted by lowercase name; anything else → 404 |
 | dir | `f?path=[&dl=1][&json=1]` | resolve `path` (non-empty, else 400) to a file, else 404. `json` → `{"url":"/s/<token>/f?path=<pct-encoded>","name","contentType"(mime or null),"size"}`; otherwise the bytes, `inline` unless `dl` |
-| dir | `p/<path>` | `<path>` percent-decoded segment by segment, then as `f?path=<path>`: the bytes, `inline`. A playlist's relative URIs resolve against this URL to their own files (§A9.6) |
+| dir | `p/<path>` | `<path>` percent-decoded segment by segment (a segment that is not valid UTF-8 once decoded → 400), then as `f?path=<path>`: the bytes, `inline`. A playlist's relative URIs resolve against this URL to their own files (§A9.6) |
 | any | `preview` | the share's preview image (§A9.8) |
 | any other | | 404 |
 
@@ -253,7 +253,7 @@ Every file-share route reads the manifest first: a symlink manifest → 400 `can
 
 ### A9.5 Headers and ranges
 
-- `content-type` from the shared mime table by lowercase extension, else `application/octet-stream`. Browser-facing headers per [security §13](../algorithms/security-model.md#13-html-and-browser-facing-output), `content-disposition` included.
+- `content-type` from the shared mime table by lowercase extension, else `application/octet-stream`. An extension the table's `@signatures` names is decided by the file's first bytes: when every listed offset that lies inside a non-empty file holds its byte, the signature's type, else the extension's. `.ts` is both TypeScript and an MPEG transport stream, whose 188-byte packets each start with `0x47`. A media file, an HLS playlist and the page's preview kind go by the name alone, since a listing does not read file bytes. Browser-facing headers per [security §13](../algorithms/security-model.md#13-html-and-browser-facing-output), `content-disposition` included.
 - `accept-ranges: bytes` on 200 and 206.
 - `Range` (single range only): must start with `bytes=` and split on `-` into exactly two parts. `a-b` with `a ≤ b` → `(a, min(b, size−1))`; `a-` → `(a, size−1)`; `-n` with `n > 0` → `(max(0, size−n), size−1)`. Numbers are decimal digits only. Parsed and `a < size` → 206 with `content-range: bytes a-b/size`; parsed and `a ≥ size` → 416 with `content-range: bytes */size`; absent or unparseable → 200 whole.
 
@@ -275,8 +275,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 `content-type: text/html; charset=utf-8`.
 
 - **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
-- In folder mode, an HLS playlist plays like a video, in a video element whose source is its `p/<path>` URL, so the segments, variant playlists and keys it names by relative URI are fetched by the browser from the same share. A browser that cannot play HLS by itself (`canPlayType("application/vnd.apple.mpegurl")` empty) is shown a sentence saying so, never an empty player. No script is loaded to play it.
-- In both modes, audio and video play from their `f` or `f?path=…` URL, not from the URL `json` returns, so their ranges reach the share's own origin (object-store-common §6).
+- In folder mode, an HLS playlist plays like a video from its `p/<path>` URL, so the segments, variant playlists and keys it names by relative URI are fetched from the same share. The page plays it with hls.js, loaded on first use from a pinned CDN URL with a subresource-integrity hash and no referrer (the page's URL is a credential); where hls.js cannot run (no Media Source Extensions) or fails to load, with the browser's own HLS player; a browser with neither (`canPlayType("application/vnd.apple.mpegurl")` empty) is shown a sentence saying so, never an empty player.
 - **File mode** shows no listing: it asks `f?json=1` for the URL, displays the file in the page by its preview kind without starting playback, and offers `download`. The page carries nothing of the file but its name.
 - In either mode, a browser that reports no PDF viewer (`navigator.pdfViewerEnabled` false, as on phones) is sent to the file's download (`download` in file mode, `f?path=…&dl=1` in folder mode) and shown a sentence saying so beside the download, never an empty frame.
 

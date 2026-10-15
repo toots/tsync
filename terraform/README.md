@@ -423,6 +423,20 @@ notifications, set `manage_notifications = false` and see
 On GCS nothing is taken over. An adopted bucket's lifecycle stays yours, so add the
 one rule every store needs by hand: abort incomplete multipart uploads after 1 day.
 
+With a share function, an adopted bucket also needs the CORS rule a created one gets,
+or HLS playlists in shared folders will not play: the share page reads segments by
+script through the function's redirects, which send `Origin: null`. Allow `GET` and
+`HEAD` from origin `*`, exposing `Content-Range`, `Content-Length`, `Content-Type`
+and `Accept-Ranges` (on S3, also allow the `Range` request header). Presigned URLs
+still gate every read. On GCS:
+
+```
+cat > cors.json <<'EOF'
+[{"origin": ["*"], "method": ["GET", "HEAD"], "responseHeader": ["Content-Range", "Content-Length", "Content-Type", "Accept-Ranges"], "maxAgeSeconds": 3600}]
+EOF
+gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json
+```
+
 ### Option A — carry rules in `extra_lifecycle_rules` (recommended)
 
 List the bucket's current rules in the store entry and the module emits them

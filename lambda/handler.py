@@ -118,56 +118,59 @@ def ns_base(dir_prefix):
     return dir_prefix.rstrip("/").rsplit("/", 1)[0] + "/"
 
 
-def child_objects(ns_prefix):
-    """Direct children of a folder namespace as (name, key, is_dir, size).
-    For a subdir, key is its own namespace prefix; for a file, its manifest key.
+def child_object(base, key):
+    """A listed child key as (name, key, is_dir, size), else None.
+    For a subdir, key is its own namespace prefix; for a file, its manifest key."""
+    try:
+        body = get_bytes(key)
+    except FileNotFoundError:
+        return None
+    # A file manifest and a folder marker share this namespace and are told
+    # apart by the body: the first is binary and starts with the magic, the
+    # second is JSON.
+    if manifest.is_manifest(body):
+        try:
+            m = manifest.Manifest(body)
+        except manifest.Malformed:
+            return None
+        return (m.name, key, False, m.size)
+    try:
+        m = json.loads(body)
+    except ValueError:
+        return None
+    if m.get("dir"):
+        return (m.get("name", ""), base + m["id"] + "/", True, None)
+    return None
+
+
+def child_objects(ns_prefix, read=child_object):
+    """Direct children of a folder namespace, from a live listing.
     One GET per child to read names/ids/sizes from bodies (folders are small)."""
     base = ns_base(ns_prefix)
-    out = []
-    for key in store.list_keys(ns_prefix):
-        if key == ns_prefix:
-            continue
-        try:
-            body = get_bytes(key)
-        except FileNotFoundError:
-            continue
-        # A file manifest and a folder marker share this namespace and are told
-        # apart by the body: the first is binary and starts with the magic, the
-        # second is JSON.
-        if manifest.is_manifest(body):
-            try:
-                m = manifest.Manifest(body)
-            except manifest.Malformed:
-                continue
-            out.append((m.name, key, False, m.size))
-            continue
-        try:
-            m = json.loads(body)
-        except ValueError:
-            continue
-        if m.get("dir"):
-            out.append((m.get("name", ""), base + m["id"] + "/", True, None))
-    return out
+    children = (read(base, k) for k in store.list_keys(ns_prefix) if k != ns_prefix)
+    return [c for c in children if c]
 
 
-# ponytail: per-instance memo, so a player walking a folder of N segments
-# lists it once rather than once per segment; a name added within the TTL
-# 404s until it lapses. Read the folder index (02 §2.10) if a first walk of a
-# huge folder is too slow.
-CHILDREN_TTL = 30
-_children = {}
+# A child key is its name's hash, so the name behind a listed key never changes:
+# its body read is kept, and every walk still lists live, so a name added or
+# removed is seen at once. Only the size, and a same-named folder recreated
+# under a new id, can be CHILD_TTL old, which resolving does not read or
+# tolerates; a player walking N segments then reads each body once.
+CHILD_TTL = 30
+_child_cache = {}
 
 
-def cached_children(ns_prefix):
+def cached_child(base, key):
     now = time.time()
-    hit = _children.get(ns_prefix)
-    if hit and now - hit[0] < CHILDREN_TTL:
+    hit = _child_cache.get(key)
+    if hit and now - hit[0] < CHILD_TTL:
         return hit[1]
-    if len(_children) > 256:
-        _children.clear()
-    out = child_objects(ns_prefix)
-    _children[ns_prefix] = (now, out)
-    return out
+    if len(_child_cache) > 100_000:
+        for k in [k for k, (t, _) in _child_cache.items() if now - t >= CHILD_TTL]:
+            del _child_cache[k]
+    c = child_object(base, key)
+    _child_cache[key] = (now, c)
+    return c
 
 
 def resolve(dir_prefix, rel):
@@ -178,7 +181,7 @@ def resolve(dir_prefix, rel):
     for part in [p for p in rel.split("/") if p]:
         if kind != "dir":
             return None
-        match = next((c for c in cached_children(loc) if c[0] == part), None)
+        match = next((c for c in child_objects(loc, cached_child) if c[0] == part), None)
         if match is None:
             return None
         _, key, is_dir, _ = match
@@ -308,20 +311,33 @@ def build_dir_zip(share, cache_key):
 # embeds this same file at build time, so the table has one definition.
 with open(os.path.join(os.path.dirname(__file__), "mime.json")) as _f:
     MIME = json.load(_f)
+# http-proxy §A9.5: extensions whose type the first bytes decide.
+SIGNATURES = MIME.pop("@signatures")
+
+
+def extension(name):
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 
 def mime_type(name):
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    return MIME.get(ext)
+    return MIME.get(extension(name))
+
+
+def content_type(cache_key, name, size):
+    """The served type: by name, unless a signature of its extension matches
+    the bytes at every listed offset inside the file."""
+    sig = SIGNATURES.get(extension(name))
+    if sig and size > 0:
+        at = {int(o): b for o, b in sig["bytes"].items() if int(o) < size}
+        head = store.get_range(cache_key, 0, max(at))
+        if all(head[o] == b for o, b in at.items()):
+            return sig["type"]
+    return mime_type(name) or "application/octet-stream"
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
 # object-store-common §6: a playlist is answered whole, never redirected.
 PLAYLIST_MAX_BYTES = 1024 * 1024
-# Whether the platform streams a response of any length: GCP does; AWS
-# Lambda's Python runtime does not, so its byte answers are redirects.
-STREAMS = os.environ.get("STORE", "aws") == "gcs"
-STREAM_PIECE_BYTES = 4 * 1024 * 1024
 
 
 def preview_kind(mime):
@@ -424,12 +440,8 @@ def download_artifact(token, share, m=None):
     )
 
 
-def file_answer(cache_key, name, size, as_download, want_json, range_header=None):
-    if not want_json:
-        r = range_response(cache_key, name, size, range_header, as_download)
-        if r:
-            return r
-    ctype = mime_type(name)
+def file_answer(cache_key, name, size, as_download, want_json):
+    ctype = content_type(cache_key, name, size)
     url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
     if want_json:
         return json_response(
@@ -438,11 +450,11 @@ def file_answer(cache_key, name, size, as_download, want_json, range_header=None
     return redirect(url)
 
 
-def serve_shared_file(token, share, want_json, range_header):
+def serve_shared_file(token, share, want_json):
     m = file_manifest(share["key"])
     return file_answer(
         artifact(token, share, m), share["filename"], m.size,
-        as_download=False, want_json=want_json, range_header=range_header,
+        as_download=False, want_json=want_json,
     )
 
 
@@ -497,38 +509,11 @@ def assembled(share, m):
     return cache_key
 
 
-def serve_file(share, path, as_download, want_json, range_header):
+def serve_file(share, path, as_download, want_json):
     rel, m = shared_file(share, path)
     return file_answer(
-        assembled(share, m), os.path.basename(rel), m.size,
-        as_download, want_json, range_header,
+        assembled(share, m), os.path.basename(rel), m.size, as_download, want_json
     )
-
-
-def parse_range(size, header):
-    """http-proxy §A9.5: one range -> (a, b) inclusive, "whole" or
-    "unsatisfiable"."""
-    if not header or not header.startswith("bytes="):
-        return "whole"
-    parts = header[6:].split("-")
-    if len(parts) != 2:
-        return "whole"
-    a, b = parts
-    digits = lambda s: s.isascii() and s.isdigit()
-    if digits(a) and digits(b):
-        a, b = int(a), int(b)
-        if a > b:
-            return "whole"
-        return "unsatisfiable" if a >= size else (a, min(b, size - 1))
-    if digits(a) and b == "":
-        a = int(a)
-        return "unsatisfiable" if a >= size else (a, size - 1)
-    if a == "" and digits(b):
-        n = int(b)
-        if n == 0:
-            return "whole"
-        return "unsatisfiable" if size == 0 else (max(0, size - n), size - 1)
-    return "whole"
 
 
 SERVED_HEADERS = {
@@ -538,52 +523,10 @@ SERVED_HEADERS = {
 }
 
 
-def served(status, name, as_download, headers, **body):
-    """A response of file bytes: `body` (bytes) or `stream` (key, first, last),
-    which only a streaming platform's adapter turns into the body."""
-    if "body" in body:
-        body = {"body": base64.b64encode(body["body"]).decode(), "isBase64Encoded": True}
-    return {
-        "statusCode": status,
-        "headers": dict(
-            SERVED_HEADERS,
-            **{
-                "Content-Type": mime_type(name) or "application/octet-stream",
-                "Content-Disposition": content_disposition(not as_download, name),
-                "Accept-Ranges": "bytes",
-            },
-            **headers,
-        ),
-        **body,
-    }
-
-
-def stream_pieces(key, first, last):
-    for a in range(first, last + 1, STREAM_PIECE_BYTES):
-        yield store.get_range(key, a, min(last, a + STREAM_PIECE_BYTES - 1))
-
-
-def range_response(cache_key, name, size, header, as_download=False):
-    """A range of a file, streamed; None, for a redirect, when the request
-    names no range or the platform cannot stream."""
-    r = parse_range(size, header)
-    if not STREAMS or r == "whole":
-        return None
-    if r == "unsatisfiable":
-        return {"statusCode": 416, "headers": {"Content-Range": "bytes */%d" % size}, "body": ""}
-    a, b = r
-    return served(
-        206, name, as_download, {"Content-Range": "bytes %d-%d/%d" % (a, b, size)},
-        stream=(cache_key, a, b),
-    )
-
-
-def serve_path(share, raw, range_header):
-    """http-proxy §A9.3 `p/<path>` (object-store-common §6): a player resolves
-    a playlist's relative URIs against the URL it finally read, so a playlist
-    is answered whole; where the platform streams, so is every file, since a
-    browser's HLS player does not take segments through a redirect to another
-    origin."""
+def serve_path(share, raw):
+    """http-proxy §A9.3 `p/<path>` (object-store-common §6): a playlist is
+    answered whole, since a player resolves its relative URIs against the URL
+    it finally read; anything else is redirected as for `f`."""
     # unquote keeps a malformed escape as is, which the http-proxy refuses.
     if re.search(r"%(?![0-9A-Fa-f]{2})", raw):
         raise ShareError(400, "bad path")
@@ -595,14 +538,22 @@ def serve_path(share, raw, range_header):
         raise ShareError(404, "file not found")
     rel, m = shared_file(share, "/".join(parts))
     name = os.path.basename(rel)
-    if mime_type(name) == HLS_MIME:
-        if m.size > PLAYLIST_MAX_BYTES:
-            raise ShareError(413, "playlist too large")
-        return served(200, name, False, {}, body=get_bytes(assembled(share, m)))
-    cache_key = assembled(share, m)
-    if STREAMS and not range_header and m.size > 0:
-        return served(200, name, False, {}, stream=(cache_key, 0, m.size - 1))
-    return file_answer(cache_key, name, m.size, False, False, range_header)
+    if mime_type(name) != HLS_MIME:
+        return file_answer(assembled(share, m), name, m.size, False, False)
+    if m.size > PLAYLIST_MAX_BYTES:
+        raise ShareError(413, "playlist too large")
+    return {
+        "statusCode": 200,
+        "headers": dict(
+            SERVED_HEADERS,
+            **{
+                "Content-Type": HLS_MIME,
+                "Content-Disposition": content_disposition(True, name),
+            },
+        ),
+        "body": base64.b64encode(get_bytes(assembled(share, m))).decode(),
+        "isBase64Encoded": True,
+    }
 
 
 PREVIEW_FETCHERS = (
@@ -723,23 +674,15 @@ def handler(event, context):
         if sub == "download":
             return download_artifact(token, share)
         if not is_dir and sub == "f":
-            return serve_shared_file(
-                token, share, want_json=q.get("json") == "1",
-                range_header=(event.get("headers") or {}).get("range"),
-            )
+            return serve_shared_file(token, share, want_json=q.get("json") == "1")
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
         if is_dir and sub == "p":
-            return serve_path(
-                share,
-                (event.get("rawPath", "").split("/", 3) + [""])[3],
-                (event.get("headers") or {}).get("range"),
-            )
+            return serve_path(share, (event.get("rawPath", "").split("/", 3) + [""])[3])
         if is_dir and sub == "f":
             return serve_file(
                 share, q.get("path", ""),
                 as_download=q.get("dl") == "1", want_json=q.get("json") == "1",
-                range_header=(event.get("headers") or {}).get("range"),
             )
         raise ShareError(404, "not found")
     except ShareError as e:
@@ -757,19 +700,15 @@ def gcp_handler(request):
     to the event dict the core handler consumes, and its response dict back to a
     Flask (body, status, headers) tuple. The core [handler] stays AWS-shaped so
     the moto tests exercise it directly."""
+    # Encoded, as a function URL's rawPath is: `p/<path>` decodes it after the
+    # split, so the path as sent (gunicorn's RAW_URI), not Werkzeug's decoded one.
+    raw = request.environ.get("RAW_URI", "").split("?", 1)[0]
     event = {
-        # Encoded, as a function URL's rawPath is: `p/<path>` decodes it.
-        "rawPath": urllib.parse.quote(request.path),
+        "rawPath": raw or urllib.parse.quote(request.path),
         "queryStringParameters": dict(request.args),
         "headers": {k.lower(): v for k, v in request.headers.items()},
     }
     resp = handler(event, None)
-    if "stream" in resp:
-        import flask
-
-        return flask.Response(
-            stream_pieces(*resp["stream"]), resp["statusCode"], resp["headers"]
-        )
     body = resp.get("body", "")
     if resp.get("isBase64Encoded"):
         body = base64.b64decode(body)

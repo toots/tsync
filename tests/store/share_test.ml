@@ -110,6 +110,7 @@ let routes () =
       share "a3" "gone.mp4" None;
       share "a4" "index.m3u8" (Some "#EXTM3U\nseg 0.ts\n");
       share "a5" "seg 0.ts" (Some "tsdata");
+      share "a6" "packet.ts" (Some "Gabc");
       C.store.put
         (Option.get (Key.share "d1"))
         (Bigstring.of_string
@@ -186,9 +187,11 @@ let routes () =
       get "d1" "p/index.m3u8" [];
       get "d1" "p/seg%200.ts" [];
       get "d1" "p//seg%200.ts" [];
+      get "d1" "p/packet.ts" [];
       get "d1" "p/nope.ts" [];
       get "d1" "p/%2E%2E/x" [];
       get "d1" "p/%zz" [];
+      get "d1" "p/%FF.ts" [];
       get "d1" "p/" [];
       get "d1" "p" [];
       p "== link previews (§A9.3, §A9.6, §A9.8)";
@@ -263,6 +266,25 @@ let () =
       "a.json";
       "a.bin";
       "mp3";
+    ];
+  p "== served types (§A9.5)";
+  let packet = "G" ^ String.make 187 'x' in
+  List.iter
+    (fun (name, content) ->
+      let size = String.length content in
+      p "%-10s %4d bytes  %s" name size
+        (Option.value ~default:"-"
+           (Mime.served ~size
+              ~head:(fun n -> String.sub content 0 (min n size))
+              name)))
+    [
+      ("seg.ts", packet ^ packet ^ packet);
+      ("short.ts", "Gabc");
+      ("app.ts", packet ^ "x");
+      ("empty.ts", "");
+      ("a.TS", packet);
+      ("a.mp4", "xyz");
+      ("a.bin", "G");
     ];
   p "== preview image check (§A9.8)";
   preview_checks ();

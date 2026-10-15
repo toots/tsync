@@ -302,6 +302,17 @@ let stream t (m : Manifest.t) ~off ~len feed =
   in
   go 0
 
+(* §A9.5: the served type, reading the first bytes only for an extension the
+   table's signatures name. *)
+let content_type t (m : Manifest.t) name =
+  let head n =
+    let b = Buffer.create n in
+    stream t m ~off:0 ~len:(min n m.size) (fun c ->
+        Buffer.add_string b (Bigstring.to_string c));
+    Buffer.contents b
+  in
+  Mime.served ~size:m.size ~head name
+
 let servable (m : Manifest.t) =
   if m.link <> None then refuse 400 "cannot serve a symlink directly";
   m
@@ -312,7 +323,8 @@ let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
   let base =
     [
       ( "content-type",
-        Option.value ~default:"application/octet-stream" (mime name) );
+        Option.value ~default:"application/octet-stream" (content_type t m name)
+      );
       ( "content-disposition",
         disposition (if inline then "inline" else "attachment") name );
       ("accept-ranges", "bytes");
@@ -404,8 +416,8 @@ let url_path_parts path =
          | "" -> None
          | p -> (
              match W.unescape p with
-               | Some p -> Some p
-               | None -> refuse 400 "bad path"))
+               | Some p when String.is_valid_utf_8 p -> Some p
+               | _ -> refuse 400 "bad path"))
        (String.split_on_char '/' path))
 
 let listing t id =
@@ -452,14 +464,16 @@ let pct_path path =
            | c -> Printf.sprintf "%%%02X" (Char.code c))
        (List.of_seq (String.to_seq path)))
 
-let file_json ~url ~name (m : Manifest.t) =
+let file_json t ~url ~name (m : Manifest.t) =
   json
     (`Assoc
        [
          ("url", `String url);
          ("name", `String name);
          ( "contentType",
-           match mime name with Some m -> `String m | None -> `Null );
+           match content_type t m name with
+             | Some m -> `String m
+             | None -> `Null );
          ("size", `Int m.size);
        ])
 
@@ -601,7 +615,7 @@ let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
       | `File key, "f" ->
           let m = servable (manifest_at t key) in
           if param "json" = Some "1" then
-            file_json ~url:("/s/" ^ token ^ "/f") ~name:share.filename m
+            file_json t ~url:("/s/" ^ token ^ "/f") ~name:share.filename m
           else file_response t r ~name:share.filename ~inline:true m
       | `Dir id, "" ->
           live_folder t id;
@@ -636,7 +650,7 @@ let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
             | `File m ->
                 let name = List.nth parts (List.length parts - 1) in
                 if param "json" = Some "1" then
-                  file_json
+                  file_json t
                     ~url:
                       ("/s/" ^ token ^ "/f?path="
                       ^ pct_path (String.concat "/" parts))

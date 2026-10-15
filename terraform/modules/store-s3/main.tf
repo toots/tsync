@@ -56,6 +56,23 @@ resource "aws_s3_bucket_public_access_block" "store" {
   restrict_public_buckets = true
 }
 
+# 11 §7: the share page's HLS player reads segments by script through the
+# share function's redirects, which send `Origin: null`. Presigned URLs still
+# gate every read. Created buckets only, like the access block above.
+resource "aws_s3_bucket_cors_configuration" "store" {
+  region = var.region
+  count  = var.create_bucket && var.deploy_share ? 1 : 0
+  bucket = local.bucket_id
+
+  cors_rule {
+    allowed_origins = ["*"]
+    allowed_methods = ["GET", "HEAD"]
+    allowed_headers = ["Range"]
+    expose_headers  = ["Content-Range", "Content-Length", "Content-Type", "Accept-Ranges"]
+    max_age_seconds = 3600
+  }
+}
+
 data "aws_iam_policy_document" "bucket" {
   statement {
     sid       = "DenyInsecureTransport"

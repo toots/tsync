@@ -132,6 +132,7 @@ A store has one unless the operator declines it (§10). Its behaviour is
 - **Environment.** The bucket's name, the presigned-URL lifetime
   ([security §6](algorithms/security-model.md#6-share-capabilities): `share_presign_ttl`),
   SHARE_MAX_BYTES, and the provider where the package needs telling.
+- **Cross-origin reads.** The bucket allows `GET` and `HEAD` from any origin, exposing `Content-Range`, `Content-Length`, `Content-Type` and `Accept-Ranges`: the share page's HLS player fetches segments by script through the function's redirects, and a redirect to another origin sends `Origin: null`. A presigned URL still gates every read. It is declared with a bucket the deployment creates, so applying never removes it; on an adopted bucket the operator sets it.
 - A store without a share function reports no share URL, and a tsync backend on it carries no
   `shareUrl`.
 

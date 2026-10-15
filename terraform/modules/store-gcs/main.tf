@@ -16,6 +16,19 @@ resource "google_storage_bucket" "store" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  # 11 §7: the share page's HLS player reads segments by script through the
+  # share function's redirects, which send `Origin: null`. Presigned URLs
+  # still gate every read.
+  dynamic "cors" {
+    for_each = var.deploy_share ? [1] : []
+    content {
+      origin          = ["*"]
+      method          = ["GET", "HEAD"]
+      response_header = ["Content-Range", "Content-Length", "Content-Type", "Accept-Ranges"]
+      max_age_seconds = 3600
+    }
+  }
+
   lifecycle_rule {
     condition { age = 1 }
     action { type = "AbortIncompleteMultipartUpload" }

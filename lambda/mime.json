@@ -59,7 +59,7 @@
  "svg": "image/svg+xml",
  "swift": "text/plain; charset=utf-8",
  "toml": "text/plain; charset=utf-8",
- "ts": "video/mp2t",
+ "ts": "text/plain; charset=utf-8",
  "tsv": "text/plain; charset=utf-8",
  "tsx": "text/plain; charset=utf-8",
  "txt": "text/plain; charset=utf-8",
@@ -70,5 +70,8 @@
  "xml": "application/xml; charset=utf-8",
  "yaml": "text/plain; charset=utf-8",
  "yml": "text/plain; charset=utf-8",
- "zsh": "text/plain; charset=utf-8"
+ "zsh": "text/plain; charset=utf-8",
+ "@signatures": {
+  "ts": {"type": "video/mp2t", "bytes": {"0": 71, "188": 71, "376": 71}}
+ }
 }
