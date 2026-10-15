@@ -475,6 +475,15 @@ def test_ts_type_from_its_first_bytes(s3):
     assert ctype("short.ts") == "video/mp2t"
     assert ctype("app.ts") == "text/plain; charset=utf-8"
     assert h.PREVIEW_KINDS["ts"] == "text"
+    # No listed offset inside the file: every one that is matches.
+    h.SIGNATURES["zz"] = {"type": "x/y", "bytes": {"500": 1}}
+    put_file(s3, "alb", "a.zz", [("wwww-8888", b"tiny")])
+    assert ctype("a.zz") == "x/y"
+    # An unknown type stays unknown, and the signed URL names none (§A9.3).
+    put_file(s3, "alb", "blob.bin", [("xxxx-9999", b"data")])
+    doc = json.loads(h.handler(event(tok, "f", {"path": "blob.bin", "json": "1"}), None)["body"])
+    assert doc["contentType"] is None
+    assert "response-content-type" not in doc["url"]
 
 
 def test_folder_view_is_live(s3):

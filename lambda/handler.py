@@ -324,15 +324,15 @@ def mime_type(name):
 
 
 def content_type(cache_key, name, size):
-    """The served type: by name, unless a signature of its extension matches
-    the bytes at every listed offset inside the file."""
+    """The served type, None when unknown: by name, unless a signature of its
+    extension matches the bytes at every listed offset inside the file."""
     sig = SIGNATURES.get(extension(name))
     if sig and size > 0:
         at = {int(o): b for o, b in sig["bytes"].items() if int(o) < size}
-        head = store.get_range(cache_key, 0, max(at))
+        head = store.get_range(cache_key, 0, max(at)) if at else b""
         if all(head[o] == b for o, b in at.items()):
             return sig["type"]
-    return mime_type(name) or "application/octet-stream"
+    return mime_type(name)
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
