@@ -317,7 +317,7 @@ def mime_type(name):
 
 HLS_MIME = "application/vnd.apple.mpegurl"
 # object-store-common §6: the most one answer of file bytes carries.
-ANSWER_MAX_BYTES = 4 * 1024 * 1024
+ANSWER_MAX_BYTES = int(os.environ.get("ANSWER_MAX_BYTES", str(4 * 1024**2)))
 
 
 def preview_kind(mime):
