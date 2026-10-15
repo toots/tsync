@@ -40,7 +40,7 @@ Trust boundaries, each an enforcement point in this file:
 3. The listener host's filesystem outside its stores.
 4. Local state: mirror, staged bodies, chunk cache, sync state (before-values, position), queues. Staged bodies are the only copy of content not yet on the main.
 5. Operational information: status reports, domain names, traffic, backend settings.
-6. Vault contents: extension records (wifi passwords), each domain's vault key K and its passphrase ([vault](../extensions/vault.md)).
+6. Vault contents: extension records (one-time-password seeds, website and app passwords), each domain's vault key K and its passphrase ([vault](../extensions/vault.md)).
 
 ---
 
@@ -325,4 +325,4 @@ An implementation MUST exhibit:
 - A request body larger than its limit is refused before it is read; a connection that stops sending is closed after the idle timeout.
 - `/stats` signed with one domain's secret mentions no other domain.
 - A folder or a shared file named `</script><script>alert(1)</script>` shown on a share page renders as text; a shared HTML file served inline runs no script on the listener origin.
-- After a vault is initialised and used, no store object, local file, config or log holds the passphrase, K, a wifi password or a plaintext SSID; on Linux without a Secret Service, restarting the owner leaves the vault locked; `tsync vault unlock` takes no passphrase argument.
+- After a vault is initialised and used, no store object, local file, config or log holds the passphrase, K, a seed, a password or a plaintext label; on Linux without a Secret Service, restarting the owner leaves the vault locked; `tsync vault unlock` takes no passphrase argument.

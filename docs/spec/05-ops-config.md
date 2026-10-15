@@ -180,7 +180,7 @@ Example:
     "name": "Files",
     "symlinks": "keep", "versioning": true, "chunkSize": "8M", "maxCache": "50G",
     "frontends": ["fuse", {"type": "http-proxy", "port": 8080, "secret": "…", "shares": true}],
-    "extensions": ["wifi"],
+    "extensions": ["totp", "passwords"],
     "backends": [
       {"type": "s3", "name": "cloud", "role": "main", "bucket": "…", "accessKeyId": "…",
        "secretAccessKey": "…", "shareUrl": "https://…"},

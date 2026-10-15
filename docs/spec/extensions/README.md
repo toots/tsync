@@ -8,13 +8,13 @@ can do for one. It does not own the encryption every extension's records share
 ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)), or the security rules for keys and
 passphrases ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)).
 
-Extensions: [wifi](wifi/README.md).
+Extensions: [totp](totp.md), [passwords](passwords.md).
 
 ---
 
 ## 1. Problem
 
-Some small, secret, per-user data (wifi passwords, later perhaps one-time-password seeds)
+Some small, secret, per-user data (one-time-password seeds, website and app passwords)
 should follow the user across machines the way files do. A domain already moves data between
 machines with history, offline edits and conflict handling. An extension reuses that, keeping
 its records encrypted in a hidden folder of the domain, instead of building a second sync
@@ -79,7 +79,27 @@ settle them into one record (or, where both must survive, several).
   extension's folder, and at owner start. A fold that needs plaintext waits until the vault is
   unlocked; the copies stay where they are until then.
 
-### 4.3 Hidden from users
+### 4.3 The grouped fold
+
+A fold most extensions share. The extension names its record's **key fields**: the ones a
+concurrent change must never silently replace. A record id and its conflicted copies fold as:
+
+1. Decrypt each file. A file that does not open is left as it is.
+2. Group the files by their key fields. The **primary group** holds the file at the record id,
+   or the greatest file (rule 3) when none is there.
+3. In each group the greatest file is the one with the highest `modified`; on a tie, the one
+   whose body is bytewise greatest.
+4. The primary group's greatest file is moved to the record id, unless it is already there, and
+   every other file of the group is removed: they differ only in fields the newest change wins.
+5. Each other group's greatest file is moved to the id `hex16(XXH3(body, 0)) hex16(XXH3(body, 1))`,
+   the body's two digests ([01 §3.3](../01-core.md#33-other-digests-with-the-same-construction))
+   written as 32 hex digits, and the rest of its group is removed. No key field is lost: the
+   user sees two records and removes the wrong one.
+
+A clock decides only between files that agree on every key field. The fold reads plaintext, so
+it waits for an unlocked vault.
+
+### 4.4 Hidden from users
 
 `/.tsync-ext` is a reserved root name
 ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)): every interface that presents the

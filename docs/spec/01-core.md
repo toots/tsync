@@ -805,7 +805,7 @@ An implementation MUST exhibit these observable properties.
   another domain's prefix fails; a trailing `/` is accepted when parsing; descending from a
   file fails; a leading `/` in a user path is ignored. A chunk with a key shorter than 3
   characters is filed under shard `_`.
-- **Reserved root name.** A domain holding `/.tsync-ext/wifi/<id>` lists, stats, exports,
+- **Reserved root name.** A domain holding `/.tsync-ext/totp/<id>` lists, stats, exports,
   rsyncs and shares the same as one without it; creating, renaming onto or addressing
   `.tsync-ext` at the root through a frontend is refused INVALID; a `.tsync-ext` below the root
   is an ordinary name; `tsync mirror` and gc copy and keep the folder like any other.
