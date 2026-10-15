@@ -641,7 +641,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `vault <verb>`, `<extension> <verb>` | owner, serving only | [extensions §6](extensions/README.md#6-commands-and-actions), [vault §8](extensions/vault.md#8-commands), and each extension's spec |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
-| `build-info` | none | compiled frontends, drivers and extensions, whether the vault is compiled in, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
+| `build-info` | none | compiled frontends and drivers, the extensions, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
 | `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
 
 `--source NAME` reads from one member ([05 §3.1](05-ops-config.md) `reading_from`); `-j N` sets read
@@ -798,7 +798,7 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   (default no). A frontend the descriptor does not offer here (another system's, or one its host
   configures itself, such as `android`) is never asked about, and an entry of that type already in
   the file is kept as it is.
-- **Extensions** are one yes-or-no question per extension compiled in, default no on a new
+- **Extensions** are one yes-or-no question per extension, default no on a new
   domain, else whether the domain lists it. The answers write `extensions`, `[]` when none.
 - **Advanced mode** (`tsync config --edit --advanced`). The keys [05 §2.1](05-ops-
   config.md#21-schema-and-validation) marks *advanced* are asked about only in this mode, after the

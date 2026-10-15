@@ -33,17 +33,14 @@ reserved for the vault itself. A name is also the extension's CLI group (§6), s
 a top-level command or a frontend's CLI group
 ([07 §5.3](../07-daemon-cli.md#53-commands), [08 §2.1](../08-frontends.md#21-frontend-descriptor)).
 
-## 3. Packaging
+## 3. Opting in
 
-- Each extension is an optional package, `tsync-<name>`. The vault is the optional package
-  `tsync-vault`, which every extension depends on.
-- An extension is compiled in or out per build, the way optional frontends and TLS
-  implementations are: the binary links it when it is built, and is complete without it.
-- `tsync build-info` lists the compiled extensions, and says whether the vault is compiled in.
-- Every release build includes every extension ([10 §4.2](../10-delivery.md#42-release-builds)).
-- A domain configured with an extension this build does not include follows the config rule for
-  a known type that is not compiled in: it is refused when the owner starts serving the domain
-  ([05 §2.1](../05-ops-config.md#21-schema-and-validation)).
+- The vault and every extension are part of every build: they need nothing outside tsync's own
+  sources.
+- They are off until a domain lists an extension
+  ([05 §2.1](../05-ops-config.md#21-schema-and-validation)). A domain that lists none has no
+  vault, and nothing of this file runs for it.
+- `tsync build-info` lists the extensions.
 
 ## 4. Records
 
@@ -152,9 +149,8 @@ domain's names to a user or another party omits it, and only the extension layer
 
 ## 7. Conformance
 
-- A build without an extension starts and serves a domain that does not list it. A domain that
-  lists it is refused at serve time with "configured but not compiled into this binary".
-  `tsync build-info` lists exactly the compiled extensions.
+- A domain that lists no extension has no `/.tsync-ext/` folder written for it, and every vault
+  and extension verb on it is refused `invalid`.
 - A record's leaf is 32 lowercase hex and its body a vault envelope. No record leaf or body
   holds a plaintext label.
 - Two clients edit one record concurrently and both fold: the domain settles with no conflicted

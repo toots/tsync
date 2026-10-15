@@ -108,8 +108,6 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 ### 4.2 Release builds
 
 - A release ships both TLS implementations, OpenSSL the default, and uses the release profile.
-- Every release build, the container images included, ships the vault and every extension
-  ([extensions](extensions/README.md#3-packaging)).
 - A Linux release includes the FUSE frontend, the tray, the discovery library and the Dolphin
   plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
