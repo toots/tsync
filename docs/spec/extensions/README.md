@@ -8,13 +8,13 @@ can do for one. It does not own the encryption every extension's records share
 ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)), or the security rules for keys and
 passphrases ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)).
 
-Extensions: [totp](totp.md).
+Extensions: [wifi](wifi.md).
 
 ---
 
 ## 1. Problem
 
-Some small, secret, per-user data (one-time-password seeds, later perhaps wifi credentials)
+Some small, secret, per-user data (wifi passwords, later perhaps one-time-password seeds)
 should follow the user across machines the way files do. A domain already moves data between
 machines with history, offline edits and conflict handling. An extension reuses that, keeping
 its records encrypted in a hidden folder of the domain, instead of building a second sync
@@ -52,8 +52,9 @@ reserved for the vault itself and is not an extension name.
 - They go through the log, the merge, projection, versions, replication and garbage collection
   like any file. Nothing below the file operations knows they are records.
 - Each record is one file. Its leaf is a **record id**, `32hexlower`, drawn from the CSPRNG when
-  the record is created ([01 §2.10](../01-core.md#210-random-identifiers)). A leaf never carries
-  a user-visible label: names are not encrypted.
+  the record is created ([01 §2.10](../01-core.md#210-random-identifiers)), unless the
+  extension's spec derives it from the record under K, so that two machines adding the same
+  thing meet at one name. A leaf never carries a user-visible label: names are not encrypted.
 - Every record body is a vault envelope ([vault §5](vault.md#5-record-envelope)). An extension
   never stores plaintext.
 

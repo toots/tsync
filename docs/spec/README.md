@@ -105,7 +105,7 @@ The constraints that shape everything:
 | **applied log** | The owner's log of every change made to its local tree; the change feed frontends read. |
 | **converge** | Recover, run the cycle (arrive, push, project), run maintenance. Done by the domain's owner. |
 | **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `http-proxy`, `android`. |
-| **extension / vault** | An optional package keeping small secret records (`totp`) in a domain's hidden `/.tsync-ext/` folder; the vault is the encryption they share. |
+| **extension / vault** | An optional package keeping small secret records (`wifi`) in a domain's hidden `/.tsync-ext/` folder; the vault is the encryption they share. |
 | **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `i:<fileId>` (a local id kept across renames), or `f:<parentFolderId>/<leaf>`. |
 | **uplink governor** | Admits uploads on a network link at a rate chosen from measured queueing delay. |
 
@@ -187,7 +187,7 @@ Extensions:
 |---|---|
 | [extensions](extensions/README.md) | What an extension is: packaging, records under `/.tsync-ext/`, the fold, host adapters and capabilities. |
 | [extensions/vault](extensions/vault.md) | The data key, the passphrase, the keyring and its slots, the record envelope, unlocking, rotation. |
-| [extensions/totp](extensions/totp.md) | One-time-password seeds: the record, its fold, code generation, commands. |
+| [extensions/wifi](extensions/wifi.md) | Wifi networks: the record, its fold, `WIFI:` codes, installing on each host, commands. |
 
 ### 4.4 Data models and algorithms
 
@@ -289,7 +289,7 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 | http-proxy wire protocol | [backends/http-proxy](backends/http-proxy.md) |
 | Uplink lease messages | [uplink-governor](algorithms/uplink-governor.md) |
 | Host-specific state (macOS, Android) | [file-provider](frontends/file-provider.md), [android-app](frontends/android-app.md) |
-| Vault keyring and record envelope; extension records | [extensions/vault](extensions/vault.md), [extensions/totp](extensions/totp.md) |
+| Vault keyring and record envelope; extension records | [extensions/vault](extensions/vault.md), [extensions/wifi](extensions/wifi.md) |
 
 ## 8. Building an implementation
 
