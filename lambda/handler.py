@@ -316,8 +316,12 @@ def mime_type(name):
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
-# object-store-common §6: the most one answer of file bytes carries.
-ANSWER_MAX_BYTES = int(os.environ.get("ANSWER_MAX_BYTES", str(4 * 1024**2)))
+# object-store-common §6: a playlist is answered whole, never redirected.
+PLAYLIST_MAX_BYTES = 1024 * 1024
+# Whether the platform streams a response of any length: GCP does; AWS
+# Lambda's Python runtime does not, so its byte answers are redirects.
+STREAMS = os.environ.get("STORE", "aws") == "gcs"
+STREAM_PIECE_BYTES = 4 * 1024 * 1024
 
 
 def preview_kind(mime):
@@ -534,7 +538,11 @@ SERVED_HEADERS = {
 }
 
 
-def bytes_response(status, name, as_download, body, headers):
+def served(status, name, as_download, headers, **body):
+    """A response of file bytes: `body` (bytes) or `stream` (key, first, last),
+    which only a streaming platform's adapter turns into the body."""
+    if "body" in body:
+        body = {"body": base64.b64encode(body["body"]).decode(), "isBase64Encoded": True}
     return {
         "statusCode": status,
         "headers": dict(
@@ -546,32 +554,36 @@ def bytes_response(status, name, as_download, body, headers):
             },
             **headers,
         ),
-        "body": base64.b64encode(body).decode(),
-        "isBase64Encoded": True,
+        **body,
     }
 
 
+def stream_pieces(key, first, last):
+    for a in range(first, last + 1, STREAM_PIECE_BYTES):
+        yield store.get_range(key, a, min(last, a + STREAM_PIECE_BYTES - 1))
+
+
 def range_response(cache_key, name, size, header, as_download=False):
-    """A range of a file, at most ANSWER_MAX_BYTES of it; None when the request
-    names no range."""
+    """A range of a file, streamed; None, for a redirect, when the request
+    names no range or the platform cannot stream."""
     r = parse_range(size, header)
-    if r == "whole":
+    if not STREAMS or r == "whole":
         return None
     if r == "unsatisfiable":
         return {"statusCode": 416, "headers": {"Content-Range": "bytes */%d" % size}, "body": ""}
     a, b = r
-    b = min(b, a + ANSWER_MAX_BYTES - 1)
-    return bytes_response(
-        206, name, as_download, store.get_range(cache_key, a, b),
-        {"Content-Range": "bytes %d-%d/%d" % (a, b, size)},
+    return served(
+        206, name, as_download, {"Content-Range": "bytes %d-%d/%d" % (a, b, size)},
+        stream=(cache_key, a, b),
     )
 
 
 def serve_path(share, raw, range_header):
-    """http-proxy §A9.3 `p/<path>`, answered from this origin
-    (object-store-common §6): a player resolves a playlist's relative URIs
-    against the URL it finally read, and a browser's HLS player does not take
-    segments through a redirect to another origin."""
+    """http-proxy §A9.3 `p/<path>` (object-store-common §6): a player resolves
+    a playlist's relative URIs against the URL it finally read, so a playlist
+    is answered whole; where the platform streams, so is every file, since a
+    browser's HLS player does not take segments through a redirect to another
+    origin."""
     # unquote keeps a malformed escape as is, which the http-proxy refuses.
     if re.search(r"%(?![0-9A-Fa-f]{2})", raw):
         raise ShareError(400, "bad path")
@@ -583,12 +595,13 @@ def serve_path(share, raw, range_header):
         raise ShareError(404, "file not found")
     rel, m = shared_file(share, "/".join(parts))
     name = os.path.basename(rel)
-    small = m.size <= ANSWER_MAX_BYTES
-    if mime_type(name) == HLS_MIME and not small:
-        raise ShareError(413, "playlist too large")
+    if mime_type(name) == HLS_MIME:
+        if m.size > PLAYLIST_MAX_BYTES:
+            raise ShareError(413, "playlist too large")
+        return served(200, name, False, {}, body=get_bytes(assembled(share, m)))
     cache_key = assembled(share, m)
-    if small and not range_header:
-        return bytes_response(200, name, False, get_bytes(cache_key), {})
+    if STREAMS and not range_header and m.size > 0:
+        return served(200, name, False, {}, stream=(cache_key, 0, m.size - 1))
     return file_answer(cache_key, name, m.size, False, False, range_header)
 
 
@@ -751,6 +764,12 @@ def gcp_handler(request):
         "headers": {k.lower(): v for k, v in request.headers.items()},
     }
     resp = handler(event, None)
+    if "stream" in resp:
+        import flask
+
+        return flask.Response(
+            stream_pieces(*resp["stream"]), resp["statusCode"], resp["headers"]
+        )
     body = resp.get("body", "")
     if resp.get("isBase64Encoded"):
         body = base64.b64decode(body)

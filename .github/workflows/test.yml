@@ -221,7 +221,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Python libraries
-        run: pip install boto3 moto pytest xxhash
+        run: pip install boto3 moto pytest xxhash flask
       - name: Share handler and chunk verifier (S3)
         run: pytest lambda/test_handler.py lambda/test_verify.py
       - name: Keys agree with the OCaml implementation
