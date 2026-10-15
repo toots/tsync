@@ -37,9 +37,13 @@ a top-level command or a frontend's CLI group
 
 - The vault and every extension are part of every build: they need nothing outside tsync's own
   sources.
-- They are off until a domain lists an extension
-  ([05 §2.1](../05-ops-config.md#21-schema-and-validation)). A domain that lists none has no
-  vault, and nothing of this file runs for it.
+- A domain's vault and records are part of the domain: they exist in its store once any client
+  made them ([vault §3](vault.md#3-initialising)), whatever this client's config says.
+- A client **uses** an extension of a domain when its config lists the extension for that domain
+  ([05 §2.1](../05-ops-config.md#21-schema-and-validation)). For a domain whose config lists
+  none, this client runs nothing of this file: it writes nothing under `/.tsync-ext/`, folds
+  nothing, and refuses every vault and extension verb `invalid`. The folder still syncs, hidden,
+  like any other.
 - `tsync build-info` lists the extensions.
 
 ## 4. Records
@@ -143,14 +147,40 @@ domain's names to a user or another party omits it, and only the extension layer
   is refused UNREACHABLE (`unreachable`) and tells the user to start tsync.
 - A verb that needs plaintext, on a domain whose vault is locked, is refused UNPREPARED/locked
   (`locked`, [failure-model §7.2](../algorithms/failure-model.md#72-client-error-codes)).
+- Actions are per domain: an owner answers only for its own domain's vault.
 - Verbs and actions return plaintext only where the extension's spec says so. Nothing an
   extension logs or reports contains plaintext (masking:
   [security-model §10.3](../algorithms/security-model.md#103-masking)).
 
+### 6.1 Several domains
+
+A user may use an extension on several domains, each with its own vault and passphrase. The
+caller (the CLI, an app, a browser bridge) shows them as one: it asks each domain that uses the
+extension, and merges the answers. Nothing is copied between vaults, and nothing is
+deduplicated: the same login or seed in two domains is two entries, each indexed by its domain.
+A record is named by the pair (domain, id).
+
+- **Reads** (`list`, `match`) cover every domain that uses the extension, each row naming its
+  domain. A domain whose vault is locked, or whose owner does not answer, is named in the reply
+  with its error; the others still answer. The read is refused only when no domain answered,
+  with the first domain's error.
+- **Writes** of a new record go to one domain: `--domain` (`domain` in an action), else the only
+  domain that uses the extension, else the default domain
+  ([07 §5.3](../07-daemon-cli.md#53-commands)) when it uses it. Anything else is refused
+  `invalid`, naming the candidates.
+- **An id** given without a domain names the record of the one domain that holds it. An id held
+  by several domains is refused `invalid` as ambiguous until `--domain` picks one.
+- A record refers to records of its own domain only.
+
 ## 7. Conformance
 
-- A domain that lists no extension has no `/.tsync-ext/` folder written for it, and every vault
-  and extension verb on it is refused `invalid`.
+- A client whose config lists no extension for a domain writes nothing under `/.tsync-ext/` of
+  that domain, folds nothing there, and refuses every vault and extension verb on it `invalid`,
+  while another client using that domain's vault goes on reading and writing it.
+- Two domains each use `totp`, one vault locked: `totp list` lists the other's records, each
+  naming its domain, and names the locked domain. One TOTP seed added to both domains lists
+  twice, once per domain. `totp add` with no `--domain` and no default
+  domain is refused, naming both. An id present in both is refused until `--domain` is given.
 - A record's leaf is 32 lowercase hex and its body a vault envelope. No record leaf or body
   holds a plaintext label.
 - Two clients edit one record concurrently and both fold: the domain settles with no conflicted

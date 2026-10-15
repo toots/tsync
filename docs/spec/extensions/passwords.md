@@ -112,7 +112,9 @@ A login's one-time-password seed is a record of the [totp](totp.md) extension, w
 seeds and computes codes ([totp §4](totp.md#4-code-generation)). The login names it by id in
 `totp`.
 
-- Linking needs the domain to list `totp`; elsewhere a non-empty `totp`, or an `otpauth`
+- A login links a TOTP record of its own domain
+  ([README §6.1](README.md#61-several-domains)). Linking needs this client to use `totp` on that
+  domain; elsewhere a non-empty `totp`, or an `otpauth`
   request member, is refused `invalid`.
 - `add` and `edit` take `otpauth`, an `otpauth://totp/` URI: it adds a TOTP record
   ([totp §5.1](totp.md#51-otpauth-uris)) and links it. They also take `totp`, an existing TOTP
@@ -171,21 +173,23 @@ declares nothing.
 
 ### 8.2 Requests
 
-Every request carries `domain`, and every request but `status` carries `origin`: the origin
-(§4.2) of the frame that holds the form, as the browser reports it to the extension.
+The bridge serves every domain that uses `passwords` on this client, merged as
+[README §6.1](README.md#61-several-domains) says. Every request but `status` carries `origin`:
+the origin (§4.2) of the frame that holds the form, as the browser reports it to the extension.
+`fill` carries the `domain` its `match` row named; `save` carries a `domain` only to pick one.
 
 | request | carries | answer |
 |---|---|---|
-| `status` | — | locked or unlocked, and whether the domain lists `totp` |
-| `match` | `origin` | the logins matching `origin` (§4.2): id, title, username, and whether a code is linked; no password |
-| `fill` | `origin`, `id` | the login's username, password, and current code with seconds left when one is linked |
-| `save` | `origin`, `username`, `password` | as a `save` (§7), with `origin` as the site |
+| `status` | — | per domain: locked or unlocked, and whether it uses `totp` |
+| `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, and whether a code is linked; no password |
+| `fill` | `origin`, `domain`, `id` | the login's username, password, and current code with seconds left when one is linked |
+| `save` | `origin`, `username`, `password`, `domain?` | as a `save` (§7), with `origin` as the site |
 
 - A `fill` whose login does not match `origin` is refused `invalid`. A page never receives a
   login of another site, whatever the extension asks.
 - No request lists every login, returns a login by id alone, or carries a seed, notes or the
   passphrase. Unlocking is done in the app or the CLI.
-- On a locked vault every request but `status` is refused `locked`.
+- A locked vault is named in a `match` reply; a `fill` or `save` on it is refused `locked`.
 
 ### 8.3 What the extension does
 
@@ -272,5 +276,6 @@ The file is plaintext. tsync neither copies nor removes it.
 - Through the bridge: `match` for `https://login.example.com` lists a login for
   `https://example.com` and no password; `fill` of a login for `https://other.com` with that
   origin is refused `invalid`; any request other than `status`, `match`, `fill` or `save` is
-  refused `invalid`; on a locked vault `match` is refused `locked`. A message from an extension
+  refused `invalid`; a `match` names a locked domain and still lists the other domains' logins;
+  one login present in two domains is matched twice, each row naming its domain. A message from an extension
   the manifest does not name never reaches the bridge.
