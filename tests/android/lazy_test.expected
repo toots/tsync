@@ -102,5 +102,7 @@
   camera, upload done                [ours.jpg, theirs.jpg] read the store
   the peer's camera                  [ours.jpg, theirs.jpg]
   the peer's root                    [camera]
+== a write into a folder made here and published
+  write, the store down              ok
 == status
   names the frontend                 true

@@ -631,7 +631,10 @@ opened. It runs the same protocol **per folder**:
   needed because a folder's own key is in its parent's view: only they show that the folder still
   exists and that a pending move closes no cycle, which is what makes the batch well-formed
   (Definition 6). Its entry number is that head plus one, and its `Won` step sets those
-  folders' positions to the entry's number. Folders with nothing pending are not touched: their
+  folders' positions to the entry's number. It does the same for each folder the entry creates,
+  which no pull has a view of when it holds no key of the batch: this client knows its content
+  at that entry, all of it its own, so a later change in it is checked against that view rather
+  than waiting for a pull. Folders with nothing pending are not touched: their
   views stay as they are, however old, until they are pulled.
 - **No background fetch.** Nothing fetches on the cursor or on a timer. The cycle runs to push,
   and pulls happen when the host asks.

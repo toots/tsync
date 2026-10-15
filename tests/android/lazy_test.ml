@@ -579,6 +579,16 @@ let () =
           (fun n -> String.length n >= 6 && String.sub n 0 6 = "camera")
           (until_peer_sees "camera")));
 
+  p "== a write into a folder made here and published";
+  let made = action "mkdir" [s "parentRef" "root"; s "name" "made"] in
+  let made = text (Option.get (field made "item")) "ref" in
+  ignore (until_peer_sees "made");
+  Atomic.set mode `Down;
+  p "  %-34s %s" "write, the store down"
+    (outcome
+       (action "write"
+          [s "parentRef" made; s "name" "m.txt"; s "staging" (staged "s11" "m")]));
+  Atomic.set mode `Up;
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

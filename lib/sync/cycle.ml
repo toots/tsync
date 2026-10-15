@@ -162,6 +162,10 @@ module Make (C : Engine_ctx.S) = struct
   let pulled_marker dir =
     Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
 
+  let mark_pulled dir =
+    Fs.replace (pulled_marker dir)
+      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
+
   (* Every item under a folder, as it would be reported if it had just arrived:
      a host that drops a removed folder's subtree learns it again. *)
   let announce dir =
@@ -844,13 +848,20 @@ module Make (C : Engine_ctx.S) = struct
          batch)
 
   let commit_position n batch =
-    if C.lazy_tree then
+    if C.lazy_tree then (
+      let at_n id f = Option.iter f (Mirror.key_of_id mirror id) in
       List.iter
-        (fun id ->
-          Option.iter
-            (fun dir -> set_folder_position dir n)
-            (Mirror.key_of_id mirror id))
-        (views_of batch)
+        (fun id -> at_n id (fun dir -> set_folder_position dir n))
+        (views_of batch);
+      (* publication §4.11: a folder the entry creates is a view at [n]. *)
+      List.iter
+        (function
+          | `Folder (i, None, Some _) ->
+              at_n i (fun dir ->
+                  set_folder_position dir n;
+                  mark_pulled dir)
+          | _ -> ())
+        batch)
     else Sync_state.set_position sync_state n
 
   (* The [Won] step (publication §4.5): the staged edits it committed are
@@ -1164,8 +1175,7 @@ module Make (C : Engine_ctx.S) = struct
       if theirs = [] && folder_position dir = Some head then 0
       else merge_and_enact ~view:id ~head theirs
     in
-    Fs.replace (pulled_marker dir)
-      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
+    mark_pulled dir;
     changed > 0
 
   (* publication §4.5: the entry this client creates of a batch. *)
