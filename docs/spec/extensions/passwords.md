@@ -13,9 +13,9 @@ Website and app passwords are kept by each browser, or by a hosted password mana
 the user's vault on its servers. With this extension they live in the user's own storage,
 encrypted, and every machine of the user reads them.
 
-Without a host capability (§7) the extension is a command-line and app password store: the user
-looks a login up and copies its password. Filling forms in browsers and apps is a host
-capability, and is where most of the work of this extension lies.
+Without a host capability (§7) or a browser extension (§8) the extension is a command-line
+and app password store: the user looks a login up and copies its password. Filling forms in
+apps and browsers is where most of the work of this extension lies.
 
 ### 1.1 Non-goals
 
@@ -133,7 +133,7 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 | `fill` with codes | the host's autofill also asks for a site's one-time code, and fills the current code of the login the user picks (§6) | the user reads the code from `get` |
 | `save` | the host's autofill hands over a username and password the user just typed, and the user approves saving them | the user runs `add` |
 
-- Both are `confirm` or `authenticate` on every host: the user picks the login, or approves the
+- Each is `confirm` or `authenticate` on every host: the user picks the login, or approves the
   save. The extension never calls either by itself.
 - A `fill` request on a locked vault answers that it is locked, and the host's app offers to
   unlock; it never fills from a cache.
@@ -148,9 +148,55 @@ No host declares a capability yet. Each gets `extensions/passwords/<host>.md` on
 |---|---|---|
 | macOS | an AutoFill credential provider extension (`ASCredentialProviderViewController`), which also serves one-time codes | not offered to credential providers |
 | Android | an `AutofillService`, for apps and for browsers that use it | the same `AutofillService` |
-| Linux | none: no system autofill | none |
+| Linux | none: no system autofill; browsers are served by §8 | none |
 
-## 8. Commands
+## 8. Browser extensions
+
+A browser extension fills and saves logins in that browser, on any host the browser runs on. It
+is a client of the owner, not a host adapter: it reaches the owner through a **bridge**, and
+declares nothing.
+
+### 8.1 The bridge
+
+- The bridge is `tsync passwords browser-host`, started by the browser through native messaging:
+  each message, both ways, is a 32-bit length in the host's byte order followed by that many
+  bytes of UTF-8 JSON. A message the bridge sends is at most 1 MiB.
+- The browser starts it only for the extensions its native-messaging manifest names (Chromium
+  `allowed_origins`, Firefox `allowed_extensions`). `tsync passwords browser install` writes that
+  manifest for each browser it finds on the host, naming tsync's published extension ids and any
+  `--extension-id` given.
+- The bridge is a one-shot client of the owner of access class **owner**
+  ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)). It forwards only the requests of §8.2;
+  anything else is refused `invalid`. It holds no K and keeps nothing.
+
+### 8.2 Requests
+
+Every request carries `domain`, and every request but `status` carries `origin`: the origin
+(§4.2) of the frame that holds the form, as the browser reports it to the extension.
+
+| request | carries | answer |
+|---|---|---|
+| `status` | — | locked or unlocked, and whether the domain lists `totp` |
+| `match` | `origin` | the logins matching `origin` (§4.2): id, title, username, and whether a code is linked; no password |
+| `fill` | `origin`, `id` | the login's username, password, and current code with seconds left when one is linked |
+| `save` | `origin`, `username`, `password` | as a `save` (§7), with `origin` as the site |
+
+- A `fill` whose login does not match `origin` is refused `invalid`. A page never receives a
+  login of another site, whatever the extension asks.
+- No request lists every login, returns a login by id alone, or carries a seed, notes or the
+  passphrase. Unlocking is done in the app or the CLI.
+- On a locked vault every request but `status` is refused `locked`.
+
+### 8.3 What the extension does
+
+- It fills only on a gesture of the user in the page or the extension's own UI, never when a page
+  loads, so a page cannot collect logins by drawing forms the user never touches.
+- It sends the origin of the frame holding the form, not the top-level page's. A login is filled
+  into a cross-origin frame only when it matches that frame's origin.
+- It asks the user before every `save`.
+- It never stores a password, a code or a match result beyond the fill that asked for it.
+
+## 9. Commands
 
 Every verb is of access class **owner**
 ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)) and needs K.
@@ -162,7 +208,7 @@ Every verb is of access class **owner**
 | `get` / `passwords_get` | `id` | the record's password and notes, and the linked TOTP record's current code and seconds left. The CLI prints the password alone, newline-terminated, for a pipe to a clipboard tool |
 | `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `otpauth` or `totp` | replaces those fields and sets `modified` |
 | `remove` / `passwords_remove` | `id` | removes the record |
-| `import` (CLI only) | a CSV file | §8.1 |
+| `import` (CLI only) | a CSV file | §9.1 |
 | `export` (CLI only) | — | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per record, its first site in `url` |
 
 - `get` is the only action that replies with a password. No action replies with a seed
@@ -171,7 +217,7 @@ Every verb is of access class **owner**
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
 
-### 8.1 Import
+### 9.1 Import
 
 `import` reads a CSV file (RFC 4180, UTF-8, a header row) as exported by a browser or another
 password manager, and adds one record per row.
@@ -198,7 +244,7 @@ password manager, and adds one record per row.
 
 The file is plaintext. tsync neither copies nor removes it.
 
-## 9. Conformance
+## 10. Conformance
 
 - The store holds no title, username, site or password in plaintext after `add`. Two records
   whose plaintexts differ in length by less than 256 bytes before padding may have envelopes of
@@ -223,3 +269,8 @@ The file is plaintext. tsync neither copies nor removes it.
   is reported dangling and `get` gives no code. Removing the login leaves the TOTP record.
 - A non-empty `totp` or an `otpauth` on a domain that does not list `totp` is refused and writes
   nothing.
+- Through the bridge: `match` for `https://login.example.com` lists a login for
+  `https://example.com` and no password; `fill` of a login for `https://other.com` with that
+  origin is refused `invalid`; any request other than `status`, `match`, `fill` or `save` is
+  refused `invalid`; on a locked vault `match` is refused `locked`. A message from an extension
+  the manifest does not name never reaches the bridge.
