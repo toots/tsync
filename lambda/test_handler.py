@@ -53,6 +53,10 @@ def event(token, sub="", query=None, accept=None, headers=None):
     return {"rawPath": path, "queryStringParameters": query or {}, "headers": headers}
 
 
+def streamed(h, resp):
+    return b"".join(h.stream_pieces(*resp["stream"]))
+
+
 def jpeg(w, h, marker=0xC0, precision=8, pad=0):
     """A frame header alone: SOI, APP0 segments holding `pad` bytes, a frame of
     `marker`, EOI."""
@@ -251,8 +255,11 @@ def test_media_file_share_opens_the_viewer(s3):
     assert fetch_url(s3, doc["url"]) == b"audiodata"
     body, _ = follow(s3, h.handler(event(tok, "f"), None))
     assert body == b"audiodata"
+    # Without streaming, a range is redirected too; with it, streamed.
+    assert follow(s3, h.handler(event(tok, "f", headers={"range": "bytes=5-"}), None))[0] == b"audiodata"
+    h.STREAMS = True
     resp = h.handler(event(tok, "f", headers={"range": "bytes=5-"}), None)
-    assert resp["statusCode"] == 206 and base64.b64decode(resp["body"]) == b"data"
+    assert resp["statusCode"] == 206 and streamed(h, resp) == b"data"
     resp = h.handler(event(tok, "download"), None)
     assert "attachment" in resp["headers"]["Location"]
     assert follow(s3, resp)[0] == b"audiodata"
@@ -412,14 +419,16 @@ def test_dir_per_file_json_and_redirect(s3):
     assert body == b"\xff\xd8imgdata" and key2 == cache_key
     after = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
     assert before == after
-    # A range is answered in place, inline unless a download.
+    # Where the platform streams, a range is answered in place, inline unless
+    # a download.
+    h.STREAMS = True
     resp = h.handler(event(tok, "f", {"path": "cover.jpg"}, headers={"range": "bytes=0-1"}), None)
-    assert resp["statusCode"] == 206 and base64.b64decode(resp["body"]) == b"\xff\xd8"
+    assert resp["statusCode"] == 206 and streamed(h, resp) == b"\xff\xd8"
     assert resp["headers"]["Content-Disposition"].startswith("inline;")
     resp = h.handler(
         event(tok, "f", {"path": "cover.jpg", "dl": "1"}, headers={"range": "bytes=2-"}), None
     )
-    assert base64.b64decode(resp["body"]) == b"imgdata"
+    assert streamed(h, resp) == b"imgdata"
     assert resp["headers"]["Content-Disposition"].startswith("attachment;")
     # A nested file resolves through its path.
     body, _ = follow(s3, h.handler(event(tok, "f", {"path": "live/track.flac"}), None))
@@ -440,28 +449,30 @@ def test_hls_playlist_through_p(s3):
     assert resp["headers"]["Content-Type"] == "application/vnd.apple.mpegurl"
     assert base64.b64decode(resp["body"]) == playlist
     assert resp["headers"]["Content-Disposition"].startswith("inline;")
-    # What the player resolves "seg 0.ts" to: a range is answered in place.
+    # What the player resolves "seg 0.ts" to: without streaming, a redirect
+    # with or without a range.
     seg = "p/my%20show/seg%200.ts"
-    resp = h.handler(event(tok, seg, headers={"range": "bytes=2-3"}), None)
-    assert resp["statusCode"] == 206, resp
-    assert resp["headers"]["Content-Range"] == "bytes 2-3/6"
-    assert base64.b64decode(resp["body"]) == b"da"
-    # A wider or open range is cut to the per-answer ceiling.
-    # Small enough, it is answered whole without a range.
+    for headers in ({}, {"range": "bytes=2-3"}):
+        assert follow(s3, h.handler(event(tok, seg, headers=headers), None))[0] == b"tsdata"
+    # Streaming, it is answered in place, in pieces.
+    h.STREAMS = True
+    h.STREAM_PIECE_BYTES = 4
     resp = h.handler(event(tok, seg), None)
     assert resp["statusCode"] == 200, resp
     assert resp["headers"]["Content-Type"] == "video/mp2t"
-    assert base64.b64decode(resp["body"]) == b"tsdata"
-    # A wider or open range is cut to the per-answer ceiling.
-    h.ANSWER_MAX_BYTES = 4
-    for r in ("bytes=1-", "bytes=1-5"):
+    assert list(h.stream_pieces(*resp["stream"])) == [b"tsda", b"ta"]
+    for r, cr, body in (
+        ("bytes=2-3", "bytes 2-3/6", b"da"),
+        ("bytes=1-", "bytes 1-5/6", b"sdata"),
+        ("bytes=-2", "bytes 4-5/6", b"ta"),
+    ):
         resp = h.handler(event(tok, seg, headers={"range": r}), None)
-        assert resp["headers"]["Content-Range"] == "bytes 1-4/6"
-        assert base64.b64decode(resp["body"]) == b"sdat"
+        assert resp["statusCode"] == 206 and resp["headers"]["Content-Range"] == cr
+        assert streamed(h, resp) == body
     assert h.handler(event(tok, seg, headers={"range": "bytes=6-"}), None)["statusCode"] == 416
-    # Larger, without a range: the usual redirect.
-    body, _ = follow(s3, h.handler(event(tok, seg), None))
-    assert body == b"tsdata"
+    # The playlist is still answered whole.
+    resp = h.handler(event(tok, "p/my%20show/index.m3u8"), None)
+    assert base64.b64decode(resp["body"]) == playlist
     assert h.handler(event(tok, "p/my%20show/nope.ts"), None)["statusCode"] == 404
     assert h.handler(event(tok, "p/%2E%2E/x"), None)["statusCode"] == 400
     assert h.handler(event(tok, "p/%ff"), None)["statusCode"] == 400
@@ -469,10 +480,25 @@ def test_hls_playlist_through_p(s3):
     assert h.handler(event(tok, "p"), None)["statusCode"] == 400
 
 
+def test_gcp_adapter_streams(s3):
+    from types import SimpleNamespace
+
+    h = load_handler()
+    h.STREAMS = True
+    h.STREAM_PIECE_BYTES = 4
+    tok = _folder_share(s3)
+    put_file(s3, "alb", "seg.ts", [("pppp-1111", b"tsdata")])
+    req = SimpleNamespace(path="/%s/p/seg.ts" % tok, args={}, headers={"Range": "bytes=1-"})
+    resp = h.gcp_handler(req)
+    assert resp.status_code == 206
+    assert resp.headers["Content-Range"] == "bytes 1-5/6"
+    assert list(resp.response) == [b"sdat", b"a"]
+
+
 def test_hls_playlist_too_large(s3):
     h = load_handler()
     tok = _folder_share(s3)
-    h.ANSWER_MAX_BYTES = 4
+    h.PLAYLIST_MAX_BYTES = 4
     put_file(s3, "alb", "big.m3u8", [("nnnn-8888", b"#EXTM3U")])
     assert h.handler(event(tok, "p/big.m3u8"), None)["statusCode"] == 413
     # Refused before it is assembled.
