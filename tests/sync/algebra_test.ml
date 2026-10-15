@@ -300,6 +300,25 @@ let check tally ~r ~l ~m =
             folders = List.sort compare s.folders;
           }
         in
+        (* What enacting starts from: L, each merged folder's content under the
+           folder it went into. *)
+        let rehomed =
+          sorted
+            {
+              files =
+                List.map
+                  (fun ((p : A.place), v) ->
+                    ({ p with parent = home p.parent }, v))
+                  l.files;
+              folders =
+                List.map
+                  (fun (i, (p : A.place)) ->
+                    (home i, { p with parent = home p.parent }))
+                  l.folders;
+            }
+        in
+        if read merged.start ~of_:[r; l; m] ~extra <> rehomed then
+          fail "the start is not L re-identified";
         if m = r && n <> sorted l then fail "2 identity (M = R)";
         if l = r && n <> sorted m then fail "2 identity (L = R)";
         List.iter
