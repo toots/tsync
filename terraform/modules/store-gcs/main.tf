@@ -170,6 +170,8 @@ resource "google_cloudfunctions2_function" "share" {
       PRESIGN_TTL = tostring(var.presign_ttl)
       MAX_BYTES   = tostring(var.max_share_bytes)
       STORE       = "gcs"
+      # object-store-common §6: Cloud Run's 32 MiB response, with a margin.
+      ANSWER_MAX_BYTES = tostring(16 * 1024 * 1024)
     }
   }
 }
