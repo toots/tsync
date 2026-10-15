@@ -187,7 +187,7 @@ Extensions:
 |---|---|
 | [extensions](extensions/README.md) | What an extension is: packaging, records under `/.tsync-ext/`, the fold, host adapters and capabilities. |
 | [extensions/vault](extensions/vault.md) | The data key, the passphrase, the keyring and its slots, the record envelope, unlocking, rotation. |
-| [extensions/wifi](extensions/wifi.md) | Wifi networks: the record, its fold, `WIFI:` codes, installing on each host, commands. |
+| [extensions/wifi](extensions/wifi/README.md) | Wifi networks, host-independent: the record, its fold, `WIFI:` codes, capabilities and managed networks, commands. Per host: [macos](extensions/wifi/macos.md), [android](extensions/wifi/android.md), [linux](extensions/wifi/linux.md). |
 
 ### 4.4 Data models and algorithms
 
@@ -289,7 +289,7 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 | http-proxy wire protocol | [backends/http-proxy](backends/http-proxy.md) |
 | Uplink lease messages | [uplink-governor](algorithms/uplink-governor.md) |
 | Host-specific state (macOS, Android) | [file-provider](frontends/file-provider.md), [android-app](frontends/android-app.md) |
-| Vault keyring and record envelope; extension records | [extensions/vault](extensions/vault.md), [extensions/wifi](extensions/wifi.md) |
+| Vault keyring and record envelope; extension records | [extensions/vault](extensions/vault.md), [extensions/wifi](extensions/wifi/README.md) |
 
 ## 8. Building an implementation
 

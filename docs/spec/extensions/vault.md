@@ -140,7 +140,7 @@ ad       = "tsync-vault/" extension-name
 ```
 
 - `ciphertext ‖ tag = XChaCha20-Poly1305-Seal(K, nonce, plaintext, ad)`. The plaintext is the
-  extension's record ([wifi §2](wifi.md#2-record)).
+  extension's record ([wifi §2](wifi/README.md#2-record)).
 - The associated data binds a record to its extension, so a body moved into another extension's
   folder does not open. It does not bind the record id: a fold may rename a record without
   rewriting it ([README §4.2](README.md#42-the-fold)).

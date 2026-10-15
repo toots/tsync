@@ -8,7 +8,7 @@ can do for one. It does not own the encryption every extension's records share
 ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)), or the security rules for keys and
 passphrases ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)).
 
-Extensions: [wifi](wifi.md).
+Extensions: [wifi](wifi/README.md).
 
 ---
 
@@ -87,9 +87,20 @@ domain's names to a user or another party omits it, and only the extension layer
 
 ## 5. Host adapters
 
-- A host adapter belongs to one extension and one frontend host (`fuse` for Linux,
-  `file_provider` for macOS, `android`). It declares a set of **capabilities**, drawn from a
-  vocabulary the extension's spec defines.
+- A host adapter belongs to one extension and one host: `linux`, `macos` or `android`
+  ([README §5](../README.md#5-hosts-one-core-several-compositions)). It runs in the owner and
+  declares a set of **capabilities**, drawn from a vocabulary the extension's spec defines.
+- An extension's spec is host-independent: it defines each capability, and what the extension
+  does on a host that lacks it. Every capability is optional. Each host has its own spec,
+  `extensions/<name>/<host>.md`, which owns what that host declares and how it realises it.
+- Each declared capability carries an **interaction**: `silent` (no user gesture), `confirm` (the
+  user approves, one gesture per call) or `authenticate` (the user proves who they are, once per
+  item). Work an extension starts by itself runs in the background only through `silent`
+  capabilities. Anything else waits for a command the user ran, or for the host's app in the
+  foreground.
+- A host declares a capability only once it has been seen working on that host, from the process
+  that will run it. A capability not yet seen is listed in the host's spec as planned, and not
+  declared.
 - A command or action that needs a capability the host did not declare is refused INVALID
   (`invalid`), naming the capability. It is never attempted.
 - An extension whose spec defines no capabilities has no host adapter, and every command of it
@@ -120,3 +131,5 @@ domain's names to a user or another party omits it, and only the extension layer
 - A fold of a record whose copies need plaintext does nothing while the vault is locked, and
   settles them after unlock.
 - A command needing an undeclared capability is refused `invalid` and has no effect.
+- Work an extension starts by itself never calls a capability whose interaction is not
+  `silent`.
