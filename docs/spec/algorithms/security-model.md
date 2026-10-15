@@ -156,7 +156,7 @@ The share operation surface is in [05-ops-config §4.11](../05-ops-config.md#411
 
 A server serves a manifest only if it passes the validity rule of [data-model/backend §2.18](../data-model/backend.md#218-share) (version 1, a valid domain name, a file key inside that domain's manifest area, a valid folder id) and, in addition, names a domain this server serves (on a listener: the domain of the route asked). Otherwise it answers as for a corrupt manifest (502) or, for another domain, an absent token (404).
 
-Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)): a disowned marker is absent, and a removed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400).
+Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)): a disowned marker is absent, and a removed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400). In a share of the domain root, the reserved name `.tsync-ext` ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)) is absent: listings and archives omit it, and a path through it answers 404. A creator refuses a share at or below it, so a manifest naming one was not written by tsync.
 
 ### 6.4 The share space on a listener
 

@@ -29,7 +29,9 @@ channel.
 | **Host adapter** | the frontend host, optional | what this platform can do with the records (§5) |
 
 An extension has a **name**: `1*( "a"–"z" | "0"–"9" )`, starting with a letter. `vault` is
-reserved for the vault itself and is not an extension name.
+reserved for the vault itself. A name is also the extension's CLI group (§6), so it MUST NOT be
+a top-level command or a frontend's CLI group
+([07 §5.3](../07-daemon-cli.md#53-commands), [08 §2.1](../08-frontends.md#21-frontend-descriptor)).
 
 ## 3. Packaging
 
@@ -55,6 +57,11 @@ reserved for the vault itself and is not an extension name.
   the record is created ([01 §2.10](../01-core.md#210-random-identifiers)), unless the
   extension's spec derives it from the record under K, so that two machines adding the same
   thing meet at one name. A leaf never carries a user-visible label: names are not encrypted.
+- Records are read through the read path
+  ([04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy)). On a lazy tree, a verb or
+  fold first pulls the folders it reads (`/.tsync-ext/vault/` and its extension's) and fetches
+  each body it needs; a failed pull or fetch fails the verb, and leaves a fold for the next
+  arrival. A verb never answers from a partial set of records.
 - Every record body is a vault envelope ([vault §5](vault.md#5-record-envelope)). An extension
   never stores plaintext.
 
@@ -84,9 +91,10 @@ settle them into one record (or, where both must survive, several).
 A fold most extensions share. The extension names its record's **key fields**: the ones a
 concurrent change must never silently replace. A record id and its conflicted copies fold as:
 
-1. Decrypt each file. A file that does not open is left as it is.
+1. Decrypt each file. A file that does not open is left as it is, and is in no group.
 2. Group the files by their key fields. The **primary group** holds the file at the record id,
-   or the greatest file (rule 3) when none is there.
+   or the greatest file (rule 3) when no file is there. When the file there does not open, there
+   is no primary group: the record id keeps it, and every group goes to rule 5.
 3. In each group the greatest file is the one with the highest `modified`; on a tie, the one
    whose body is bytewise greatest.
 4. The primary group's greatest file is moved to the record id, unless it is already there, and
@@ -131,8 +139,11 @@ domain's names to a user or another party omits it, and only the extension layer
 ## 6. Commands and actions
 
 - An extension registers CLI verbs as `tsync <name> <verb>`, and request-handler actions named
-  `<name>_<verb>` ([08 §3.3](../08-frontends.md#33-actions)). Each verb declares its access class
-  ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)).
+  `<name>_<verb>` ([08 §3.3](../08-frontends.md#33-actions)). Every verb, the vault's included,
+  is of access class **owner** and needs a **serving** owner
+  ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)): K may live only in the owner's memory, so
+  a command that took ownership for its run would lose it on exit. With no owner serving, a verb
+  is refused UNREACHABLE (`unreachable`) and tells the user to start tsync.
 - A verb that needs plaintext, on a domain whose vault is locked, is refused UNPREPARED/locked
   (`locked`, [failure-model §7.2](../algorithms/failure-model.md#72-client-error-codes)).
 - Verbs and actions return plaintext only where the extension's spec says so. Nothing an
@@ -153,3 +164,10 @@ domain's names to a user or another party omits it, and only the extension layer
 - A command needing an undeclared capability is refused `invalid` and has no effect.
 - Work an extension starts by itself never calls a capability whose interaction is not
   `silent`.
+- A grouped fold whose record id holds a body that does not open leaves that body in place and
+  moves each group's newest copy to its digest id.
+- An extension name equal to a top-level command or a frontend's CLI group is refused.
+- On a lazy tree with the extension's records evicted, a listing verb fetches them and answers
+  every record, or fails; it never answers a partial list.
+- With no owner serving, every vault and extension verb is refused `unreachable` and writes
+  nothing.

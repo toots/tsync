@@ -112,7 +112,7 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
 ```json
 { "name": "<device model, else 'android'>",
   "domains": [ { "name": "Family Photos", "versioning": true,
-    "maxCache": "2G", "frontends": ["android"],
+    "maxCache": "2G", "frontends": ["android"], "extensions": [],
     "backends": [ { "type": "http-proxy", "name": "server", "role": "main",
                     "url": "https://tsync.example.org", "secret": "…" } ] } ] }
 ```

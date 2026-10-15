@@ -117,11 +117,13 @@ fold ([README §4.2](README.md#42-the-fold)) settles it:
   one id, the slot whose canonical JSON is bytewise greatest), written canonically at `keyring`.
   The copies are removed. The fold needs no key.
 - **Different `keyId`.** Two inits raced. The keyring at `keyring` is the domain's vault; the
-  copy is not folded and is reported. The machine that made the copy holds the copy's K in its
-  keystore: when that machine is unlocked with the domain's passphrase (§6), it re-encrypts
-  every record whose envelope names the copy's key id under the domain's K, then removes the copy
-  and its own old K. Only that machine holds the old K, so no other client rewrites those
-  records.
+  copy is not folded and is reported. Each machine that holds the copy's K (the one that made
+  it, and any unlocked from it before the race settled) keeps it cached: when that machine is
+  unlocked with the domain's passphrase (§6), it re-encrypts every record whose envelope names
+  the copy's key id under the domain's K, then removes the copy and its own old K. Two machines
+  doing so concurrently leave conflicted copies of equal plaintext, which the extension's fold
+  settles. Once no machine holding the copy's K is left, the records under it cannot be read;
+  status keeps reporting them.
 
 A slot removed concurrently with another keyring change comes back from the union. Status lists
 the slots, so the user sees it.
@@ -136,19 +138,20 @@ envelope = "tsv1"          4 bytes, magic
            nonce          24 bytes, from the CSPRNG for each write
            ciphertext      the plaintext's length
            tag            16 bytes
-ad       = "tsync-vault/" extension-name
+ad       = "tsync-vault/" extension-name "/" key id in 16 lowercase hex
 ```
 
 - `ciphertext ‖ tag = XChaCha20-Poly1305-Seal(K, nonce, plaintext, ad)`. The plaintext is the
   extension's record ([totp §2](totp.md#2-record)).
-- The associated data binds a record to its extension, so a body moved into another extension's
-  folder does not open. It does not bind the record id: a fold may rename a record without
+- The associated data binds a record to its extension and to the key id its header names, so a
+  body moved into another extension's folder, or with an altered key id, does not open. It does not bind the record id: a fold may rename a record without
   rewriting it ([README §4.2](README.md#42-the-fold)).
 - Each write of a record draws a new nonce, so a record written twice has two different bodies.
 - A body shorter than 52 bytes, with another magic, or failing authentication under K is
   CORRUPT: it is reported by name, kept, and never overwritten by a fold. A body naming another
-  key id than the keyring's is not CORRUPT: it waits for the step of §4.3, and is reported as
-  under another key.
+  key id than the keyring's is **under another key** while a keyring copy (§4.3) names that key
+  id: it waits for the step of §4.3, and is reported as such. With no such copy it is CORRUPT:
+  this version re-keys nothing (§7), so no other key id is legitimate.
 
 ## 6. Unlocking and the keystore
 
@@ -188,8 +191,8 @@ A machine's vault for a domain is **unlocked** when it holds K for the keyring's
 
 ## 8. Commands
 
-Every verb is of access class **owner**
-([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)): K may live only in the owner's memory.
+Every verb needs a serving owner ([README §6](README.md#6-commands-and-actions)): K may live
+only in the owner's memory.
 
 | verb / action | needs K | does |
 |---|---|---|
@@ -236,3 +239,7 @@ Every verb is of access class **owner**
 - After a passphrase change, only the new passphrase unlocks the current keyring, and every
   record still opens.
 - Lock removes K: a restart of the owner finds the vault locked.
+- An envelope whose key id is altered does not open under K. With no keyring copy naming that
+  key id it is reported CORRUPT, not under another key.
+- Two machines holding a losing keyring's K both unlock with the domain's passphrase: every record
+  ends under the domain's K, one file per record, after the folds.

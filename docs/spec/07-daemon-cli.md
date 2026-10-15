@@ -157,7 +157,7 @@ class**:
 |---|---|---|---|---|
 | **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop` | n/a | n/a | n/a |
 | **read** | `ls`, `versions` (listing), `export` | reads stores and permitted local files | same | same |
-| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `mirror`, `void-entry`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
+| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `mirror`, `void-entry`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group), every `vault` and extension verb (`<extension> <verb>`), which needs a serving owner and is refused `unreachable` without one ([extensions §6](extensions/README.md#6-commands-and-actions)) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
 
 "Serving" means the holder record names a socket and the socket answers. A refused connection does
 not by itself mean the owner is gone: some platforms refuse a connection while the socket's backlog
@@ -638,6 +638,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
 | `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
 | `share [PATH] [--expires DUR] [--token HEX] \| --preview TOKEN\|URL \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout as soon as the share exists, expiry on stderr; the preview image is then made by the owner in the background, or by this process before it exits when it ran the request itself; `--preview` makes it again and waits; `--revoke` exits 1 when no share of the domain held the token |
+| `vault <verb>`, `<extension> <verb>` | owner, serving only | [extensions §6](extensions/README.md#6-commands-and-actions), [vault §8](extensions/vault.md#8-commands), and each extension's spec |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
 | `build-info` | none | compiled frontends, drivers and extensions, whether the vault is compiled in, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
@@ -781,7 +782,7 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 - Main loop: a number alone edits that domain; `[a]dd`, `[r]emove N`, `[g]lobals`, `[w]rite`,
   `[q]uit`. No answer is ever a letter and a number where a number says enough. A domain prompts for
   its name, `versioning` (default true), `readOnly`, `maxCache` (default 1 GiB),
-  then its backends and its frontends.
+  then its backends, its frontends and its extensions.
 - **Backends** are a list edited the same way (a number edits, `[a]dd`, `[r]emove N`, `[d]one`). An
   empty list goes straight to the prompts of its first backend, since a domain needs one. Per
   backend: type (default `local`); field prompts from the driver's option spec; role default
@@ -797,6 +798,8 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   (default no). A frontend the descriptor does not offer here (another system's, or one its host
   configures itself, such as `android`) is never asked about, and an entry of that type already in
   the file is kept as it is.
+- **Extensions** are one yes-or-no question per extension compiled in, default no on a new
+  domain, else whether the domain lists it. The answers write `extensions`, `[]` when none.
 - **Advanced mode** (`tsync config --edit --advanced`). The keys [05 §2.1](05-ops-
   config.md#21-schema-and-validation) marks *advanced* are asked about only in this mode, after the
   others of their object. In the default mode they are never asked about and are kept as the file
