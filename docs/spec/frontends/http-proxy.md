@@ -276,6 +276,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 
 - **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
 - In folder mode, an HLS playlist plays like a video, in a video element whose source is its `p/<path>` URL, so the segments, variant playlists and keys it names by relative URI are fetched by the browser from the same share. A browser that cannot play HLS by itself (`canPlayType("application/vnd.apple.mpegurl")` empty) is shown a sentence saying so, never an empty player. No script is loaded to play it.
+- In both modes, audio and video play from their `f` or `f?path=…` URL, not from the URL `json` returns, so their ranges reach the share's own origin (object-store-common §6).
 - **File mode** shows no listing: it asks `f?json=1` for the URL, displays the file in the page by its preview kind without starting playback, and offers `download`. The page carries nothing of the file but its name.
 - In either mode, a browser that reports no PDF viewer (`navigator.pdfViewerEnabled` false, as on phones) is sent to the file's download (`download` in file mode, `f?path=…&dl=1` in folder mode) and shown a sentence saying so beside the download, never an empty frame.
 

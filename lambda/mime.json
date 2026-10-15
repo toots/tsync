@@ -59,7 +59,7 @@
  "svg": "image/svg+xml",
  "swift": "text/plain; charset=utf-8",
  "toml": "text/plain; charset=utf-8",
- "ts": "text/plain; charset=utf-8",
+ "ts": "video/mp2t",
  "tsv": "text/plain; charset=utf-8",
  "tsx": "text/plain; charset=utf-8",
  "txt": "text/plain; charset=utf-8",

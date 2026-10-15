@@ -57,8 +57,8 @@ a4 / [text/html] -> 200 application/vnd.apple.mpegurl | attachment; filename="in
 seg 0.ts
 d1 /p/index.m3u8 -> 200 application/vnd.apple.mpegurl | inline; filename="index.m3u8"; filename*=UTF-8''index.m3u8 | #EXTM3U
 seg 0.ts
-d1 /p/seg%200.ts -> 200 text/plain; charset=utf-8 | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
-d1 /p//seg%200.ts -> 200 text/plain; charset=utf-8 | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
+d1 /p/seg%200.ts -> 200 video/mp2t | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
+d1 /p//seg%200.ts -> 200 video/mp2t | inline; filename="seg 0.ts"; filename*=UTF-8''seg%200.ts | tsdata
 d1 /p/nope.ts -> 404 text/plain; charset=utf-8 | - | not found
 d1 /p/%2E%2E/x -> 400 text/plain; charset=utf-8 | - | bad path
 d1 /p/%zz -> 400 text/plain; charset=utf-8 | - | bad path

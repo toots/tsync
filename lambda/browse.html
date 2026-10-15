@@ -400,7 +400,8 @@
           container: body,
           tracks,
           start: f,
-          resolveUrl: signedUrl,
+          // From the share's origin, so its ranges reach the function.
+          resolveUrl: async (name) => fileUrl(name, ""),
           onTrack: (t) => {
             document.getElementById("pvt").textContent = t.name;
             document.getElementById("pvdl").href = fileUrl(t.name, "&dl=1");
@@ -429,7 +430,10 @@
         body.innerHTML = "Loading…";
         let url;
         try {
-          url = await signedUrl(f.name);
+          url =
+            k === "audio" || k === "video"
+              ? fileUrl(f.name, "")
+              : await signedUrl(f.name);
         } catch (e) {
           body.textContent = "Preview failed (" + e.message + ")";
           return;

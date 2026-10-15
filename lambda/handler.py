@@ -41,7 +41,7 @@ import urllib.parse
 import zipfile
 
 import manifest
-from share_common import ShareError, cache_prefix
+from share_common import ShareError, cache_prefix, content_disposition
 
 SHARES_PREFIX = os.environ.get("SHARES_PREFIX", "tsync/shares/")  # guard: keys must start with this
 # A token is hex, so nothing published can ever land in here.
@@ -150,6 +150,26 @@ def child_objects(ns_prefix):
     return out
 
 
+# ponytail: per-instance memo, so a player walking a folder of N segments
+# lists it once rather than once per segment; a name added within the TTL
+# 404s until it lapses. Read the folder index (02 §2.10) if a first walk of a
+# huge folder is too slow.
+CHILDREN_TTL = 30
+_children = {}
+
+
+def cached_children(ns_prefix):
+    now = time.time()
+    hit = _children.get(ns_prefix)
+    if hit and now - hit[0] < CHILDREN_TTL:
+        return hit[1]
+    if len(_children) > 256:
+        _children.clear()
+    out = child_objects(ns_prefix)
+    _children[ns_prefix] = (now, out)
+    return out
+
+
 def resolve(dir_prefix, rel):
     """Walk [rel] (decoded, '/'-separated) from the shared folder by matching
     names. Returns ('dir', namespace_prefix) or ('file', manifest_key), else
@@ -158,7 +178,7 @@ def resolve(dir_prefix, rel):
     for part in [p for p in rel.split("/") if p]:
         if kind != "dir":
             return None
-        match = next((c for c in child_objects(loc) if c[0] == part), None)
+        match = next((c for c in cached_children(loc) if c[0] == part), None)
         if match is None:
             return None
         _, key, is_dir, _ = match
@@ -296,9 +316,8 @@ def mime_type(name):
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
-# object-store-common §6: what `p/` answers itself rather than redirecting.
-PLAYLIST_MAX_BYTES = 1024 * 1024
-RANGE_MAX_BYTES = 4 * 1024 * 1024
+# object-store-common §6: the most one answer of file bytes carries.
+ANSWER_MAX_BYTES = 4 * 1024 * 1024
 
 
 def preview_kind(mime):
@@ -401,7 +420,11 @@ def download_artifact(token, share, m=None):
     )
 
 
-def file_answer(cache_key, name, size, as_download, want_json):
+def file_answer(cache_key, name, size, as_download, want_json, range_header=None):
+    if not want_json:
+        r = range_response(cache_key, name, size, range_header, as_download)
+        if r:
+            return r
     ctype = mime_type(name)
     url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
     if want_json:
@@ -411,11 +434,11 @@ def file_answer(cache_key, name, size, as_download, want_json):
     return redirect(url)
 
 
-def serve_shared_file(token, share, want_json):
+def serve_shared_file(token, share, want_json, range_header):
     m = file_manifest(share["key"])
     return file_answer(
         artifact(token, share, m), share["filename"], m.size,
-        as_download=False, want_json=want_json,
+        as_download=False, want_json=want_json, range_header=range_header,
     )
 
 
@@ -452,23 +475,30 @@ def list_response(share, path):
 
 
 def shared_file(share, path):
-    """(relative path, manifest, cached key) of a file under a folder share."""
+    """(relative path, manifest) of a file under a folder share."""
     rel = safe_rel(path)
     if not rel:
         raise ShareError(400, "not a file")
     r = resolve(shared_folder(share), rel)
     if not r or r[0] != "file":
         raise ShareError(404, "file not found")
-    m = file_manifest(r[1])
+    return rel, file_manifest(r[1])
+
+
+def assembled(share, m):
+    """The cached key of a shared file's bytes, assembled on first use."""
     cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
         assemble(m, chunk_prefix(share), cache_key)
-    return rel, m, cache_key
+    return cache_key
 
 
-def serve_file(share, path, as_download, want_json):
-    rel, m, cache_key = shared_file(share, path)
-    return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
+def serve_file(share, path, as_download, want_json, range_header):
+    rel, m = shared_file(share, path)
+    return file_answer(
+        assembled(share, m), os.path.basename(rel), m.size,
+        as_download, want_json, range_header,
+    )
 
 
 def parse_range(size, header):
@@ -504,33 +534,37 @@ SERVED_HEADERS = {
 }
 
 
-def range_response(cache_key, name, size, header):
-    """A range of a file, at most RANGE_MAX_BYTES of it; None, for a redirect,
-    when the request names no range or a bounded one wider than that, which a
-    client may not accept cut."""
+def bytes_response(status, name, as_download, body, headers):
+    return {
+        "statusCode": status,
+        "headers": dict(
+            SERVED_HEADERS,
+            **{
+                "Content-Type": mime_type(name) or "application/octet-stream",
+                "Content-Disposition": content_disposition(not as_download, name),
+                "Accept-Ranges": "bytes",
+            },
+            **headers,
+        ),
+        "body": base64.b64encode(body).decode(),
+        "isBase64Encoded": True,
+    }
+
+
+def range_response(cache_key, name, size, header, as_download=False):
+    """A range of a file, at most ANSWER_MAX_BYTES of it; None when the request
+    names no range."""
     r = parse_range(size, header)
     if r == "whole":
         return None
     if r == "unsatisfiable":
         return {"statusCode": 416, "headers": {"Content-Range": "bytes */%d" % size}, "body": ""}
     a, b = r
-    if header.endswith("-"):
-        b = min(b, a + RANGE_MAX_BYTES - 1)
-    elif b - a + 1 > RANGE_MAX_BYTES:
-        return None
-    return {
-        "statusCode": 206,
-        "headers": dict(
-            SERVED_HEADERS,
-            **{
-                "Content-Type": mime_type(name) or "application/octet-stream",
-                "Content-Range": "bytes %d-%d/%d" % (a, b, size),
-                "Accept-Ranges": "bytes",
-            },
-        ),
-        "body": base64.b64encode(store.get_range(cache_key, a, b)).decode(),
-        "isBase64Encoded": True,
-    }
+    b = min(b, a + ANSWER_MAX_BYTES - 1)
+    return bytes_response(
+        206, name, as_download, store.get_range(cache_key, a, b),
+        {"Content-Range": "bytes %d-%d/%d" % (a, b, size)},
+    )
 
 
 def serve_path(share, raw, range_header):
@@ -538,25 +572,24 @@ def serve_path(share, raw, range_header):
     (object-store-common §6): a player resolves a playlist's relative URIs
     against the URL it finally read, and a browser's HLS player does not take
     segments through a redirect to another origin."""
+    # unquote keeps a malformed escape as is, which the http-proxy refuses.
+    if re.search(r"%(?![0-9A-Fa-f]{2})", raw):
+        raise ShareError(400, "bad path")
     try:
         parts = [urllib.parse.unquote(p, errors="strict") for p in raw.split("/") if p]
     except UnicodeDecodeError:
         raise ShareError(400, "bad path")
     if any("/" in p for p in parts):
         raise ShareError(404, "file not found")
-    rel, m, cache_key = shared_file(share, "/".join(parts))
+    rel, m = shared_file(share, "/".join(parts))
     name = os.path.basename(rel)
-    if mime_type(name) != HLS_MIME:
-        return range_response(cache_key, name, m.size, range_header) or file_answer(
-            cache_key, name, m.size, as_download=False, want_json=False
-        )
-    if m.size > PLAYLIST_MAX_BYTES:
+    small = m.size <= ANSWER_MAX_BYTES
+    if mime_type(name) == HLS_MIME and not small:
         raise ShareError(413, "playlist too large")
-    return {
-        "statusCode": 200,
-        "headers": dict(SERVED_HEADERS, **{"Content-Type": HLS_MIME}),
-        "body": get_bytes(cache_key).decode("utf-8", errors="replace"),
-    }
+    cache_key = assembled(share, m)
+    if small and not range_header:
+        return bytes_response(200, name, False, get_bytes(cache_key), {})
+    return file_answer(cache_key, name, m.size, False, False, range_header)
 
 
 PREVIEW_FETCHERS = (
@@ -677,7 +710,10 @@ def handler(event, context):
         if sub == "download":
             return download_artifact(token, share)
         if not is_dir and sub == "f":
-            return serve_shared_file(token, share, want_json=q.get("json") == "1")
+            return serve_shared_file(
+                token, share, want_json=q.get("json") == "1",
+                range_header=(event.get("headers") or {}).get("range"),
+            )
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
         if is_dir and sub == "p":
@@ -690,6 +726,7 @@ def handler(event, context):
             return serve_file(
                 share, q.get("path", ""),
                 as_download=q.get("dl") == "1", want_json=q.get("json") == "1",
+                range_header=(event.get("headers") or {}).get("range"),
             )
         raise ShareError(404, "not found")
     except ShareError as e:
