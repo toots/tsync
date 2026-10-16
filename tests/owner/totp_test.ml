@@ -25,7 +25,6 @@ let () =
   Unix.putenv "XDG_CACHE_HOME" (Filename.concat root "cache")
 
 let socket = Filename.concat root "data/tsync/test.sock"
-let d = Domain_name.v "docs"
 
 let config =
   Tsync_config.Config.of_string
@@ -36,15 +35,18 @@ let config =
   {"name":"plain","symlinks":"keep","versioning":true,"extensions":["passwords"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/plain"}]},
   {"name":"spare","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
-   "backends":[{"type":"local","name":"main","role":"main","path":"%s/spare"}]}]}|}
-       root root root)
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/spare"}]},
+  {"name":"race","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/race"}]}]}|}
+       root root root root)
 
 let knowledge =
   { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
 
-let client name : (module Engine.S) =
+let client ?(domain = "docs") ?(store = "store") name : (module Engine.S) =
+  let d = Domain_name.v domain in
   let data_dir = Filename.concat root (name ^ "/data") in
-  let store = Local.create ~name:"main" (Filename.concat root "store") in
+  let store = Local.create ~name:"main" (Filename.concat root store) in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
       [{ name = "main"; role = Main; store }]
@@ -121,8 +123,8 @@ let listing ?filter label =
           corrupt
     | _ -> answer label r
 
-let added label uri =
-  let r = ask [("action", "totp_add"); ("uri", uri)] in
+let added ?domain label uri =
+  let r = ask ?domain [("action", "totp_add"); ("uri", uri)] in
   match field r "id" with
     | Some id ->
         p "%-36s %s" label (show_id id);
@@ -196,13 +198,13 @@ let b_edit (module B : Engine.S) (key_id, key) id f =
     (V.Envelope.seal ~key ~key_id ~extension:"totp" (V.Totp.to_string (f r)))
 
 (* The owner's sync until it owes nothing: what it changed is then in the store. *)
-let rec settle_owner n =
-  let r = ask [("action", "sync")] in
+let rec settle_owner ?(domain = "docs") n =
+  let r = ask ~domain [("action", "sync")] in
   match member r "pending" with
     | Some (`Int 0) -> ()
     | _ when n > 0 ->
         Rt.sleep 0.1;
-        settle_owner (n - 1)
+        settle_owner ~domain (n - 1)
     | _ -> p "  the owner still owes uploads"
 
 (* One edit on each side while the owner is paused, then the owner arrives. *)
@@ -259,7 +261,7 @@ let () =
               ("issuer", "x");
             ] );
           ("remove", [("action", "totp_remove"); ("id", String.make 32 '0')]);
-          ("export", [("action", "totp_export")]);
+          ("export", [("action", "totp_export"); ("passphrase", passphrase)]);
         ];
       answer "unlock"
         (ask [("action", "vault_unlock"); ("passphrase", passphrase)]);
@@ -298,7 +300,14 @@ let () =
       answer "remove an absent id"
         (ask [("action", "totp_remove"); ("id", String.make 32 '0')]);
       listing "list";
-      (match member (ask [("action", "totp_export")]) "uris" with
+      answer "export without a passphrase" (ask [("action", "totp_export")]);
+      answer "export, a wrong passphrase"
+        (ask [("action", "totp_export"); ("passphrase", String.make 26 '0')]);
+      (match
+         member
+           (ask [("action", "totp_export"); ("passphrase", passphrase)])
+           "uris"
+       with
         | Some (`List uris) ->
             p "export";
             List.iter (function `String u -> p "  %s" u | _ -> ()) uris
@@ -336,7 +345,11 @@ let () =
          otpauth://totp/Raw, Inc:r?secret=MFRGGZDFMZTWQ2LK";
       listing "list";
       let exported =
-        match member (ask [("action", "totp_export")]) "uris" with
+        match
+          member
+            (ask [("action", "totp_export"); ("passphrase", passphrase)])
+            "uris"
+        with
           | Some (`List uris) ->
               String.concat "\n"
                 (List.filter_map
@@ -344,11 +357,20 @@ let () =
                    uris)
           | _ -> ""
       in
-      ignore (ask ~domain:"spare" [("action", "vault_init")]);
+      let spare =
+        Option.get
+          (field (ask ~domain:"spare" [("action", "vault_init")]) "passphrase")
+      in
+      answer "export spare with docs' passphrase"
+        (ask ~domain:"spare"
+           [("action", "totp_export"); ("passphrase", passphrase)]);
       imported ~domain:"spare" "an export into an empty domain" exported;
       p "%-36s %b" "  the same records"
         (match
-           member (ask ~domain:"spare" [("action", "totp_export")]) "uris"
+           member
+             (ask ~domain:"spare"
+                [("action", "totp_export"); ("passphrase", spare)])
+             "uris"
          with
           | Some (`List uris) ->
               String.concat "\n"
@@ -451,6 +473,60 @@ let () =
               (fun (e : B.entry) -> e.name)
               (B.list_children ".tsync-ext/vault")));
       B.drain ~grace:10. ();
+      p "== two inits race; the owner's loses";
+      let race = client ~domain:"race" ~store:"race" "R" in
+      let (module R) = race in
+      R.start ~background:false ();
+      let ask_race fields = ask ~domain:"race" fields in
+      ignore (ask_race [("action", "vault_init")]);
+      ignore
+        (added ~domain:"race" "  the owner adds under its K"
+           "otpauth://totp/Race:a?secret=JBSWY3DPEHPK3PXP");
+      settle_owner ~domain:"race" 100;
+      (* What the race leaves: B's keyring at keyring, the owner's beside it. *)
+      ignore (R.resync ());
+      let path = ".tsync-ext/vault/keyring" in
+      put race ".tsync-ext/vault/keyring (conflicted copy from test)"
+        (read_file race path);
+      let won = V.Passphrase.generate () in
+      let _, keyring = V.Keyring.create ~now:0 won in
+      put race path (V.Keyring.to_string keyring);
+      R.drain ~grace:10. ();
+      settle_owner ~domain:"race" 100;
+      let status label =
+        let st = ask_race [("action", "vault_status")] in
+        p "  %-34s %s copies=%d" label
+          (Option.get (field st "vault"))
+          (match member st "copies" with
+            | Some (`List l) -> List.length l
+            | _ -> -1)
+      in
+      status "status";
+      answer "  list" (ask_race [("action", "totp_list")]);
+      answer "  unlock with the winner's passphrase"
+        (ask_race
+           [
+             ("action", "vault_unlock");
+             ("passphrase", V.Passphrase.to_string won);
+           ]);
+      (match member (ask_race [("action", "totp_list")]) "records" with
+        | Some (`List rows) ->
+            List.iter
+              (fun row ->
+                p "  list: %S %S"
+                  (Option.get (field row "issuer"))
+                  (Option.get (field row "account")))
+              rows
+        | _ -> p "  list failed");
+      status "status";
+      settle_owner ~domain:"race" 100;
+      ignore (R.resync ());
+      p "  the vault folder: %s"
+        (String.concat " "
+           (List.map
+              (fun (e : R.entry) -> e.name)
+              (R.list_children ".tsync-ext/vault")));
+      R.drain ~grace:10. ();
       ignore (ask [("action", "stop")]);
       p "owner exit status %d" (Rt.Promise.await owner));
   Fs.rm_rf root

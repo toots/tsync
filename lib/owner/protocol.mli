@@ -261,7 +261,8 @@ type _ request =
       -> unit request
   | Totp_remove : string -> unit request
   | Totp_import : string -> totp_imported request  (** the text of a file *)
-  | Totp_export : string list request  (** one URI per record *)
+  | Totp_export : string -> string list request
+      (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed
 

@@ -24,8 +24,7 @@ let wrapped_size = Crypto.key_size + Crypto.tag_size
 let slot_id = function Passphrase { id; _ } | Unknown { id; _ } -> id
 
 let is_hex16 s =
-  String.length s = 16
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
+  String.length s = 16 && String.for_all Tsync_core.Names.is_hexlower s
 
 let b64 s = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet s
 
@@ -120,10 +119,27 @@ let of_string s =
     | exception (Failure msg | Yojson.Json_error msg) -> Error msg
     | exception Yojson.Safe.Util.Type_error (msg, _) -> Error msg
 
+let max_slots = 8
+
+(* §4.2: the slot comes from the store; Argon2id is undefined below RFC 9106's
+   floor. *)
 let within_limits kdf =
-  kdf.mem_kib <= max_mem_kib
-  && kdf.iterations <= max_iterations
+  kdf.parallelism >= 1
   && kdf.parallelism <= max_parallelism
+  && kdf.iterations >= 1
+  && kdf.iterations <= max_iterations
+  && kdf.mem_kib >= 8 * kdf.parallelism
+  && kdf.mem_kib <= max_mem_kib
+
+(* §4.2: the passphrase slots one unlock derives for, in slot id order. *)
+let derivable t =
+  List.filteri
+    (fun i _ -> i < max_slots)
+    (List.filter_map
+       (function
+         | Passphrase { kdf; _ } as s when within_limits kdf -> Some s
+         | _ -> None)
+       (sort_slots t.slots))
 
 let kek kdf passphrase =
   Crypto.argon2id ~mem_kib:kdf.mem_kib ~iterations:kdf.iterations
@@ -150,21 +166,22 @@ let create ?params ~now passphrase =
   )
 
 let unusable t =
+  let derived = List.map slot_id (derivable t) in
   List.filter_map
     (function
-      | Passphrase { id; kdf; _ } when not (within_limits kdf) -> Some id
+      | Passphrase { id; _ } when not (List.mem id derived) -> Some id
       | _ -> None)
-    t.slots
+    (sort_slots t.slots)
 
 let unlock t passphrase =
   List.find_map
     (function
-      | Passphrase { id; kdf; nonce; wrapped; _ } when within_limits kdf ->
+      | Passphrase { id; kdf; nonce; wrapped; _ } ->
           Crypto.open_ ~key:(kek kdf passphrase) ~nonce
             ~ad:(slot_ad ~key_id:t.key_id id)
             wrapped
-      | _ -> None)
-    t.slots
+      | Unknown _ -> None)
+    (derivable t)
 
 (* Spec §4.3: a union by slot id; for one id, the bytewise greatest canonical
    slot, so every client folding the same copies writes the same bytes. *)

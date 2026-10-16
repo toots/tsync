@@ -58,21 +58,22 @@ let write_file (module E : Engine.S) ~exclusive path body =
   E.write path ~off:0 (Bigstring.of_string body);
   E.close path
 
-(* README §4.2: a fold that cannot be applied now is left for the next. *)
+(* README §4.2: a fold that cannot be applied now is left for the next. Its
+   actions run in order and stop at the first failure, so a copy is never
+   removed after what should have absorbed it failed to be written. *)
 let apply engine dir actions =
   let (module E : Engine.S) = engine in
-  List.iter
-    (fun action ->
-      try
-        match action with
-          | Tsync_vault.Fold.Move { src; dst } ->
-              E.rename ~src:(Names.join dir src) ~dst:(Names.join dir dst)
-                ~exclusive:false
-          | Remove name -> E.delete (Names.join dir name)
-          | Write { name; body } ->
-              write_file engine ~exclusive:false (Names.join dir name) body
-      with Fail.E f -> Log.warn "vault: a fold in %s is left: %s" dir f.reason)
-    actions
+  try
+    List.iter
+      (function
+        | Tsync_vault.Fold.Move { src; dst } ->
+            E.rename ~src:(Names.join dir src) ~dst:(Names.join dir dst)
+              ~exclusive:false
+        | Remove name -> E.delete (Names.join dir name)
+        | Write { name; body } ->
+            write_file engine ~exclusive:false (Names.join dir name) body)
+      actions
+  with Fail.E f -> Log.warn "vault: a fold in %s is left: %s" dir f.reason
 
 type found = {
   keyring : [ `Absent | `Corrupt of string | `Ok of Keyring.t ];
@@ -105,7 +106,7 @@ let now () = int_of_float (Unix.time ())
 let secret ~key_id passphrase : Protocol.secret =
   { passphrase = Passphrase.to_string passphrase; key_id }
 
-let init t ~domain ~engine ~lazy_tree =
+let init ~domain ~engine ~lazy_tree t =
   check_uses domain;
   refresh engine ~lazy_tree;
   (match (read engine).keyring with
@@ -126,8 +127,8 @@ let current engine ~lazy_tree =
     | `Absent -> Fail.absent "this domain has no vault: run tsync vault init"
     | `Corrupt reason -> Fail.corrupt "the keyring is unreadable: %s" reason
 
-let unlock t ~domain ~engine ~lazy_tree typed =
-  check_uses domain;
+(* vault §6: K from the keyring's passphrase slots. *)
+let unwrap ~engine ~lazy_tree typed =
   let passphrase =
     match Passphrase.of_string typed with
       | Some p -> p
@@ -135,10 +136,55 @@ let unlock t ~domain ~engine ~lazy_tree typed =
   in
   let keyring = current engine ~lazy_tree in
   match Keyring.unlock keyring passphrase with
-    | Some key -> Atomic.set t.key (Some (keyring.key_id, key))
+    | Some key -> (keyring, key)
     | None -> Fail.raise_ Denied "wrong passphrase"
 
-let lock t ~domain =
+(* vault §4.3: a machine holding a losing init's K moves every record sealed
+   under it to the domain's K, then drops the keyring copies naming it. *)
+let rekey ~(domain : Tsync_domain.Domain.t) ~engine ~from:(old_id, old_key)
+    ~into:(key_id, key) =
+  let module Envelope = Tsync_vault.Envelope in
+  List.iter
+    (fun extension ->
+      let dir = Names.join ext extension in
+      List.iter
+        (fun (f : Tsync_vault.Fold.file) ->
+          match
+            Envelope.open_ ~key:old_key ~key_id:old_id ~extension f.body
+          with
+            | Ok plaintext ->
+                write_file engine ~exclusive:false (Names.join dir f.name)
+                  (Envelope.seal ~key ~key_id ~extension plaintext)
+            | Error _ -> ())
+        (files engine dir))
+    domain.domain.extensions;
+  let copies =
+    List.filter_map
+      (fun (f : Tsync_vault.Fold.file) ->
+        match Keyring.of_string f.body with
+          | Ok k when f.name <> "keyring" && k.key_id = old_id ->
+              Some (Tsync_vault.Fold.Remove f.name)
+          | _ -> None)
+      (files engine folder)
+  in
+  apply engine folder copies
+
+let unlock ~domain ~engine ~lazy_tree t typed =
+  check_uses domain;
+  let keyring, key = unwrap ~engine ~lazy_tree typed in
+  let held = Atomic.get t.key in
+  Atomic.set t.key (Some (keyring.key_id, key));
+  match held with
+    | Some ((old_id, _) as old) when old_id <> keyring.key_id ->
+        rekey ~domain ~engine ~from:old ~into:(keyring.key_id, key)
+    | _ -> ()
+
+(* totp §5: the user's own request, told apart by the passphrase. *)
+let confirm ~domain ~engine ~lazy_tree typed =
+  check_uses domain;
+  ignore (unwrap ~engine ~lazy_tree typed)
+
+let lock ~domain t =
   check_uses domain;
   Atomic.set t.key None
 
@@ -149,7 +195,7 @@ let key t keyring =
     | Some (id, key) when id = keyring.Keyring.key_id -> Some key
     | _ -> None
 
-let held t ~domain ~engine ~lazy_tree =
+let held ~domain ~engine ~lazy_tree t =
   check_uses domain;
   let keyring = current engine ~lazy_tree in
   match key t keyring with
@@ -157,8 +203,8 @@ let held t ~domain ~engine ~lazy_tree =
     | None -> Fail.raise_ Locked "the vault is locked: run tsync vault unlock"
 
 (* vault §7: a new slot replaces every passphrase slot; others are kept. *)
-let passphrase t ~domain ~engine ~lazy_tree =
-  let keyring, key = held t ~domain ~engine ~lazy_tree in
+let passphrase ~domain ~engine ~lazy_tree t =
+  let keyring, key = held ~domain ~engine ~lazy_tree t in
   let passphrase = Passphrase.generate () in
   let slot =
     Keyring.passphrase_slot ~now:(now ()) ~key_id:keyring.key_id ~key passphrase
@@ -171,7 +217,7 @@ let passphrase t ~domain ~engine ~lazy_tree =
   write engine ~exclusive:false { keyring with slots = slot :: others };
   secret ~key_id:keyring.key_id passphrase
 
-let status t ~domain ~engine ~lazy_tree : Protocol.vault_status =
+let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses domain;
   read_current engine ~lazy_tree;
   let found = read engine in

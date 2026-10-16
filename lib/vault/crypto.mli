@@ -14,7 +14,8 @@ val open_ : key:string -> nonce:string -> ad:string -> string -> string option
 
 (** Argon2id version 0x13, 32-byte output. [secret] and [ad] exist for the RFC
     9106 test vector; the vault uses neither. Releases the runtime while it
-    runs. *)
+    runs. [Invalid_argument] for [parallelism] or [iterations] below 1,
+    [mem_kib] below [8 * parallelism] or above 4 GiB. *)
 val argon2id :
   ?secret:string ->
   ?ad:string ->

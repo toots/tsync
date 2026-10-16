@@ -28,8 +28,13 @@ unknown kind and members: still unlocks                      yes
 unknown member dropped                                       yes
 unknown slot kept as read                                    yes
 slots sorted by id, unknown first                            yes
-a slot above the memory limit is skipped                     yes
-and reported                                                 yes
+memKiB above the limit: skipped, not derived, and reported   yes
+memKiB 1: skipped, not derived, and reported                 yes
+memKiB negative: skipped, not derived, and reported          yes
+parallelism 0: skipped, not derived, and reported            yes
+iterations 0: skipped, not derived, and reported             yes
+iterations negative: skipped, not derived, and reported      yes
+of nine passphrase slots, one is skipped                     yes
   not json                       CORRUPT
   no slot                        CORRUPT
   as written                     accepted

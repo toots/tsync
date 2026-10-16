@@ -27,6 +27,8 @@ remove an absent id                  not_found: no record 0000000000000000000000
 list
   <id1> "ACME Inc" "john@example.com" code of 6 digits
   <id2> "Other" "bob" code of 6 digits
+export without a passphrase          invalid: passphrase is required
+export, a wrong passphrase           denied: wrong passphrase
 export
   otpauth://totp/ACME%20Inc:john%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Inc&algorithm=SHA1&digits=6&period=30
   otpauth://totp/Other:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Other&algorithm=SHA1&digits=6&period=30
@@ -41,6 +43,7 @@ list
   <id5> "Mail" "me@example.org" code of 6 digits
   <id2> "Other" "bob" code of 6 digits
   <id6> "Raw, Inc" "r" code of 6 digits
+export spare with docs' passphrase   denied: wrong passphrase
 an export into an empty domain       added 6, already 0
   the same records                   true
 list on a domain without totp        invalid: plain does not use totp: add it to its extensions in the config
@@ -93,4 +96,12 @@ holds a label: false
   before the fold: keyring keyring (conflicted copy from test)
   status unlocked slots={"passphrase":2,"unknown":1} copies=[]
   after: keyring
+== two inits race; the owner's loses
+  the owner adds under its K         <id9>
+  status                             locked copies=1
+  list                               locked: the vault is locked: run tsync vault unlock
+  unlock with the winner's passphrase ok
+  list: "Race" "a"
+  status                             unlocked copies=0
+  the vault folder: keyring
 owner exit status 0

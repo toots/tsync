@@ -103,9 +103,14 @@ wrapped = XChaCha20-Poly1305-Seal(KEK, nonce, K, ad = "tsync-vault-slot/" keyId 
 - Writers use `memKiB` ≥ `VAULT_KDF_MIN_MEM`, `iterations` ≥ 2 and `parallelism` = 1, and
   SHOULD use the recommended values of §9.
 - A reader MUST refuse to derive with `memKiB` above `VAULT_KDF_MAX_MEM`, `iterations` above
-  `VAULT_KDF_MAX_ITERATIONS` or `parallelism` above `VAULT_KDF_MAX_PARALLELISM`. Such a slot is
-  skipped as unusable and reported. The keyring arrives from the store, and the limits keep a
-  slot from asking a phone for more memory than it has.
+  `VAULT_KDF_MAX_ITERATIONS` or `parallelism` above `VAULT_KDF_MAX_PARALLELISM`, and with
+  `parallelism` or `iterations` below 1 or `memKiB` below 8 × `parallelism` (RFC 9106's own
+  floor). Such a slot is skipped as unusable and reported. The keyring arrives from the store, and
+  the limits keep a slot from asking a phone for more memory than it has, or the derivation from
+  running on values it is not defined for.
+- A reader derives for at most `VAULT_MAX_SLOTS` passphrase slots, in slot id order; the others
+  are skipped as unusable. Each derivation costs up to the limits above, so the count bounds one
+  unlock.
 - An unwrap that fails authentication means a wrong passphrase for that slot; the next slot is
   tried. Every slot failing is "wrong passphrase".
 
@@ -217,6 +222,7 @@ locked vault `locked`.
 | `VAULT_KDF_MEM` / `VAULT_KDF_ITERATIONS` / `VAULT_KDF_PARALLELISM` | 64 MiB / 3 / 1 | writers' recommended values (RFC 9106 second recommendation) |
 | `VAULT_KDF_MIN_MEM` | 19 MiB | writers MUST NOT go below |
 | `VAULT_KDF_MAX_MEM` / `VAULT_KDF_MAX_ITERATIONS` / `VAULT_KDF_MAX_PARALLELISM` | 256 MiB / 10 / 4 | readers refuse above; MUST fit the smallest host that unlocks |
+| `VAULT_MAX_SLOTS` | 8 | passphrase slots one unlock derives for |
 
 ## 10. Conformance
 
@@ -228,7 +234,8 @@ locked vault `locked`.
 - Init on a domain with no extension, offline, or over an existing keyring is refused and writes
   nothing. After init the store holds a keyring and no plaintext key or passphrase.
 - Unlock with the passphrase succeeds; any other passphrase fails as "wrong passphrase"; a slot
-  above a `VAULT_KDF_MAX_*` limit is skipped and reported without being derived.
+  above a `VAULT_KDF_MAX_*` limit, with `parallelism` 0 or with `memKiB` 1 is skipped and reported
+  without being derived; a ninth passphrase slot is skipped.
 - Writing the keyring twice with the same content gives identical bytes. A keyring with an
   unknown slot kind and unknown members unlocks through its known slot, and keeps the unknown
   slot through a rewrite.

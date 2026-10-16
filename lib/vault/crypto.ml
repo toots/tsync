@@ -26,6 +26,13 @@ let open_ ~key ~nonce ~ad sealed =
   check "nonce" nonce_size nonce;
   open_ key nonce ad sealed
 
+(* The stub hands these to Monocypher as they are: below RFC 9106's floor it
+   divides by zero or writes past its work area. *)
 let argon2id ?(secret = "") ?(ad = "") ~mem_kib ~iterations ~parallelism ~salt
     password =
+  if
+    parallelism < 1 || iterations < 1
+    || mem_kib < 8 * parallelism
+    || mem_kib > 1 lsl 22
+  then invalid_arg "Crypto.argon2id: parameters outside RFC 9106";
   argon2id_raw password salt secret ad mem_kib iterations parallelism

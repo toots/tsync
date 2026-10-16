@@ -794,42 +794,29 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   let refreshed path =
     Option.iter (fun p -> Pulls.before_open p path) t.pulls
   in
+  let vault f =
+    f ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree t.vault
+  in
   match req with
     | Ping -> ()
-    | Vault_init ->
-        Vault.init t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree
-    | Vault_unlock passphrase ->
-        Vault.unlock t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree passphrase;
-        Totp_verbs.fold t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree
-    | Vault_lock -> Vault.lock t.vault ~domain:t.domain
-    | Vault_passphrase ->
-        Vault.passphrase t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree
-    | Vault_status ->
-        Vault.status t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree
-    | Totp_add uri ->
-        Totp_verbs.add t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree uri
-    | Totp_list filter ->
-        Totp_verbs.list t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree filter
+    | Vault_init -> vault Vault.init
+    | Vault_unlock passphrase -> (
+        vault Vault.unlock passphrase;
+        (* The vault is unlocked whatever the fold does: one left now runs at
+           the next verb. *)
+        try vault Totp_verbs.fold
+        with Fail.E f ->
+          Log.warn "totp: the fold after unlock is left: %s" f.reason)
+    | Vault_lock -> Vault.lock ~domain:t.domain t.vault
+    | Vault_passphrase -> vault Vault.passphrase
+    | Vault_status -> vault Vault.status
+    | Totp_add uri -> vault Totp_verbs.add uri
+    | Totp_list filter -> vault Totp_verbs.list filter
     | Totp_rename r ->
-        Totp_verbs.rename t.vault ?issuer:r.issuer ?account:r.account
-          ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree
-          ~id:r.id ()
-    | Totp_remove id ->
-        Totp_verbs.remove t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree id
-    | Totp_import text ->
-        Totp_verbs.import t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree text
-    | Totp_export ->
-        Totp_verbs.export t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree
+        vault (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id)
+    | Totp_remove id -> vault Totp_verbs.remove id
+    | Totp_import text -> vault Totp_verbs.import text
+    | Totp_export passphrase -> vault Totp_verbs.export passphrase
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
@@ -854,13 +841,14 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             xs
         in
         let downloading = named (E.downloads ()) in
+        let uploading = named (E.uploads ()) in
         {
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
           pending_uploads = max (E.pending_uploads ()) (E.pending_changes ());
-          pending_downloads = List.length (E.downloads ());
-          uploading = named (E.uploads ());
+          pending_downloads = List.length downloading;
+          uploading;
           downloading;
           pending_bytes = pending_bytes t now;
           subscribers = t.subscribers ();

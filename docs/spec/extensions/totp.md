@@ -77,11 +77,15 @@ Every verb is of access class **owner**
 | `rename` / `totp_rename` | `id`, `issuer?`, `account?` | edits the labels and sets `modified` |
 | `remove` / `totp_remove` | `id` | removes the record |
 | `import` / `totp_import` | `text` | adds one record per line of a plain-text export (§5.2); replies with what it added, skipped and refused |
-| `export` / `totp_export` | — | one `otpauth://totp/` URI per record, the way out of tsync |
+| `export` / `totp_export` | `passphrase` | one `otpauth://totp/` URI per record, the way out of tsync |
 
 - `list` never carries a seed. `export` is the only verb that returns one. K lives in the owner,
   so the CLI's `export` reaches it through the request handler like any verb; an app MUST NOT
   offer `totp_export`.
+- `export` needs the domain's passphrase each time, even on an unlocked vault: any process of the
+  user can reach the owner, and the passphrase is what tells the user's request from theirs. It
+  is checked against the keyring like an unlock (vault §6); a wrong one is refused DENIED
+  (`denied`), malformed INVALID. The CLI asks once per domain.
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
 
@@ -136,3 +140,4 @@ export decrypts to it): `otpauth://` URIs, one per line, or several on a line se
 - Two copies with different code fields fold into two records, both still producing their codes.
 - A record with a CORRUPT plaintext is reported and survives a fold.
 - Every verb on a locked vault is refused `locked` and changes nothing.
+- `export` with no passphrase, a wrong one or another domain's is refused and returns no URI.

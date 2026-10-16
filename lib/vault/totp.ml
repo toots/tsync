@@ -177,41 +177,14 @@ let seconds_left t ~unix_time =
   t.period - Int64.to_int (Int64.rem unix_time (Int64.of_int t.period))
 
 let percent_decode s =
-  let n = String.length s in
-  let b = Buffer.create n in
-  let hex c =
-    match c with
-      | '0' .. '9' -> Some (Char.code c - 48)
-      | 'a' .. 'f' -> Some (Char.code c - 87)
-      | 'A' .. 'F' -> Some (Char.code c - 55)
-      | _ -> None
-  in
-  let rec go i =
-    if i = n then Ok (Buffer.contents b)
-    else if s.[i] = '%' then (
-      match
-        if i + 2 < n then (hex s.[i + 1], hex s.[i + 2]) else (None, None)
-      with
-        | Some h, Some l ->
-            Buffer.add_char b (Char.chr ((h * 16) + l));
-            go (i + 3)
-        | _ -> Error "a bad percent escape")
-    else (
-      Buffer.add_char b s.[i];
-      go (i + 1))
-  in
-  go 0
+  match Tsync_core.Text.percent_unescape s with
+    | Some s -> Ok s
+    | None -> Error "a bad percent escape"
 
-let percent_encode s =
-  let b = Buffer.create (String.length s) in
-  String.iter
-    (fun c ->
-      match c with
-        | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' ->
-            Buffer.add_char b c
-        | c -> Buffer.add_string b (Printf.sprintf "%%%02X" (Char.code c)))
-    s;
-  Buffer.contents b
+let percent_encode =
+  Tsync_core.Text.percent_escape ~allowed:(function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
+    | _ -> false)
 
 let ( let* ) = Result.bind
 

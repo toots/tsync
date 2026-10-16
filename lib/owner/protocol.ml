@@ -245,7 +245,8 @@ type _ request =
       -> unit request
   | Totp_remove : string -> unit request
   | Totp_import : string -> totp_imported request  (** the text of a file *)
-  | Totp_export : string list request  (** one URI per record *)
+  | Totp_export : string -> string list request
+      (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed
 
@@ -295,7 +296,7 @@ let action : type a. a request -> string = function
   | Totp_rename _ -> "totp_rename"
   | Totp_remove _ -> "totp_remove"
   | Totp_import _ -> "totp_import"
-  | Totp_export -> "totp_export"
+  | Totp_export _ -> "totp_export"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
@@ -380,8 +381,9 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
   | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
   | Stop | Share_clear_cache | Vault_init | Vault_lock | Vault_passphrase
-  | Vault_status | Totp_export ->
+  | Vault_status ->
       []
+  | Totp_export p -> [("passphrase", `String p)]
   | Vault_unlock p -> [("passphrase", `String p)]
   | Totp_add uri -> [("uri", `String uri)]
   | Totp_list filter -> opt "filter" (fun f -> `String f) filter
@@ -587,7 +589,7 @@ let decode j =
              })
     | "totp_remove" -> Request (Totp_remove (required j "id"))
     | "totp_import" -> Request (Totp_import (required j "text"))
-    | "totp_export" -> Request Totp_export
+    | "totp_export" -> Request (Totp_export (required j "passphrase"))
     | a -> Fail.invalid "unknown action: %s" a
 
 let kind_name = function
@@ -752,7 +754,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                      `Assoc [("line", `Int line); ("reason", `String reason)])
                    reply.refused) );
           ]
-    | Totp_export -> ok [("uris", `List (List.map (fun u -> `String u) reply))]
+    | Totp_export _ ->
+        ok [("uris", `List (List.map (fun u -> `String u) reply))]
     | Totp_list _ ->
         ok
           [
@@ -954,7 +957,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
                     l
               | _ -> []);
         }
-    | Totp_export -> (
+    | Totp_export _ -> (
         match member j "uris" with
           | Some (`List l) ->
               List.filter_map (function `String s -> Some s | _ -> None) l

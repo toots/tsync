@@ -122,18 +122,16 @@ let keyring () =
              ({|{"keyId":"|} ^ ring.key_id
             ^ {|","slots":[{"id":"0000000000000000"|})));
   (* Readers' limits *)
-  let greedy =
+  let with_kdf key value =
     Yojson.Safe.to_string
       Yojson.Safe.Util.(
         let slot = List.hd slots in
-        let kdf = member "kdf" slot in
         let kdf =
-          match kdf with
+          match member "kdf" slot with
             | `Assoc l ->
                 `Assoc
                   (List.map
-                     (function
-                       | "memKiB", _ -> ("memKiB", `Int (512 * 1024)) | kv -> kv)
+                     (fun (k, v) -> if k = key then (k, value) else (k, v))
                      l)
             | j -> j
         in
@@ -153,12 +151,37 @@ let keyring () =
                 ] );
           ])
   in
-  (match Keyring.of_string greedy with
-    | Error e -> p "greedy refused: %s\n" e
-    | Ok r ->
-        check "a slot above the memory limit is skipped"
-          (Keyring.unlock r passphrase = None);
-        check "and reported" (Keyring.unusable r <> []));
+  List.iter
+    (fun (what, key, value) ->
+      match Keyring.of_string (with_kdf key value) with
+        | Error e -> p "%s refused: %s\n" what e
+        | Ok r ->
+            check
+              (what ^ ": skipped, not derived, and reported")
+              (Keyring.unlock r passphrase = None && Keyring.unusable r <> []))
+    [
+      ("memKiB above the limit", "memKiB", `Int (512 * 1024));
+      ("memKiB 1", "memKiB", `Int 1);
+      ("memKiB negative", "memKiB", `Int (-1));
+      ("parallelism 0", "parallelism", `Int 0);
+      ("iterations 0", "iterations", `Int 0);
+      ("iterations negative", "iterations", `Int (-5));
+    ];
+  let small =
+    { Keyring.recommended with mem_kib = 19 * 1024; iterations = 2 }
+  in
+  let nine =
+    {
+      ring with
+      slots =
+        List.init 9 (fun _ ->
+            Keyring.passphrase_slot ~params:small ~now:0 ~key_id:ring.key_id
+              ~key passphrase);
+    }
+  in
+  check "of nine passphrase slots, one is skipped"
+    (List.length (Keyring.unusable nine) = 1
+    && Keyring.unlock nine passphrase = Some key);
   (* Corrupt keyrings *)
   List.iter
     (fun (what, s) ->

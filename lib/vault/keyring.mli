@@ -33,11 +33,12 @@ val create : ?params:kdf -> now:int -> string -> string * t
 val passphrase_slot :
   ?params:kdf -> now:int -> key_id:string -> key:string -> string -> slot
 
-(** K, from the first passphrase slot within the readers' limits that opens.
+(** K, from the first of the derivable passphrase slots (§4.2) that opens.
     [None] is a wrong passphrase. *)
 val unlock : t -> string -> string option
 
-(** Ids of the slots skipped for exceeding the readers' limits. *)
+(** Ids of the passphrase slots unlock skips: outside the readers' limits, or
+    past [VAULT_MAX_SLOTS]. *)
 val unusable : t -> string list
 
 (** The fold of two copies with one key id (§4.3); [None] when the key ids

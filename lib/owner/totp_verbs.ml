@@ -16,14 +16,24 @@ type ctx = {
   engine : (module Tsync_sync.Engine.S);
   key : string;
   key_id : string;
+  opened : (string, Totp.t option) Hashtbl.t;
+      (** by body: a verb opens each body once, the fold's included *)
 }
 
 let opened ctx (f : Fold.file) =
-  match
-    Envelope.open_ ~key:ctx.key ~key_id:ctx.key_id ~extension:name f.body
-  with
-    | Ok plaintext -> Result.to_option (Totp.of_string plaintext)
-    | Error _ -> None
+  match Hashtbl.find_opt ctx.opened f.body with
+    | Some r -> r
+    | None ->
+        let r =
+          match
+            Envelope.open_ ~key:ctx.key ~key_id:ctx.key_id ~extension:name
+              f.body
+          with
+            | Ok plaintext -> Result.to_option (Totp.of_string plaintext)
+            | Error _ -> None
+        in
+        Hashtbl.replace ctx.opened f.body r;
+        r
 
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
@@ -39,13 +49,18 @@ let settled ctx =
         Vault.apply ctx.engine folder actions;
         Vault.files ctx.engine folder
 
-let context t ~domain ~engine ~lazy_tree =
+let context ~domain ~engine ~lazy_tree t =
   check_uses domain;
-  let keyring, key = Vault.held t ~domain ~engine ~lazy_tree in
+  let keyring, key = Vault.held ~domain ~engine ~lazy_tree t in
   if lazy_tree then (
     let (module E : Tsync_sync.Engine.S) = engine in
     if E.kind folder = `Dir then ignore (E.pull folder));
-  { engine; key; key_id = keyring.Tsync_vault.Keyring.key_id }
+  {
+    engine;
+    key;
+    key_id = keyring.Tsync_vault.Keyring.key_id;
+    opened = Hashtbl.create 16;
+  }
 
 let now () = int_of_float (Unix.time ())
 
@@ -58,12 +73,12 @@ let write ctx ~exclusive id record =
     (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
        (Totp.to_string record))
 
-let add t ~domain ~engine ~lazy_tree uri =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let add ~domain ~engine ~lazy_tree t uri =
+  let ctx = context ~domain ~engine ~lazy_tree t in
   match Totp.of_uri ~now:(now ()) uri with
     | Error e -> Fail.invalid "%s" e
     | Ok record ->
-        let id = Ids.hex (Ids.urandom 16) in
+        let id = Ids.token () in
         write ctx ~exclusive:true id record;
         id
 
@@ -84,15 +99,10 @@ let records ctx =
   |> fun (ok, corrupt) -> (List.rev ok, List.sort compare corrupt)
 
 let contains ~sub s =
-  let s = String.lowercase_ascii s and sub = String.lowercase_ascii sub in
-  let n = String.length sub in
-  let rec at i =
-    i + n <= String.length s && (String.sub s i n = sub || at (i + 1))
-  in
-  at 0
+  Text.contains (String.lowercase_ascii s) (String.lowercase_ascii sub)
 
-let list t ~domain ~engine ~lazy_tree filter : Protocol.totp_listing =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let list ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
+  let ctx = context ~domain ~engine ~lazy_tree t in
   let ok, corrupt = records ctx in
   let unix_time = Int64.of_float (Unix.time ()) in
   let rows =
@@ -126,8 +136,8 @@ let find ctx id =
         Fail.corrupt "%s does not open under this vault's key" id
     | None -> Fail.absent "no record %s" id
 
-let rename t ?issuer ?account ~domain ~engine ~lazy_tree ~id () =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
+  let ctx = context ~domain ~engine ~lazy_tree t in
   let r = find ctx id in
   let r =
     {
@@ -141,8 +151,8 @@ let rename t ?issuer ?account ~domain ~engine ~lazy_tree ~id () =
     Fail.invalid "issuer and account cannot both be empty";
   write ctx ~exclusive:false id r
 
-let remove t ~domain ~engine ~lazy_tree id =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let remove ~domain ~engine ~lazy_tree t id =
+  let ctx = context ~domain ~engine ~lazy_tree t in
   ignore (find ctx id);
   let (module E : Tsync_sync.Engine.S) = engine in
   E.delete (Names.join folder id)
@@ -163,8 +173,8 @@ let entries line =
   List.filter (fun e -> e <> "") (List.map String.trim (go 0 0 []))
 
 (* §5.2: a refusal names the line, never its content. *)
-let import t ~domain ~engine ~lazy_tree text : Protocol.totp_imported =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
+  let ctx = context ~domain ~engine ~lazy_tree t in
   let known = ref (List.map snd (fst (records ctx))) in
   let added = ref 0 and already = ref 0 and refused = ref [] in
   List.iteri
@@ -181,7 +191,7 @@ let import t ~domain ~engine ~lazy_tree text : Protocol.totp_imported =
                 refused := (i + 1, reason) :: !refused
             | Ok r when List.exists (same r) !known -> incr already
             | Ok r ->
-                write ctx ~exclusive:true (Ids.hex (Ids.urandom 16)) r;
+                write ctx ~exclusive:true (Ids.token ()) r;
                 known := r :: !known;
                 incr added)
         (entries line))
@@ -189,12 +199,13 @@ let import t ~domain ~engine ~lazy_tree text : Protocol.totp_imported =
   { added = !added; already = !already; refused = List.rev !refused }
 
 (* README §4.2: the fold that waited for the key. *)
-let fold t ~domain ~engine ~lazy_tree =
+let fold ~domain ~engine ~lazy_tree t =
   if List.mem name domain.Tsync_domain.Domain.domain.extensions then
-    ignore (records (context t ~domain ~engine ~lazy_tree))
+    ignore (records (context ~domain ~engine ~lazy_tree t))
 
-let export t ~domain ~engine ~lazy_tree =
-  let ctx = context t ~domain ~engine ~lazy_tree in
+let export ~domain ~engine ~lazy_tree t passphrase =
+  let ctx = context ~domain ~engine ~lazy_tree t in
+  Vault.confirm ~domain ~engine ~lazy_tree passphrase;
   fst (records ctx)
   |> List.sort (fun (a, (x : Totp.t)) (b, (y : Totp.t)) ->
       compare (x.issuer, x.account, a) (y.issuer, y.account, b))

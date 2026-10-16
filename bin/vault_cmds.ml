@@ -28,11 +28,11 @@ let show_secret (s : P.secret) =
    ^ ": keep this passphrase; tsync never shows it again, and nothing recovers \
       the records without it")
 
-let read_passphrase ~stdin =
+let read_passphrase ?(prompt = "passphrase") ~stdin () =
   if stdin || not (Unix.isatty Unix.stdin) then
     In_channel.input_line In_channel.stdin |> Option.value ~default:""
   else (
-    print_string "passphrase: ";
+    print_string (prompt ^ ": ");
     flush stdout;
     let saved = Unix.tcgetattr Unix.stdin in
     Unix.tcsetattr Unix.stdin TCSANOW { saved with c_echo = false };
@@ -58,7 +58,7 @@ let unlock_cmd =
   verb "unlock" ~doc:"Unlock the domain's vault with its passphrase."
     Term.(
       const (fun stdin dom ->
-          ask dom (P.Vault_unlock (read_passphrase ~stdin));
+          ask dom (P.Vault_unlock (read_passphrase ~stdin ()));
           say "unlocked";
           0)
       $ stdin)

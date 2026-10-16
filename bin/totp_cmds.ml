@@ -188,12 +188,30 @@ let import_cmd =
       $ file)
 
 let export_cmd =
-  verb "export" ~doc:"Print every seed as an otpauth URI: the way out of tsync."
-    (Term.const (fun ?name config ->
-         List.iter
-           (fun (_, uris) -> List.iter (say "%s") uris)
-           (each ?name config (fun d -> Vault_cmds.ask d P.Totp_export));
-         0))
+  let stdin =
+    Arg.(
+      value & flag
+      & info ["stdin"]
+          ~doc:
+            "Read each domain's passphrase from standard input, one line each.")
+  in
+  verb "export"
+    ~doc:
+      "Print every seed as an otpauth URI, the way out of tsync; asks each \
+       domain's passphrase."
+    Term.(
+      const (fun stdin ?name config ->
+          List.iter
+            (fun (_, uris) -> List.iter (say "%s") uris)
+            (each ?name config (fun d ->
+                 let passphrase =
+                   Vault_cmds.read_passphrase
+                     ~prompt:(Printf.sprintf "passphrase of %s" (dname d))
+                     ~stdin ()
+                 in
+                 Vault_cmds.ask d (P.Totp_export passphrase)));
+          0)
+      $ stdin)
 
 let cmds =
   [
