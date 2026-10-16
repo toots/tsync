@@ -1,0 +1,36 @@
+== engine listings
+root: [a.txt sub]
+.tsync-ext: [totp]
+.tsync-ext/totp: [r1]
+sub: [.tsync-ext]
+== export
+export the root                accepted
+  [a.txt sub/.tsync-ext/b.txt]
+export .tsync-ext/totp         invalid: ".tsync-ext/totp" is reserved
+== rsync
+the root out                   accepted
+  [a.txt sub/.tsync-ext/b.txt]
+from .tsync-ext                invalid: ".tsync-ext/totp" is reserved
+into .tsync-ext                invalid: ".tsync-ext/z" is reserved
+a source holding .tsync-ext    invalid: ".tsync-ext" is reserved
+the same into a folder         accepted
+  in: [.tsync-ext c.txt] in/.tsync-ext: [totp]
+== import
+a source holding .tsync-ext    accepted
+  root: [a.txt c.txt in sub]
+  .tsync-ext/totp: [r1]
+sync                           ok
+== owner
+list_dir root: [a.txt c.txt in late.txt sub]
+list_all: [a.txt c.txt in .tsync-ext totp forged c.txt late.txt sub .tsync-ext b.txt]
+stat rel .tsync-ext            invalid: ".tsync-ext" is reserved
+stat rel record                invalid: ".tsync-ext/totp/r1" is reserved
+stat d:<its id>                invalid: ".tsync-ext" is reserved
+mkdir .tsync-ext               invalid: ".tsync-ext" is reserved
+stat sub/.tsync-ext/b.txt      ok
+rename a.txt onto it           invalid: ".tsync-ext" is reserved
+share it                       invalid: ".tsync-ext" is reserved
+revert a record                invalid: ".tsync-ext/totp/r1" is reserved
+feed: [a.txt c.txt sub .tsync-ext in .tsync-ext totp b.txt c.txt forged late.txt]
+feed unnamed: -
+exit status 0

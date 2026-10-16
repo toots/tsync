@@ -40,6 +40,16 @@ val join : string -> string -> string
 (** [p] is [dir] or lies beneath it. *)
 val is_under : dir:string -> string -> bool
 
+(** [.tsync-ext], the root folder holding extension records (§2.3). *)
+val extension_root : string
+
+(** [p] is {!extension_root} or lies beneath it: absent from every interface
+    presenting the domain's names. *)
+val is_reserved : string -> bool
+
+(** Raise INVALID for a reserved path. *)
+val check_unreserved : ?op:string -> string -> unit
+
 (** {1 Folder ids (§2.5)} *)
 
 val root_id : string

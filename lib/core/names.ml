@@ -92,6 +92,12 @@ let join a b = if a = "" then b else if b = "" then a else a ^ "/" ^ b
 let is_under ~dir p =
   dir = "" || p = dir || String.starts_with ~prefix:(dir ^ "/") p
 
+let extension_root = ".tsync-ext"
+let is_reserved p = is_under ~dir:extension_root p
+
+let check_unreserved ?op p =
+  if is_reserved p then Fail.invalid ?op "%S is reserved" p
+
 type item_ref =
   | Root
   | Dir of string

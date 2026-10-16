@@ -67,6 +67,14 @@ folder id ".."                                 false
 "my.tsync-tmp-1-2.tmp"   ours=false owner=-
 escape "a:b" -> .tsync-esc-35a5819dd7f7c459
 
+== reserved root name (01 §2.3)
+".tsync-ext"             reserved=true
+".tsync-ext/totp/0123"   reserved=true
+".tsync-extra"           reserved=false
+"a/.tsync-ext"           reserved=false
+"a/.tsync-ext/totp"      reserved=false
+""                       reserved=false
+
 == pieces (01 §3.4), cs = 8
 [6,10) count 3: #0[6,8)@0 #1[0,2)@2
 [12,28) count 2: #1[4,8)@0

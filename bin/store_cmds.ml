@@ -512,6 +512,7 @@ module Versions (C : Tsync_remote.Context.S) = struct
       (if what = "" then "" else "  " ^ what)
 
   let of_file path =
+    Names.check_unreserved ~op:"versions" path;
     let parent = Names.parent_of path and leaf = Names.leaf_of path in
     let parts = List.filter (( <> ) "") (String.split_on_char '/' parent) in
     let folder =
@@ -543,13 +544,13 @@ module Versions (C : Tsync_remote.Context.S) = struct
                 match
                   (Folder_id.of_string (String.sub group 0 i), manifest e)
                 with
-                  | Some id, Some m when R.head_slot id m.name = None ->
-                      Some
-                        ( ns,
-                          m.size,
-                          match folder_path id with
-                            | Some dir -> Names.join dir m.name
-                            | None -> m.name ^ " (folder gone)" )
+                  | Some id, Some m when R.head_slot id m.name = None -> (
+                      match folder_path id with
+                        | Some dir
+                          when Names.is_reserved (Names.join dir m.name) ->
+                            None
+                        | Some dir -> Some (ns, m.size, Names.join dir m.name)
+                        | None -> Some (ns, m.size, m.name ^ " (folder gone)"))
                   | _ -> None)
             | _ -> None)
         (R.all_versions ())

@@ -83,6 +83,10 @@ let plan ?(only = []) ?(exclude = []) ~symlinks src =
             (fun pending (_, name, full, st) ->
               let r = Names.join rel name in
               if any exclude r || any exclude name then pending
+              else if Names.is_reserved r then (
+                Log.warn "import: %s skipped, the name is reserved (01 §2.3)"
+                  full;
+                pending)
               else (
                 let flush () =
                   List.iter (fun p -> emit (Folder p)) (List.rev pending);

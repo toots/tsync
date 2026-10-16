@@ -120,3 +120,29 @@
  (alias runtest)
  (action
   (diff supervisor_test.expected supervisor_test.output)))
+
+(executable
+ (name reserved_test)
+ (modules reserved_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  reserved_test.output
+  (run ./reserved_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff reserved_test.expected reserved_test.output)))

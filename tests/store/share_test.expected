@@ -74,6 +74,12 @@ d1 /p/%zz -> 400 text/plain; charset=utf-8 | - | bad path
 d1 /p/%FF.ts -> 400 text/plain; charset=utf-8 | - | bad path
 d1 /p/ -> 400 text/plain; charset=utf-8 | - | bad path
 d1 /p -> 400 text/plain; charset=utf-8 | - | bad path
+== the reserved root folder in a root share (security-model §6.3)
+d1 /list -> 200 application/json | - | {"dirs":[],"files":[{"name":"</script>.mp3","size":19},{"name":"index.m3u8","size":17},{"name":"notes.txt","size":11},{"name":"packet.ts","size":4},{"name":"seg 0.ts","size":6}]}
+d1 /p/.tsync-ext/r1 -> 404 text/plain; charset=utf-8 | - | not found
+d1 /f?json=1 -> 404 text/plain; charset=utf-8 | - | not found
+d1 /list?json=1 -> 404 text/plain; charset=utf-8 | - | not found
+zip names notes.txt true, .tsync-ext false
 == link previews (§A9.3, §A9.6, §A9.8)
 a1 / [*/*] [user-agent: WhatsApp/2.24.1.6 A] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://localhost/s/a1/preview
 a1 / [user-agent: curl/8.0] -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ

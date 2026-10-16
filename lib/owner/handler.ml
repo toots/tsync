@@ -219,10 +219,17 @@ let row_or_unnamed t path =
     | None ->
         Fail.raise_ Fail.Unprepared "%s cannot be named on this client" path
 
+(* 01 §2.3: no reference names the reserved root folder or anything in it. *)
+let unreserved path =
+  Names.check_unreserved path;
+  path
+
 (* 08 §2.2: resolution mints nothing, and an f: reference never answers for a
    folder. *)
 let resolve_ref (module E : Engine.S) s =
-  match Names.parse_ref s with
+  unreserved
+  @@
+    match Names.parse_ref s with
     | Error () -> invalid "malformed item reference %S" s
     | Ok Root -> ""
     | Ok (Dir id) -> (
@@ -244,6 +251,7 @@ let resolve_rel (module E : Engine.S) rel =
   let parts = String.split_on_char '/' rel in
   if rel <> "" && List.exists (fun c -> c = "" || c = "." || c = "..") parts
   then invalid "malformed relative path %S" rel;
+  Names.check_unreserved rel;
   if E.kind rel = `Absent then Fail.absent "%s: not found" rel;
   rel
 
@@ -253,7 +261,7 @@ let destination t (d : Protocol.destination) =
   let parent = resolve_ref t.engine d.parent_ref in
   if E.kind parent <> `Dir then invalid "parentRef does not name a folder";
   if not (Names.valid_leaf d.name) then invalid "invalid name %S" d.name;
-  Names.join parent d.name
+  unreserved (Names.join parent d.name)
 
 let target t : Protocol.target -> string = function
   | Ref r -> resolve_ref t.engine r
@@ -497,7 +505,10 @@ let changes t ~anchor ~limit : Protocol.changes =
   match E.changes_since anchor ~limit with
     | `Stale -> Stale
     | `Page (cursor, more, ops) ->
-        let rendered = List.map (feed_op t) ops in
+        let shown (o : Applied.op) =
+          not (List.exists Names.is_reserved (Op.paths o.op))
+        in
+        let rendered = List.map (feed_op t) (List.filter shown ops) in
         Changes
           {
             cursor;
@@ -800,14 +811,20 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               (if seconds > 0. then float_of_int x.bytes /. seconds else 0.);
           }
         in
-        let downloading = List.map transfer (E.downloads ()) in
+        let named xs =
+          List.filter_map
+            (fun (x : Engine_intf.transfer) ->
+              if Names.is_reserved x.path then None else Some (transfer x))
+            xs
+        in
+        let downloading = named (E.downloads ()) in
         {
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
           pending_uploads = max (E.pending_uploads ()) (E.pending_changes ());
-          pending_downloads = List.length downloading;
-          uploading = List.map transfer (E.uploads ());
+          pending_downloads = List.length (E.downloads ());
+          uploading = named (E.uploads ());
           downloading;
           pending_bytes = pending_bytes t now;
           subscribers = t.subscribers ();
