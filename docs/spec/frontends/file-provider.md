@@ -602,7 +602,7 @@ content the owner renders (`menu`) from the model shared with the Linux tray
 model's.
 
 `menu` answers `{"ok":true,"menu":<menu JSON>}`, the model's JSON form
-([menu-model.md §7](menu-model.md#7-json-form)), rendered with no quit label:
+([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label:
 
 ```json
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Downloading 1",
@@ -631,6 +631,25 @@ submenu shows the model's placeholder row.
 - The stats submenu is fetched with `menu_stats` when it opens, at most once per
   `menu_stats_interval`; a failure leaves the placeholder.
 - The owner renders no quit row for this host (§2).
+
+### 10.1 One-time codes
+
+- The owner renders the `One-time codes` row with every domain whose config lists `totp` as a code
+  domain ([menu-model.md §5](menu-model.md#5-rows)).
+- `menu_codes` answers `{"ok":true,"entries":[…]}`: the rows of
+  [menu-model.md §7](menu-model.md#7-codes-submenu), built from each code domain's `totp_list`. It
+  is fetched each time the submenu opens, never cached: a record added on another machine shows at
+  the next open.
+- `copyCode` asks the owner `totp_code` for that record, then writes the code to the general
+  pasteboard as plain text together with the `org.nspasteboard.ConcealedType` marker, so clipboard
+  managers and history skip it. The code is never logged and never cached in the app. A refusal is
+  shown as a user notification carrying the reply's `error`; nothing is written.
+- `unlock` opens a dialog with a secure text field (no echo, no autofill, paste accepted) and the
+  domain's name. It sends `vault_unlock` with what was typed and clears the field's contents after
+  sending. `denied` keeps the dialog open with the owner's sentence; `invalid` the same; success
+  closes it. The passphrase is never stored, logged or kept after the request.
+- The app offers neither `vault init`, `vault passphrase` nor `totp export`: those print secrets,
+  and stay with the CLI (totp §5).
 
 ## 11. Installation
 
@@ -709,6 +728,16 @@ submenu shows the model's placeholder row.
 
 An implementation MUST exhibit these properties; [09-tests.md](../09-tests.md) says how they are
 checked.
+
+**One-time codes**
+- With no domain listing `totp` the menu has no `One-time codes` row. With one, the submenu is
+  fetched on each open and no row of any menu carries a code.
+- A click on a record puts its current code on the pasteboard with the concealed marker; a refusal
+  shows a notification with the owner's sentence and writes nothing.
+- A locked domain's row opens the unlock dialog; a wrong passphrase keeps it open with the owner's
+  sentence; a right one unlocks, and the next open lists the domain's records.
+- After an unlock, a restart of the owner finds the vault unlocked from the keychain
+  ([vault §6.1](../extensions/vault.md#61-the-keystore)); after a lock it is locked.
 
 **Identifiers and items**
 - `root` and `d:.tsync-root` are one identity, mapped to the root container; malformed references are

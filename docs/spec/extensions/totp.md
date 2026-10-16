@@ -73,6 +73,7 @@ Every verb is of access class **owner**
 | verb / action | request | does |
 |---|---|---|
 | `add` / `totp_add` | `uri` | adds one record from an `otpauth://totp/` URI (§5.1); replies with its id |
+| `code` / `totp_code` | `id` | the record's current code and seconds left; no seed, no labels |
 | `list` / `totp_list` | `filter?` | every record whose issuer or account contains `filter` (case-insensitive): id, issuer, account, code, seconds left; ordered by issuer, then account, then id |
 | `rename` / `totp_rename` | `id`, `issuer?`, `account?` | edits the labels and sets `modified` |
 | `remove` / `totp_remove` | `id` | removes the record |

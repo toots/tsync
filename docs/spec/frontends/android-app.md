@@ -118,7 +118,8 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
 ```
 
 - The app configures one domain backed by one http-proxy server: URL, secret, domain, cache limit
-  (default `2G`).
+  (default `2G`). `extensions` is `[]`, or `["totp"]` once One-time codes are turned on in
+  Settings (§10.7); the change is a config change like any other.
 - **Validation**, first failure wins and is attached to its field:
   1. the URL MUST use `https://` unless its host is a loopback address
      ([android.md §4.1](android.md#41-what-the-host-provides));
@@ -324,7 +325,8 @@ implementation's.
 Until a config exists the app shows only Setup (§10.7). A config the core refuses at boot (one
 written by an earlier version, for instance with a cleartext URL) also shows Setup, with its fields
 filled from that config and the core's message; nothing is deleted. After that, three top-level destinations
-reachable from every screen: **Files** (the start destination), **Activity** and **Settings**.
+reachable from every screen: **Files** (the start destination), **Activity** and **Settings**, and
+**Codes** (§10.8) while the config lists `totp`.
 Process death and configuration changes restore the destination and, in Files, the folder trail.
 
 ### 10.3 Files
@@ -420,7 +422,47 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
     "Free up space" (`evict` on the root, after a confirmation saying that files made available
     offline are removed from the phone too).
   - *Camera backup*: the controls of §11.6.
+  - *One-time codes*: a switch writing `extensions` (§6.1), and, while it is on, the vault's
+    state from `vault_status` (none, locked, unlocked, corrupt, with where K is kept) and what
+    that state allows: **Set up** (`vault_init`, §10.8), **Unlock**, **Lock** (`vault_lock`, after a
+    confirmation saying codes need the passphrase again afterwards) and **New passphrase**
+    (`vault_passphrase`, shown as Set up shows one). Turning the switch off keeps the vault and
+    its records in the domain; only this phone stops using them
+    ([extensions §3](../extensions/README.md#3-opting-in)).
   - *About*: the app version and the commit it was built from.
+
+### 10.8 Codes
+
+The `totp` extension on this phone ([totp](../extensions/totp.md)). The owner computes every code;
+the app never sees a seed.
+
+- **List** (`totp_list`): one row per record, issuer and account, the code grouped in threes, and
+  the seconds left as a countdown. The app asks again when the earliest countdown reaches zero,
+  and when the screen returns to the foreground; codes are not computed in the app. A search field
+  narrows the list (`filter`). Unreadable records (`corrupt`) are counted in a row of their own.
+- **Copy**: a tap writes the code to the clipboard with `ClipDescription.EXTRA_IS_SENSITIVE`, so
+  the keyboard and clipboard previews hide it, and confirms with a short message that names the
+  record, not the code.
+- **Add** offers:
+  - *Scan a QR code*: Google Play services' code scanner (`GmsBarcodeScanning`, QR format only),
+    which needs no camera permission. The scanned text is sent as `totp_add`; a refusal shows the
+    owner's sentence. Without Play services the choice is shown disabled, saying why.
+  - *Import a file*: a document picker for a plain-text export, sent as `totp_import`
+    ([totp §5.2](../extensions/totp.md#52-plain-text-import)). The result says how many were added,
+    already there and refused, with each refused line's number and reason.
+  - *Enter a URI*: a text field for an `otpauth://` URI, sent as `totp_add`.
+- **Rename** and **Remove** (after a confirmation naming the record) from a row's menu.
+- **No export.** The app never offers `totp_export` (totp §5).
+- **States**, each told apart (§10.1):
+  - *no vault* (`not_found`): **Set up**, which runs `vault_init` and shows the passphrase once,
+    in groups as vault §2.1 spells it, with a confirmation "I have saved it" before the screen can
+    be left. It is never copied to the clipboard by the app and never shown again;
+  - *locked*: a passphrase field (masked, paste accepted, no autofill, no suggestions) and
+    **Unlock** (`vault_unlock`); `denied` and `invalid` stay on the field with the owner's
+    sentence;
+  - *unreachable*, *offline* and *read-only* as everywhere else.
+- **Screens that show secrets** (the passphrase, the codes list) set `FLAG_SECURE`: no screenshots,
+  no recent-apps thumbnail.
 
 ## 11. Camera backup
 
@@ -649,6 +691,20 @@ What the app's build MUST guarantee; where it runs and what it gates is [10](../
 
 An implementation MUST exhibit these properties; [09-tests.md](../09-tests.md) says how they are
 checked.
+
+**Codes**
+- With `totp` off, no Codes destination exists and no vault verb is sent; turning it on writes
+  `extensions` through `check_config` and offers the restart.
+- Set up shows the passphrase once and cannot be left before "I have saved it"; it is never on
+  the clipboard. Unlock with a wrong passphrase stays on the field with the owner's sentence.
+- A copied code carries `EXTRA_IS_SENSITIVE`; the confirmation names the record, not the code.
+- The list asks the owner again when the earliest countdown reaches zero and never computes a
+  code itself; the app holds no seed at any point, and offers no export.
+- A scanned `otpauth://hotp/` code, and a file with a refused line, show the owner's refusal; the
+  file's other lines are added.
+- The Codes and passphrase screens are absent from screenshots and the recent-apps thumbnail.
+- After an unlock, killing the app and opening it again shows the codes without a passphrase
+  (the keystore, [android.md §4.1](android.md#41-what-the-host-provides)); after a lock it asks.
 
 **Names and writes**
 - A share-sheet save, an in-app upload, a document creation and a first camera upload never replace

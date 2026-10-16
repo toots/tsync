@@ -256,6 +256,12 @@ These general rules are realised by the hosts, which link here: the vault keysto
   - Any other host: memory. No host falls back to a file.
 - K leaves a machine only wrapped in the keyring. A keystore that would copy it to another device or into a backup is not used that way.
 - **Plaintext records** exist only in the owner's memory. Only envelopes reach staged bodies, the chunk cache and the store.
+- **Codes and passphrases in a UI.** A client copies a one-time code only on the user's gesture,
+  and marks it sensitive where the platform has a marker (macOS `org.nspasteboard.ConcealedType`,
+  Android `EXTRA_IS_SENSITIVE`) so clipboard history, sync and previews skip it. It is not cleared
+  on a timer: a code expires by itself, and a reader of the clipboard reads it before any timer
+  would. A client never copies a passphrase, and keeps a screen that shows a passphrase or codes
+  out of screenshots where the platform allows (`FLAG_SECURE`). A client never logs either.
 - Implementations SHOULD overwrite the passphrase, the KEK, K and decrypted records once they are no longer needed, where the runtime allows.
 - The replies of `vault_init` and `vault_passphrase`, and the `passphrase` member of a `vault_unlock` request, are never logged; a log of IPC traffic masks them (§10.3).
 
