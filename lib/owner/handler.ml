@@ -30,6 +30,7 @@ type t = {
   unnamed : int Atomic.t;  (** the last listing's or feed page's count *)
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
   pulls : Pulls.t option;  (** on a pulled tree *)
+  vault : Vault.t;
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -116,6 +117,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     staging_roots;
     answered_unreachable = Atomic.make false;
     running = Atomic.make None;
+    vault = Vault.create ();
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
@@ -794,6 +796,19 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   in
   match req with
     | Ping -> ()
+    | Vault_init ->
+        Vault.init t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree
+    | Vault_unlock passphrase ->
+        Vault.unlock t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree passphrase
+    | Vault_lock -> Vault.lock t.vault ~domain:t.domain
+    | Vault_passphrase ->
+        Vault.passphrase t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree
+    | Vault_status ->
+        Vault.status t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit

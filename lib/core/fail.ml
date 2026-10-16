@@ -12,6 +12,7 @@ type kind =
   | Corrupt
   | Missing_chunks of string list
   | Paused
+  | Locked
   | Unprepared
   | Link
   | Load
@@ -51,6 +52,7 @@ let kind_name = function
   | Corrupt -> "corrupt/other"
   | Missing_chunks _ -> "corrupt/missing_chunks"
   | Paused -> "unprepared/paused"
+  | Locked -> "unprepared/locked"
   | Unprepared -> "unprepared/other"
   | Link -> "transient/link"
   | Load -> "transient/load"
@@ -120,6 +122,7 @@ let code = function
   | Unreachable -> "unreachable"
   | Load -> "busy"
   | Paused -> "paused"
+  | Locked -> "locked"
   | _ -> "internal"
 
 let kind_of_code = function
@@ -132,6 +135,7 @@ let kind_of_code = function
   | "unreachable" -> Unreachable
   | "busy" -> Load
   | "paused" -> Paused
+  | "locked" -> Locked
   | _ -> Unexplained
 
 (* The x-tsync-kind vocabulary of the peer wire. *)
@@ -145,7 +149,7 @@ let wire_kind = function
   | Invalid -> Some "invalid"
   | Corrupt -> Some "corrupt"
   | Missing_chunks _ -> Some "missing_chunks"
-  | Paused | Unprepared -> Some "unprepared"
+  | Paused | Locked | Unprepared -> Some "unprepared"
   | _ -> None
 
 let of_wire_kind = function

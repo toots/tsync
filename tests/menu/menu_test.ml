@@ -297,7 +297,7 @@ let () =
            "cache":{"chunks":1216,"bytes":10737418240,"maxCache":10737418240,"pinnedBytes":2147483648},
            "queues":{"pendingFiles":0,"bytesOwed":0,"parked":1},
            "sync":{"position":402,"pending":3,"treeHead":402},
-           "frontends":[{"type":"fuse","mount":"/home/u/tsync/Media","bytesRead":540436070,"bytesWritten":0},
+           "extensions":[],"frontends":[{"type":"fuse","mount":"/home/u/tsync/Media","bytesRead":540436070,"bytesWritten":0},
                         {"type":"http-proxy","bytesRead":10,"bytesWritten":5}],
            "backends":[
              {"name":"http-proxy","role":"main","reach":{"reachable":true,"latencyMs":11.4},
@@ -341,7 +341,7 @@ let () =
       {|{"ok":true,"self":[],"domains":{"name":"x"}}|};
       {|{"ok":true,"self":{"server":"box","process":3,"traffic":null},
          "domains":[7,{"name":3},{"name":"d","settings":1,"cache":{"chunks":"many"},
-           "queues":[],"sync":{"pending":"1","cannotFollow":3},"frontends":[1,{"mount":4}],
+           "queues":[],"sync":{"pending":"1","cannotFollow":3},"extensions":[],"frontends":[1,{"mount":4}],
            "backends":[{"reach":"up","corrupted":"no"}]}]}|};
     ];
 

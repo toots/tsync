@@ -20,7 +20,7 @@ let config =
   Config.of_string
     (Printf.sprintf
        {|{"name":"test","domains":[
-  {"name":"d","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"d","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
        root)
 

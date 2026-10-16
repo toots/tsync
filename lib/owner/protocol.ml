@@ -104,6 +104,19 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** A passphrase shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { passphrase : string; key_id : string }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -196,6 +209,11 @@ type _ request =
   | Pause : bool -> bool request
   | Stats : string list -> R.answer request
   | Stop : unit request
+  | Vault_init : secret request
+  | Vault_unlock : string -> unit request  (** the passphrase as typed *)
+  | Vault_lock : unit request
+  | Vault_passphrase : secret request
+  | Vault_status : vault_status request
 
 type packed = Request : 'a request -> packed
 
@@ -235,10 +253,15 @@ let action : type a. a request -> string = function
   | Pause _ -> "pause"
   | Stats _ -> "stats"
   | Stop -> "stop"
+  | Vault_init -> "vault_init"
+  | Vault_unlock _ -> "vault_unlock"
+  | Vault_lock -> "vault_lock"
+  | Vault_passphrase -> "vault_passphrase"
+  | Vault_status -> "vault_status"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
-  | Revert _ ->
+  | Revert _ | Vault_init | Vault_passphrase ->
       true
   | _ -> false
 
@@ -317,8 +340,10 @@ let destination_of j =
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
   | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
-  | Stop | Share_clear_cache ->
+  | Stop | Share_clear_cache | Vault_init | Vault_lock | Vault_passphrase
+  | Vault_status ->
       []
+  | Vault_unlock p -> [("passphrase", `String p)]
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
   | List_all r ->
@@ -499,6 +524,11 @@ let decode j =
                 (String.split_on_char ','
                    (Option.value ~default:"" (str j "arg")))))
     | "stop" -> Request Stop
+    | "vault_init" -> Request Vault_init
+    | "vault_unlock" -> Request (Vault_unlock (required j "passphrase"))
+    | "vault_lock" -> Request Vault_lock
+    | "vault_passphrase" -> Request Vault_passphrase
+    | "vault_status" -> Request Vault_status
     | a -> Fail.invalid "unknown action: %s" a
 
 let kind_name = function
@@ -638,11 +668,40 @@ let page_fields (pg : page) =
   @ opt "pulledAt" (fun at -> `Int (int_of_float at)) pg.pulled_at
   @ if pg.outdated then [("outdated", `Bool true)] else []
 
+let secret_fields s =
+  [("passphrase", `String s.passphrase); ("keyId", `String s.key_id)]
+
+let secret_of j =
+  { passphrase = required j "passphrase"; key_id = required j "keyId" }
+
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _ ->
+    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _
+    | Vault_unlock _ | Vault_lock ->
         ok []
+    | Vault_init -> ok (secret_fields reply)
+    | Vault_passphrase -> ok (secret_fields reply)
+    | Vault_status ->
+        let strings l = `List (List.map (fun s -> `String s) l) in
+        ok
+          ([
+             ( "vault",
+               `String
+                 (match reply.vault with
+                   | `Absent -> "absent"
+                   | `Corrupt _ -> "corrupt"
+                   | `Locked -> "locked"
+                   | `Unlocked -> "unlocked") );
+             ("slots", `Assoc (List.map (fun (k, n) -> (k, `Int n)) reply.slots));
+             ("unusable", strings reply.unusable);
+             ("copies", strings reply.copies);
+           ]
+          @ (match reply.vault with
+            | `Corrupt reason -> [("reason", `String reason)]
+            | _ -> [])
+          @ opt "keyId" (fun k -> `String k) reply.key_id
+          @ opt "cached" (fun c -> `String c) reply.cached)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -786,6 +845,36 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   in
   match req with
     | Ping -> ()
+    | Vault_unlock _ -> ()
+    | Vault_lock -> ()
+    | Vault_init -> secret_of j
+    | Vault_passphrase -> secret_of j
+    | Vault_status ->
+        let strings k =
+          match member j k with
+            | Some (`List l) ->
+                List.filter_map (function `String s -> Some s | _ -> None) l
+            | _ -> []
+        in
+        {
+          vault =
+            (match str j "vault" with
+              | Some "absent" -> `Absent
+              | Some "locked" -> `Locked
+              | Some "unlocked" -> `Unlocked
+              | _ -> `Corrupt (Option.value ~default:"" (str j "reason")));
+          key_id = str j "keyId";
+          cached = str j "cached";
+          slots =
+            (match member j "slots" with
+              | Some (`Assoc l) ->
+                  List.filter_map
+                    (function k, `Int n -> Some (k, n) | _ -> None)
+                    l
+              | _ -> []);
+          unusable = strings "unusable";
+          copies = strings "copies";
+        }
     | Full_resync -> ()
     | Revert _ -> ()
     | Poll -> ()

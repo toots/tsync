@@ -14,6 +14,7 @@ Add an `http-proxy` frontend to the domain on the machine that has the disk or t
       "name": "media",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": [
         { "type": "http-proxy",
           "port": 8443,
@@ -69,6 +70,7 @@ If the proxy runs on another machine, the server must listen beyond localhost. T
       "name": "media",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": ["fuse"],
       "backends": [
         { "type": "http-proxy", "name": "nas", "role": "main",

@@ -59,6 +59,11 @@ fuse unknown user                        refused: domains[0].frontends[0].uid: n
 fuse uid out of range                    refused: domains[0].frontends[0].uid: a decimal id is at most 4294967294
 fuse unknown group                       refused: domains[0].frontends[0].gid: no such group
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
+no extensions                            refused: domains[0].extensions: required array is missing
+unknown extension                        refused: domains[0].extensions[0]: extension "wifi" is unknown (known: totp, passwords)
+an extension twice                       refused: domains[0].extensions: totp is listed twice
+unknown key in an extension              refused: domains[0].extensions[0]: unknown key(s) "x"
+two extensions                           ok: F ro=false backends=disk:main extensions=totp,passwords
 unused link                              refused: links.slow: no backend uses this link
 maxRate below minRate                    refused: uplink.maxRate: is below minRate
 wrong JSON type                          refused: domains[0].readOnly: expected a boolean

@@ -117,6 +117,19 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** A passphrase shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { passphrase : string; key_id : string }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -212,6 +225,11 @@ type _ request =
   | Pause : bool -> bool request  (** [false] resumes; the reply is the state *)
   | Stats : string list -> Tsync_status.Status_report.answer request
   | Stop : unit request
+  | Vault_init : secret request
+  | Vault_unlock : string -> unit request  (** the passphrase as typed *)
+  | Vault_lock : unit request
+  | Vault_passphrase : secret request
+  | Vault_status : vault_status request
 
 type packed = Request : 'a request -> packed
 

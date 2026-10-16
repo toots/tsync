@@ -19,6 +19,7 @@ data class ServerConfig(
             .put("url", url.trim().trimEnd('/')).put("secret", secret)
         val domain = JSONObject().put("name", domain).put("versioning", true)
             .put("maxCache", maxCache.trim()).put("frontends", JSONArray().put("android"))
+            .put("extensions", JSONArray())
             .put("backends", JSONArray().put(backend))
         return JSONObject().put("name", clientName).put("domains", JSONArray().put(domain)).toString()
     }

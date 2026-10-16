@@ -31,6 +31,6 @@ stat sub/.tsync-ext/b.txt      ok
 rename a.txt onto it           invalid: ".tsync-ext" is reserved
 share it                       invalid: ".tsync-ext" is reserved
 revert a record                invalid: ".tsync-ext/totp/r1" is reserved
-feed: [a.txt c.txt sub .tsync-ext in .tsync-ext totp b.txt c.txt forged late.txt]
+feed: [late.txt]
 feed unnamed: -
 exit status 0

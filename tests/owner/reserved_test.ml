@@ -30,7 +30,7 @@ let config =
   Tsync_config.Config.of_string
     (Printf.sprintf
        {|{"name":"test","domains":[
-  {"name":"docs","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"docs","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
        root)
 
@@ -183,6 +183,9 @@ let () =
             Owner.run ~socket config config.Tsync_config.Config.domains)
       in
       wait_serving 100;
+      (* The owner's own arrival is settled first: the feed then holds only
+         the writes below. *)
+      ignore (ask [("action", "sync")]);
       let cursor =
         Option.get (Ipc.field (ask [("action", "cursor")]) "cursor")
       in

@@ -205,6 +205,11 @@ only in the owner's memory.
 
 `vault_init` and `vault_passphrase` are the only replies that carry a secret.
 
+Refusals: init over a keyring EXISTS (`exists`); unlock or passphrase with no keyring ABSENT
+(`not_found`), with a CORRUPT keyring `internal` (status answers both as a state); a malformed
+passphrase INVALID (`invalid`); a wrong passphrase DENIED (`denied`); a passphrase change on a
+locked vault `locked`.
+
 ## 9. Parameters
 
 | name | value | rule |

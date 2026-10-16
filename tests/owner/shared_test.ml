@@ -36,9 +36,9 @@ let config =
      else
        Printf.sprintf
          {|{"name":"test","domains":[
-  {"name":"docs","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"docs","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
-  {"name":"pics","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"pics","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store2"}]}]}|}
          root root)
 

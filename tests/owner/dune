@@ -146,3 +146,26 @@
  (alias runtest)
  (action
   (diff reserved_test.expected reserved_test.output)))
+
+(executable
+ (name vault_test)
+ (modules vault_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_vault
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  vault_test.output
+  (run ./vault_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff vault_test.expected vault_test.output)))

@@ -23,10 +23,15 @@ type backend = {
 
 type frontend = { ftype : string; options : (string * value) list }
 
+(** The extensions of this release (05 §2.1). *)
+val extension_names : string list
+
 type domain = {
   name : Domain_name.t;
   backends : backend list;  (** in read order: role, then config order *)
   frontends : frontend list;
+  extensions : string list;
+      (** the extensions this client uses; any gives the domain a vault *)
   symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;  (** forced when no backend has a writable role *)
