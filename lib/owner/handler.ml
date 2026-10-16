@@ -801,13 +801,34 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           ~lazy_tree:t.domain.lazy_tree
     | Vault_unlock passphrase ->
         Vault.unlock t.vault ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree passphrase
+          ~lazy_tree:t.domain.lazy_tree passphrase;
+        Totp_verbs.fold t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree
     | Vault_lock -> Vault.lock t.vault ~domain:t.domain
     | Vault_passphrase ->
         Vault.passphrase t.vault ~domain:t.domain ~engine:t.engine
           ~lazy_tree:t.domain.lazy_tree
     | Vault_status ->
         Vault.status t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree
+    | Totp_add uri ->
+        Totp_verbs.add t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree uri
+    | Totp_list filter ->
+        Totp_verbs.list t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree filter
+    | Totp_rename r ->
+        Totp_verbs.rename t.vault ?issuer:r.issuer ?account:r.account
+          ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree
+          ~id:r.id ()
+    | Totp_remove id ->
+        Totp_verbs.remove t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree id
+    | Totp_import text ->
+        Totp_verbs.import t.vault ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree text
+    | Totp_export ->
+        Totp_verbs.export t.vault ~domain:t.domain ~engine:t.engine
           ~lazy_tree:t.domain.lazy_tree
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull

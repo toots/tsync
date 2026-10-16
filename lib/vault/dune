@@ -1,6 +1,6 @@
 (library
  (name tsync_vault)
- (libraries tsync_core yojson base64)
+ (libraries tsync_core yojson base64 digestif)
  (foreign_stubs
   (language c)
   (include_dirs ../../vendor/monocypher)

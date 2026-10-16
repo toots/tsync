@@ -76,10 +76,12 @@ Every verb is of access class **owner**
 | `list` / `totp_list` | `filter?` | every record whose issuer or account contains `filter` (case-insensitive): id, issuer, account, code, seconds left; ordered by issuer, then account, then id |
 | `rename` / `totp_rename` | `id`, `issuer?`, `account?` | edits the labels and sets `modified` |
 | `remove` / `totp_remove` | `id` | removes the record |
-| `export` (CLI only) | — | prints one `otpauth://totp/` URI per record, the way out of tsync |
+| `import` / `totp_import` | `text` | adds one record per line of a plain-text export (§5.2); replies with what it added, skipped and refused |
+| `export` / `totp_export` | — | one `otpauth://totp/` URI per record, the way out of tsync |
 
-- `list` never carries a seed. `export` is the only verb that prints one, and it has no action:
-  a seed reaches no app through the request handler.
+- `list` never carries a seed. `export` is the only verb that returns one. K lives in the owner,
+  so the CLI's `export` reaches it through the request handler like any verb; an app MUST NOT
+  offer `totp_export`.
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
 
@@ -96,6 +98,22 @@ Every verb is of access class **owner**
   machines using one seed would hand out the same counter.
 - Unknown parameters are ignored.
 
+### 5.2 Plain-text import
+
+The plain-text export of another authenticator (Ente Auth writes this form, and its encrypted
+export decrypts to it): `otpauth://` URIs, one per line, or several on a line separated by `,` or
+`;`.
+
+- A `,` or `;` separates two entries only where the next entry, after spaces, starts with
+  `otpauth://`: a label left unencoded may hold either character.
+- Entries are trimmed; empty ones are skipped. Each other is added as `add` would (§5.1), into one
+  domain.
+- A refused entry is reported by its line number (and its rank on the line, when the line has
+  several) and reason, never by its content (it holds a seed), and the others go on.
+- A line whose issuer, account and code fields equal those of a record of the domain, or of an
+  earlier line, is skipped as already there: importing one file twice adds nothing.
+- Line numbers count from 1 and include empty lines, so they match an editor's.
+
 ## 6. Conformance
 
 - The RFC 6238 appendix B vectors, 8 digits, period 30: seed `12345678901234567890` with SHA1
@@ -110,6 +128,9 @@ Every verb is of access class **owner**
 - The store holds no seed, label or code in plaintext after `add`.
 - `list` replies hold no seed. `export` then `add` of each URI reproduces every record's fields
   but `modified`.
+- `import` of three lines (a URI, an empty line, an `hotp` URI) adds one record and refuses line
+  3 without echoing it; importing the same text again adds nothing and skips one; the `export`
+  of a domain imports into an empty domain as the same records.
 - Two machines rename one record concurrently: after both fold, one record remains at its id
   with the newer labels, and no copy.
 - Two copies with different code fields fold into two records, both still producing their codes.

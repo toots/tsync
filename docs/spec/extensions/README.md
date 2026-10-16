@@ -83,9 +83,10 @@ settle them into one record (or, where both must survive, several).
   inputs (the keyring, [vault §4.3](vault.md#43-concurrent-changes)).
 - A fold MUST NOT lose a record that a user could still need. Copies it removes MUST hold no
   information the kept file lacks, beyond what the extension's own spec names as superseded.
-- The owner runs the fold after each arrival or pull that brings a conflicted copy into the
-  extension's folder, and at owner start. A fold that needs plaintext waits until the vault is
-  unlocked; the copies stay where they are until then.
+- The owner runs the fold before each verb that reads the extension's records, and after an
+  unlock. A copy that arrives stays, hidden, until then: the fold depends on nothing but the
+  files, so folding later settles the same. A fold that needs plaintext waits until the vault is
+  unlocked.
 
 ### 4.3 The grouped fold
 

@@ -169,3 +169,30 @@
  (alias runtest)
  (action
   (diff vault_test.expected vault_test.output)))
+
+(executable
+ (name totp_test)
+ (modules totp_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  tsync_vault
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  totp_test.output
+  (run ./totp_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff totp_test.expected totp_test.output)))

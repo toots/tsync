@@ -39,6 +39,41 @@ let refresh engine ~lazy_tree =
 
 let read_current engine ~lazy_tree = if lazy_tree then pull engine
 
+(* The files of an extension folder, read whole. *)
+let files engine dir : Tsync_vault.Fold.file list =
+  let (module E : Engine.S) = engine in
+  if E.kind dir <> `Dir then []
+  else
+    List.filter_map
+      (fun (e : E.entry) ->
+        if e.is_dir then None
+        else (
+          let path = Names.join dir e.name in
+          Some { Tsync_vault.Fold.name = e.name; body = read_file engine path }))
+      (E.list_children dir)
+
+let write_file (module E : Engine.S) ~exclusive path body =
+  E.create path ~exclusive;
+  E.truncate path 0;
+  E.write path ~off:0 (Bigstring.of_string body);
+  E.close path
+
+(* README §4.2: a fold that cannot be applied now is left for the next. *)
+let apply engine dir actions =
+  let (module E : Engine.S) = engine in
+  List.iter
+    (fun action ->
+      try
+        match action with
+          | Tsync_vault.Fold.Move { src; dst } ->
+              E.rename ~src:(Names.join dir src) ~dst:(Names.join dir dst)
+                ~exclusive:false
+          | Remove name -> E.delete (Names.join dir name)
+          | Write { name; body } ->
+              write_file engine ~exclusive:false (Names.join dir name) body
+      with Fail.E f -> Log.warn "vault: a fold in %s is left: %s" dir f.reason)
+    actions
+
 type found = {
   keyring : [ `Absent | `Corrupt of string | `Ok of Keyring.t ];
   copies : string list;  (** the conflicted copies beside it *)
@@ -46,6 +81,10 @@ type found = {
 
 let read engine =
   let (module E : Engine.S) = engine in
+  let actions, others =
+    Tsync_vault.Fold.keyring ~name:"keyring" (files engine folder)
+  in
+  apply engine folder actions;
   let keyring =
     match E.kind keyring_path with
       | `Absent | `Dir -> `Absent
@@ -54,23 +93,12 @@ let read engine =
             | Ok k -> `Ok k
             | Error reason -> `Corrupt reason)
   in
-  let copies =
-    if E.kind folder <> `Dir then []
-    else
-      List.filter_map
-        (fun (e : E.entry) ->
-          if e.is_dir || e.name = "keyring" then None
-          else Some (Names.join folder e.name))
-        (E.list_children folder)
-  in
-  { keyring; copies }
+  { keyring; copies = List.map (Names.join folder) others }
 
-let write (module E : Engine.S) ~exclusive keyring =
+let write engine ~exclusive keyring =
+  let (module E : Engine.S) = engine in
   List.iter (fun dir -> E.mkdir dir ~exclusive:false) [ext; folder];
-  E.create keyring_path ~exclusive;
-  E.truncate keyring_path 0;
-  E.write keyring_path ~off:0 (Bigstring.of_string (Keyring.to_string keyring));
-  E.close keyring_path
+  write_file engine ~exclusive keyring_path (Keyring.to_string keyring)
 
 let now () = int_of_float (Unix.time ())
 
