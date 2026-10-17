@@ -103,11 +103,20 @@ installation's configuration and local state.
 |---|---|
 | App bundle id | `org.feverdreamtv.tsync` |
 | Extension bundle id | `org.feverdreamtv.tsync.fileprovider` |
+| Owner wrapper bundle id | `org.feverdreamtv.tsync.daemon` |
 | App Group | `group.org.feverdreamtv.tsync` |
 | Service label | `org.feverdreamtv.tsync.daemon` |
 
 A `group.`-style App Group is accepted by macOS without a prompt only when every binary claiming it
-carries a provisioning profile authorising it; the app and the extension MUST both embed one.
+carries a provisioning profile authorising it; the app, the extension and the owner's wrapper MUST
+each embed one. A process that reaches the group container without that claim is asked "would like
+to access data from other apps" at every start: macOS does not keep the answer for it.
+
+The owner is a command-line program, and a profile can only be embedded in a bundle. It therefore
+runs from a wrapper bundle, `Contents/Library/Helpers/tsyncd.app`, which holds the daemon as its
+executable, its profile, and the dylibs the daemon links. The daemon is signed claiming the App
+Group. `Contents/MacOS/tsync` of the app is a link to it, so the CLI link and a path to it keep
+working.
 
 ### 3.2 Paths
 
@@ -122,7 +131,8 @@ carries a provisioning profile authorising it; the app and the extension MUST bo
 | Purge marker | `<data dir>/fileprovider-purge` |
 | Identity-scheme record | `<data dir>/fileprovider-identity-scheme` (decimal integer) |
 | Service log | `~/Library/Logs/tsync-daemon.log` |
-| CLI link | `/usr/local/bin/tsync` → the binary inside the app bundle |
+| Owner program | `<app>/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync` |
+| CLI link | `/usr/local/bin/tsync` → the owner program |
 | Extension staging directory | the extension's own temporary directory, `staging/` |
 
 Unix socket paths are limited to 104 bytes; the request socket path MUST fit. Every marker and record
@@ -659,7 +669,7 @@ submenu shows the model's placeholder row.
   it, and launches the app, all as the console user. The app registers itself as a login item through
   the service-management API.
 - The owner's agent is a per-user agent definition in the user's launch agents directory, naming the
-  program inside the app bundle by its absolute path. It MUST name the app's bundle identifier as its
+  owner program (§3.2) by its absolute path. It MUST name the app's bundle identifier as its
   associated bundle, so the system attributes it to the app in Login Items. It runs `tsync start` at
   login, sends its output to the service log, and is restarted on any unclean exit. With no config, or no domain
   configured (every fresh install), the service still serves the request socket, answering `menu`
@@ -670,9 +680,10 @@ submenu shows the model's placeholder row.
 - The agent cannot be bundled and registered by the app: the system lets a sandboxed app register
   only sandboxed executables through the service-management API ("SMAppService target executable must
   be sandboxed because the app is sandboxed"), and the owner must not be sandboxed.
-- The user approves the extension once in System Settings. The owner reads and writes inside the
-  extension's container (staging and temporary files), so its first start may prompt once for access
-  to data from other apps.
+- The user approves the extension once in System Settings. The owner claims the App Group through
+  its wrapper (§3.1), so neither its own files nor the extension's staging prompt for access to data
+  from other apps. A release build without the wrapper's profile is refused: an owner that cannot
+  claim the group would prompt at every start.
 - Apple silicon only; minimum macOS 13.
 
 ## 12. The framework's contract (what any reimplementation must honour)

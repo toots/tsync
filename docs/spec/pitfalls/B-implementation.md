@@ -559,6 +559,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Before deleting a tree, list what reads from it (golden files read across languages, scripts named in workflows and docs, workflow `uses:` and `run:` paths) and carry each over or delete its reader. Every path a workflow names exists in the tree.
 - **Seen** — rewrite (ci-workflows).
 
+### B-11.12 An owner that prompts for its own App Group at every start
+- **Pitfall** — The owner ran as a bare executable inside the app bundle, signed without entitlements, and kept its config, socket and data in the `group.` App Group container. macOS 15 asked "tsync would like to access data from other apps" at every start, and did not keep the answer for a binary that does not claim the group; the spec had expected one prompt at first start. An entitlement only a profile can authorise cannot be given to a bare executable, which holds no profile.
+- **Check** — Every process that opens the group container claims the App Group under a profile: the owner runs from a wrapper bundle carrying one (file-provider §3.1). A restart of the agent on an installed build shows no prompt.
+- **Seen** — vault-core (stamped build 281, 2026-10-17).
+
 ## 12. Test harnesses that pass while testing nothing [tests]
 
 ### B-12.1 Suites that verified nothing and reported success

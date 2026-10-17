@@ -10,6 +10,8 @@
 #                   package.sh overrides this with the Developer ID identity.
 #   PROFILE_APP     optional .provisionprofile embedded in the app
 #   PROFILE_APPEX   optional .provisionprofile embedded in the extension
+#   PROFILE_DAEMON  optional .provisionprofile embedded in the owner's wrapper;
+#                   without it the daemon claims no App Group (file-provider §3.1)
 #   BUNDLE_VERSION / BUNDLE_SHORT_VERSION  optional CFBundleVersion overrides
 set -euo pipefail
 
@@ -97,9 +99,18 @@ else
     rm -f "$build_log"
 fi
 
+# file-provider §3.1: the owner runs from a wrapper bundle, the only place a
+# command-line program can hold the profile its App Group claim needs.
 say "Embedding daemon"
-cp "$REPO/_build/default/bin/tsync.exe" "$APP/Contents/MacOS/tsync"
-chmod +x "$APP/Contents/MacOS/tsync"
+DAEMON_APP="$APP/Contents/Library/Helpers/tsyncd.app"
+DAEMON="$DAEMON_APP/Contents/MacOS/tsync"
+rm -rf "$DAEMON_APP" "$APP/Contents/MacOS/tsync" "$APP/Contents/libs"
+mkdir -p "$DAEMON_APP/Contents/MacOS"
+cp "$MACOS_DIR/TsyncDaemon/Info.plist" "$DAEMON_APP/Contents/Info.plist"
+cp "$REPO/_build/default/bin/tsync.exe" "$DAEMON"
+chmod +x "$DAEMON"
+# The CLI link and existing paths to the app's binary keep working.
+ln -s ../Library/Helpers/tsyncd.app/Contents/MacOS/tsync "$APP/Contents/MacOS/tsync"
 # Shipped in the bundle so the installer's postinstall and deploy.sh share one
 # implementation, and so it can be re-run to repair the agent.
 mkdir -p "$APP/Contents/Resources"
@@ -109,19 +120,22 @@ chmod +x "$APP/Contents/Resources/install-agent.sh"
 # The daemon links Homebrew dylibs (openssl, gmp, pcre2, libev) that are
 # not present on a user's machine. Copy them in and rewrite the install names.
 say "Bundling dylibs"
-rm -rf "$APP/Contents/libs"
 dylibbundler -cd -of -b \
-    -x "$APP/Contents/MacOS/tsync" \
-    -d "$APP/Contents/libs" \
+    -x "$DAEMON" \
+    -d "$DAEMON_APP/Contents/libs" \
     -p "@executable_path/../libs" >/dev/null
 
 if [[ -n "${BUNDLE_VERSION:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUNDLE_VERSION" \
+        "$DAEMON_APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUNDLE_VERSION" \
         "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUNDLE_VERSION" \
         "$APP/Contents/PlugIns/TsyncFileProvider.appex/Contents/Info.plist"
 fi
 if [[ -n "${BUNDLE_SHORT_VERSION:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUNDLE_SHORT_VERSION" \
+        "$DAEMON_APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUNDLE_SHORT_VERSION" \
         "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUNDLE_SHORT_VERSION" \
@@ -131,6 +145,13 @@ fi
 APPEX="$APP/Contents/PlugIns/TsyncFileProvider.appex"
 [[ -n "${PROFILE_APP:-}" ]] && cp "$PROFILE_APP" "$APP/Contents/embedded.provisionprofile"
 [[ -n "${PROFILE_APPEX:-}" ]] && cp "$PROFILE_APPEX" "$APPEX/Contents/embedded.provisionprofile"
+# An App Group claim no profile authorises keeps the daemon from launching, so
+# the claim is made only with the profile.
+DAEMON_SIGNING=()
+if [[ -n "${PROFILE_DAEMON:-}" ]]; then
+    cp "$PROFILE_DAEMON" "$DAEMON_APP/Contents/embedded.provisionprofile"
+    DAEMON_SIGNING=(--entitlements "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements")
+fi
 
 # Inside-out: nested code must be sealed before the enclosing bundle.
 say "Signing with identity: $SIGN_IDENTITY"
@@ -165,10 +186,12 @@ APPEX_ENTITLEMENTS=$(effective_entitlements "$APPEX" \
 APP_ENTITLEMENTS=$(effective_entitlements "$APP" \
     "$MACOS_DIR/TsyncApp/TsyncApp.entitlements")
 
-for dylib in "$APP/Contents/libs"/*.dylib; do
+for dylib in "$DAEMON_APP/Contents/libs"/*.dylib; do
     sign "$dylib"
 done
-sign "$APP/Contents/MacOS/tsync"
+# Signing the wrapper signs its executable; bash 3.2 refuses an empty array
+# under set -u, hence the guard.
+sign ${DAEMON_SIGNING[@]+"${DAEMON_SIGNING[@]}"} "$DAEMON_APP"
 sign --entitlements "$APPEX_ENTITLEMENTS" "$APPEX"
 sign --entitlements "$APP_ENTITLEMENTS" "$APP"
 
