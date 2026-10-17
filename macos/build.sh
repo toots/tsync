@@ -156,7 +156,18 @@ if [[ -n "${PROFILE_DAEMON:-}" ]]; then
     allowed=$(/usr/libexec/PlistBuddy \
         -c "Print :Entitlements:com.apple.security.application-groups" \
         "$profile_plist" 2>/dev/null || true)
+    # The profile is tied to the daemon by its application identifier.
+    profile_id=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.application-identifier" \
+        "$profile_plist" 2>/dev/null || true)
     rm -f "$profile_plist"
+    claimed_id=$(/usr/libexec/PlistBuddy \
+        -c "Print :com.apple.application-identifier" \
+        "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements")
+    [[ "$profile_id" == "$claimed_id" ]] || {
+        echo "PROFILE_DAEMON is for $profile_id, the daemon claims $claimed_id" >&2
+        exit 1
+    }
     claimed=$(/usr/libexec/PlistBuddy \
         -c "Print :com.apple.security.application-groups" \
         "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements" | sed '1d;$d')

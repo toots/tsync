@@ -115,7 +115,9 @@ to access data from other apps" at every start: macOS does not keep the answer f
 The owner is a command-line program, and a profile can only be embedded in a bundle. It therefore
 runs from a wrapper bundle, `Contents/Library/Helpers/tsyncd.app`, which holds the daemon as its
 executable, its profile, and the dylibs the daemon links. The daemon is signed claiming the App
-Group. `Contents/MacOS/tsync` of the app is a link to it, so the CLI link and a path to it keep
+Group, its application identifier (`<team>.org.feverdreamtv.tsync.daemon`) and its team: the
+identifier is what ties the embedded profile to the binary, and without it the group claim is
+treated as unauthorised and the prompt stays. `Contents/MacOS/tsync` of the app is a link to it, so the CLI link and a path to it keep
 working.
 
 ### 3.2 Paths
