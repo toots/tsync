@@ -436,7 +436,7 @@ let parse_domain path j =
               parse_extension (Printf.sprintf "%s.extensions[%d]" path i) e)
             es
       | Some _ -> fail (sub path "extensions") "expected an array"
-      | None -> fail (sub path "extensions") "required array is missing"
+      | None -> []
   in
   List.iter
     (fun e ->

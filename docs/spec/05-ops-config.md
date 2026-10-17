@@ -88,7 +88,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)) |
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
-| `extensions` | array | yes | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
+| `extensions` | array | no, `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; absent or `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
@@ -773,9 +773,9 @@ Token, expiry, overwrite and revocation rules are
   included; a known but
   not compiled type refused at use, an unknown type at parse; wrong JSON types refused with the JSON
   path in the message; duplicate domain names and backend names (ignoring case) refused; a domain
-  name outside the grammar refused; two presenting frontends or a duplicate frontend refused; a domain without `extensions`, with
-  an unknown or duplicate extension, or with an unknown key in an extension object refused, `[]`
-  accepted; role
+  name outside the grammar refused; two presenting frontends or a duplicate frontend refused; a domain with
+  an unknown or duplicate extension, or with an unknown key in an extension object refused; a domain
+  without `extensions` and one with `[]` accepted alike; role
   validation as §2.1; `link` default and refusal on `local`; `links` merged over `uplink` and an
   unused link refused; sizes parsed as §2.1; `maxChunkBuffers` follows `maxUploads`; zero means the
   default; a lone `readOnly` backend forces read-only; the wizard cannot write a config the parser
