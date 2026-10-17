@@ -149,6 +149,24 @@ APPEX="$APP/Contents/PlugIns/TsyncFileProvider.appex"
 # the claim is made only with the profile.
 DAEMON_SIGNING=()
 if [[ -n "${PROFILE_DAEMON:-}" ]]; then
+    # A claim the profile does not authorise is refused at launch, after the
+    # whole release: check every claimed group against the profile here.
+    profile_plist=$(mktemp)
+    security cms -D -i "$PROFILE_DAEMON" >"$profile_plist"
+    allowed=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.security.application-groups" \
+        "$profile_plist" 2>/dev/null || true)
+    rm -f "$profile_plist"
+    claimed=$(/usr/libexec/PlistBuddy \
+        -c "Print :com.apple.security.application-groups" \
+        "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements" | sed '1d;$d')
+    for group in $claimed; do
+        grep -qxF "    $group" <<<"$allowed" || {
+            echo "PROFILE_DAEMON does not authorise App Group $group" >&2
+            echo "it authorises: $(sed '1d;$d' <<<"$allowed" | xargs)" >&2
+            exit 1
+        }
+    done
     cp "$PROFILE_DAEMON" "$DAEMON_APP/Contents/embedded.provisionprofile"
     DAEMON_SIGNING=(--entitlements "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements")
 fi
