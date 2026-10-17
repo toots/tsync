@@ -254,6 +254,7 @@ let () =
               ("uri", "otpauth://totp/a?secret=JBSWY3DPEHPK3PXP");
             ] );
           ("list", [("action", "totp_list")]);
+          ("code", [("action", "totp_code"); ("id", String.make 32 '0')]);
           ( "rename",
             [
               ("action", "totp_rename");
@@ -285,6 +286,25 @@ let () =
       in
       listing "list";
       listing ~filter:"acme" "list acme";
+      (let seed =
+         Result.get_ok
+           (V.Totp.of_uri ~now:0 "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP")
+       in
+       let before = Int64.of_float (Unix.time ()) in
+       let r = ask [("action", "totp_code"); ("id", acme)] in
+       let after = Int64.of_float (Unix.time ()) in
+       match field r "code" with
+         | Some code ->
+             p "%-36s matches the seed: %b, carries no seed: %b" "code"
+               (code = V.Totp.code_at seed ~unix_time:before
+               || code = V.Totp.code_at seed ~unix_time:after)
+               (not
+                  (Text.contains (Yojson.Safe.to_string r) "JBSWY3DPEHPK3PXP"))
+         | None -> answer "code" r);
+      answer "code of a malformed id"
+        (ask [("action", "totp_code"); ("id", "xyz")]);
+      answer "code of an absent id"
+        (ask [("action", "totp_code"); ("id", String.make 32 '0')]);
       answer "rename"
         (ask [("action", "totp_rename"); ("id", acme); ("issuer", "ACME Inc")]);
       answer "rename to nothing"

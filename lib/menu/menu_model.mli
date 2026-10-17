@@ -8,6 +8,9 @@ type action =
   | Reveal of { domain : string; rel : string }
   | Set_paused of bool
   | Show_stats
+  | Show_codes
+  | Copy_code of { domain : string; id : string }
+  | Unlock of string
   | Quit
 
 type item = {
@@ -41,8 +44,10 @@ val status_of_json : Yojson.Safe.t -> status option
 
 (** The domains in configuration order, each with its status or [None] when
     unreachable. [quit] is the label of the quit row, absent for a client whose
-    process must keep running. *)
-val render : ?quit:string -> (string * status option) list -> t
+    process must keep running. [codes] are the code domains (§5): with none
+    there is no One-time codes row. *)
+val render :
+  ?quit:string -> ?codes:string list -> (string * status option) list -> t
 
 (** {1 Stats submenu (§6)} *)
 
@@ -58,7 +63,21 @@ val stats_placeholder : entry list
 (** The rows for the processes that answered; never empty. *)
 val stats : stats list -> entry list
 
-(** {1 JSON form (§7)} *)
+(** {1 Codes submenu (§7)} *)
+
+(** What the model reads of one domain's [totp_list] answer. *)
+type codes
+
+(** The reply, or [None] when the owner did not answer; total. *)
+val codes_of_json : Yojson.Safe.t option -> codes
+
+val codes_placeholder : entry list
+
+(** The code domains in configuration order with their answers; never empty, and
+    no row carries a code. *)
+val codes : (string * codes) list -> entry list
+
+(** {1 JSON form (§8)} *)
 
 val entry_to_json : entry -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t

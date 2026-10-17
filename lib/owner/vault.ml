@@ -7,10 +7,53 @@ let ext = Names.extension_root
 let folder = Names.join ext "vault"
 let keyring_path = Names.join folder "keyring"
 
-(* vault §6: K lives in the owner's memory only, under its key id. *)
-type t = { key : (string * string) option Atomic.t }
+(* vault §6: K under its key id, in the owner's memory and, where the host has
+   one, its keystore (§6.1). *)
+type t = {
+  key : (string * string) option Atomic.t;
+  cached : [ `Keystore | `Memory ] Atomic.t;
+  restored : bool Atomic.t;  (** the keystore was read for this owner *)
+  keystore_error : string option Atomic.t;
+}
 
-let create () = { key = Atomic.make None }
+let create () =
+  {
+    key = Atomic.make None;
+    cached = Atomic.make `Memory;
+    restored = Atomic.make false;
+    keystore_error = Atomic.make None;
+  }
+
+let domain_key (domain : Tsync_domain.Domain.t) =
+  Domain_name.to_string domain.name
+
+(* §6.1 owner start: read once, before the first use of K. *)
+let restore ~domain t =
+  if not (Atomic.exchange t.restored true) then
+    Option.iter
+      (fun (ks : Keystore.t) ->
+        match ks.get ~domain:(domain_key domain) with
+          | Some entry ->
+              Atomic.set t.key (Some entry);
+              Atomic.set t.cached `Keystore
+          | None -> ()
+          | exception Fail.E f -> Atomic.set t.keystore_error (Some f.reason))
+      (Keystore.registered ())
+
+(* §6.1 unlock: a keystore that refuses leaves K in memory. *)
+let store ~domain t (key_id, key) =
+  Atomic.set t.key (Some (key_id, key));
+  Atomic.set t.cached `Memory;
+  Option.iter
+    (fun (ks : Keystore.t) ->
+      match ks.put ~domain:(domain_key domain) ~key_id ~key with
+        | () ->
+            Atomic.set t.cached `Keystore;
+            Atomic.set t.keystore_error None
+        | exception Fail.E f ->
+            Atomic.set t.keystore_error (Some f.reason);
+            Log.warn "vault: %s keeps the key in memory: %s" ks.name f.reason)
+    (Keystore.registered ())
 
 (* extensions README §3: a client that uses no extension of the domain runs
    none of the vault. *)
@@ -117,7 +160,7 @@ let init ~domain ~engine ~lazy_tree t =
   let passphrase = Passphrase.generate () in
   let key, keyring = Keyring.create ~now:(now ()) passphrase in
   write engine ~exclusive:true keyring;
-  Atomic.set t.key (Some (keyring.key_id, key));
+  store ~domain t (keyring.key_id, key);
   secret ~key_id:keyring.key_id passphrase
 
 let current engine ~lazy_tree =
@@ -171,9 +214,10 @@ let rekey ~(domain : Tsync_domain.Domain.t) ~engine ~from:(old_id, old_key)
 
 let unlock ~domain ~engine ~lazy_tree t typed =
   check_uses domain;
+  restore ~domain t;
   let keyring, key = unwrap ~engine ~lazy_tree typed in
   let held = Atomic.get t.key in
-  Atomic.set t.key (Some (keyring.key_id, key));
+  store ~domain t (keyring.key_id, key);
   match held with
     | Some ((old_id, _) as old) when old_id <> keyring.key_id ->
         rekey ~domain ~engine ~from:old ~into:(keyring.key_id, key)
@@ -184,8 +228,17 @@ let confirm ~domain ~engine ~lazy_tree typed =
   check_uses domain;
   ignore (unwrap ~engine ~lazy_tree typed)
 
+(* §6.1: a lock whose delete failed did not happen. *)
 let lock ~domain t =
   check_uses domain;
+  restore ~domain t;
+  Option.iter
+    (fun (ks : Keystore.t) ->
+      try ks.delete ~domain:(domain_key domain)
+      with Fail.E f ->
+        Fail.raise_ Unexplained "%s could not forget the key: %s" ks.name
+          f.reason)
+    (Keystore.registered ());
   Atomic.set t.key None
 
 (* The K held for the keyring's key id: one for another id is not adopted
@@ -197,6 +250,7 @@ let key t keyring =
 
 let held ~domain ~engine ~lazy_tree t =
   check_uses domain;
+  restore ~domain t;
   let keyring = current engine ~lazy_tree in
   match key t keyring with
     | Some k -> (keyring, k)
@@ -219,6 +273,7 @@ let passphrase ~domain ~engine ~lazy_tree t =
 
 let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses domain;
+  restore ~domain t;
   read_current engine ~lazy_tree;
   let found = read engine in
   let base =
@@ -229,6 +284,7 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       slots = [];
       unusable = [];
       copies = found.copies;
+      keystore_error = Atomic.get t.keystore_error;
     }
   in
   match found.keyring with
@@ -245,7 +301,12 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
           base with
           vault = (if unlocked then `Unlocked else `Locked);
           key_id = Some k.key_id;
-          cached = (if unlocked then Some "memory" else None);
+          cached =
+            (if not unlocked then None
+             else (
+               match Atomic.get t.cached with
+                 | `Keystore -> Some "keystore"
+                 | `Memory -> Some "memory"));
           slots =
             List.map
               (fun n -> (n, List.length (List.filter (( = ) n) kinds)))

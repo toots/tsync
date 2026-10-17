@@ -118,6 +118,9 @@ type totp_listing = {
   corrupt : string list;  (** record ids that do not open *)
 }
 
+(** totp §5 [code]: one record's current code. *)
+type totp_code = { code : string; seconds_left : int }
+
 (** totp §5.2: refused lines by number and reason, never by content. *)
 type totp_imported = {
   added : int;
@@ -136,6 +139,7 @@ type vault_status = {
   slots : (string * int) list;  (** count by kind *)
   unusable : string list;  (** slots past the readers' limits *)
   copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -237,6 +241,7 @@ type _ request =
   | Vault_status : vault_status request
   | Totp_add : string -> string request  (** a URI; the new record's id *)
   | Totp_list : string option -> totp_listing request
+  | Totp_code : string -> totp_code request  (** a record id *)
   | Totp_rename : {
       id : string;
       issuer : string option;
@@ -293,6 +298,7 @@ let action : type a. a request -> string = function
   | Vault_status -> "vault_status"
   | Totp_add _ -> "totp_add"
   | Totp_list _ -> "totp_list"
+  | Totp_code _ -> "totp_code"
   | Totp_rename _ -> "totp_rename"
   | Totp_remove _ -> "totp_remove"
   | Totp_import _ -> "totp_import"
@@ -390,7 +396,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Totp_rename r ->
       (("id", `String r.id) :: opt "issuer" (fun i -> `String i) r.issuer)
       @ opt "account" (fun a -> `String a) r.account
-  | Totp_remove id -> [("id", `String id)]
+  | Totp_remove id | Totp_code id -> [("id", `String id)]
   | Totp_import text -> [("text", `String text)]
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
@@ -588,6 +594,7 @@ let decode j =
                account = str j "account";
              })
     | "totp_remove" -> Request (Totp_remove (required j "id"))
+    | "totp_code" -> Request (Totp_code (required j "id"))
     | "totp_import" -> Request (Totp_import (required j "text"))
     | "totp_export" -> Request (Totp_export (required j "passphrase"))
     | a -> Fail.invalid "unknown action: %s" a
@@ -742,6 +749,12 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Vault_unlock _ | Vault_lock | Totp_rename _ | Totp_remove _ ->
         ok []
     | Totp_add _ -> ok [("id", `String reply)]
+    | Totp_code _ ->
+        ok
+          [
+            ("code", `String reply.code);
+            ("secondsLeft", `Int reply.seconds_left);
+          ]
     | Totp_import _ ->
         ok
           [
@@ -795,7 +808,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
             | `Corrupt reason -> [("reason", `String reason)]
             | _ -> [])
           @ opt "keyId" (fun k -> `String k) reply.key_id
-          @ opt "cached" (fun c -> `String c) reply.cached)
+          @ opt "cached" (fun c -> `String c) reply.cached
+          @ opt "keystoreError" (fun e -> `String e) reply.keystore_error)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -944,6 +958,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Totp_rename _ -> ()
     | Totp_remove _ -> ()
     | Totp_add _ -> required j "id"
+    | Totp_code _ ->
+        { code = required j "code"; seconds_left = count "secondsLeft" j }
     | Totp_import _ ->
         {
           added = count "added" j;
@@ -1008,6 +1024,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               | _ -> []);
           unusable = strings "unusable";
           copies = strings "copies";
+          keystore_error = str j "keystoreError";
         }
     | Full_resync -> ()
     | Revert _ -> ()

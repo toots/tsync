@@ -347,6 +347,58 @@ tooltip tsync — Idle
             sync stopped at entry 8
             gcs (main) — reachable
 
+== codes: a menu with code domains has the row, one without has not
+icon    tsync-idle-symbolic
+tooltip tsync — Idle
+        work — Idle -> open work
+        ---
+        Stats >
+        One-time codes >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== codes: before any answer
+        Reading…
+
+== codes: one domain
+        ACME Co — john@example.com -> copy work:3f2a
+        GitHub -> copy work:9c1e
+        bob -> copy work:77aa
+
+== codes: two domains, one locked
+        work
+            ACME Co — john@example.com -> copy work:3f2a
+            GitHub -> copy work:9c1e
+            bob -> copy work:77aa
+        home
+            Locked — unlock… -> unlock home
+
+== codes: no vault, not answering, no codes, unreadable records
+        a
+            No vault — run tsync vault init
+        b
+            not answering
+        c
+            not answering
+        d
+            No codes
+        e
+            2 unreadable — run tsync totp list
+        f
+            LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… -> copy f:1
+            1 unreadable — run tsync totp list
+
+== codes: no code domain at all
+        No codes
+
+== codes: the JSON form, and no code in any row
+[{"label":"work","enabled":true,"indent":0,"action":{}},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"home","enabled":true,"indent":0,"action":{}},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
+the reply carries 123456: true
+carries 123456: false
+carries 654321: false
+carries 000000: false
+
 == replies with fields of the wrong type, and an empty object
 icon    tsync-sync-symbolic
 tooltip tsync — Downloading 1
@@ -366,4 +418,4 @@ tooltip tsync — Downloading 1
         d
             ? (?)
 
-29 cases
+36 cases

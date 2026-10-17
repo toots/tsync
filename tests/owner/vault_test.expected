@@ -33,6 +33,26 @@ status                           locked slots={"passphrase":1}
 unlock                           ok
 status                           unlocked cached=memory slots={"passphrase":1}
 owner exit status 0
+== with a keystore: unlock
+status                           locked slots={"passphrase":1}
+unlock                           ok
+status                           unlocked cached=keystore slots={"passphrase":1}
+keystore entries                 [docs]
+owner exit status 0
+== with a keystore: a restart, then lock
+status                           unlocked cached=keystore slots={"passphrase":1}
+lock                             ok
+status                           locked slots={"passphrase":1}
+keystore entries                 []
+owner exit status 0
+== with a keystore: a restart after the lock
+status                           locked slots={"passphrase":1}
+owner exit status 0
+== a keystore that refuses the write
+unlock                           ok
+status                           unlocked cached=memory keystore error: the test keystore refuses writes slots={"passphrase":1}
+keystore entries                 []
+owner exit status 0
 == the store
 holds the keyring: true
 holds the passphrase spelled: false

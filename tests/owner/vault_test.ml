@@ -62,9 +62,12 @@ let status label =
   match field r "error" with
     | Some _ -> answer label r
     | None ->
-        p "%-32s %s%s slots=%s" label
+        p "%-32s %s%s%s slots=%s" label
           (Option.get (field r "vault"))
           (match field r "cached" with Some c -> " cached=" ^ c | None -> "")
+          (match field r "keystoreError" with
+            | Some e -> " keystore error: " ^ e
+            | None -> "")
           (Yojson.Safe.to_string (Option.get (member r "slots")))
 
 (* vault §2.1: 26 characters in groups 5-5-5-5-6. *)
@@ -128,6 +131,61 @@ let after_restart () =
           answer "unlock"
             (ask [("action", "vault_unlock"); ("passphrase", passphrase)]);
           status "status"))
+
+(* vault §6.1 against a keystore kept in files of ROOT, as a host's would
+   survive the owner; [broken] refuses every write. *)
+let keystore_dir = Filename.concat root "keystore"
+
+let file_keystore ~broken : Keystore.t =
+  let path domain = Filename.concat keystore_dir domain in
+  {
+    name = "test keystore";
+    put =
+      (fun ~domain ~key_id ~key ->
+        if broken then Fail.raise_ Denied "the test keystore refuses writes";
+        Fs.mkdir_p keystore_dir;
+        Fs.write_file_for_test (path domain) (key_id ^ key));
+    get =
+      (fun ~domain ->
+        Option.map
+          (fun s -> (String.sub s 0 16, String.sub s 16 (String.length s - 16)))
+          (Fs.read_file_opt (path domain)));
+    delete = (fun ~domain -> Fs.unlink_quiet (path domain));
+  }
+
+let entries () =
+  if Sys.file_exists keystore_dir then
+    String.concat " "
+      (List.sort compare (Array.to_list (Sys.readdir keystore_dir)))
+  else ""
+
+let with_keystore ~broken f =
+  Keystore.register (file_keystore ~broken);
+  let passphrase = Fs.read_file passphrase_file in
+  Owner.stop_on_signals ();
+  Rt.run_sync (fun () -> with_owner (fun () -> f passphrase))
+
+let keystore_phase = function
+  | "ks-unlock" ->
+      with_keystore ~broken:false (fun passphrase ->
+          status "status";
+          answer "unlock"
+            (ask [("action", "vault_unlock"); ("passphrase", passphrase)]);
+          status "status";
+          p "%-32s [%s]" "keystore entries" (entries ()))
+  | "ks-restart" ->
+      with_keystore ~broken:false (fun _ ->
+          status "status";
+          answer "lock" (ask [("action", "vault_lock")]);
+          status "status";
+          p "%-32s [%s]" "keystore entries" (entries ()))
+  | "ks-after-lock" -> with_keystore ~broken:false (fun _ -> status "status")
+  | _ ->
+      with_keystore ~broken:true (fun passphrase ->
+          answer "unlock"
+            (ask [("action", "vault_unlock"); ("passphrase", passphrase)]);
+          status "status";
+          p "%-32s [%s]" "keystore entries" (entries ()))
 
 let child phase =
   let pid =
@@ -197,11 +255,20 @@ let first_owner () =
 let () =
   match phase with
     | Some "first" -> first_owner ()
-    | Some _ -> after_restart ()
+    | Some "restart" -> after_restart ()
+    | Some phase -> keystore_phase phase
     | None ->
         child "first";
         p "== after a restart";
         child "restart";
+        p "== with a keystore: unlock";
+        child "ks-unlock";
+        p "== with a keystore: a restart, then lock";
+        child "ks-restart";
+        p "== with a keystore: a restart after the lock";
+        child "ks-after-lock";
+        p "== a keystore that refuses the write";
+        child "ks-broken";
         let passphrase = Fs.read_file passphrase_file in
         Fs.unlink_quiet passphrase_file;
         p "== the store";

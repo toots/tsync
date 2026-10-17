@@ -812,6 +812,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_status -> vault Vault.status
     | Totp_add uri -> vault Totp_verbs.add uri
     | Totp_list filter -> vault Totp_verbs.list filter
+    | Totp_code id -> vault Totp_verbs.code id
     | Totp_rename r ->
         vault (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id)
     | Totp_remove id -> vault Totp_verbs.remove id

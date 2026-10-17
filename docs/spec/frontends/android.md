@@ -216,7 +216,7 @@ Before the core initialises:
    one directory under home that every `staging` and `dest` path MUST lie in.
 7. **A keystore** of three calls, the vault's on this host
    ([vault §6.1](../extensions/vault.md#61-the-keystore)): `put(domain, keyId, K)`,
-   `get(domain, keyId) → K or none` and `delete(domain)`. The host seals K with AES-GCM under a
+   `get(domain) → (keyId, K) or none` and `delete(domain)`. The host seals K with AES-GCM under a
    non-exportable Android Keystore key that needs no user authentication (the owner reads it
    unattended at boot), and keeps the sealed bytes in its no-backup storage
    ([security-model.md §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). A

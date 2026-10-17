@@ -136,6 +136,15 @@ let find ctx id =
         Fail.corrupt "%s does not open under this vault's key" id
     | None -> Fail.absent "no record %s" id
 
+let code ~domain ~engine ~lazy_tree t id : Protocol.totp_code =
+  let ctx = context ~domain ~engine ~lazy_tree t in
+  let r = find ctx id in
+  let unix_time = Int64.of_float (Unix.time ()) in
+  {
+    code = Totp.code_at r ~unix_time;
+    seconds_left = Totp.seconds_left r ~unix_time;
+  }
+
 let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
   let ctx = context ~domain ~engine ~lazy_tree t in
   let r = find ctx id in

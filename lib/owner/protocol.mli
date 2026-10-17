@@ -131,6 +131,9 @@ type totp_listing = {
   corrupt : string list;  (** record ids that do not open *)
 }
 
+(** totp §5 [code]: one record's current code. *)
+type totp_code = { code : string; seconds_left : int }
+
 (** totp §5.2: refused lines by number and reason, never by content. *)
 type totp_imported = {
   added : int;
@@ -149,6 +152,7 @@ type vault_status = {
   slots : (string * int) list;  (** count by kind *)
   unusable : string list;  (** slots past the readers' limits *)
   copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -253,6 +257,7 @@ type _ request =
   | Vault_status : vault_status request
   | Totp_add : string -> string request  (** a URI; the new record's id *)
   | Totp_list : string option -> totp_listing request
+  | Totp_code : string -> totp_code request  (** a record id *)
   | Totp_rename : {
       id : string;
       issuer : string option;

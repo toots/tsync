@@ -4,6 +4,7 @@ lock                                 ok
 == locked
 add                                  locked: the vault is locked: run tsync vault unlock
 list                                 locked: the vault is locked: run tsync vault unlock
+code                                 locked: the vault is locked: run tsync vault unlock
 rename                               locked: the vault is locked: run tsync vault unlock
 remove                               locked: the vault is locked: run tsync vault unlock
 export                               locked: the vault is locked: run tsync vault unlock
@@ -20,6 +21,9 @@ list
   <id2> "Other" "bob" code of 6 digits
 list acme
   <id1> "ACME Co" "john@example.com" code of 6 digits
+code                                 matches the seed: true, carries no seed: true
+code of a malformed id               invalid: "xyz" is not a record id
+code of an absent id                 not_found: no record 00000000000000000000000000000000
 rename                               ok
 rename to nothing                    invalid: issuer and account cannot both be empty
 rename a malformed id                invalid: "xyz" is not a record id

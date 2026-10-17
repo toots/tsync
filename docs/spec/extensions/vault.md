@@ -185,23 +185,24 @@ A machine's vault for a domain is **unlocked** when it holds K for the keyring's
 ### 6.1 The keystore
 
 What every host's keystore does; where each host keeps it is
-[security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases). An entry is
-K under `(domain, key id)`.
+[security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases). A domain
+has at most one entry: the key id and K of its last unlock. A host provides three calls,
+`put(domain, key id, K)` (replacing the entry), `get(domain)` and `delete(domain)`.
 
 - **Unlock** writes the entry, then answers. A keystore that refuses the write, or a host with
   none, leaves K in memory: the unlock still succeeds, status says `cached: memory`, and the
   failure is logged once with the keystore's reason, never with K.
-- **Owner start** reads the entry for the keyring's key id. Found, the vault is unlocked with
-  `cached: keystore`. An entry for another key id of the domain is kept and held as the K of §4.3:
-  the next unlock re-encrypts under the domain's K and then deletes it. A read that fails leaves
+- **Owner start** reads the domain's entry. One for the keyring's key id unlocks the vault with
+  `cached: keystore`. One for another key id is held as the K of §4.3, the vault staying locked:
+  the next unlock re-encrypts under the domain's K and replaces the entry. A read that fails leaves
   the vault locked, and status reports the keystore's reason.
-- **Lock** deletes every entry of the domain, then forgets K. A delete that fails leaves the
+- **Lock** deletes the domain's entry, then forgets K. A delete that fails leaves the
   vault unlocked and is refused `internal` with the keystore's reason: a lock that did not happen
   is never reported as done.
 - A keystore entry is only ever read by the owner of its domain, on the machine that wrote it. It
   never needs user interaction to be read: an entry the platform would guard with a prompt or a
   biometric is not used, since the owner reads it unattended at start.
-- Removing a domain from the config does not delete its entries; `tsync vault lock` before
+- Removing a domain from the config does not delete its entry; `tsync vault lock` before
   removing it does.
 
 ## 7. Rotation

@@ -128,6 +128,16 @@ let list_cmd =
           0)
       $ filter)
 
+let code_cmd =
+  verb "code"
+    ~doc:"Print one record's current code, for a script or a clipboard tool."
+    Term.(
+      const (fun id ?name config ->
+          let c = Vault_cmds.ask (holder ?name config id) (P.Totp_code id) in
+          say "%s" c.code;
+          0)
+      $ id_arg)
+
 let rename_cmd =
   let issuer =
     Arg.(
@@ -218,5 +228,13 @@ let cmds =
     Cmd.group
       (Cmd.info "totp"
          ~doc:"One-time-password seeds kept in the domain's vault.")
-      [add_cmd; import_cmd; list_cmd; rename_cmd; remove_cmd; export_cmd];
+      [
+        add_cmd;
+        import_cmd;
+        list_cmd;
+        code_cmd;
+        rename_cmd;
+        remove_cmd;
+        export_cmd;
+      ];
   ]

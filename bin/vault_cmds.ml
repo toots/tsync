@@ -89,6 +89,7 @@ let status_cmd =
              | `Unlocked -> "unlocked");
          Option.iter (say "key: %s") s.key_id;
          Option.iter (say "cached: %s") s.cached;
+         Option.iter (say "keystore not used: %s") s.keystore_error;
          List.iter (fun (kind, n) -> say "slots: %d %s" n kind) s.slots;
          List.iter
            (say "unusable slot: %s (past the readers' limits)")
