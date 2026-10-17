@@ -18,7 +18,9 @@ let register () =
   Tsync_owner.Keystore.register
     {
       name = "the login keychain";
-      put = (fun ~domain ~key_id ~key -> keychain (fun () -> put domain (key_id ^ key)));
+      put =
+        (fun ~domain ~key_id ~key ->
+          keychain (fun () -> put domain (key_id ^ key)));
       get =
         (fun ~domain ->
           keychain (fun () ->

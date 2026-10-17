@@ -34,4 +34,5 @@ let present _domain _engine ~publish =
 let host ~mount:_ _domains ~run =
   Keychain.register ();
   run present
+
 let () = Owner.register_host "file_provider" host
