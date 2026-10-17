@@ -69,6 +69,11 @@ let holder ?name config id =
               Fail.invalid "%s is in %s: pick one with --domain" id
                 (String.concat ", " (List.map (fun (d, _) -> dname d) l)))
 
+(* For reading off a screen: [123 456], [1234 5678]. *)
+let grouped code =
+  let half = String.length code / 2 in
+  String.sub code 0 half ^ " " ^ String.sub code half (String.length code - half)
+
 let verb name ~doc term =
   cmd name ~doc
     Term.(
@@ -114,7 +119,8 @@ let list_cmd =
             (fun ((d : Config.domain), (l : P.totp_listing)) ->
               List.iter
                 (fun (r : P.totp_row) ->
-                  say "%s  %2ds  %s%s%s  %s" r.code r.seconds_left r.issuer
+                  say "%s  %2ds  %s%s%s  %s" (grouped r.code) r.seconds_left
+                    r.issuer
                     (if r.issuer = "" || r.account = "" then "" else " / ")
                     r.account
                     (dname d ^ " " ^ r.id))
