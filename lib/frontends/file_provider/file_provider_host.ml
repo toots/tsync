@@ -31,5 +31,7 @@ let present _domain _engine ~publish =
     },
     ignore )
 
-let host ~mount:_ _domains ~run = run present
+let host ~mount:_ _domains ~run =
+  Keychain.register ();
+  run present
 let () = Owner.register_host "file_provider" host
