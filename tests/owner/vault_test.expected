@@ -1,0 +1,59 @@
+== before init
+status                           absent slots={}
+unlock                           not_found: this domain has no vault: run tsync vault init
+passphrase                       not_found: this domain has no vault: run tsync vault init
+== init
+init                             passphrase 5-5-5-5-6, key id of 16 hex
+status                           unlocked cached=memory slots={"passphrase":1}
+init again                       exists: docs already has a vault: unlock it
+== lock and unlock
+lock                             ok
+status                           locked slots={"passphrase":1}
+passphrase while locked          locked: the vault is locked: run tsync vault unlock
+unlock, wrong passphrase         denied: wrong passphrase
+unlock, 25 characters            invalid: a passphrase is 26 characters in groups 5-5-5-5-6
+unlock, padding bits set         invalid: a passphrase is 26 characters in groups 5-5-5-5-6
+unlock, upper case and spaces    ok
+status                           unlocked cached=memory slots={"passphrase":1}
+== passphrase change
+passphrase                       passphrase 5-5-5-5-6, key id of 16 hex
+a new one                        true
+lock                             ok
+unlock, the old one              denied: wrong passphrase
+unlock, the new one              ok
+status                           unlocked cached=memory slots={"passphrase":1}
+== a domain that uses no extension
+vault_status                     invalid: plain uses no extension: add one to its extensions in the config
+vault_init                       invalid: plain uses no extension: add one to its extensions in the config
+vault_lock                       invalid: plain uses no extension: add one to its extensions in the config
+vault_passphrase                 invalid: plain uses no extension: add one to its extensions in the config
+owner exit status 0
+== after a restart
+status                           locked slots={"passphrase":1}
+unlock                           ok
+status                           unlocked cached=memory slots={"passphrase":1}
+owner exit status 0
+== with a keystore: unlock
+status                           locked slots={"passphrase":1}
+unlock                           ok
+status                           unlocked cached=keystore slots={"passphrase":1}
+keystore entries                 [docs]
+owner exit status 0
+== with a keystore: a restart, then lock
+status                           unlocked cached=keystore slots={"passphrase":1}
+lock                             ok
+status                           locked slots={"passphrase":1}
+keystore entries                 []
+owner exit status 0
+== with a keystore: a restart after the lock
+status                           locked slots={"passphrase":1}
+owner exit status 0
+== a keystore that refuses the write
+unlock                           ok
+status                           unlocked cached=memory keystore error: the test keystore refuses writes slots={"passphrase":1}
+keystore entries                 []
+owner exit status 0
+== the store
+holds the keyring: true
+holds the passphrase spelled: false
+holds its bytes: false

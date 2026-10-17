@@ -1,0 +1,55 @@
+== argon2id
+RFC 9106 5.3: 0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659
+libsodium 64MiB t=3: 64238e3e58814f30f3e39a08c684eff99323911c33f0af78e91e933a7f792bc9
+== xchacha20-poly1305
+A.3.1: bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52ec0875924c1c7987947deafd8780acf49
+opens                                                        yes
+a flipped tag bit does not open                              yes
+other ad does not open                                       yes
+== passphrase
+00..0f: 000g4-0r40m-30e20-9185g-r38e1w
+  "000g4-0r40m-30e20-9185g-r38e1w"         -> same
+  "000G4-0R40M-30E20-9185G-R38E1W"         -> same
+  "000g40r40m30e209185gr38e1w"             -> same
+  "000g4 0r40m 30e20 9185g r38e1w"         -> same
+  "ooog4-or4om-3oe2o-9l85g-r38elw"         -> same
+  "000g4-0r40m-30e20-9I85g-r38eIw"         -> same
+  "000g40r40m30e209185gr38e1"              -> refused
+  "000g40r40m30e209185gr38e1w0"            -> refused
+  "000g40r40m30e209185gr38e11"             -> refused
+  "000g40r40m30e209185gr38e1u"             -> refused
+a generated passphrase reads back                            yes
+== keyring
+unlocks with its passphrase                                  yes
+a wrong passphrase fails                                     yes
+parse then write gives the same bytes                        yes
+K is not in the keyring text                                 yes
+unknown kind and members: still unlocks                      yes
+unknown member dropped                                       yes
+unknown slot kept as read                                    yes
+slots sorted by id, unknown first                            yes
+memKiB above the limit: skipped, not derived, and reported   yes
+memKiB 1: skipped, not derived, and reported                 yes
+memKiB negative: skipped, not derived, and reported          yes
+parallelism 0: skipped, not derived, and reported            yes
+iterations 0: skipped, not derived, and reported             yes
+iterations negative: skipped, not derived, and reported      yes
+of nine passphrase slots, one is skipped                     yes
+  not json                       CORRUPT
+  no slot                        CORRUPT
+  as written                     accepted
+  upper-case key id              CORRUPT
+union holds every slot                                       yes
+union is symmetric, bytewise                                 yes
+both passphrases unlock the union                            yes
+different key ids do not fold                                yes
+== envelope
+length for 6 bytes: 58
+two seals differ                                             yes
+  as written                               opens: secret
+  in another extension                     CORRUPT
+  a flipped ciphertext bit                 CORRUPT
+  a flipped key id bit                     under key 0123456789abcdee
+  another magic                            CORRUPT
+  51 bytes                                 CORRUPT
+  sealed under another K, same id          CORRUPT

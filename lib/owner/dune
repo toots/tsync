@@ -14,6 +14,7 @@
   tsync_status
   tsync_gc
   tsync_remote
+  tsync_vault
   yojson)
  (preprocess
   (pps ppx_deriving_yojson)))

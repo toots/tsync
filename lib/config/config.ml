@@ -28,6 +28,7 @@ type domain = {
   name : Domain_name.t;
   backends : backend list;
   frontends : frontend list;
+  extensions : string list;
   symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;
@@ -318,6 +319,23 @@ let parse_frontend path j =
   let options = fields_of path specs l in
   { ftype; options }
 
+(* extensions README §2: no extension has options yet. *)
+let extension_names = ["totp"; "passwords"]
+
+let parse_extension path j =
+  let name, l =
+    match j with
+      | `String t -> (t, [])
+      | `Assoc l ->
+          (required (sub path "type") "string" (string_field path l "type"), l)
+      | _ -> fail path "expected an extension name or object"
+  in
+  if not (List.mem name extension_names) then
+    fail path "extension %S is unknown (known: %s)" name
+      (String.concat ", " extension_names);
+  check_keys path ["type"] l;
+  name
+
 let parse_link path j =
   let l = assoc path j in
   check_keys path
@@ -366,6 +384,7 @@ let parse_domain path j =
       "name";
       "backends";
       "frontends";
+      "extensions";
       "symlinks";
       "versioning";
       "readOnly";
@@ -409,6 +428,21 @@ let parse_domain path j =
       | Some _ -> fail (sub path "frontends") "expected a non-empty array"
       | None -> fail (sub path "frontends") "required array is missing"
   in
+  let extensions =
+    match get l "extensions" with
+      | Some (`List es) ->
+          List.mapi
+            (fun i e ->
+              parse_extension (Printf.sprintf "%s.extensions[%d]" path i) e)
+            es
+      | Some _ -> fail (sub path "extensions") "expected an array"
+      | None -> []
+  in
+  List.iter
+    (fun e ->
+      if List.length (List.filter (( = ) e) extensions) > 1 then
+        fail (sub path "extensions") "%s is listed twice" e)
+    extensions;
   let types = List.map (fun f -> f.ftype) frontends in
   List.iter
     (fun t ->
@@ -500,6 +534,7 @@ let parse_domain path j =
               (Tsync_store.Composite.read_rank b.role))
           backends;
       frontends;
+      extensions;
       symlinks;
       versioning;
       read_only =

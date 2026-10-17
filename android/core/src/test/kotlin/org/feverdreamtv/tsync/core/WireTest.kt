@@ -67,7 +67,7 @@ class WireTest {
         val store = File(home, "store").apply { mkdirs() }
         val backend = JSONObject().put("type", "local").put("name", "store").put("role", "main").put("path", store.path)
         val domain = JSONObject().put("name", "Wire Suite").put("versioning", true)
-            .put("frontends", listOf("android")).put("backends", listOf(backend))
+            .put("frontends", listOf("android")).put("extensions", listOf<String>()).put("backends", listOf(backend))
         val config = JSONObject().put("name", "wire").put("domains", listOf(domain)).toString()
         core = ProcessCore(binary, home, config)
         client = Client(core)

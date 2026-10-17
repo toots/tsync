@@ -36,9 +36,9 @@ let config =
      else
        Printf.sprintf
          {|{"name":"test","domains":[
-  {"name":"docs","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"docs","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
-  {"name":"pics","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"pics","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store2"}]}]}|}
          root root)
 
@@ -213,7 +213,39 @@ let () =
                   ("domain", `String "docs");
                   ("rel", `String "f.txt");
                   ("dest", `String (Filename.concat link "out"));
-                ])));
+                ]));
+        (* file-provider §10.1: docs lists totp, pics does not. *)
+        let codes label =
+          match call [("action", "menu_codes")] with
+            | `Assoc l -> (
+                match List.assoc_opt "entries" l with
+                  | Some (`List rows) ->
+                      List.iter
+                        (fun row ->
+                          p "%s: %s%s" label
+                            (Option.value ~default:"---" (Ipc.field row "label"))
+                            (match row with
+                              | `Assoc r -> (
+                                  match List.assoc_opt "action" r with
+                                    | Some (`Assoc [(k, _)]) -> " -> " ^ k
+                                    | _ -> "")
+                              | _ -> ""))
+                        rows
+                  | _ -> p "%s: no entries" label)
+            | _ -> p "%s: no reply" label
+        in
+        codes "menu_codes, no vault";
+        ignore (call [("action", "vault_init"); ("domain", "docs")]);
+        ignore
+          (call
+             [
+               ("action", "totp_add");
+               ("domain", "docs");
+               ("uri", "otpauth://totp/ACME:me?secret=JBSWY3DPEHPK3PXP");
+             ]);
+        codes "menu_codes, one record";
+        ignore (call [("action", "vault_lock"); ("domain", "docs")]);
+        codes "menu_codes, locked");
       Ipc.Client.close c;
       show "stop" (call [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner));

@@ -72,6 +72,7 @@ The result, for a folder backed by another disk:
       "name": "media",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "maxCache": "1 GiB",
       "backends": [
         { "type": "local", "name": "disk", "role": "main", "path": "/mnt/pool" }

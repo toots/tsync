@@ -104,6 +104,44 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** totp §5 [list]: never a seed. *)
+type totp_row = {
+  id : string;
+  issuer : string;
+  account : string;
+  code : string;
+  seconds_left : int;
+}
+
+type totp_listing = {
+  rows : totp_row list;
+  corrupt : string list;  (** record ids that do not open *)
+}
+
+(** totp §5 [code]: one record's current code. *)
+type totp_code = { code : string; seconds_left : int }
+
+(** totp §5.2: refused lines by number and reason, never by content. *)
+type totp_imported = {
+  added : int;
+  already : int;
+  refused : (int * string) list;
+}
+
+(** A passphrase shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { passphrase : string; key_id : string }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -196,6 +234,24 @@ type _ request =
   | Pause : bool -> bool request
   | Stats : string list -> R.answer request
   | Stop : unit request
+  | Vault_init : secret request
+  | Vault_unlock : string -> unit request  (** the passphrase as typed *)
+  | Vault_lock : unit request
+  | Vault_passphrase : secret request
+  | Vault_status : vault_status request
+  | Totp_add : string -> string request  (** a URI; the new record's id *)
+  | Totp_list : string option -> totp_listing request
+  | Totp_code : string -> totp_code request  (** a record id *)
+  | Totp_rename : {
+      id : string;
+      issuer : string option;
+      account : string option;
+    }
+      -> unit request
+  | Totp_remove : string -> unit request
+  | Totp_import : string -> totp_imported request  (** the text of a file *)
+  | Totp_export : string -> string list request
+      (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed
 
@@ -235,10 +291,23 @@ let action : type a. a request -> string = function
   | Pause _ -> "pause"
   | Stats _ -> "stats"
   | Stop -> "stop"
+  | Vault_init -> "vault_init"
+  | Vault_unlock _ -> "vault_unlock"
+  | Vault_lock -> "vault_lock"
+  | Vault_passphrase -> "vault_passphrase"
+  | Vault_status -> "vault_status"
+  | Totp_add _ -> "totp_add"
+  | Totp_list _ -> "totp_list"
+  | Totp_code _ -> "totp_code"
+  | Totp_rename _ -> "totp_rename"
+  | Totp_remove _ -> "totp_remove"
+  | Totp_import _ -> "totp_import"
+  | Totp_export _ -> "totp_export"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
-  | Revert _ ->
+  | Revert _ | Vault_init | Vault_passphrase | Totp_add _ | Totp_rename _
+  | Totp_remove _ | Totp_import _ ->
       true
   | _ -> false
 
@@ -317,8 +386,18 @@ let destination_of j =
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
   | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
-  | Stop | Share_clear_cache ->
+  | Stop | Share_clear_cache | Vault_init | Vault_lock | Vault_passphrase
+  | Vault_status ->
       []
+  | Totp_export p -> [("passphrase", `String p)]
+  | Vault_unlock p -> [("passphrase", `String p)]
+  | Totp_add uri -> [("uri", `String uri)]
+  | Totp_list filter -> opt "filter" (fun f -> `String f) filter
+  | Totp_rename r ->
+      (("id", `String r.id) :: opt "issuer" (fun i -> `String i) r.issuer)
+      @ opt "account" (fun a -> `String a) r.account
+  | Totp_remove id | Totp_code id -> [("id", `String id)]
+  | Totp_import text -> [("text", `String text)]
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
   | List_all r ->
@@ -499,6 +578,25 @@ let decode j =
                 (String.split_on_char ','
                    (Option.value ~default:"" (str j "arg")))))
     | "stop" -> Request Stop
+    | "vault_init" -> Request Vault_init
+    | "vault_unlock" -> Request (Vault_unlock (required j "passphrase"))
+    | "vault_lock" -> Request Vault_lock
+    | "vault_passphrase" -> Request Vault_passphrase
+    | "vault_status" -> Request Vault_status
+    | "totp_add" -> Request (Totp_add (required j "uri"))
+    | "totp_list" -> Request (Totp_list (str j "filter"))
+    | "totp_rename" ->
+        Request
+          (Totp_rename
+             {
+               id = required j "id";
+               issuer = str j "issuer";
+               account = str j "account";
+             })
+    | "totp_remove" -> Request (Totp_remove (required j "id"))
+    | "totp_code" -> Request (Totp_code (required j "id"))
+    | "totp_import" -> Request (Totp_import (required j "text"))
+    | "totp_export" -> Request (Totp_export (required j "passphrase"))
     | a -> Fail.invalid "unknown action: %s" a
 
 let kind_name = function
@@ -638,11 +736,80 @@ let page_fields (pg : page) =
   @ opt "pulledAt" (fun at -> `Int (int_of_float at)) pg.pulled_at
   @ if pg.outdated then [("outdated", `Bool true)] else []
 
+let secret_fields s =
+  [("passphrase", `String s.passphrase); ("keyId", `String s.key_id)]
+
+let secret_of j =
+  { passphrase = required j "passphrase"; key_id = required j "keyId" }
+
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _ ->
+    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _
+    | Vault_unlock _ | Vault_lock | Totp_rename _ | Totp_remove _ ->
         ok []
+    | Totp_add _ -> ok [("id", `String reply)]
+    | Totp_code _ ->
+        ok
+          [
+            ("code", `String reply.code);
+            ("secondsLeft", `Int reply.seconds_left);
+          ]
+    | Totp_import _ ->
+        ok
+          [
+            ("added", `Int reply.added);
+            ("already", `Int reply.already);
+            ( "refused",
+              `List
+                (List.map
+                   (fun (line, reason) ->
+                     `Assoc [("line", `Int line); ("reason", `String reason)])
+                   reply.refused) );
+          ]
+    | Totp_export _ ->
+        ok [("uris", `List (List.map (fun u -> `String u) reply))]
+    | Totp_list _ ->
+        ok
+          [
+            ( "records",
+              `List
+                (List.map
+                   (fun r ->
+                     `Assoc
+                       [
+                         ("id", `String r.id);
+                         ("issuer", `String r.issuer);
+                         ("account", `String r.account);
+                         ("code", `String r.code);
+                         ("secondsLeft", `Int r.seconds_left);
+                       ])
+                   reply.rows) );
+            ("corrupt", `List (List.map (fun c -> `String c) reply.corrupt));
+          ]
+    | Vault_init -> ok (secret_fields reply)
+    | Vault_passphrase -> ok (secret_fields reply)
+    | Vault_status ->
+        let strings l = `List (List.map (fun s -> `String s) l) in
+        ok
+          ([
+             ( "vault",
+               `String
+                 (match reply.vault with
+                   | `Absent -> "absent"
+                   | `Corrupt _ -> "corrupt"
+                   | `Locked -> "locked"
+                   | `Unlocked -> "unlocked") );
+             ("slots", `Assoc (List.map (fun (k, n) -> (k, `Int n)) reply.slots));
+             ("unusable", strings reply.unusable);
+             ("copies", strings reply.copies);
+           ]
+          @ (match reply.vault with
+            | `Corrupt reason -> [("reason", `String reason)]
+            | _ -> [])
+          @ opt "keyId" (fun k -> `String k) reply.key_id
+          @ opt "cached" (fun c -> `String c) reply.cached
+          @ opt "keystoreError" (fun e -> `String e) reply.keystore_error)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -786,6 +953,79 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   in
   match req with
     | Ping -> ()
+    | Vault_unlock _ -> ()
+    | Vault_lock -> ()
+    | Totp_rename _ -> ()
+    | Totp_remove _ -> ()
+    | Totp_add _ -> required j "id"
+    | Totp_code _ ->
+        { code = required j "code"; seconds_left = count "secondsLeft" j }
+    | Totp_import _ ->
+        {
+          added = count "added" j;
+          already = count "already" j;
+          refused =
+            (match member j "refused" with
+              | Some (`List l) ->
+                  List.map
+                    (fun r ->
+                      (count "line" r, Option.value ~default:"" (str r "reason")))
+                    l
+              | _ -> []);
+        }
+    | Totp_export _ -> (
+        match member j "uris" with
+          | Some (`List l) ->
+              List.filter_map (function `String s -> Some s | _ -> None) l
+          | _ -> [])
+    | Totp_list _ ->
+        let strings k = match member j k with Some (`List l) -> l | _ -> [] in
+        {
+          rows =
+            List.map
+              (fun r ->
+                {
+                  id = required r "id";
+                  issuer = required r "issuer";
+                  account = required r "account";
+                  code = required r "code";
+                  seconds_left = count "secondsLeft" r;
+                })
+              (strings "records");
+          corrupt =
+            List.filter_map
+              (function `String s -> Some s | _ -> None)
+              (strings "corrupt");
+        }
+    | Vault_init -> secret_of j
+    | Vault_passphrase -> secret_of j
+    | Vault_status ->
+        let strings k =
+          match member j k with
+            | Some (`List l) ->
+                List.filter_map (function `String s -> Some s | _ -> None) l
+            | _ -> []
+        in
+        {
+          vault =
+            (match str j "vault" with
+              | Some "absent" -> `Absent
+              | Some "locked" -> `Locked
+              | Some "unlocked" -> `Unlocked
+              | _ -> `Corrupt (Option.value ~default:"" (str j "reason")));
+          key_id = str j "keyId";
+          cached = str j "cached";
+          slots =
+            (match member j "slots" with
+              | Some (`Assoc l) ->
+                  List.filter_map
+                    (function k, `Int n -> Some (k, n) | _ -> None)
+                    l
+              | _ -> []);
+          unusable = strings "unusable";
+          copies = strings "copies";
+          keystore_error = str j "keystoreError";
+        }
     | Full_resync -> ()
     | Revert _ -> ()
     | Poll -> ()

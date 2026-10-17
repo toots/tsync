@@ -1,0 +1,76 @@
+== RFC 6238 appendix B, 8 digits
+SHA1              59 94287082, 1s left
+SHA1      1111111109 07081804, 1s left
+SHA1      1234567890 89005924, 30s left
+SHA1     20000000000 65353130, 10s left
+SHA256            59 46119246, 1s left
+SHA512            59 90693936, 1s left
+
+== otpauth URIs
+otpauth://totp/ACME%20Co:john@example.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Co
+  -> issuer "ACME Co" account "john@example.com" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/ACME%20Co:john%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Co&algorithm=SHA1&digits=6&period=30
+otpauth://totp/Label:me?secret=jbswy3dpehpk3pxp&issuer=Param
+  -> issuer "Param" account "me" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/Param:me?secret=JBSWY3DPEHPK3PXP&issuer=Param&algorithm=SHA1&digits=6&period=30
+otpauth://totp/Label:me?secret=JBSWY3DPEHPK3PXP%3D%3D%3D%3D
+  -> issuer "Label" account "me" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/Label:me?secret=JBSWY3DPEHPK3PXP&issuer=Label&algorithm=SHA1&digits=6&period=30
+otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=sha256&digits=8&period=60&foo=bar
+  -> issuer "" account "me" secret JBSWY3DPEHPK3PXP SHA256/8/60
+  -> otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=SHA256&digits=8&period=60
+otpauth://hotp/me?secret=JBSWY3DPEHPK3PXP&counter=1
+  refused: only totp is kept, not hotp
+otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&digits=9
+  refused: digits is 6 to 8
+otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=MD5
+  refused: unknown algorithm MD5
+otpauth://totp/me?secret=
+  refused: the secret is missing
+otpauth://totp/?secret=JBSWY3DPEHPK3PXP
+  refused: issuer and account are empty
+otpauth://totp/me?secret=JBSWY3DPEHPK3PX1
+  refused: the secret is not base32
+export then add reproduces the record: true
+
+== plaintexts
+{"issuer":"GitHub","account":"me@example.com","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1760500000} ok, rewritten {"issuer":"GitHub","account":"me@example.com","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1760500000}
+{"issuer":"G","account":"a","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1,"later":[1]} ok, rewritten {"issuer":"G","account":"a","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1,"later":[1]}
+{"issuer":"G","account":"a","secret":"jbswy3dpehpk3pxp","algorithm":"SHA1","digits":6,"period":30,"modified":1} CORRUPT: the secret is not in its stored form
+{"issuer":"","account":"","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1} CORRUPT: issuer and account are empty
+{"issuer":"G","account":"a","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30} CORRUPT: a required member is missing or of the wrong type
+[1]                                                                              CORRUPT: not a JSON object
+
+== grouped fold
+one record, no copy
+  nothing to do
+two renames: the newer labels win, at the id
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) -> aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+the newer one is already at the id
+  remove aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop)
+a tie on modified: the bytewise greatest
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) -> aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+another seed survives at its digest id
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) -> e592527539efbdc84c0b4e3570def5fb
+no file at the id: the newest group takes it
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy 2 from laptop) -> aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) -> 3310cf52b9e54133322dd6a6573c6e39
+the file at the id does not open: kept, every group to its digest
+  remove aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy 2 from laptop)
+  move aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) -> 23310437f044516fd53c27b286329338
+a copy that does not open is left
+  nothing to do
+a leaf that is no record id is ignored
+  nothing to do
+folding the result again does nothing: true
+
+== keyring fold
+each added a slot: the union
+  write keyring {"keyId":"0123456789abcdef","slots":[{"id":"1111111111111111","kind":"later"},{"id":"2222222222222222","kind":"later"}]}
+  remove keyring (conflicted copy from laptop)
+the copy adds nothing: removed
+  remove keyring (conflicted copy from laptop)
+another key id: left and reported
+  left keyring (conflicted copy from laptop)
+no copy
+  nothing to do

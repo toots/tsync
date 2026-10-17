@@ -60,6 +60,9 @@ let show_config () =
                              ("readOnly", `Bool d.read_only);
                              ("backends", `List (List.map backend d.backends));
                              ("frontends", `List (List.map frontend d.frontends));
+                             ( "extensions",
+                               `List
+                                 (List.map (fun e -> `String e) d.extensions) );
                            ])
                        config.domains) );
               ]));
@@ -176,6 +179,7 @@ let build_info () =
       | l ->
           String.concat ", "
             (List.map Tsync_http.Transport.impl_name (List.sort compare l)));
+  say "extensions: %s" (String.concat ", " Config.extension_names);
   say "share previews: %s"
     (if Share_preview.available () then "ffmpeg" else "none");
   say "service log: %s" (String.concat " " (log_reader ()));

@@ -15,13 +15,27 @@ type t = {
   anchor : Folder_id.t -> Folder.anchor option;
 }
 
+let entry_name (e : Tree.entry) =
+  match e.body with Dir m -> m.name | File m -> m.name
+
+(* security-model §6.3: a root share omits the reserved folder, and a path
+   through it is absent. *)
 let of_context (module C : Context.S) =
   let module T = Tree.Make (C) in
+  let reserved id name = Folder_id.is_root id && Names.is_reserved name in
   {
     domain = C.domain;
     store = C.store;
-    find = T.find;
-    children = (fun id -> T.children ~on_unusable:(Skip ignore) id);
+    find =
+      (fun id parts ->
+        match parts with
+          | first :: _ when reserved id first -> `Missing
+          | _ -> T.find id parts);
+    children =
+      (fun id ->
+        List.filter
+          (fun e -> not (reserved id (entry_name e)))
+          (T.children ~on_unusable:(Skip ignore) id));
     anchor = T.anchor;
   }
 

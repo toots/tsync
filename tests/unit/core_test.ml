@@ -125,6 +125,17 @@ let () =
       "my.tsync-tmp-1-2.tmp";
     ];
   p "escape %S -> %s\n" "a:b" (Names.escape "a:b");
+  p "\n== reserved root name (01 §2.3)\n";
+  List.iter
+    (fun path -> p "%-24S reserved=%b\n" path (Names.is_reserved path))
+    [
+      ".tsync-ext";
+      ".tsync-ext/totp/0123";
+      ".tsync-extra";
+      "a/.tsync-ext";
+      "a/.tsync-ext/totp";
+      "";
+    ];
   p "\n== pieces (01 §3.4), cs = 8\n";
   List.iter
     (fun (off, len, count) ->

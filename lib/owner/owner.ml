@@ -179,6 +179,16 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
     done
   with Stop.Stopping -> ()
 
+(* file-provider §10.1: this host copies codes, so every domain listing totp is
+   a code domain. *)
+let code_domains served =
+  List.filter_map
+    (fun s ->
+      if List.mem "totp" s.domain.Domain.domain.extensions then
+        Some (Domain_name.to_string s.domain.Domain.name, s)
+      else None)
+    served
+
 (* The router of a shared socket (file-provider §4.2, §8.1, §10). *)
 let all_topics = "*"
 
@@ -201,7 +211,36 @@ let shared_router served reports action req =
                   | exception _ -> None ))
             served
         in
-        Some (Ipc.Reply (Ipc.ok [("menu", Menu.to_json (Menu.render answers))]))
+        Some
+          (Ipc.Reply
+             (Ipc.ok
+                [
+                  ( "menu",
+                    Menu.to_json
+                      (Menu.render
+                         ~codes:(List.map fst (code_domains served))
+                         answers) );
+                ]))
+    | "menu_codes" ->
+        let answers =
+          List.map
+            (fun (name, s) ->
+              ( name,
+                Menu.codes_of_json
+                  (Some
+                     (match Handler.call s.handler (Totp_list None) with
+                       | listing ->
+                           Protocol.encode_reply (Totp_list None) listing
+                       | exception e -> Ipc.failure (Fail.classify e))) ))
+            (code_domains served)
+        in
+        Some
+          (Ipc.Reply
+             (Ipc.ok
+                [
+                  ( "entries",
+                    `List (List.map Menu.entry_to_json (Menu.codes answers)) );
+                ]))
     | "menu_stats" ->
         let stats =
           match reports with

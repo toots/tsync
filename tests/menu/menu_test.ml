@@ -14,7 +14,9 @@ let action = function
   | Open_folder d -> " -> open " ^ d
   | Reveal { domain; rel } -> Printf.sprintf " -> reveal %s:%s" domain rel
   | Set_paused p -> Printf.sprintf " -> pause %b" p
-  | Show_stats -> ""
+  | Show_stats | Show_codes -> ""
+  | Copy_code { domain; id } -> Printf.sprintf " -> copy %s:%s" domain id
+  | Unlock d -> " -> unlock " ^ d
   | Quit -> " -> quit"
 
 let entry = function
@@ -297,7 +299,7 @@ let () =
            "cache":{"chunks":1216,"bytes":10737418240,"maxCache":10737418240,"pinnedBytes":2147483648},
            "queues":{"pendingFiles":0,"bytesOwed":0,"parked":1},
            "sync":{"position":402,"pending":3,"treeHead":402},
-           "frontends":[{"type":"fuse","mount":"/home/u/tsync/Media","bytesRead":540436070,"bytesWritten":0},
+           "extensions":[],"frontends":[{"type":"fuse","mount":"/home/u/tsync/Media","bytesRead":540436070,"bytesWritten":0},
                         {"type":"http-proxy","bytesRead":10,"bytesWritten":5}],
            "backends":[
              {"name":"http-proxy","role":"main","reach":{"reachable":true,"latencyMs":11.4},
@@ -321,6 +323,69 @@ let () =
                  "cannotFollow":{"entry":8,"reason":"it is of version 2"}},
          "backends":[{"name":"gcs","role":"main","reach":{"reachable":true}}]}]}|};
     ];
+
+  let codes answers =
+    List.iter entry
+      (M.codes
+         (List.map
+            (fun (d, reply) ->
+              (d, M.codes_of_json (Option.map Yojson.Safe.from_string reply)))
+            answers))
+  in
+  let two_records =
+    {|{"ok":true,"records":[
+       {"id":"3f2a","issuer":"ACME Co","account":"john@example.com","code":"123456","secondsLeft":9},
+       {"id":"9c1e","issuer":"GitHub","account":"","code":"654321","secondsLeft":9},
+       {"id":"77aa","issuer":"","account":"bob","code":"000000","secondsLeft":9}],"corrupt":[]}|}
+  in
+  case "codes: a menu with code domains has the row, one without has not";
+  show
+    (M.render ~quit:"Quit tsync tray" ~codes:["work"] [("work", status idle)]);
+  case "codes: before any answer";
+  List.iter entry M.codes_placeholder;
+  case "codes: one domain";
+  codes [("work", Some two_records)];
+  case "codes: two domains, one locked";
+  codes
+    [
+      ("work", Some two_records);
+      ( "home",
+        Some {|{"ok":false,"code":"locked","error":"the vault is locked"}|} );
+    ];
+  case "codes: no vault, not answering, no codes, unreadable records";
+  codes
+    [
+      ("a", Some {|{"ok":false,"code":"not_found","error":"no vault"}|});
+      ("b", None);
+      ("c", Some {|{"ok":false,"code":"internal","error":"boom"}|});
+      ("d", Some {|{"ok":true,"records":[],"corrupt":[]}|});
+      ("e", Some {|{"ok":true,"records":[],"corrupt":["x","y"]}|});
+      ( "f",
+        Some
+          (Printf.sprintf
+             {|{"ok":true,"records":[{"id":"1","issuer":"%s","account":"me"}],"corrupt":["z"]}|}
+             (String.make 80 'L')) );
+    ];
+  case "codes: no code domain at all";
+  codes [];
+  case "codes: the JSON form, and no code in any row";
+  let rows =
+    M.codes
+      [
+        ("work", M.codes_of_json (Some (Yojson.Safe.from_string two_records)));
+        ( "home",
+          M.codes_of_json
+            (Some (Yojson.Safe.from_string {|{"ok":false,"code":"locked"}|})) );
+      ]
+  in
+  let json = Yojson.Safe.to_string (`List (List.map M.entry_to_json rows)) in
+  print_endline json;
+  Printf.printf "the reply carries 123456: %b\n"
+    (Tsync_core.Text.contains two_records "123456");
+  List.iter
+    (fun code ->
+      Printf.printf "carries %s: %b\n" code (Tsync_core.Text.contains json code))
+    ["123456"; "654321"; "000000"];
 
   case "replies with fields of the wrong type, and an empty object";
   show

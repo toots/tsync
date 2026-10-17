@@ -30,6 +30,7 @@ type t = {
   unnamed : int Atomic.t;  (** the last listing's or feed page's count *)
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
   pulls : Pulls.t option;  (** on a pulled tree *)
+  vault : Vault.t;
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -116,6 +117,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     staging_roots;
     answered_unreachable = Atomic.make false;
     running = Atomic.make None;
+    vault = Vault.create ();
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
@@ -219,10 +221,17 @@ let row_or_unnamed t path =
     | None ->
         Fail.raise_ Fail.Unprepared "%s cannot be named on this client" path
 
+(* 01 §2.3: no reference names the reserved root folder or anything in it. *)
+let unreserved path =
+  Names.check_unreserved path;
+  path
+
 (* 08 §2.2: resolution mints nothing, and an f: reference never answers for a
    folder. *)
 let resolve_ref (module E : Engine.S) s =
-  match Names.parse_ref s with
+  unreserved
+  @@
+    match Names.parse_ref s with
     | Error () -> invalid "malformed item reference %S" s
     | Ok Root -> ""
     | Ok (Dir id) -> (
@@ -244,6 +253,7 @@ let resolve_rel (module E : Engine.S) rel =
   let parts = String.split_on_char '/' rel in
   if rel <> "" && List.exists (fun c -> c = "" || c = "." || c = "..") parts
   then invalid "malformed relative path %S" rel;
+  Names.check_unreserved rel;
   if E.kind rel = `Absent then Fail.absent "%s: not found" rel;
   rel
 
@@ -253,7 +263,7 @@ let destination t (d : Protocol.destination) =
   let parent = resolve_ref t.engine d.parent_ref in
   if E.kind parent <> `Dir then invalid "parentRef does not name a folder";
   if not (Names.valid_leaf d.name) then invalid "invalid name %S" d.name;
-  Names.join parent d.name
+  unreserved (Names.join parent d.name)
 
 let target t : Protocol.target -> string = function
   | Ref r -> resolve_ref t.engine r
@@ -497,7 +507,10 @@ let changes t ~anchor ~limit : Protocol.changes =
   match E.changes_since anchor ~limit with
     | `Stale -> Stale
     | `Page (cursor, more, ops) ->
-        let rendered = List.map (feed_op t) ops in
+        let shown (o : Applied.op) =
+          not (List.exists Names.is_reserved (Op.paths o.op))
+        in
+        let rendered = List.map (feed_op t) (List.filter shown ops) in
         Changes
           {
             cursor;
@@ -781,8 +794,30 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   let refreshed path =
     Option.iter (fun p -> Pulls.before_open p path) t.pulls
   in
+  let vault f =
+    f ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree t.vault
+  in
   match req with
     | Ping -> ()
+    | Vault_init -> vault Vault.init
+    | Vault_unlock passphrase -> (
+        vault Vault.unlock passphrase;
+        (* The vault is unlocked whatever the fold does: one left now runs at
+           the next verb. *)
+        try vault Totp_verbs.fold
+        with Fail.E f ->
+          Log.warn "totp: the fold after unlock is left: %s" f.reason)
+    | Vault_lock -> Vault.lock ~domain:t.domain t.vault
+    | Vault_passphrase -> vault Vault.passphrase
+    | Vault_status -> vault Vault.status
+    | Totp_add uri -> vault Totp_verbs.add uri
+    | Totp_list filter -> vault Totp_verbs.list filter
+    | Totp_code id -> vault Totp_verbs.code id
+    | Totp_rename r ->
+        vault (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id)
+    | Totp_remove id -> vault Totp_verbs.remove id
+    | Totp_import text -> vault Totp_verbs.import text
+    | Totp_export passphrase -> vault Totp_verbs.export passphrase
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
@@ -800,14 +835,21 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               (if seconds > 0. then float_of_int x.bytes /. seconds else 0.);
           }
         in
-        let downloading = List.map transfer (E.downloads ()) in
+        let named xs =
+          List.filter_map
+            (fun (x : Engine_intf.transfer) ->
+              if Names.is_reserved x.path then None else Some (transfer x))
+            xs
+        in
+        let downloading = named (E.downloads ()) in
+        let uploading = named (E.uploads ()) in
         {
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
           pending_uploads = max (E.pending_uploads ()) (E.pending_changes ());
           pending_downloads = List.length downloading;
-          uploading = List.map transfer (E.uploads ());
+          uploading;
           downloading;
           pending_bytes = pending_bytes t now;
           subscribers = t.subscribers ();
