@@ -78,6 +78,12 @@ unlock                           ok
 status                             unlocked enrolled cached=memory keystore error: the test keystore refuses writes slots={"secret-key":1}
 keystore entries                   []
 owner exit status 0
+== a keystore that keeps the secret key entry, then lock
+unlock                           ok
+lock and forget, one delete refused internal: test keystore could not forget the key: the test keystore keeps its entries
+status                             locked enrolled slots={"secret-key":1}
+keystore entries                   [docs#secret-key]
+owner exit status 0
 == a keystore that keeps its entries, then delete
 unlock                           ok
 delete                           ok

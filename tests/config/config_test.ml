@@ -116,7 +116,7 @@ let () =
   let against what extra =
     let bare =
       Printf.sprintf
-        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"extensions":[],"frontends":["android"]%s}]}|}
+        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
         extra
     in
     let main : Tsync_store.Store.domain_settings =
@@ -128,7 +128,7 @@ let () =
         settle = 420.;
         entry_commands = 1024;
         projector = None;
-        extensions = [];
+        extensions = ["totp"];
       }
     in
     let wire =
@@ -153,6 +153,9 @@ let () =
       | _ -> p "%-26s not one domain\n" what
   in
   against "nothing configured" "";
+  against "the main's extensions" {|,"extensions":["totp"]|};
+  against "no extension" {|,"extensions":[]|};
+  against "one the main lacks" {|,"extensions":["totp","passwords"]|};
   against "the same as the main" {|,"symlinks":"follow","projectSettle":420|};
   against "a smaller entry" {|,"maxEntryCommands":64,"batchDelay":1|};
   against "a larger entry" {|,"maxEntryCommands":4096|};

@@ -806,7 +806,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_passphrase r ->
         vault (Vault.passphrase ~new_secret_key:r.new_secret_key) r.passphrase
     | Vault_delete confirm ->
-        Vault.delete ~domain:t.domain ~engine:t.engine ~confirm t.vault
+        Vault.delete ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree ~confirm t.vault
     | Vault_status -> vault Vault.status
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull

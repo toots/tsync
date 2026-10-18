@@ -137,14 +137,20 @@ let within_limits kdf =
   && kdf.mem_kib <= max_mem_kib
 
 (* §4.2: the slots one unlock derives for, in slot id order. *)
-let derivable t =
+let of_secret_key t ~secret_key_id =
+  List.filter
+    (function
+      | Secret_key s -> s.secret_key_id = secret_key_id | Unknown _ -> false)
+    (sort_slots t.slots)
+
+(* §4.2: the cap counts the slots of one secret key, so other machines'
+   enrolments never push this one's out. *)
+let derivable t ~secret_key_id =
   List.filteri
     (fun i _ -> i < max_slots)
-    (List.filter_map
-       (function
-         | Secret_key { kdf; _ } as s when within_limits kdf -> Some s
-         | _ -> None)
-       (sort_slots t.slots))
+    (List.filter
+       (function Secret_key { kdf; _ } -> within_limits kdf | _ -> false)
+       (of_secret_key t ~secret_key_id))
 
 (* §4.2: the secret key is Argon2id's secret value. *)
 let kek kdf ~secret_key passphrase =
@@ -183,10 +189,14 @@ let create ?params ~now ~secret_key passphrase =
   )
 
 let unusable t =
-  let derived = List.map slot_id (derivable t) in
   List.filter_map
     (function
-      | Secret_key { id; _ } when not (List.mem id derived) -> Some id
+      | Secret_key { id; secret_key_id; _ }
+        when not
+               (List.exists
+                  (fun s -> slot_id s = id)
+                  (derivable t ~secret_key_id)) ->
+          Some id
       | _ -> None)
     (sort_slots t.slots)
 
@@ -199,13 +209,10 @@ let enrolls t ~secret_key_id =
 (* §4.2: a slot for another secret key is not derived for. *)
 let unlock t ~secret_key passphrase =
   let secret_key_id = Secret_key.id secret_key in
-  let mine =
-    List.filter
-      (function
-        | Secret_key s -> s.secret_key_id = secret_key_id | Unknown _ -> false)
-      (derivable t)
-  in
-  if mine = [] then Error `Wrong_secret_key
+  let own = of_secret_key t ~secret_key_id in
+  let mine = derivable t ~secret_key_id in
+  if own = [] then Error `Wrong_secret_key
+  else if mine = [] then Error (`Unusable (List.map slot_id own))
   else (
     match
       List.find_map

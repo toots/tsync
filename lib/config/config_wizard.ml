@@ -448,7 +448,10 @@ let domain io ~advanced ~system d =
   let d =
     set d "frontends" (`List (frontends io ~system (list_of d "frontends")))
   in
-  set d "extensions" (`List (extensions io (list_of d "extensions")))
+  (* 07 §5.9: a domain following its main stays so unless one is chosen. *)
+    match (get d "extensions", extensions io (list_of d "extensions")) with
+    | None, [] -> unset d "extensions"
+    | _, chosen -> set d "extensions" (`List chosen)
 
 let links_used j =
   List.concat_map
