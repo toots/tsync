@@ -74,6 +74,7 @@ import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
 import org.feverdreamtv.tsync.Tsync
+import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.Parameters
 import org.feverdreamtv.tsync.core.ServerConfig
@@ -81,6 +82,7 @@ import org.feverdreamtv.tsync.core.ServerConfig
 class MainActivity : ComponentActivity() {
     private var shared by mutableStateOf<List<Uri>?>(null)
     private var activityRequests by mutableIntStateOf(0)
+    private var codeLink by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -88,7 +90,7 @@ class MainActivity : ComponentActivity() {
         accept(intent)
         setContent {
             TsyncTheme {
-                App(shared, activityRequests, onShareDone = ::finish)
+                App(shared, activityRequests, codeLink, onCodeLinkDone = { codeLink = null }, onShareDone = ::finish)
             }
         }
     }
@@ -101,6 +103,10 @@ class MainActivity : ComponentActivity() {
 
     private fun accept(intent: Intent) {
         if (intent.getBooleanExtra(EXTRA_SHOW_ACTIVITY, false)) activityRequests++
+        if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "otpauth") {
+            codeLink = intent.data.toString()
+            return
+        }
         if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
         val streams = streams(intent)
         val refusal = when {
@@ -143,7 +149,7 @@ fun TsyncTheme(content: @Composable () -> Unit) {
 private data class Started(val boot: Boot, val refusal: String?, val config: ServerConfig?)
 
 @Composable
-private fun App(shared: List<Uri>?, activityRequests: Int, onShareDone: () -> Unit) {
+private fun App(shared: List<Uri>?, activityRequests: Int, codeLink: String?, onCodeLinkDone: () -> Unit, onShareDone: () -> Unit) {
     val context = LocalContext.current
     val tsync = remember { Tsync.get(context) }
     var started by remember { mutableStateOf<Started?>(null) }
@@ -167,7 +173,10 @@ private fun App(shared: List<Uri>?, activityRequests: Int, onShareDone: () -> Un
             Failure(state.boot.reason, it, onRetry = { started = null; attempt++ })
         }
         shared != null -> SaveTarget(tsync, shared, onShareDone)
-        else -> Main(tsync, activityRequests)
+        else -> {
+            Main(tsync, activityRequests)
+            codeLink?.let { CodeLinkSheet(tsync, it, onCodeLinkDone) }
+        }
     }
 }
 
@@ -187,6 +196,7 @@ private fun NotificationPermission(tsync: Tsync) {
 
 enum class Destination(val label: Int, val icon: Int) {
     FILES(R.string.destination_files, R.drawable.ic_folder),
+    VAULT(R.string.destination_vault, R.drawable.ic_vault),
     ACTIVITY(R.string.destination_activity, R.drawable.ic_activity),
     SETTINGS(R.string.destination_settings, R.drawable.ic_settings),
 }
@@ -214,13 +224,27 @@ private fun Main(tsync: Tsync, activityRequests: Int) {
         // Outcomes are shown here only while the screen is; otherwise they become notifications.
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { tsync.outcomes.collect { snackbar.showSnackbar(it) } }
     }
+    // android-app §10.2: shown while the domain uses an extension, asked again at each foreground.
+    var vaultShown by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            vaultShown = withContext(Dispatchers.IO) {
+                try {
+                    tsync.vault.status() != null
+                } catch (e: CoreException) {
+                    vaultShown
+                }
+            }
+        }
+    }
+    if (destination == Destination.VAULT && !vaultShown) destination = Destination.FILES
     BackHandler(enabled = destination != Destination.FILES) { destination = Destination.FILES }
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (moving == null) NavigationBar {
-                for (entry in Destination.entries) NavigationBarItem(
+                for (entry in Destination.entries.filter { it != Destination.VAULT || vaultShown }) NavigationBarItem(
                     selected = destination == entry,
                     onClick = { destination = entry },
                     icon = { Icon(painterResource(entry.icon), contentDescription = null) },
@@ -233,6 +257,7 @@ private fun Main(tsync: Tsync, activityRequests: Int) {
         when {
             destination == Destination.FILES && item != null -> MoveTarget(tsync, item, bars, onDone = { moving = null })
             destination == Destination.FILES -> FilesScreen(tsync, FilesMode.Browse, trail, bars, onMove = { moving = it })
+            destination == Destination.VAULT -> VaultScreen(tsync, bars)
             destination == Destination.ACTIVITY -> ActivityScreen(tsync, bars)
             else -> SettingsScreen(tsync, bars)
         }

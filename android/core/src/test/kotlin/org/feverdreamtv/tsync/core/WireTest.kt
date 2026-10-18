@@ -15,7 +15,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /** The bridge's `request` through `tsync android request JSON`, one process per call (android.md §7). */
-private class ProcessCore(private val binary: String, private val home: File, private val config: String) : Core {
+internal class ProcessCore(private val binary: String, private val home: File, private val config: String) : Core {
     private fun run(vararg arguments: String): String {
         val builder = ProcessBuilder(binary, "android", *arguments).redirectErrorStream(false)
         builder.environment().apply {
@@ -67,7 +67,7 @@ class WireTest {
         val store = File(home, "store").apply { mkdirs() }
         val backend = JSONObject().put("type", "local").put("name", "store").put("role", "main").put("path", store.path)
         val domain = JSONObject().put("name", "Wire Suite").put("versioning", true)
-            .put("frontends", listOf("android")).put("backends", listOf(backend))
+            .put("frontends", listOf("android")).put("extensions", listOf<String>()).put("backends", listOf(backend))
         val config = JSONObject().put("name", "wire").put("domains", listOf(domain)).toString()
         core = ProcessCore(binary, home, config)
         client = Client(core)

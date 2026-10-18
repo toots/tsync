@@ -9,9 +9,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import org.feverdreamtv.tsync.bridge.Keystore
 import org.feverdreamtv.tsync.bridge.Native
 import org.feverdreamtv.tsync.bridge.NativeCore
 import org.feverdreamtv.tsync.core.Client
+import org.feverdreamtv.tsync.core.Vault
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.ConfigStore
 import org.feverdreamtv.tsync.core.Core
@@ -48,6 +50,7 @@ class Tsync private constructor(val context: Context) {
     val config = ConfigStore(home)
     val core: Core = NativeCore
     val client = Client(core)
+    val vault = Vault(client)
     val ingest = Ingest(client, IntentStore(home))
     val keepAlive = KeepAlive(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -81,6 +84,7 @@ class Tsync private constructor(val context: Context) {
         ingest.intents.recover()
         val bundle = File(home, "ca-bundle.pem")
         TrustBundle.refresh(bundle, listOf(File("/apex/com.android.conscrypt/cacerts"), File("/system/etc/security/cacerts")))
+        Keystore.directory = File(context.noBackupFilesDir, "vault")
         System.loadLibrary("tsyncjni")
         Native.nativeInit(bytes(home.path), bytes(bundle.path), bytes(ingest.intents.stagingDirectory.path))
         Thread(::readNotices, "tsync-notices").apply { isDaemon = true }.start()
