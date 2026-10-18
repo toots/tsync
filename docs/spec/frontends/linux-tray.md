@@ -340,6 +340,13 @@ again it reports its own state, and the switch then reads unchecked
 
 Leave. The owners keep running.
 
+### 6.5 One-time codes
+
+The tray gives the menu model no code domain
+([menu-model.md §5](menu-model.md#5-rows)), so it shows no `One-time codes` row: putting a code on
+the clipboard needs an X11 or Wayland client, which the tray is not. On Linux, codes are read with
+`tsync totp list` and the vault is unlocked with `tsync vault unlock`.
+
 ## 7. Showing a path in the file manager
 
 1. Build the URI: `file://` followed by the path, where every byte outside
