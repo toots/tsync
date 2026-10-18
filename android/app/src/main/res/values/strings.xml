@@ -218,6 +218,8 @@
     <string name="vault_state_enrolled">this phone is enrolled</string>
     <string name="vault_state_not_enrolled">this phone is not enrolled</string>
     <string name="vault_state_keystore">key kept in the Android Keystore</string>
+    <string name="vault_state_memory">key kept in memory until the app stops</string>
+    <string name="vault_state_keystore_error">the Keystore refused: %1$s</string>
     <string name="code_search">Search codes</string>
     <string name="codes_empty">No codes yet</string>
     <string name="code_seconds_left">%1$d s</string>

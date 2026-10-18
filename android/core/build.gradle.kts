@@ -28,21 +28,25 @@ tasks.test {
     // The binary is not a tracked input: its tests must run again against a rebuilt one.
     outputs.upToDateWhen { !wireBinary.isPresent }
     val wireTests = AtomicLong()
+    val vaultTests = AtomicLong()
     addTestListener(object : TestListener {
         override fun beforeSuite(suite: TestDescriptor) {}
         override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
         override fun beforeTest(test: TestDescriptor) {}
         override fun afterTest(test: TestDescriptor, result: TestResult) {
-            val wire = test.className?.endsWith(".WireTest") == true
-            if (wire && result.resultType != TestResult.ResultType.SKIPPED) wireTests.incrementAndGet()
+            val ran = result.resultType != TestResult.ResultType.SKIPPED
+            if (ran && test.className?.endsWith(".WireTest") == true) wireTests.incrementAndGet()
+            if (ran && test.className?.endsWith(".VaultTest") == true) vaultTests.incrementAndGet()
         }
     })
-    doFirst { wireTests.set(0) }
+    doFirst { wireTests.set(0); vaultTests.set(0) }
     doLast {
         if (!wireBinary.isPresent) {
             logger.warn("\n*** WIRE SUITE NOT RUN: TSYNC_BIN is unset, so no request or reply shape was checked against a real tsync. ***\n")
         } else if (wireTests.get() == 0L) {
             throw GradleException("TSYNC_BIN is set but the wire suite executed no test")
+        } else if (vaultTests.get() == 0L) {
+            throw GradleException("TSYNC_BIN is set but the vault suite executed no test")
         } else {
             logger.lifecycle("wire suite executed ${wireTests.get()} tests against ${wireBinary.get()}")
         }
