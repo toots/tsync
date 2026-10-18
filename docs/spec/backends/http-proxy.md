@@ -172,7 +172,7 @@ Each takes `?prefix=P`, a prefix within the client's domain; it routes and autho
 | Request | 200 answer | 404 when |
 |---|---|---|
 | `GET /share-url?prefix=P` | `{"self":true}` when the listener serves the domain's share links; else `{"url":"<absolute URL>"}` when the domain's far store has a share endpoint | neither |
-| `GET /domain-settings?prefix=P` | `{"chunkSize":n,"symlinks":p,"projectLease":l,"projectQuarantine":q,"projectSettle":s,"maxEntryCommands":m,"projector":u?}`: every domain-wide setting ([05 §2.1](../05-ops-config.md#21-schema-and-validation)) in force for the serving domain, configured or default; sizes in bytes, timings in seconds; `projector` is the client uuid of the serving owner, present when the listener projects the domain's commits | a listener older than the endpoint: the client asks `/chunk-size` |
+| `GET /domain-settings?prefix=P` | `{"chunkSize":n,"symlinks":p,"projectLease":l,"projectQuarantine":q,"projectSettle":s,"maxEntryCommands":m,"extensions":[e…],"projector":u?}`: every domain-wide setting ([05 §2.1](../05-ops-config.md#21-schema-and-validation)) in force for the serving domain, configured or default, and the extensions the serving domain uses (its configured list, else `[]`); sizes in bytes, timings in seconds; `projector` is the client uuid of the serving owner, present when the listener projects the domain's commits | a listener older than the endpoint: the client asks `/chunk-size` |
 | `GET /max-concurrency?prefix=P` | `{"maxConcurrency":n}`, `n > 0`: how many object reads and writes the listener runs at once | no bound |
 | `GET /verified?prefix=P` | `{"verified":bool}`: the far composite store's `verified` capability | never (always answers) |
 
@@ -322,7 +322,7 @@ Four requests (§5.3), issued concurrently on first ask with the domain's prefix
 |---|---|---|
 | `share_url` | `{"url":u}` → `u`; `{"self":true}` → `<configured url>/s` | `None` |
 | `chunk_size` | `chunkSize` when a positive integer | `None` |
-| `chunk_size`, `symlinks`, `projection`, `max_entry_commands` | from `/domain-settings`, all of them when every field is well-formed (`chunkSize` and `maxEntryCommands` positive integers; `projector` 32 lowercase hex or absent; `symlinks` one of the three policies; the timings numbers with `0 < lease < quarantine < settle`) | `None` all: settings with one ill-formed field state nothing |
+| `chunk_size`, `symlinks`, `projection`, `max_entry_commands`, `extensions` | from `/domain-settings`, all of them when every field is well-formed (`chunkSize` and `maxEntryCommands` positive integers; `projector` 32 lowercase hex or absent; `symlinks` one of the three policies; the timings numbers with `0 < lease < quarantine < settle`; `extensions` absent, read as `[]`, or an array of names, unknown names dropped) | `None` all: settings with one ill-formed field state nothing |
 | `max_concurrency` | `maxConcurrency` when a positive integer | `None` |
 | `verified` | `verified == true` | `false` (a peer that cannot say has not said) |
 

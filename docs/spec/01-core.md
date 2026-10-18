@@ -98,12 +98,21 @@ path  = "" | leaf *( "/" leaf )          ; "" is the domain root
 ```
 
 - A leaf is the user's name for one file or folder. Any byte string satisfying `leaf` is valid,
-  including names beginning with `.tsync-`, names longer than a local filesystem allows, and
+  including names beginning with `.tsync-` (but for the reserved root name below), names longer than a local filesystem allows, and
   names with characters some filesystems refuse: the store files children by a hash of the
   leaf (§2.6), and a local mirror escapes what it cannot hold (§2.8).
 - Readers MUST accept any leaf that existing writers stored; all of them satisfy this grammar.
 - A path accepted from a user (CLI argument, import source walk) MAY carry one leading and one
   trailing `/`, which are removed; after that it MUST satisfy `path` or be refused as INVALID.
+- **Reserved root name.** The folder `.tsync-ext` at the domain root holds extension records
+  ([extensions](extensions/README.md)). Every interface that presents the domain's names to a
+  user or another party omits it, and refuses as INVALID a request that would create it, rename
+  onto it or name anything at or below it: the file operations frontends call, `tsync ls`
+  (with `--deleted`), `tsync versions` (listing and revert), export, rsync and shares (a root
+  share's listing and archive omit it, [security-model §6.3](algorithms/security-model.md#63-a-share-never-leaves-its-domain)). Import skips a source entry of
+  that name at the root, with a warning. Store-level operations (the cycle, projection,
+  `tsync mirror`, gc, integrity, the retention of versions) treat it as any folder. Only the extension layer
+  reaches it. Anything a user stored at that name before is hidden with it.
 
 ### 2.4 Logical keys
 
@@ -797,6 +806,10 @@ An implementation MUST exhibit these observable properties.
   another domain's prefix fails; a trailing `/` is accepted when parsing; descending from a
   file fails; a leading `/` in a user path is ignored. A chunk with a key shorter than 3
   characters is filed under shard `_`.
+- **Reserved root name.** A domain holding `/.tsync-ext/totp/<id>` lists (deleted files too), stats,
+  lists versions, exports, rsyncs and shares the same as one without it; creating, renaming onto or addressing
+  `.tsync-ext` at the root through a frontend is refused INVALID; a `.tsync-ext` below the root
+  is an ordinary name; `tsync mirror` and gc copy and keep the folder like any other.
 - **Validation.** Keys with an empty, `.` or `..` segment, a leading `/` or a NUL are refused;
   domain names `shares`, `gc-jobs`, `a/b`, `..`, `.tsync-x` are refused, `SHARES` is refused
   for a domain with a local-filesystem store and accepted otherwise, and `Family Photos` and
