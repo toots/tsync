@@ -42,6 +42,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import org.feverdreamtv.tsync.core.Code
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,12 +86,18 @@ import org.feverdreamtv.tsync.core.OneTimeCode
 import org.feverdreamtv.tsync.core.VaultStatus
 
 /** android-app §10.8: no screenshot or recent-apps thumbnail while a secret can be on screen. */
+// ponytail: one count for the app's single activity.
+private var secureHolders = 0
+
+/** Pitfall B-8.17: the flag stays while any holder is composed. */
 @Composable
 fun SecureWindow() {
     val activity = LocalActivity.current ?: return
     DisposableEffect(activity) {
-        activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+        if (secureHolders++ == 0) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose {
+            if (--secureHolders == 0) activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 }
 
@@ -112,11 +123,15 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     var confirm by remember { mutableStateOf<Boolean?>(null) }
     var adding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val changes by tsync.vaultChanges.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current
     fun reload() = generation++
-    LaunchedEffect(generation) {
-        attempt { tsync.vault.status() }
-            .onSuccess { status = it; failure = null }
-            .onFailure { failure = it.message }
+    LaunchedEffect(generation, changes) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            attempt { tsync.vault.status() }
+                .onSuccess { status = it; failure = null }
+                .onFailure { failure = it.message }
+        }
     }
     val unlocked = status?.state == "unlocked"
     Scaffold(
@@ -157,7 +172,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             current.state == "locked" -> Column(Modifier.padding(padding).padding(16.dp)) {
                 UnlockForm(tsync, current.enrolled, onUnlocked = ::reload)
             }
-            else -> CodesList(tsync, padding)
+            else -> CodesList(tsync, padding, onLocked = ::reload)
         }
     }
     confirm?.let { forget ->
@@ -176,14 +191,19 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             dismissButton = { TextButton(onClick = { confirm = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
-    if (adding) AddCodeSheet(tsync, onDismiss = { adding = false; reload() })
+    if (adding) AddCodeSheet(tsync, onDismiss = { adding = false; tsync.vaultChanges.value++ })
 }
 
 private fun describe(context: Context, status: VaultStatus): String {
     val state = context.getString(if (status.state == "unlocked") R.string.vault_state_unlocked else R.string.vault_state_locked)
     val enrolled = context.getString(if (status.enrolled) R.string.vault_state_enrolled else R.string.vault_state_not_enrolled)
-    val kept = if (status.cached == "keystore") context.getString(R.string.vault_state_keystore) else null
-    return listOfNotNull(state, enrolled, kept).joinToString(" · ")
+    val kept = when (status.cached) {
+        "keystore" -> context.getString(R.string.vault_state_keystore)
+        "memory" -> context.getString(R.string.vault_state_memory)
+        else -> null
+    }
+    val problem = status.keystoreError?.let { context.getString(R.string.vault_state_keystore_error, it) }
+    return listOfNotNull(state, enrolled, kept, problem).joinToString(" · ")
 }
 
 @Composable
@@ -239,23 +259,30 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CodesList(tsync: Tsync, padding: PaddingValues) {
+private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
     var codes by remember { mutableStateOf<Codes?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }
-    var generation by remember { mutableIntStateOf(0) }
     var acting by remember { mutableStateOf<OneTimeCode?>(null) }
-    // The owner computes every code; the app only counts the seconds down and asks again at zero.
-    LaunchedEffect(filter, generation) {
-        while (true) {
-            attempt { tsync.vault.codes(filter) }
-                .onSuccess { codes = it; failure = null }
-                .onFailure { failure = it.message }
-            elapsed = 0
-            val wait = codes?.records?.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
-            repeat(wait) { delay(1000); elapsed++ }
+    val changes by tsync.vaultChanges.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current
+    // The owner computes every code; the app only counts the seconds down and asks again at zero,
+    // at each return to the foreground, and after each change it makes (pitfall B-8.18).
+    LaunchedEffect(filter, changes) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val result = attempt { tsync.vault.codes(filter) }
+                result.onSuccess { codes = it; failure = null }.onFailure { failure = it.message }
+                if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
+                    onLocked()
+                    return@repeatOnLifecycle
+                }
+                elapsed = 0
+                val wait = codes?.records?.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
+                repeat(wait) { delay(1000); elapsed++ }
+            }
         }
     }
     Column(Modifier.padding(padding)) {
@@ -298,7 +325,7 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues) {
             }
         }
     }
-    acting?.let { CodeActions(tsync, it, onDone = { acting = null; generation++ }) }
+    acting?.let { CodeActions(tsync, it, onDone = { acting = null; tsync.vaultChanges.value++ }) }
 }
 
 private fun grouped(code: String) = code.chunked(3).joinToString(" ")
@@ -316,6 +343,7 @@ private fun copy(context: Context, tsync: Tsync, record: OneTimeCode) {
 private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
     var renaming by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
+    var removeSent by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val name = record.issuer.ifEmpty { record.account }
     when {
@@ -323,6 +351,7 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
             var issuer by remember { mutableStateOf(record.issuer) }
             var account by remember { mutableStateOf(record.account) }
             var refusal by remember { mutableStateOf<String?>(null) }
+            var busy by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = onDone,
                 title = { Text(stringResource(R.string.action_rename)) },
@@ -334,9 +363,11 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    TextButton(enabled = !busy, onClick = {
+                        busy = true
                         scope.launch {
                             val result = attempt { tsync.vault.rename(record.id, issuer.trim(), account.trim()) }
+                            busy = false
                             refusal = result.reason()
                             if (result.isSuccess) onDone()
                         }
@@ -349,7 +380,8 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
             onDismissRequest = onDone,
             text = { Text(stringResource(R.string.code_remove_confirm, name)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(enabled = !removeSent, onClick = {
+                    removeSent = true
                     scope.launch {
                         attempt { tsync.vault.remove(record.id) }.reason()?.let { tsync.report(it, failed = true) }
                         onDone()
@@ -386,8 +418,15 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var entering by remember { mutableStateOf(false) }
     var outcome by remember { mutableStateOf<String?>(null) }
-    fun added(result: Result<*>) {
-        outcome = result.reason() ?: context.getString(R.string.code_added)
+    var busy by remember { mutableStateOf(false) }
+    fun adding(call: () -> Any) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val result = attempt(call)
+            busy = false
+            outcome = result.reason() ?: context.getString(R.string.code_added)
+        }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -411,8 +450,8 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
             text = { Text(outcome!!, Modifier.verticalScroll(rememberScrollState())) },
             confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
         )
-        entering -> EnterCode(onDismiss) { secret, issuer, account ->
-            scope.launch { added(attempt { tsync.vault.add(secret, issuer, account) }) }
+        entering -> EnterCode(onDismiss, busy) { secret, issuer, account ->
+            adding { tsync.vault.add(secret, issuer, account) }
         }
         else -> ModalBottomSheet(onDismissRequest = onDismiss) {
             Column(Modifier.navigationBarsPadding()) {
@@ -421,7 +460,7 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.code_scan)) },
                     supportingContent = if (scanner) null else ({ Text(stringResource(R.string.code_scan_unavailable)) }),
                     modifier = Modifier.combinedClickable(enabled = scanner, onClick = {
-                        scan(context, { text -> scope.launch { added(attempt { tsync.vault.add(text) }) } }, { outcome = it })
+                        scan(context, { text -> adding { tsync.vault.add(text) } }, { outcome = it })
                     }),
                 )
                 ListItem(headlineContent = { Text(stringResource(R.string.code_enter)) }, modifier = Modifier.combinedClickable(onClick = { entering = true }))
@@ -435,7 +474,7 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun EnterCode(onDismiss: () -> Unit, onSubmit: (String, String, String) -> Unit) {
+private fun EnterCode(onDismiss: () -> Unit, busy: Boolean, onSubmit: (String, String, String) -> Unit) {
     var issuer by remember { mutableStateOf("") }
     var account by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
@@ -457,7 +496,7 @@ private fun EnterCode(onDismiss: () -> Unit, onSubmit: (String, String, String) 
             }
         },
         confirmButton = {
-            TextButton(enabled = secret.isNotBlank(), onClick = { onSubmit(secret, issuer, account) }) { Text(stringResource(R.string.add)) }
+            TextButton(enabled = !busy && secret.isNotBlank(), onClick = { onSubmit(secret, issuer, account) }) { Text(stringResource(R.string.add)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
@@ -470,11 +509,15 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<VaultStatus?>(null) }
+    var unreachable by remember { mutableStateOf<String?>(null) }
     var checked by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     var refusal by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     LaunchedEffect(generation) {
-        status = attempt { tsync.vault.status() }.getOrNull()
+        val result = attempt { tsync.vault.status() }
+        status = result.getOrNull()
+        unreachable = result.reason()
         checked = true
     }
     val name = remember(link) { linkName(link) }
@@ -486,20 +529,28 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when {
                     !checked -> Text(stringResource(R.string.loading))
+                    unreachable != null -> Text(unreachable!!)
                     current == null -> Text(stringResource(R.string.vault_not_used))
                     current.state == "absent" -> Text(stringResource(R.string.vault_absent))
-                    current.state == "locked" -> UnlockForm(tsync, current.enrolled, onUnlocked = { generation++ })
+                    current.state == "corrupt" -> Text(stringResource(R.string.vault_corrupt))
+                    current.state == "locked" -> UnlockForm(tsync, current.enrolled, onUnlocked = {
+                        generation++
+                        tsync.vaultChanges.value++
+                    })
                     else -> Text(stringResource(R.string.code_link_add, name))
                 }
                 refusal?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            if (current?.state == "unlocked") TextButton(onClick = {
+            if (current?.state == "unlocked") TextButton(enabled = !busy, onClick = {
+                busy = true
                 scope.launch {
                     val result = attempt { tsync.vault.add(link) }
+                    busy = false
                     refusal = result.reason()
                     if (result.isSuccess) {
+                        tsync.vaultChanges.value++
                         tsync.report(context.getString(R.string.code_added))
                         onDone()
                     }

@@ -30,6 +30,9 @@ let () =
       name = "the Android Keystore";
       put =
         (fun ~domain ~key_id ~key ->
+          (* get splits the entry at this length. *)
+          if String.length key_id <> key_id_length then
+            Tsync_core.Fail.invalid "a key id is %d characters" key_id_length;
           keystore (fun () -> keystore_put domain (key_id ^ key)));
       get =
         (fun ~domain ->
@@ -40,6 +43,7 @@ let () =
                   else
                     Some
                       ( String.sub entry 0 key_id_length,
-                        String.sub entry key_id_length (length - key_id_length) ))));
+                        String.sub entry key_id_length (length - key_id_length)
+                      ))));
       delete = (fun ~domain -> keystore (fun () -> keystore_delete domain));
     }

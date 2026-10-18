@@ -89,14 +89,30 @@ static void run_keystore_call(char operation, struct keystore_call *call) {
     }
     attached = 1;
   }
-  (*env)->PushLocalFrame(env, 8);
+  if ((*env)->PushLocalFrame(env, 8) != 0) {
+    (*env)->ExceptionClear(env);
+    call->failure = strdup("the JVM has no memory for the keystore call");
+    if (attached)
+      (*java_vm)->DetachCurrentThread(java_vm);
+    return;
+  }
   jbyteArray name = to_array(env, call->name, call->name_length);
+  jbyteArray entry = operation == 'p'
+                         ? to_array(env, call->entry, call->entry_length)
+                         : NULL;
   jbyteArray result = NULL;
+  if (name == NULL || (operation == 'p' && entry == NULL)) {
+    (*env)->ExceptionClear(env);
+    call->failure = strdup("the JVM has no memory for the keystore call");
+    (*env)->PopLocalFrame(env, NULL);
+    if (attached)
+      (*java_vm)->DetachCurrentThread(java_vm);
+    return;
+  }
   switch (operation) {
   case 'p':
-    (*env)->CallStaticVoidMethod(
-        env, keystore_class, keystore_put, name,
-        to_array(env, call->entry, call->entry_length));
+    (*env)->CallStaticVoidMethod(env, keystore_class, keystore_put, name,
+                                 entry);
     break;
   case 'g':
     result = (*env)->CallStaticObjectMethod(env, keystore_class, keystore_get,

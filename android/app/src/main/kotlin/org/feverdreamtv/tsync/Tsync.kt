@@ -51,6 +51,9 @@ class Tsync private constructor(val context: Context) {
     val core: Core = NativeCore
     val client = Client(core)
     val vault = Vault(client)
+
+    /** Bumped by every vault change the app makes, so each vault screen asks again (pitfall B-8.18). */
+    val vaultChanges = MutableStateFlow(0)
     val ingest = Ingest(client, IntentStore(home))
     val keepAlive = KeepAlive(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
