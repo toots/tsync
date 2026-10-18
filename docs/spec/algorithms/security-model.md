@@ -16,7 +16,7 @@ OCaml notes: [ocaml/algorithms/security-model.md](../ocaml/algorithms/security-m
 | **Domain writer** | Write credentials to a domain's store, or the http-proxy secret of that domain | The whole content and metadata of that domain. Writers of one domain trust each other completely (§3.2). |
 | **Proxy client** | One domain's http-proxy secret | That domain's objects on that listener, and nothing else: not other domains, not the listener host's files, not other domains' shares (§4, §5). |
 | **Share recipient** | A share link | Reading one file or one folder of one domain until the link expires or is revoked (§6). |
-| **Storage provider** | The bucket, disk or NAS | Durability and access control of the objects. It sees plaintext (§3.1). |
+| **Storage provider** | The bucket, disk or NAS | Durability and access control of the objects. It sees plaintext, but for vault records (§3.1). |
 | **Network** | Any path between a tsync client and a store or listener | Nothing. |
 | **Anonymous internet** | Reach to a listener's port | Fetching the status login page and share links; nothing else (§4.6, §11). |
 
@@ -40,6 +40,7 @@ Trust boundaries, each an enforcement point in this file:
 3. The listener host's filesystem outside its stores.
 4. Local state: mirror, staged bodies, chunk cache, sync state (before-values, position), queues. Staged bodies are the only copy of content not yet on the main.
 5. Operational information: status reports, domain names, traffic, backend settings.
+6. Vault contents: extension records (one-time-password seeds, website and app passwords), each domain's vault key K, its secret key and its passphrase ([vault](../extensions/vault.md)).
 
 ---
 
@@ -47,7 +48,7 @@ Trust boundaries, each an enforcement point in this file:
 
 ### 3.1 Non-goals
 
-- **Confidentiality from the storage provider.** Objects are stored in plaintext. Whoever administers the bucket, disk or NAS can read every file, name and log entry. Encryption at rest is the provider's or the volume's.
+- **Confidentiality from the storage provider.** Objects are stored in plaintext. Whoever administers the bucket, disk or NAS can read every file, name and log entry. Encryption at rest is the provider's or the volume's. The one exception is vault records (§3.2): their bodies are encrypted, though their number, sizes and times are not hidden.
 - **Integrity against a domain writer.** A holder of write access to a domain can replace, delete or corrupt anything in it, including version history. tsync keeps conflicted copies and versions against *accidents*, not against a hostile writer. In particular the main checks nothing about the entries appended to its log: that every client creates an entry only from the head, with a batch, is an assumption of the protocol (A5, [change-algebra.md §1](change-algebra.md#1-setting)), not something tsync enforces. A writer that breaks it can commit any tree.
 - **Chunk keys as a security property.** Chunk keys are two seeded 64-bit non-cryptographic hashes ([01-core](../01-core.md)). They detect accidental corruption and drive deduplication. An adversary with write access to the store can craft colliding content and poison deduplication for every writer of the domain. Nothing in tsync MAY rely on a chunk key to authenticate content against an adversary.
 - **Replay of a captured request within the freshness window** (§4.2) by a party that can read requests on the path. TLS (§9) is what keeps requests from being captured.
@@ -66,6 +67,7 @@ Trust boundaries, each an enforcement point in this file:
 | Only the owner account (and its clients' granted paths) reaches the owner process | Socket directory modes and peer-credential checks (§7) |
 | Secrets are not readable by other accounts or copied off the device | File modes set at creation, backup exclusion, masking (§10) |
 | Content served to a browser cannot script the listener's origin | Output escaping and sandboxing headers (§12, §13) |
+| Vault records are read only by a machine its user unlocked, and a domain writer cannot make a machine encrypt under a key the writer chose | XChaCha20-Poly1305 under a random K; K wrapped by Argon2id of a generated 128-bit passphrase; K kept only in the OS keystore or the owner's memory; a machine adopts only a K it unwrapped itself ([vault](../extensions/vault.md), §10.6) |
 
 ---
 
@@ -154,7 +156,7 @@ The share operation surface is in [05-ops-config §4.11](../05-ops-config.md#411
 
 A server serves a manifest only if it passes the validity rule of [data-model/backend §2.18](../data-model/backend.md#218-share) (version 1, a valid domain name, a file key inside that domain's manifest area, a valid folder id) and, in addition, names a domain this server serves (on a listener: the domain of the route asked). Otherwise it answers as for a corrupt manifest (502) or, for another domain, an absent token (404).
 
-Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)): a disowned marker is absent, and a removed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400).
+Every name the share server resolves inside a folder share goes through that domain's folder namespaces on the store, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)): a disowned marker is absent, and a removed shared folder is no longer served. Nothing goes through a path or the local mirror. `path` components that are empty, `.` or `..` are refused (400). In a share of the domain root, the reserved name `.tsync-ext` ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)) is absent: listings and archives omit it, and a path through it answers 404. A creator refuses a share at or below it, so a manifest naming one was not written by tsync.
 
 ### 6.4 The share space on a listener
 
@@ -242,7 +244,27 @@ The status page keeps the secret in page memory only, never in web storage, and 
 
 ### 10.5 Who realises what
 
-These general rules are realised by the hosts, which link here: staging and destination confinement with exclusive `dest` creation (§7.3) by every host with sandboxed clients; cleartext refusal and trust-store refresh (§9) by every client host, Android included; backup exclusion (§10.2) by every host with a platform backup; `default_permissions` with read-only `allowOther` (§8) by the FUSE host; socket modes and peer checks (§7) by every IPC server; config written 0600 from creation (§10.2) by every config writer; share token rules and revoke (§6.1) by the share operation.
+These general rules are realised by the hosts, which link here: the vault keystore (§10.6) by every host that has one; staging and destination confinement with exclusive `dest` creation (§7.3) by every host with sandboxed clients; cleartext refusal and trust-store refresh (§9) by every client host, Android included; backup exclusion (§10.2) by every host with a platform backup; `default_permissions` with read-only `allowOther` (§8) by the FUSE host; socket modes and peer checks (§7) by every IPC server; config written 0600 from creation (§10.2) by every config writer; share token rules and revoke (§6.1) by the share operation.
+
+### 10.6 Vault keys and passphrases
+
+- **The passphrase** is chosen by the user ([vault §2.2](../extensions/vault.md#22-passphrase)). tsync writes it nowhere: not to the config, local state, the store, a keystore or a log, and never shows it back. It is read from a terminal without echo, from standard input, or from an action's request; never from a command-line argument, which other processes can list.
+- **The secret key** is generated ([vault §2](../extensions/vault.md#2-keys)) and is what makes a chosen passphrase safe against whoever reads the store. It never reaches the store. It is shown once, by the command that made it; it lives in each enrolled machine's keystore, or in the owner's memory, under the same rules as K; it is read like the passphrase.
+- **K** lives only in the host's keystore or in the owner's memory. It is never written to the config, a local file, the store unwrapped, a log or an IPC reply. Where a host keeps it:
+  - macOS: a generic-password item of the login keychain, service `org.feverdreamtv.tsync.vault`, account the domain, whose access list trusts the daemon's code signature alone. Every call refuses rather than prompts (`kSecUseAuthenticationUIFail`): a read the keychain would guard with a dialog fails, and K stays in memory. The daemon is a bare executable, and the data-protection keychain needs an entitlement only a provisioning profile can grant, which a bare executable cannot carry. The login keychain never syncs; it is in a Time Machine backup encrypted under the user's login password. A build whose signature changes identity (an ad-hoc local build) cannot read an item an earlier build wrote.
+  - Android: encrypted with AES-GCM under a non-exportable Android Keystore key; the encrypted K is kept in the app's no-backup storage.
+  - Linux: a Secret Service item with attributes `application = tsync-vault`, `domain` and `keyId`. With no Secret Service reachable from the owner (no session bus, no provider), K stays in memory.
+  - Any other host: memory. No host falls back to a file.
+- K leaves a machine only wrapped in the keyring. A keystore that would copy it to another device or into a backup is not used that way.
+- **Plaintext records** exist only in the owner's memory. Only envelopes reach staged bodies, the chunk cache and the store.
+- **Codes and passphrases in a UI.** A client copies a one-time code only on the user's gesture,
+  and marks it sensitive where the platform has a marker (macOS `org.nspasteboard.ConcealedType`,
+  Android `EXTRA_IS_SENSITIVE`) so clipboard history, sync and previews skip it. It is not cleared
+  on a timer: a code expires by itself, and a reader of the clipboard reads it before any timer
+  would. A client never copies a passphrase, and keeps a screen that shows a passphrase or codes
+  out of screenshots where the platform allows (`FLAG_SECURE`). A client never logs either.
+- Implementations SHOULD overwrite the passphrase, the KEK, K and decrypted records once they are no longer needed, where the runtime allows.
+- The replies of `vault_init` and `vault_passphrase`, and the `passphrase` and `secretKey` members of any vault request, are never logged; a log of IPC traffic masks them (§10.3).
 
 ---
 
@@ -310,3 +332,4 @@ An implementation MUST exhibit:
 - A request body larger than its limit is refused before it is read; a connection that stops sending is closed after the idle timeout.
 - `/stats` signed with one domain's secret mentions no other domain.
 - A folder or a shared file named `</script><script>alert(1)</script>` shown on a share page renders as text; a shared HTML file served inline runs no script on the listener origin.
+- After a vault is initialised and used, no store object, local file, config or log holds the passphrase, K, a seed, a password or a plaintext label; on Linux without a Secret Service, restarting the owner leaves the vault locked; `tsync vault unlock` takes no passphrase argument.
