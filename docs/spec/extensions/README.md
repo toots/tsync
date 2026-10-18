@@ -39,10 +39,12 @@ a top-level command or a frontend's CLI group
   sources.
 - A domain's vault and records are part of the domain: they exist in its store once any client
   made them ([vault §3](vault.md#3-initialising)), whatever this client's config says.
-- A client **uses** an extension of a domain when its config lists the extension for that domain,
-  or, when its config has no `extensions` for the domain, when the domain's main states it
-  ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5). A client that follows the
-  main this way (the Android app) decides nothing about the domain's extensions. For a domain whose config lists
+- A client **uses** an extension of a domain when the domain's main states it and the client's
+  config, if it lists `extensions` for the domain, lists it too; behind a main that states
+  nothing, when the client's config lists it
+  ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5). Behind an http-proxy the
+  server decides: a client can only narrow its list, and one that leaves `extensions` out (the
+  Android app) decides nothing. For a domain whose config lists
   none, this client runs nothing of this file: it writes nothing under `/.tsync-ext/`, folds
   nothing, and refuses every vault and extension verb `invalid`. The folder still syncs, hidden,
   like any other.
