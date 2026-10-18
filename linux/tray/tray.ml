@@ -270,7 +270,10 @@ let set_paused t paused =
   refresh t
 
 let run_action t : M.action -> unit = function
-  | Nothing | Show_stats -> ()
+  (* linux-tray §6.5: the tray gives the model no code domain, so no codes row
+     reaches it. *)
+  | Nothing | Show_stats | Show_codes | Copy_code _ | Unlock _ | Add_code _ ->
+      ()
   | Quit -> ignore (Rt.Promise.try_resolve t.finished 0)
   | Set_paused paused -> set_paused t paused
   | Open_folder name -> Option.iter (show t ~folder:true) (mount_point t name)

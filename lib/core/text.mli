@@ -7,3 +7,9 @@ val contains : string -> string -> bool
 
 (** Every occurrence of [sub] replaced by [by], left to right. *)
 val replace_all : sub:string -> by:string -> string -> string
+
+(** Every byte outside [allowed] as [%XX], upper-case hex. *)
+val percent_escape : allowed:(char -> bool) -> string -> string
+
+(** [None] for a malformed escape. *)
+val percent_unescape : string -> string option
