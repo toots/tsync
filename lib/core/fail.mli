@@ -13,6 +13,7 @@ type kind =
   | Corrupt  (** an answer that contradicts what it must be *)
   | Missing_chunks of string list  (** the reference gate's refusal *)
   | Paused
+  | Locked  (** the domain's vault key is not held here *)
   | Unprepared  (** local state cannot express the operation yet *)
   | Link  (** transient: no answer, a stall, a dropped connection *)
   | Load  (** transient: the authority answered "later" *)

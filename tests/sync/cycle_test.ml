@@ -250,6 +250,7 @@ let () =
                   settle = 600.;
                   entry_commands = 256;
                   projector = Some projector;
+                  extensions = [];
                 }
               root "A"
           in
@@ -825,6 +826,7 @@ let () =
                   settle = 600.;
                   entry_commands = 256;
                   projector = Some (String.make 32 'f');
+                  extensions = [];
                 }
               root "A"
           in
@@ -912,6 +914,7 @@ let () =
                   settle = 600.;
                   entry_commands = 256;
                   projector = Some (String.make 32 'f');
+                  extensions = [];
                 }
               root "A"
           in

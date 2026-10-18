@@ -194,6 +194,39 @@ let routes () =
       get "d1" "p/%FF.ts" [];
       get "d1" "p/" [];
       get "d1" "p" [];
+      p "== the reserved root folder in a root share (security-model §6.3)";
+      let ext = Option.get (Folder_id.of_string "0123456789ab-1") in
+      let put k v = C.store.put k (Bigstring.of_string v) in
+      put
+        (Key.child d Folder_id.root ".tsync-ext")
+        (Folder.marker_body { name = ".tsync-ext"; id = ext });
+      put (Key.anchor d ext)
+        (Folder.anchor_body { parent = Folder_id.root; aname = ".tsync-ext" });
+      let m =
+        R.upload_chunks ~name:"r1" ~size:6 ~chunk_size:8 ~mtime:1. (fun _ ->
+            Bytes (Bigstring.of_string "sealed"))
+      in
+      R.put_manifest (Key.child d ext "r1") (Manifest.rename m "r1");
+      get "d1" "list" [];
+      get "d1" "p/.tsync-ext/r1" [];
+      get "d1" "f" [("path", ".tsync-ext/r1")];
+      get "d1" "list" [("path", ".tsync-ext")];
+      let zip =
+        body_text
+          (S.handle t ~tls:false ~max_zip_members:10
+             {
+               Server.meth = "GET";
+               target = "";
+               path = "";
+               query = "";
+               headers = [];
+               peer = "";
+               body_length = `Length 0;
+             }
+             ~token:"d1" ~sub:"download" [])
+      in
+      p "zip names notes.txt %b, .tsync-ext %b" (contains zip "notes.txt")
+        (contains zip ".tsync-ext");
       p "== link previews (§A9.3, §A9.6, §A9.8)";
       let whatsapp = [("user-agent", "WhatsApp/2.24.1.6 A")] in
       get ~accept:"*/*" ~headers:whatsapp "a1" "" [];

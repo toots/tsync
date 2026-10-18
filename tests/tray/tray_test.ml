@@ -244,7 +244,7 @@ let configure w names =
              (fun name ->
                Printf.sprintf
                  {|{"name":%S,"symlinks":"keep","versioning":true,
-                    "frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
+                    "extensions":[],"frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
                     "backends":[{"type":"local","name":"main","role":"main","path":"/srv/%s"}]}|}
                  name name name)
              names)))

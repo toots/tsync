@@ -1,0 +1,15 @@
+(executable
+ (name vault_test)
+ (modules vault_test)
+ (libraries tsync_core tsync_vault yojson base64))
+
+(rule
+ (action
+  (with-stdout-to
+   vault_test.output
+   (run ./vault_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff vault_test.expected vault_test.output)))

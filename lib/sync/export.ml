@@ -30,6 +30,7 @@ module Make (C : Context.S) = struct
   (* §4.4 step 2: a file lands by its name, a folder keeps its name, the
      root's contents land as they are. *)
   let resolve ~dst path =
+    Names.check_unreserved ~op:"export" path;
     match T.find Folder_id.root (segs path) with
       | `Missing ->
           Fail.raise_ Fail.Absent "%s: no such file or folder in %s" path
@@ -47,7 +48,10 @@ module Make (C : Context.S) = struct
                    | Dir _ -> acc
                    | File m ->
                        let rel = Names.join dir m.name in
-                       { dest = Filename.concat base rel; manifest = m } :: acc)
+                       if path = "" && Names.is_reserved rel then acc
+                       else
+                         { dest = Filename.concat base rel; manifest = m }
+                         :: acc)
                [])
 
   let check_names ~dst files =
@@ -229,6 +233,7 @@ module Make (C : Context.S) = struct
       List.concat_map
         (fun p -> List.map fst (Staged.edits_under staged p))
         paths
+      |> List.filter (fun p -> not (Names.is_reserved p))
       |> List.sort_uniq compare
     in
     let total = List.fold_left (fun n f -> n + f.manifest.size) 0 files in

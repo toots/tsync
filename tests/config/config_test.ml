@@ -3,13 +3,17 @@ open Tsync_config
 let p fmt = Printf.printf fmt
 let secret = String.make 40 'x'
 
-let domain ?(extra = "")
+let domain ?(extra = "") ?(extensions = Some "[]")
     ?(backends =
       {|[{"type":"local","name":"disk","role":"main","path":"/srv/d"}]|})
     ?(frontends = {|["fuse"]|}) name =
   Printf.sprintf
-    {|{"name":%S,"symlinks":"keep","versioning":true,"backends":%s,"frontends":%s%s}|}
-    name backends frontends extra
+    {|{"name":%S,"symlinks":"keep","versioning":true,"backends":%s%s,"frontends":%s%s}|}
+    name backends
+    (match extensions with
+      | Some e -> Printf.sprintf {|,"extensions":%s|} e
+      | None -> "")
+    frontends extra
 
 let config ?(top = "") domains =
   Printf.sprintf {|{"name":"laptop"%s,"domains":[%s]}|} top
@@ -22,7 +26,7 @@ let try_ what s =
           (String.concat "; "
              (List.map
                 (fun (d : Config.domain) ->
-                  Printf.sprintf "%s ro=%b backends=%s"
+                  Printf.sprintf "%s ro=%b backends=%s%s"
                     (Tsync_core.Domain_name.to_string d.name)
                     d.read_only
                     (String.concat ","
@@ -30,7 +34,11 @@ let try_ what s =
                           (fun (b : Config.backend) ->
                             b.bname ^ ":"
                             ^ Tsync_store.Composite.role_to_string b.role)
-                          d.backends)))
+                          d.backends))
+                    (match d.extensions with
+                      | None -> " extensions follow the main"
+                      | Some [] -> ""
+                      | Some l -> " extensions=" ^ String.concat "," l))
                 c.domains))
     | exception Config.Invalid e -> p "%-40s refused: %s\n" what e
 
@@ -72,7 +80,7 @@ let () =
   let in_force what extra =
     let bare =
       Printf.sprintf
-        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
+        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"extensions":[],"frontends":["android"]%s}]}|}
         extra
     in
     match Config.of_string bare with
@@ -108,7 +116,7 @@ let () =
   let against what extra =
     let bare =
       Printf.sprintf
-        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
+        {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"extensions":[],"frontends":["android"]%s}]}|}
         extra
     in
     let main : Tsync_store.Store.domain_settings =
@@ -120,6 +128,7 @@ let () =
         settle = 420.;
         entry_commands = 1024;
         projector = None;
+        extensions = [];
       }
     in
     let wire =
@@ -154,7 +163,7 @@ let () =
     match
       Config.of_string
         (Printf.sprintf
-           {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"http-proxy","name":"nas","role":"main","url":"https://nas.example:8443","secret":"0123456789abcdef0123456789abcdef"}],"frontends":["android"]%s}]}|}
+           {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"http-proxy","name":"nas","role":"main","url":"https://nas.example:8443","secret":"0123456789abcdef0123456789abcdef"}],"extensions":[],"frontends":["android"]%s}]}|}
            extra)
     with
       | _ -> p "%-34s accepted\n" what
@@ -200,7 +209,7 @@ let () =
            "Files";
        ]);
   try_ "missing versioning"
-    {|{"domains":[{"name":"F","symlinks":"keep","backends":[{"type":"local","name":"d","role":"main","path":"/d"}],"frontends":["fuse"]}]}|};
+    {|{"domains":[{"name":"F","symlinks":"keep","backends":[{"type":"local","name":"d","role":"main","path":"/d"}],"extensions":[],"frontends":["fuse"]}]}|};
   try_ "reserved domain name" (config [domain "gc-jobs"]);
   try_ "SHARES beside a local store" (config [domain "SHARES"]);
   try_ "duplicate domain ignoring case"
@@ -282,6 +291,14 @@ let () =
     (config
        [domain ~frontends:{|[{"type":"fuse","gid":"no-such-group-x"}]|} "F"]);
   try_ "a frontend twice" (config [domain ~frontends:{|["fuse","fuse"]|} "F"]);
+  try_ "no extensions" (config [domain ~extensions:None "F"]);
+  try_ "unknown extension" (config [domain ~extensions:(Some {|["wifi"]|}) "F"]);
+  try_ "an extension twice"
+    (config [domain ~extensions:(Some {|["totp",{"type":"totp"}]|}) "F"]);
+  try_ "unknown key in an extension"
+    (config [domain ~extensions:(Some {|[{"type":"totp","x":1}]|}) "F"]);
+  try_ "two extensions"
+    (config [domain ~extensions:(Some {|["totp",{"type":"passwords"}]|}) "F"]);
   try_ "unused link"
     (config ~top:{|,"links":{"slow":{"maxRate":"1M"}}|} [domain "F"]);
   try_ "maxRate below minRate"
@@ -362,9 +379,9 @@ let () =
     Config.of_string
       {|{"domains":[
           {"name":"media","symlinks":"keep","versioning":true,
-           "frontends":[{"type":"fuse","mountPoint":"/mnt/media/"}],
+           "extensions":[],"frontends":[{"type":"fuse","mountPoint":"/mnt/media/"}],
            "backends":[{"type":"local","name":"a","role":"main","path":"/srv/a"}]},
-          {"name":"media:raw","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+          {"name":"media:raw","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
            "backends":[{"type":"local","name":"a","role":"main","path":"/srv/b"}]}]}|}
   in
   let domain = Option.value ~default:"(resolved)" in
@@ -409,4 +426,40 @@ let () =
       (Some "media", [Some "media"]);
       (Some "media", [Some "other"]);
       (None, [Some "media"; Some "other"]);
+    ]
+
+let () =
+  p "\n== extensions in force (05 §2.1 rule 5)\n";
+  let stated extensions : Tsync_store.Store.domain_settings =
+    {
+      chunk = 4096;
+      symlinks = `Keep;
+      lease = 30.;
+      quarantine = 300.;
+      settle = 600.;
+      entry_commands = 64;
+      projector = None;
+      extensions;
+    }
+  in
+  let one extensions =
+    List.hd
+      (Config.of_string
+         (config [domain ~frontends:{|["android"]|} ~extensions "F"]))
+        .Config.domains
+  in
+  List.iter
+    (fun (what, extensions, main) ->
+      p "  %-44s [%s]\n" what
+        (String.concat "," (Config.extensions_in_force (one extensions) main)))
+    [
+      ("none configured, nothing stated", None, None);
+      ("none configured, totp stated", None, Some (stated ["totp"]));
+      ( "none configured, an unknown one stated too",
+        None,
+        Some (stated ["totp"; "wifi"]) );
+      ("[] configured, totp stated", Some "[]", Some (stated ["totp"]));
+      ( "passwords configured, totp stated",
+        Some {|["passwords"]|},
+        Some (stated ["totp"]) );
     ]

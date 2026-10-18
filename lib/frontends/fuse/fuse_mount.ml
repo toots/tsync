@@ -54,8 +54,13 @@ let call f =
 
 let locked t f = Mutex.protect t.m f
 
+(* 01 §2.3: every operation names its path through here. *)
 let rel path =
-  if path = "/" then "" else String.sub path 1 (String.length path - 1)
+  let rel =
+    if path = "/" then "" else String.sub path 1 (String.length path - 1)
+  in
+  if Names.is_reserved rel then errno EINVAL;
+  rel
 
 let is_hidden rel =
   String.starts_with ~prefix:hidden_prefix (Filename.basename rel)
