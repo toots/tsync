@@ -67,7 +67,7 @@ Trust boundaries, each an enforcement point in this file:
 | Only the owner account (and its clients' granted paths) reaches the owner process | Socket directory modes and peer-credential checks (§7) |
 | Secrets are not readable by other accounts or copied off the device | File modes set at creation, backup exclusion, masking (§10) |
 | Content served to a browser cannot script the listener's origin | Output escaping and sandboxing headers (§12, §13) |
-| Vault records are read only by a machine its user unlocked, and a domain writer cannot make a machine encrypt under a key the writer chose | XChaCha20-Poly1305 under a random K; K wrapped by Argon2id of a generated 128-bit passphrase; K kept only in the OS keystore or the owner's memory; a machine adopts only a K it unwrapped itself ([vault](../extensions/vault.md), §10.6) |
+| Vault records are read only by a machine its user unlocked, and a domain writer cannot make a machine encrypt under a key the writer chose | XChaCha20-Poly1305 under a random K; K wrapped by Argon2id of a passphrase the user chooses, keyed with a generated 128-bit secret key that never reaches the store; K kept only in the OS keystore or the owner's memory; a machine adopts only a K it unwrapped itself ([vault](../extensions/vault.md), §10.6) |
 
 ---
 

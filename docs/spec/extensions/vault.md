@@ -138,12 +138,14 @@ wrapped = XChaCha20-Poly1305-Seal(KEK, nonce, K, ad = "tsync-vault-slot/" keyId 
   floor). Such a slot is skipped as unusable and reported. The keyring arrives from the store, and
   the limits keep a slot from asking a phone for more memory than it has, or the derivation from
   running on values it is not defined for.
-- A reader derives for at most `VAULT_MAX_SLOTS` slots, in slot id order; the others are skipped
-  as unusable. Each derivation costs up to the limits above, so the count bounds one unlock. A
-  `secret-key` slot whose `secretKeyId` is not the secret key's is not derived for.
+- A `secret-key` slot whose `secretKeyId` is not the secret key's is not derived for. Of the
+  slots of the secret key given, a reader derives for at most `VAULT_MAX_SLOTS`, in slot id
+  order; the others are skipped as unusable. Each derivation costs up to the limits above, so the
+  count bounds one unlock, however many machines are enrolled.
 - An unwrap that fails authentication means a wrong passphrase for that slot; the next slot is
   tried. Every slot failing is "wrong passphrase". No slot for the secret key given is "wrong
-  secret key", said before any derivation.
+  secret key", said before any derivation; slots for it that are all unusable are refused
+  `invalid`, naming them as unusable.
 
 ### 4.3 Concurrent changes
 
@@ -157,7 +159,10 @@ fold ([README §4.2](README.md#42-the-fold)) settles it:
   copy is not folded and is reported. Each machine that holds the copy's K (the one that made
   it, and any unlocked from it before the race settled) keeps it cached: when that machine is
   unlocked with the domain's passphrase and secret key (§6), it re-encrypts every record whose envelope names
-  the copy's key id under the domain's K, then removes the copy and its own old K. Two machines
+  the copy's key id under the domain's K, in every extension's folder whether this client uses
+  that extension or not, pulling each first on a lazy tree; then it removes the copy and its own
+  old K. Until every record is re-encrypted the old K is kept: a re-encryption that fails fails
+  the unlock and leaves both the old K and the vault as they were, for the next unlock. Two machines
   doing so concurrently leave conflicted copies of equal plaintext, which the extension's fold
   settles. Once no machine holding the copy's K is left, the records under it cannot be read;
   status keeps reporting them.
@@ -207,8 +212,9 @@ A machine's vault for a domain is **unlocked** when it holds K for the keyring's
   keystore keeps them in the owner's memory until the owner exits, and never writes them to
   disk. Where each host keeps them:
   [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases).
-- At owner start, K is read from the keystore. A cached K whose key id is not the keyring's
-  leaves the vault locked (§4.3 says what unlocking then does with it).
+- At owner start, K is read from the keystore, before any vault verb is answered; a read never
+  replaces a K the owner already holds. A cached K whose key id is not the keyring's leaves the
+  vault locked (§4.3 says what unlocking then does with it).
 - A machine adopts only a K it unwrapped itself, with a passphrase, from the domain's keyring. A
   machine encrypts only under the keyring's key id. A keyring replaced in the store by one with
   another key id therefore locks every machine; none of them writes records under the new key
@@ -237,8 +243,9 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
   the next unlock re-encrypts under the domain's K and replaces the entry. A read that fails leaves
   the vault locked, and status reports the keystore's reason.
 - **Lock** deletes the domain's K entry (and with `forget` its secret key entry), then forgets
-  them. A delete that fails leaves the vault as it was and is refused `internal` with the
-  keystore's reason: a lock that did not happen is never reported as done.
+  each entry deleted. Both deletes are attempted. One that fails leaves what that entry held, in
+  the keystore and in memory, and the lock is refused `internal` with the keystore's reason: a
+  lock that did not happen is never reported as done, and status says what is still held.
 - A keystore entry is only ever read by the owner of its domain, on the machine that wrote it. It
   never needs user interaction to be read: an entry the platform would guard with a prompt or a
   biometric is not used, since the owner reads it unattended at start.
@@ -273,7 +280,10 @@ entries.
   earlier build of the program wrote, which macOS keeps for its owner) does not undo the delete:
   the reply says which entry is left and why, and the vault is gone.
 - Other machines find the vault gone at their next arrival: they are locked, then have no vault
-  and forget the K they held. Their secret key entries go when their user runs `lock --forget`
+  and forget the K they held, in memory and in the keystore, the first time a verb or status
+  reads the keyring absent.
+- On a lazy tree, delete pulls the root and `/.tsync-ext/` first, so a vault made since the last
+  pull is deleted rather than reported gone. Their secret key entries go when their user runs `lock --forget`
   or deletes there too.
 - The files go the way any deleted file goes: in a versioned domain they stay in its versions
   until retention removes them ([05 §4.8](../05-ops-config.md#48-deleted-files-and-retention)),
@@ -298,10 +308,17 @@ only in the owner's memory.
 | `lock` / `vault_lock` | — | §6 |
 | `passphrase` / `vault_passphrase` | yes | §7 |
 | `delete` / `vault_delete` | — | §7.1 |
-| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); slot count by kind; unusable slots; keyring copies and records under another key; CORRUPT bodies by name |
+| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); slot count by kind; unusable slots; keyring copies. Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
 
 `vault_init`, and `vault_passphrase` with a new secret key, are the only replies that carry a
 secret: the secret key.
+
+- `init`, `unlock` and `passphrase` derive keys at up to the limits of §4.2 and init resyncs the
+  domain first, so each is a bulk action
+  ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)): a reply that timed out while the work went on would lose the
+  secret key init shows once.
+- The keyring's fold (§4.3) runs where this client may write the domain. On a read-only domain
+  status and unlock read the keyring as it is, copies and all.
 
 Refusals: init over a keyring EXISTS (`exists`); unlock or passphrase with no keyring ABSENT
 (`not_found`), with a CORRUPT keyring `internal` (status answers both as a state); a passphrase
