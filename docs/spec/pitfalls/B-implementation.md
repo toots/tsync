@@ -428,6 +428,16 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — "Nothing listens" is decided from a fact that cannot be confused with load (the ownership lock), not from the connect errno alone, on every platform the client runs on.
 - **Seen** — rewrite (ipc_test, run on macOS); open.
 
+
+### B-8.17 A window flag cleared by one of its holders
+- **Pitfall** — The Android vault screen and the `otpauth://` link sheet each set `FLAG_SECURE` while composed and cleared it on dispose. With the sheet open over the codes list, closing the sheet cleared the flag while the codes stayed on screen, and they reached screenshots and the recent-apps thumbnail.
+- **Check** — A window-wide flag held by several screens is counted per holder and cleared at zero. A test opens a second holder over the first, closes it, and checks the flag is still set.
+- **Seen** — android-totp review.
+
+### B-8.18 A refresh loop tied to composition, not to the lifecycle
+- **Pitfall** — The codes list asked the owner again at each expiry in a `LaunchedEffect` loop. It kept asking while the app was in the background, never asked when the app came back, and a change the screen itself made (adding a code) waited for the next expiry, up to 30 s.
+- **Check** — A loop that polls on behalf of a visible screen runs under `repeatOnLifecycle(RESUMED)`, and its key includes every local change that alters what it shows.
+- **Seen** — android-totp review.
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
