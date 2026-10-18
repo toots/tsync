@@ -661,16 +661,20 @@ submenu shows the model's placeholder row.
   shown as a user notification carrying the reply's `error`; nothing is written.
 - `unlock` opens a dialog with a secure text field for the passphrase (no echo, no autofill,
   paste accepted) and the domain's name, plus a second one for the secret key when status says
-  this machine is not enrolled (vault §6). It sends `vault_unlock` with what was typed and clears
-  the fields after sending. `denied` keeps the dialog open with the owner's sentence, which says
-  whether the passphrase or the secret key was wrong; `invalid` the same; success closes it.
-  Neither secret is stored, logged or kept after the request.
+  this machine is not enrolled (vault §6). A status that fails is shown as the dialog's failure,
+  with no field, rather than guessed. It sends `vault_unlock` with what was typed, without
+  `secretKey` when that field is empty, and clears the fields after sending. `denied` reopens the
+  dialog with the owner's sentence, which says whether the passphrase or the secret key was
+  wrong, both fields empty; `invalid` the same; success closes it. Neither secret is stored,
+  logged or kept after the request.
 - `addCode` opens a dialog naming the domain, with fields for the issuer, the account, and the
   secret, which also takes a whole `otpauth://totp/` URI pasted in it. A value starting with
   `otpauth://` is sent as `totp_add` with `uri`; anything else with `secret`, `issuer` and
-  `account` (totp §5.3). A refusal keeps the dialog open with the owner's sentence; success closes
-  it, and the record appears at the next open of the submenu. The secret field is a secure field,
-  cleared after sending.
+  `account` (totp §5.3). A refusal reopens the dialog with the owner's sentence, the issuer and
+  the account as typed and the secret field empty; success closes it, and the record appears at
+  the next open of the submenu. The secret field is a secure field, cleared after sending.
+- Each open of the codes submenu shows the placeholder until the owner's rows arrive, and keeps
+  it when they do not: rows from an earlier open are never shown again.
 - The app offers neither `vault init`, `vault passphrase`, `vault delete` nor `totp export`: those
   set or print secrets, or destroy records, and stay with the CLI (totp §5).
 
