@@ -1,6 +1,7 @@
-(** The host's keystore for vault keys (spec extensions/vault §6.1): one entry
-    per domain, the key id and K of its last unlock. A host without one
-    registers nothing, and K stays in the owner's memory. *)
+(** The host's keystore for vault keys (spec extensions/vault §6.1): two entries
+    per domain, the key id and K of its last unlock and the secret key it is
+    enrolled with, named apart. A host without one registers nothing, and both
+    stay in the owner's memory. *)
 
 (** Each call raises [Fail.E] with the keystore's reason when it fails. *)
 type t = {

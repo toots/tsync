@@ -20,6 +20,9 @@ a settle without end   refused: domains[0].projectSettle: expected a number
 
 == domain-wide settings against what the main states
 nothing configured         symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+the main's extensions      symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+no extension               symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+one the main lacks         refused: F is configured with extensions [totp, passwords] and its main states [totp]
 the same as the main       symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
 a smaller entry            symlinks follow, entry 64, lease 20, quarantine 200, settle 420, batch 1 s
 a larger entry             refused: F is configured with maxEntryCommands 4096, above the 1024 its main states
@@ -59,7 +62,7 @@ fuse unknown user                        refused: domains[0].frontends[0].uid: n
 fuse uid out of range                    refused: domains[0].frontends[0].uid: a decimal id is at most 4294967294
 fuse unknown group                       refused: domains[0].frontends[0].gid: no such group
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
-no extensions                            ok: F ro=false backends=disk:main
+no extensions                            ok: F ro=false backends=disk:main extensions follow the main
 unknown extension                        refused: domains[0].extensions[0]: extension "wifi" is unknown (known: totp, passwords)
 an extension twice                       refused: domains[0].extensions: totp is listed twice
 unknown key in an extension              refused: domains[0].extensions[0]: unknown key(s) "x"
@@ -114,4 +117,4 @@ a relative token in a domain: [a/b]
   none configured, totp stated                 [totp]
   none configured, an unknown one stated too   [totp]
   [] configured, totp stated                   []
-  passwords configured, totp stated            [passwords]
+  passwords configured, totp stated            []

@@ -12,10 +12,11 @@ val seal : key:string -> nonce:string -> ad:string -> string -> string
 (** [None] when authentication fails. *)
 val open_ : key:string -> nonce:string -> ad:string -> string -> string option
 
-(** Argon2id version 0x13, 32-byte output. [secret] and [ad] exist for the RFC
-    9106 test vector; the vault uses neither. Releases the runtime while it
-    runs. [Invalid_argument] for [parallelism] or [iterations] below 1,
-    [mem_kib] below [8 * parallelism] or above 4 GiB. *)
+(** Argon2id version 0x13, 32-byte output. [secret] is the vault's secret key
+    (vault §4.2); [ad] exists for the RFC 9106 test vector. Releases the runtime
+    while it runs. [Invalid_argument] for [parallelism] or [iterations] below 1,
+    [mem_kib] below [8 * parallelism] or above 1 GiB, which a 32-bit size can
+    hold. *)
 val argon2id :
   ?secret:string ->
   ?ad:string ->

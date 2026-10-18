@@ -53,8 +53,7 @@ new: would write
           "port": 5446,
           "secret": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
-      ],
-      "extensions": []
+      ]
     }
   ]
 }

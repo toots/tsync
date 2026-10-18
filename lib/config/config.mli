@@ -62,8 +62,9 @@ val stated : domain -> Tsync_store.Store.domain_settings
 val sources :
   domain -> Tsync_store.Store.domain_settings option -> (string * string) list
 
-(** The extensions a domain uses here (05 §2.1 rule 5): its configured list,
-    else the one its main states, unknown names dropped. *)
+(** The extensions a domain uses here (05 §2.1 rule 5): the list its main
+    states, narrowed by a configured one; behind a main that states nothing, the
+    configured list. Unknown names are dropped. *)
 val extensions_in_force :
   domain -> Tsync_store.Store.domain_settings option -> string list
 

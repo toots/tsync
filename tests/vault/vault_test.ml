@@ -219,6 +219,32 @@ let keyring () =
   in
   check "of nine slots, one is skipped"
     (List.length (Keyring.unusable nine) = 1 && unlock nine passphrase = Ok key);
+  (* §4.2: the cap counts the slots of the secret key given, so nine other
+     machines' slots, sorting first, leave this one's derived. *)
+  let crowd =
+    {
+      ring with
+      slots =
+        List.hd ring.slots
+        :: List.init 9 (fun i ->
+            match
+              Keyring.slot ~params:small ~now:0 ~key_id:ring.key_id ~key
+                ~secret_key:(Secret_key.generate ()) passphrase
+            with
+              | Keyring.Secret_key s ->
+                  Keyring.Secret_key { s with id = Printf.sprintf "%016d" i }
+              | u -> u);
+    }
+  in
+  check "nine other machines' slots do not crowd this one out"
+    (unlock crowd passphrase = Ok key);
+  check "a machine whose only slot is out of limits is told it is unusable"
+    (match Keyring.of_string (with_kdf "memKiB" (`Int (512 * 1024))) with
+      | Ok r -> (
+          match unlock r passphrase with
+            | Error (`Unusable [_]) -> true
+            | _ -> false)
+      | Error _ -> false);
   (* Corrupt keyrings *)
   List.iter
     (fun (what, s) ->

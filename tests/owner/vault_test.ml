@@ -146,7 +146,8 @@ let after_restart () =
    survive the owner; [broken] refuses every write. *)
 let keystore_dir = Filename.concat root "keystore"
 
-let file_keystore ?(stuck = false) ~broken () : Keystore.t =
+let file_keystore ?(stuck = false) ?(stuck_secret_key = false) ~broken () :
+    Keystore.t =
   let path name =
     Filename.concat keystore_dir
       (String.map (function '/' -> '#' | c -> c) name)
@@ -165,7 +166,10 @@ let file_keystore ?(stuck = false) ~broken () : Keystore.t =
           (Fs.read_file_opt (path domain)));
     delete =
       (fun ~domain ->
-        if stuck then Fail.raise_ Refused "the test keystore keeps its entries";
+        if
+          stuck
+          || (stuck_secret_key && String.ends_with ~suffix:"/secret-key" domain)
+        then Fail.raise_ Refused "the test keystore keeps its entries";
         Fs.unlink_quiet (path domain));
   }
 
@@ -175,8 +179,8 @@ let entries () =
       (List.sort compare (Array.to_list (Sys.readdir keystore_dir)))
   else ""
 
-let with_keystore ?stuck ~broken f =
-  Keystore.register (file_keystore ?stuck ~broken ());
+let with_keystore ?stuck ?stuck_secret_key ~broken f =
+  Keystore.register (file_keystore ?stuck ?stuck_secret_key ~broken ());
   let passphrase = Fs.read_file passphrase_file
   and secret_key = Fs.read_file secret_key_file in
   Owner.stop_on_signals ();
@@ -201,6 +205,20 @@ let keystore_phase = function
           answer "unlock, the passphrase alone" (unlock passphrase);
           status "status";
           answer "lock and forget"
+            (Ipc.call socket
+               (`Assoc
+                  [
+                    ("domain", `String "docs");
+                    ("action", `String "vault_lock");
+                    ("forget", `Bool true);
+                  ]));
+          status "status";
+          p "%-34s [%s]" "keystore entries" (entries ()))
+  | "ks-half" ->
+      with_keystore ~stuck_secret_key:true ~broken:false
+        (fun passphrase secret_key ->
+          answer "unlock" (unlock ~secret_key passphrase);
+          answer "lock and forget, one delete refused"
             (Ipc.call socket
                (`Assoc
                   [
@@ -360,6 +378,8 @@ let () =
         child "ks-after-lock";
         p "== a keystore that refuses the write";
         child "ks-broken";
+        p "== a keystore that keeps the secret key entry, then lock";
+        child "ks-half";
         let secret_key = Fs.read_file secret_key_file in
         p "== a keystore that keeps its entries, then delete";
         child "ks-stuck";

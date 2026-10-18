@@ -47,6 +47,8 @@ parallelism 0: skipped, not derived, and reported            yes
 iterations 0: skipped, not derived, and reported             yes
 iterations negative: skipped, not derived, and reported      yes
 of nine slots, one is skipped                                yes
+nine other machines' slots do not crowd this one out         yes
+a machine whose only slot is out of limits is told it is unusable yes
   not json                       CORRUPT
   no slot                        CORRUPT
   as written                     accepted

@@ -594,14 +594,17 @@ let stated (d : domain) : Tsync_store.Store.domain_settings =
     extensions = Option.value ~default:[] d.extensions;
   }
 
-(* 05 §2.1 rule 5: the configured list, else the main's, names this release
-   does not know dropped. *)
+(* 05 §2.1 rule 5: the main's list, narrowed by a configured one; the
+   configured list behind a main that states nothing. Names this release does
+   not know are dropped. *)
 let extensions_in_force (d : domain)
     (main : Tsync_store.Store.domain_settings option) =
   match (d.extensions, main) with
-    | Some listed, _ -> listed
+    | Some listed, Some stated ->
+        List.filter (fun e -> List.mem e stated.extensions) listed
     | None, Some stated ->
         List.filter (fun e -> List.mem e extension_names) stated.extensions
+    | Some listed, None -> listed
     | None, None -> []
 
 (* 05 §2.1, domain-wide settings: the main's where it states them, and a
@@ -621,6 +624,16 @@ let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
                   what (show c) (show stated)
             | _ -> ()
         in
+        (* rule 5: behind a main that states its list, a client only narrows it. *)
+        Option.iter
+          (fun listed ->
+            if not (List.for_all (fun e -> List.mem e m.extensions) listed) then
+              Fail.invalid
+                "%s is configured with extensions [%s] and its main states [%s]"
+                (Domain_name.to_string d.name)
+                (String.concat ", " listed)
+                (String.concat ", " m.extensions))
+          d.extensions;
         let seconds = Printf.sprintf "%g s" in
         differs "symlinks" d.symlinks m.symlinks (fun p ->
             fst (List.find (fun (_, q) -> q = p) Tsync_store.Store.policies));

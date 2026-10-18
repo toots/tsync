@@ -281,7 +281,7 @@ let mutates : type a. a request -> bool = function
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
-  | Job _ ->
+  | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false

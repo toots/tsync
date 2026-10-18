@@ -46,7 +46,9 @@ val unlock :
   t ->
   secret_key:string ->
   string ->
-  (string, [ `Wrong_secret_key | `Wrong_passphrase ]) result
+  ( string,
+    [ `Wrong_secret_key | `Wrong_passphrase | `Unusable of string list ] )
+  result
 
 (** Whether a slot is keyed with this secret key: a machine holding it is
     enrolled (§6). *)

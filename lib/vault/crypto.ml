@@ -33,6 +33,6 @@ let argon2id ?(secret = "") ?(ad = "") ~mem_kib ~iterations ~parallelism ~salt
   if
     parallelism < 1 || iterations < 1
     || mem_kib < 8 * parallelism
-    || mem_kib > 1 lsl 22
+    || mem_kib > 1 lsl 20
   then invalid_arg "Crypto.argon2id: parameters outside RFC 9106";
   argon2id_raw password salt secret ad mem_kib iterations parallelism
