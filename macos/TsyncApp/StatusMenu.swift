@@ -1,5 +1,6 @@
 import AppKit
 import FileProvider
+import UserNotifications
 
 /// §10: the status item. The owner renders its content (`menu`); the app only
 /// draws it, and adds what only it knows (registration problems). No quit row.
@@ -20,6 +21,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var domains: [String: NSFileProviderDomain] = [:]
     private var statsFetched = Date.distantPast
     private var statsEntries: [[String: Any]]?
+    /// §10.1: fetched each time it opens, never cached.
+    private var codesSubmenu: NSMenu?
 
     let pause: (Bool) -> Void
 
@@ -74,9 +77,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
     }
 
-    func menuWillOpen(_ menu: NSMenu) { isOpen = true }
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu === codesSubmenu {
+            fetchCodes(menu)
+            return
+        }
+        isOpen = true
+    }
 
     func menuDidClose(_ menu: NSMenu) {
+        if menu === codesSubmenu { return }
         isOpen = false
         rebuild()
     }
@@ -134,11 +144,36 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if entry["submenu"] as? Bool == true {
             let submenu = NSMenu()
             submenu.autoenablesItems = false
-            fillStats(submenu)
+            if (entry["action"] as? [String: Any])?["codes"] as? Bool == true {
+                submenu.delegate = self
+                submenu.addItem(Self.placeholder())
+                codesSubmenu = submenu
+            } else {
+                fillStats(submenu)
+            }
             item.submenu = submenu
             item.action = nil
         }
         return item
+    }
+
+    private static func placeholder() -> NSMenuItem {
+        let placeholder = NSMenuItem(title: "Reading…", action: nil, keyEquivalent: "")
+        placeholder.isEnabled = false
+        return placeholder
+    }
+
+    /// The owner's rows for the code domains: labels only, a record's code is
+    /// asked for when it is clicked. A failure leaves the placeholder.
+    private func fetchCodes(_ submenu: NSMenu) {
+        Thread.detachNewThread {
+            let reply = try? OwnerClient.call(["action": "menu_codes"])
+            guard let entries = reply?["entries"] as? [[String: Any]] else { return }
+            DispatchQueue.main.async {
+                submenu.removeAllItems()
+                for entry in entries { submenu.addItem(self.menuItem(entry)) }
+            }
+        }
     }
 
     /// Fetched when the submenu is drawn, at most once per stats interval; a
@@ -187,6 +222,100 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         } else if let paused = action["setPaused"] as? Bool {
             // The state shown is read back by the next poll.
             pause(paused)
+        } else if let copy = action["copyCode"] as? [String: Any],
+            let domain = copy["domain"] as? String, let id = copy["id"] as? String
+        {
+            copyCode(domain: domain, id: id)
+        } else if let domain = action["unlock"] as? String {
+            unlock(domain: domain, problem: nil)
+        } else if let domain = action["addCode"] as? String {
+            addCode(domain: domain, problem: nil)
+        }
+    }
+
+    /// security-model §10.6: copied on the user's click, marked concealed so
+    /// clipboard managers and history skip it, never logged or kept.
+    private func copyCode(domain: String, id: String) {
+        Thread.detachNewThread {
+            do {
+                let reply = try OwnerClient.call(
+                    ["action": "totp_code", "domain": domain, "id": id])
+                guard let code = reply["code"] as? String else { return }
+                DispatchQueue.main.async {
+                    let pasteboard = NSPasteboard.general
+                    let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+                    pasteboard.clearContents()
+                    pasteboard.declareTypes([.string, concealed], owner: nil)
+                    pasteboard.setString(code, forType: .string)
+                    pasteboard.setString("", forType: concealed)
+                }
+            } catch let failure as OwnerFailure {
+                Self.notify(title: "Code not copied", body: failure.message)
+            } catch {
+                Self.notify(title: "Code not copied", body: "\(error)")
+            }
+        }
+    }
+
+    private static func notify(title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            center.add(
+                UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+
+    /// §10.1: a secure field for the passphrase, and one for the secret key
+    /// when this machine is not enrolled; cleared once sent. A refusal keeps
+    /// the dialog open with the owner's sentence. Neither secret is kept.
+    private func unlock(domain: String, problem: String?) {
+        Thread.detachNewThread {
+            let status = try? OwnerClient.call(["action": "vault_status", "domain": domain])
+            let enrolled = status?["enrolled"] as? Bool ?? false
+            DispatchQueue.main.async {
+                self.unlockDialog(domain: domain, enrolled: enrolled, problem: problem)
+            }
+        }
+    }
+
+    private func unlockDialog(domain: String, enrolled: Bool, problem: String?) {
+        let alert = NSAlert()
+        alert.messageText = "Unlock the vault of \(domain)"
+        alert.informativeText =
+            problem
+            ?? (enrolled
+                ? "Type or paste your passphrase."
+                : "This Mac needs your passphrase and the vault's secret key.")
+        alert.addButton(withTitle: "Unlock")
+        alert.addButton(withTitle: "Cancel")
+        let passphrase = Self.secureField(placeholder: "Passphrase")
+        let secretKey = Self.secureField(placeholder: "Secret key")
+        alert.accessoryView = Self.column(enrolled ? [passphrase] : [passphrase, secretKey])
+        alert.window.initialFirstResponder = passphrase
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var request: [String: Any] = [
+            "action": "vault_unlock", "domain": domain, "passphrase": passphrase.stringValue,
+        ]
+        if !enrolled { request["secretKey"] = secretKey.stringValue }
+        passphrase.stringValue = ""
+        secretKey.stringValue = ""
+        Thread.detachNewThread {
+            do {
+                _ = try OwnerClient.call(request)
+            } catch let failure as OwnerFailure {
+                DispatchQueue.main.async {
+                    self.unlockDialog(domain: domain, enrolled: enrolled, problem: failure.message)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.unlockDialog(domain: domain, enrolled: enrolled, problem: "\(error)")
+                }
+            }
         }
     }
 
@@ -198,5 +327,67 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             guard let url = url else { return }
             DispatchQueue.main.async { body(url) }
         }
+    }
+
+    /// §10.1: issuer, account, and a secret that also takes a pasted
+    /// otpauth URI. A refusal keeps the dialog open with the owner's sentence.
+    private func addCode(domain: String, problem: String?) {
+        let alert = NSAlert()
+        alert.messageText = "Add a one-time code to \(domain)"
+        alert.informativeText =
+            problem ?? "Paste the text code the service shows, or its otpauth:// link."
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        let issuer = NSTextField()
+        issuer.placeholderString = "Service (GitHub)"
+        let account = NSTextField()
+        account.placeholderString = "Account (me@example.com)"
+        let secret = Self.secureField(placeholder: "Secret, or otpauth:// link")
+        alert.accessoryView = Self.column([issuer, account, secret])
+        alert.window.initialFirstResponder = issuer
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let typed = secret.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        secret.stringValue = ""
+        var request: [String: Any] = ["action": "totp_add", "domain": domain]
+        if typed.lowercased().hasPrefix("otpauth://") {
+            request["uri"] = typed
+        } else {
+            request["secret"] = typed
+            request["issuer"] = issuer.stringValue
+            request["account"] = account.stringValue
+        }
+        Thread.detachNewThread {
+            do {
+                _ = try OwnerClient.call(request)
+            } catch let failure as OwnerFailure {
+                DispatchQueue.main.async { self.addCode(domain: domain, problem: failure.message) }
+            } catch {
+                DispatchQueue.main.async { self.addCode(domain: domain, problem: "\(error)") }
+            }
+        }
+    }
+
+    private static func secureField(placeholder: String) -> NSSecureTextField {
+        let field = NSSecureTextField()
+        field.placeholderString = placeholder
+        field.isAutomaticTextCompletionEnabled = false
+        return field
+    }
+
+    /// An alert sizes its accessory view by its frame: fields laid out by
+    /// frame, one under the other, keep their width.
+    private static func column(_ fields: [NSTextField]) -> NSView {
+        let width: CGFloat = 300
+        let height: CGFloat = 24
+        let gap: CGFloat = 8
+        let total = CGFloat(fields.count) * height + CGFloat(fields.count - 1) * gap
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: total))
+        for (index, field) in fields.enumerated() {
+            let top = total - CGFloat(index + 1) * height - CGFloat(index) * gap
+            field.frame = NSRect(x: 0, y: top, width: width, height: height)
+            view.addSubview(field)
+        }
+        return view
     }
 }

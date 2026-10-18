@@ -10,6 +10,7 @@
 #   INSTALLER_IDENTITY   "Developer ID Installer: … (TEAMID)", in the keychain
 #   PROFILE_APP          .provisionprofile for org.feverdreamtv.tsync
 #   PROFILE_APPEX        .provisionprofile for org.feverdreamtv.tsync.fileprovider
+#   PROFILE_DAEMON       .provisionprofile for org.feverdreamtv.tsync.daemon
 #
 # Notarization runs only when App Store Connect credentials are present:
 #   AC_API_KEY_PATH / AC_API_KEY_ID / AC_API_ISSUER_ID
@@ -25,6 +26,8 @@ say() { echo "==> $*" >&2; }
 : "${INSTALLER_IDENTITY:?set INSTALLER_IDENTITY to a Developer ID Installer identity}"
 : "${PROFILE_APP:?set PROFILE_APP to the app provisioning profile}"
 : "${PROFILE_APPEX:?set PROFILE_APPEX to the extension provisioning profile}"
+# file-provider §11: an owner that cannot claim the App Group prompts at every start.
+: "${PROFILE_DAEMON:?set PROFILE_DAEMON to the owner wrapper provisioning profile}"
 
 APP=$(CONFIGURATION=Release "$MACOS_DIR/build.sh" | tail -n1)
 

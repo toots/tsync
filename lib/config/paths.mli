@@ -33,3 +33,11 @@ val mount_point : Domain_name.t -> string
 val read_config : ?interactive:bool -> unit -> string option
 
 val default_domain : unit -> string option
+
+(** The host's claim on its App Group container (file-provider §3.1), run once
+    by the program before anything touches the container; a no-op on hosts
+    without one. *)
+val claim_group : unit -> unit
+
+(** At module initialisation, by the host's library. *)
+val set_group_claim : (unit -> unit) -> unit
