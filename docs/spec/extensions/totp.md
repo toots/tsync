@@ -76,9 +76,9 @@ Every verb is of access class **owner**
 | `code` / `totp_code` | `id` | the record's current code and seconds left; no seed, no labels |
 | `list` / `totp_list` | `filter?` | every record whose issuer or account contains `filter` (case-insensitive): id, issuer, account, code, seconds left; ordered by issuer, then account, then id |
 | `rename` / `totp_rename` | `id`, `issuer?`, `account?` | edits the labels and sets `modified` |
-| `remove` / `totp_remove` | `id` | removes the record |
+| `remove` / `totp_remove` | `id` | removes the record, one that does not open included: removing needs no plaintext |
 | `import` / `totp_import` | `text` | adds one record per line of a plain-text export (§5.2); replies with what it added, skipped and refused |
-| `export` / `totp_export` | `passphrase` | one `otpauth://totp/` URI per record, the way out of tsync |
+| `export` / `totp_export` | `passphrase` | one `otpauth://totp/` URI per record, the way out of tsync, and the ids of the records that do not open, which the CLI names on stderr so none is left behind unnoticed |
 
 - `list` never carries a seed. `export` is the only verb that returns one. K lives in the owner,
   so the CLI's `export` reaches it through the request handler like any verb; an app MUST NOT
@@ -90,15 +90,26 @@ Every verb is of access class **owner**
   once per domain.
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
+- A refusal names what is wrong, never the value given: a URI, a line or a secret may hold a seed.
+- The CLI takes a URI or a secret as `-` to read it from standard input, so that no seed sits in
+  the shell's history or in the process list.
 
 ### 5.1 `otpauth` URIs
 
 - Form: `otpauth://totp/<label>?secret=…[&issuer=…][&algorithm=…][&digits=…][&period=…]`, as
   written by the Google Authenticator key-URI format. Percent-decoding applies to the label and
   every value.
-- The label is `issuer:account` or `account`. The `issuer` parameter, when present, is the
-  issuer; the label's issuer is used only without it.
-- `secret` is base32, accepted in any case and with or without padding, stored as §2 says.
+- The scheme is matched in any case, and the type is what lies between `otpauth://` and the next
+  `/` or `?`.
+- The label is `issuer:account` or `account`, split on its first literal `:` before decoding, so
+  that a `:` written `%3A` belongs to the issuer or the account. A label with no literal `:` whose
+  decoded form holds one is split there: some services encode the separator. The `issuer`
+  parameter, when present, is the issuer; the label's issuer is used only without it. Written
+  back (`export`), an empty issuer with an account holding a `:` gives the label `:account`.
+- `secret` is base32, accepted in any case and with or without padding, its trailing bits
+  ignored as other authenticators ignore them (a secret whose length is no multiple of 8 ends in
+  a partial symbol), stored as §2 says.
+- `digits` and `period` are decimal digits only.
   Missing parameters take `SHA1`, `6`, `30`. Any value outside §2's rules is refused `invalid`.
 - `otpauth://hotp/` is refused `invalid`. An HOTP counter changes at each code, and two
   machines using one seed would hand out the same counter.
@@ -147,7 +158,11 @@ base32 secret alone, with the account named beside it.
   record as the URI `otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub`; a secret
   with no issuer and no account, or with a `uri` too, is refused and writes nothing.
 - `list` replies hold no seed. `export` then `add` of each URI reproduces every record's fields
-  but `modified`.
+  but `modified`, an issuer or account holding `:` included.
+- `add` of `otpauth://totp?secret=JBSWY3DPEHPK3PXP`, or of an `hotp` URI, is refused with a
+  reason that holds no part of the URI; a 26-symbol secret whose last symbol has bits set is
+  accepted.
+- A record that does not open can be removed by id; `export` names it on stderr.
 - `import` of three lines (a URI, an empty line, an `hotp` URI) adds one record and refuses line
   3 without echoing it; importing the same text again adds nothing and skips one; the `export`
   of a domain imports into an empty domain as the same records.

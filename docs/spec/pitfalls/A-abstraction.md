@@ -338,6 +338,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A key both sides changed to the same content takes the main's manifest (conflict-resolution §4.1; change-algebra §7.3). Test the same bytes written on two machines: both end with the manifest the main holds.
 - **Seen** — rewrite (review of the publication log).
 
+
+### A-3.28 A compound name decoded before it is split
+- **Pitfall** — An `otpauth` label `issuer:account` was percent-decoded and then split on its first `:`. The writer encodes a `:` inside a part as `%3A`, so export then add moved part of the issuer into the account (`A:B` / `me` came back as `A` / `B:me`), and an empty issuer with `a:b` came back as `a` / `b`.
+- **Check** — Split an encoded compound on its literal separator, then decode each part. Every writer of a name has a round-trip test through its reader with the separator inside a part.
+- **Seen** — vault-totp review.
 ## 4. Failure classification: absent, unknown, transient, permanent, cancelled
 
 ### A-4.1 "Could not look" read as "absent"
@@ -425,6 +430,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — "Not yet known locally" is an outcome with guidance ("sync first").
 - **Seen** — 679ba3de.
 
+
+### A-4.18 A follow-up to a done effect that lets an untyped failure through
+- **Pitfall** — `vault_unlock` stored K, then ran the records' fold and caught only `Fail.E` from it. A `Unix_error` or `Not_found` from reading a record made the reply an error although the vault was unlocked: the caller retried an unlock that had happened.
+- **Check** — Work that runs after the effect a reply reports is guarded against every exception but cancellation, and its failure is logged, not replied.
+- **Seen** — vault-totp review.
 ## 5. Durable queues and owed work
 
 ### A-5.1 Re-reading or re-adopting a log runs a job twice
@@ -880,6 +890,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A connection is reused only after its request's body was read to its end; any failure while reading it, or a handler that never read it, closes the connection.
 - **Seen** — rewrite (review of PR #114).
 
+
+### A-9.11 A refusal that echoes the input it refuses
+- **Pitfall** — An `otpauth` URI with no `/` after its type was refused "only totp is kept, not <type>", where `<type>` ran to the end of the URI, query and seed included. `totp_import` returned the same text per refused line, and the CLI printed it on stderr: a seed reached a reply and a terminal.
+- **Check** — A reason built for input that may hold a secret names the field and the rule, never the value. A test refuses a URI carrying a known seed and asserts the seed is absent from the reply.
+- **Seen** — vault-totp review.
 ## 10. State ownership, single owners for rules, and types
 
 ### A-10.1 State keyed per instance instead of per thing

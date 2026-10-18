@@ -213,10 +213,11 @@ Every verb is of access class **owner**
 | `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `otpauth` or `totp` | replaces those fields and sets `modified` |
 | `remove` / `passwords_remove` | `id` | removes the record |
 | `import` (CLI only) | a CSV file | §9.1 |
-| `export` (CLI only) | — | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per record, its first site in `url` |
+| `export` (CLI only) | the passphrase, asked as `tsync totp export` asks it | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per record, its first site in `url` |
 
-- `get` is the only action that replies with a password. No action replies with a seed
-  ([totp §5](totp.md#5-commands)). A host that shows one SHOULD keep it
+- `get` is the only action that replies with a password. No action but `totp_export` replies
+  with a seed ([totp §5](totp.md#5-commands)): the CLI's `export` fills the `otpauth` column from
+  it, so the passphrase guards both. A host that shows one SHOULD keep it
   out of screenshots and task-switcher thumbnails.
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
