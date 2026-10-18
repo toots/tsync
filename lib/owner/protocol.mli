@@ -117,6 +117,33 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** totp §5 [list]: never a seed. *)
+type totp_row = {
+  id : string;
+  issuer : string;
+  account : string;
+  code : string;
+  seconds_left : int;
+}
+
+type totp_listing = {
+  rows : totp_row list;
+  corrupt : string list;  (** record ids that do not open *)
+}
+
+(** totp §5.3: a seed given as its text. *)
+type totp_secret = { secret : string; issuer : string; account : string }
+
+(** totp §5 [code]: one record's current code. *)
+type totp_code = { code : string; seconds_left : int }
+
+(** totp §5.2: refused lines by number and reason, never by content. *)
+type totp_imported = {
+  added : int;
+  already : int;
+  refused : (int * string) list;
+}
+
 (** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
 type secret = { secret_key : string; key_id : string }
 
@@ -287,6 +314,21 @@ type _ request =
   | Vault_delete : string -> string option request
       (** the domain's name, to confirm; why a keystore entry was left *)
   | Vault_status : vault_status request
+  | Totp_add : [ `Uri of string | `Secret of totp_secret ] -> string request
+      (** a URI, or a secret with its issuer and account (totp §5.3); the new
+          record's id *)
+  | Totp_list : string option -> totp_listing request
+  | Totp_code : string -> totp_code request  (** a record id *)
+  | Totp_rename : {
+      id : string;
+      issuer : string option;
+      account : string option;
+    }
+      -> unit request
+  | Totp_remove : string -> unit request
+  | Totp_import : string -> totp_imported request  (** the text of a file *)
+  | Totp_export : string -> string list request
+      (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed
 
