@@ -124,6 +124,9 @@ type totp_secret = { secret : string; issuer : string; account : string }
 (** totp §5 [code]: one record's current code. *)
 type totp_code = { code : string; seconds_left : int }
 
+(** totp §5 [export]: the URIs, and the ids of records that do not open. *)
+type totp_exported = { uris : string list; corrupt : string list }
+
 (** totp §5.2: refused lines by number and reason, never by content. *)
 type totp_imported = {
   added : int;
@@ -311,7 +314,7 @@ type _ request =
       -> unit request
   | Totp_remove : string -> unit request
   | Totp_import : string -> totp_imported request  (** the text of a file *)
-  | Totp_export : string -> string list request
+  | Totp_export : string -> totp_exported request
       (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed
@@ -923,7 +926,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                    reply.refused) );
           ]
     | Totp_export _ ->
-        ok [("uris", `List (List.map (fun u -> `String u) reply))]
+        let strings l = `List (List.map (fun s -> `String s) l) in
+        ok [("uris", strings reply.uris); ("corrupt", strings reply.corrupt)]
     | Totp_list _ ->
         ok
           [
@@ -1204,11 +1208,14 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
                     l
               | _ -> []);
         }
-    | Totp_export _ -> (
-        match member j "uris" with
-          | Some (`List l) ->
-              List.filter_map (function `String s -> Some s | _ -> None) l
-          | _ -> [])
+    | Totp_export _ ->
+        let strings k =
+          match member j k with
+            | Some (`List l) ->
+                List.filter_map (function `String s -> Some s | _ -> None) l
+            | _ -> []
+        in
+        { uris = strings "uris"; corrupt = strings "corrupt" }
     | Totp_list _ ->
         let strings k = match member j k with Some (`List l) -> l | _ -> [] in
         {

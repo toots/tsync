@@ -475,6 +475,16 @@ let () =
       listing "  list";
       settle_owner 100;
       p "  after: %s" (leaves b);
+      (match
+         member
+           (ask [("action", "totp_export"); ("passphrase", passphrase)])
+           "corrupt"
+       with
+        | Some (`List ids) ->
+            p "  export names it: %b" (List.mem (`String bad) ids)
+        | _ -> p "  export names nothing");
+      answer "  remove it" (ask [("action", "totp_remove"); ("id", bad)]);
+      listing "  list";
       p "== both change the keyring";
       concurrently b
         ~owner:(fun () ->

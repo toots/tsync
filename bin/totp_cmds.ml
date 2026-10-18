@@ -105,7 +105,9 @@ let add_cmd =
       value
       & pos 0 (some string) None
       & info [] ~docv:"URI"
-          ~doc:"An otpauth://totp/ URI, as a QR code holds it.")
+          ~doc:
+            "An otpauth://totp/ URI, as a QR code holds it; - reads it from \
+             standard input.")
   and secret =
     Arg.(
       value
@@ -130,15 +132,15 @@ let add_cmd =
     Term.(
       const (fun uri secret issuer account ?name config ->
           let source =
+            let from_stdin v =
+              if v = "-" then
+                Option.value ~default:"" (In_channel.input_line stdin)
+              else v
+            in
             match (uri, secret) with
-              | Some uri, None -> `Uri uri
+              | Some uri, None -> `Uri (from_stdin uri)
               | None, Some secret ->
-                  let secret =
-                    if secret = "-" then
-                      Option.value ~default:"" (In_channel.input_line stdin)
-                    else secret
-                  in
-                  `Secret { P.secret; issuer; account }
+                  `Secret { P.secret = from_stdin secret; issuer; account }
               | _ -> Fail.invalid "give a URI or --secret, not both"
           in
           let d = write_domain ?name config in
@@ -260,7 +262,15 @@ let export_cmd =
     Term.(
       const (fun stdin ?name config ->
           List.iter
-            (fun (_, uris) -> List.iter (say "%s") uris)
+            (fun (d, (exported : P.totp_exported)) ->
+              List.iter (say "%s") exported.uris;
+              List.iter
+                (fun id ->
+                  prerr_endline
+                    (Printf.sprintf
+                       "tsync: %s: record %s does not open and is not exported"
+                       (dname d) id))
+                exported.corrupt)
             (each ?name config (fun d ->
                  let passphrase =
                    Vault_cmds.read_passphrase

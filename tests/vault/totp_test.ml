@@ -59,7 +59,28 @@ let uris () =
       "otpauth://totp/me?secret=";
       "otpauth://totp/?secret=JBSWY3DPEHPK3PXP";
       "otpauth://totp/me?secret=JBSWY3DPEHPK3PX1";
+      "OTPAUTH://TOTP/me?secret=JBSWY3DPEHPK3PXP";
+      "otpauth://totp?secret=JBSWY3DPEHPK3PXP";
+      "otpauth://steam?secret=JBSWY3DPEHPK3PXP";
+      "otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&digits=0x8";
+      "otpauth://totp/A%3AB:me?secret=JBSWY3DPEHPK3PXP";
+      "otpauth://totp/ACME%3Ame?secret=JBSWY3DPEHPK3PXP";
+      "otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY";
+      "otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGZ";
     ];
+  p "a refusal holds no part of a URI's seed: %b\n"
+    (List.for_all
+       (fun uri ->
+         match Totp.of_uri ~now:7 uri with
+           | Error e ->
+               not
+                 (Tsync_core.Text.contains (String.uppercase_ascii e) "JBSWY3DP")
+           | Ok _ -> false)
+       [
+         "otpauth://totp?secret=JBSWY3DPEHPK3PXP";
+         "otpauth://hotp/me?secret=JBSWY3DPEHPK3PXP";
+         "otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=JBSWY3DP";
+       ]);
   p "\n== bare secrets\n";
   List.iter
     (fun (issuer, account, secret) ->
@@ -78,11 +99,14 @@ let uris () =
     (Totp.of_secret ~now:7 ~issuer:"GitHub" ~account:"me" "jbsw y3dp ehpk 3pxp"
     = Totp.of_uri ~now:7
         "otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub");
-  p "export then add reproduces the record: %b\n"
-    (let r = record ~issuer:"A & B" ~account:"x:y z" ~digits:7 ~period:45 () in
-     match Totp.of_uri ~now:r.modified (Totp.to_uri r) with
-       | Ok back -> back = r
-       | Error _ -> false)
+  List.iter
+    (fun (issuer, account) ->
+      p "export then add reproduces %S %S: %b\n" issuer account
+        (let r = record ~issuer ~account ~digits:7 ~period:45 () in
+         match Totp.of_uri ~now:r.modified (Totp.to_uri r) with
+           | Ok back -> back = r
+           | Error _ -> false))
+    [("A & B", "x:y z"); ("A:B", "me"); ("", "a:b"); ("", "plain")]
 
 let plaintexts () =
   p "\n== plaintexts\n";

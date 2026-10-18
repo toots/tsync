@@ -166,9 +166,12 @@ let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
     Fail.invalid "issuer and account cannot both be empty";
   write ctx ~exclusive:false id r
 
+(* §5: removing needs no plaintext, so a record that does not open goes too. *)
 let remove ~domain ~engine ~lazy_tree t id =
   let ctx = context ~domain ~engine ~lazy_tree t in
-  ignore (find ctx id);
+  (match find ctx id with
+    | _ -> ()
+    | exception Fail.E { kind = Corrupt; _ } -> ());
   let (module E : Tsync_sync.Engine.S) = engine in
   E.delete (Names.join folder id)
 
@@ -221,7 +224,11 @@ let fold ~domain ~engine ~lazy_tree t =
 let export ~domain ~engine ~lazy_tree t passphrase =
   let ctx = context ~domain ~engine ~lazy_tree t in
   Vault.confirm ~domain ~engine ~lazy_tree t passphrase;
-  fst (records ctx)
-  |> List.sort (fun (a, (x : Totp.t)) (b, (y : Totp.t)) ->
-      compare (x.issuer, x.account, a) (y.issuer, y.account, b))
-  |> List.map (fun (_, r) -> Totp.to_uri r)
+  let ok, corrupt = records ctx in
+  let uris =
+    ok
+    |> List.sort (fun (a, (x : Totp.t)) (b, (y : Totp.t)) ->
+        compare (x.issuer, x.account, a) (y.issuer, y.account, b))
+    |> List.map (fun (_, r) -> Totp.to_uri r)
+  in
+  { Protocol.uris; corrupt }
