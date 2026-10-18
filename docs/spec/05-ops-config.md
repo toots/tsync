@@ -125,10 +125,12 @@ it unasked. The config editor asks about it only in its advanced mode
    was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
    client neither projects nor takes an entry over before it has learned them
    ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
-5. **Extensions** are stated like the domain-wide settings, by rules 1, 2 and 4, but they are this
-   client's choice and never refused for differing: a domain that lists `extensions` uses its own
-   list, whatever the main states; one that leaves `extensions` out uses the list its main states,
-   else none. Until the main's list is learned, such a domain uses none.
+5. **Extensions** are stated like the domain-wide settings, by rules 1, 2 and 4. The main decides
+   them, and a client may only narrow them: a domain that leaves `extensions` out uses the list
+   its main states, and one that lists `extensions` behind a main that states a list is refused
+   by rule 3 unless its list is a subset of the main's, naming both. A domain whose main states
+   nothing (a plain store) uses its own list, else none. Until the main's list is learned, a
+   domain that leaves `extensions` out uses none.
 6. A main that states its values MAY state a projector with them
    ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
    client: a client names it in the entries it creates and leaves their projection to it
@@ -779,8 +781,8 @@ Token, expiry, overwrite and revocation rules are
   path in the message; duplicate domain names and backend names (ignoring case) refused; a domain
   name outside the grammar refused; two presenting frontends or a duplicate frontend refused; a domain with
   an unknown or duplicate extension, or with an unknown key in an extension object refused; a domain
-  without `extensions` uses the list its main states, one with `[]` none whatever the main states,
-  one with its own list that list; role
+  without `extensions` uses the list its main states, one with `[]` none, one with a subset of the
+  main's list that subset, one with a list the main does not state refused naming both; role
   validation as §2.1; `link` default and refusal on `local`; `links` merged over `uplink` and an
   unused link refused; sizes parsed as §2.1; `maxChunkBuffers` follows `maxUploads`; zero means the
   default; a lone `readOnly` backend forces read-only; the wizard cannot write a config the parser
