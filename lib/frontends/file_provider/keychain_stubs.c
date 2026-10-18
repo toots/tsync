@@ -1,6 +1,7 @@
 /* The vault keystore of macOS (security-model §10.6): one generic-password item
    of the login keychain per domain. No call ever shows a dialog. */
 
+#include <stdio.h>
 #include <string.h>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -32,13 +33,15 @@ static CFStringRef string_of_value(value _text) {
                                  false);
 }
 
-/* The base query naming the domain's item; the caller releases it. */
+/* The base query naming the domain's item; the caller releases it. A domain
+   name is any bytes, and an account must be UTF-8. */
 static CFMutableDictionaryRef item_query(value _domain) {
+  CFStringRef account = string_of_value(_domain);
+  if (account == NULL) caml_failwith("the domain name is not UTF-8");
   CFMutableDictionaryRef query = CFDictionaryCreateMutable(
       NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFStringRef service = CFStringCreateWithCString(NULL, service_name,
                                                   kCFStringEncodingUTF8);
-  CFStringRef account = string_of_value(_domain);
   CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
   CFDictionarySetValue(query, kSecAttrService, service);
   CFDictionarySetValue(query, kSecAttrAccount, account);
@@ -51,32 +54,49 @@ static CFMutableDictionaryRef item_query(value _domain) {
 
 /* Raises Failure with the keychain's sentence for a status. */
 static void fail_with(OSStatus status) {
-  char message[256] = "keychain error";
+  char message[256];
+  snprintf(message, sizeof(message), "keychain error %d", (int)status);
   CFStringRef text = SecCopyErrorMessageString(status, NULL);
   if (text != NULL) {
-    CFStringGetCString(text, message, sizeof(message), kCFStringEncodingUTF8);
+    char sentence[256];
+    if (CFStringGetCString(text, sentence, sizeof(sentence),
+                           kCFStringEncodingUTF8))
+      memcpy(message, sentence, sizeof(message));
     CFRelease(text);
   }
   caml_failwith(message);
 }
 
+/* An update keeps the entry until the new one is in place. An item another
+   identity of the daemon created refuses the update, and is replaced: its
+   access list names a signature this build no longer has. */
 CAMLprim value tsync_keychain_put(value _domain, value _secret) {
   CAMLparam2(_domain, _secret);
   CFMutableDictionaryRef query = item_query(_domain);
-  OSStatus status = SecItemDelete(query);
-  if (status != errSecSuccess && status != errSecItemNotFound) {
-    CFRelease(query);
-    fail_with(status);
-  }
   CFDataRef secret = CFDataCreate(NULL, (const UInt8 *)String_val(_secret),
                                   caml_string_length(_secret));
-  CFStringRef label = CFStringCreateWithCString(NULL, "tsync vault key",
-                                                kCFStringEncodingUTF8);
-  CFDictionarySetValue(query, kSecValueData, secret);
-  CFDictionarySetValue(query, kSecAttrLabel, label);
-  status = SecItemAdd(query, NULL);
+  CFMutableDictionaryRef changes = CFDictionaryCreateMutable(
+      NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(changes, kSecValueData, secret);
+  OSStatus status = SecItemUpdate(query, changes);
+  CFRelease(changes);
+  if (status != errSecSuccess) {
+    if (status != errSecItemNotFound) {
+      OSStatus deleted = SecItemDelete(query);
+      status = deleted == errSecSuccess || deleted == errSecItemNotFound
+                   ? errSecItemNotFound
+                   : deleted;
+    }
+    if (status == errSecItemNotFound) {
+      CFStringRef label = CFStringCreateWithCString(NULL, "tsync vault key",
+                                                    kCFStringEncodingUTF8);
+      CFDictionarySetValue(query, kSecValueData, secret);
+      CFDictionarySetValue(query, kSecAttrLabel, label);
+      status = SecItemAdd(query, NULL);
+      CFRelease(label);
+    }
+  }
   CFRelease(secret);
-  CFRelease(label);
   CFRelease(query);
   if (status != errSecSuccess) fail_with(status);
   CAMLreturn(Val_unit);

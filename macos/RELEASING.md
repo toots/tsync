@@ -18,8 +18,10 @@ mounted image.
 ```
 TsyncApp.app/Contents
 ├── MacOS/TsyncApp                        the app (a background login item)
-├── MacOS/tsync                           the OCaml service + CLI
-├── libs/                                 Homebrew dylibs the service links
+├── MacOS/tsync                           a symlink to the daemon, for the CLI
+├── Library/Helpers/tsyncd.app            the daemon's wrapper bundle and profile
+│   ├── Contents/MacOS/tsync              the OCaml service + CLI
+│   └── Contents/libs/                    Homebrew dylibs the service links
 ├── Resources/install-agent.sh            installs the service's LaunchAgent
 └── PlugIns/TsyncFileProvider.appex       the File Provider extension
 ```
@@ -86,12 +88,14 @@ other apps; until that prompt is answered the service waits.
 2. builds the app and extension with `xcodebuild`, with `CODE_SIGNING_ALLOWED=NO`
    — signing happens at the end, because injecting files afterwards would
    invalidate any earlier signature;
-3. copies the daemon to `Contents/MacOS/tsync` and `install-agent.sh` to
-   `Contents/Resources/`;
+3. copies the daemon into `Contents/Library/Helpers/tsyncd.app` with its
+   `Info.plist` and profile, links `Contents/MacOS/tsync` to it for the CLI, and
+   copies `install-agent.sh` to `Contents/Resources/`;
 4. runs `dylibbundler` to copy the daemon's Homebrew dependencies (openssl, gmp,
-   pcre2, libev, xxhash) into `Contents/libs` and rewrite their install names to
-   `@executable_path/../libs`;
-5. signs inside-out: dylibs, then the daemon, then the extension, then the app.
+   pcre2, libev, xxhash) into `tsyncd.app/Contents/libs` and rewrite their
+   install names to `@executable_path/../libs`;
+5. signs inside-out: dylibs, then the daemon's bundle, then the extension, then
+   the app.
 
 It takes a few environment variables:
 
