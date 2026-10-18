@@ -160,9 +160,14 @@ without the secrets (a fork), the job builds and tests the app unsigned and repo
 Every published APK is signed with the one tsync key: a phone refuses a build signed by another key
 as an update, and every user would have to reinstall. The keystore comes from secrets; the version
 code is the workflow's run number, so each build outranks the one before. The job checks the
-certificate of the APK it built against the keystore's and refuses to publish any other. On a pull
-request, or without the secrets (a fork), the job builds with a throwaway key, runs the same checks
-except the signer's, and reports the signing half "not run".
+certificate of the APK it built against the keystore's and refuses to publish any other.
+
+Signing is not publishing. Every build of this repository, a pull request's included, is signed with
+the tsync key, so the artifact of any run installs over an installed tsync for testing; only the
+builds §2 names are published. Without the secrets (a fork) the job builds with a throwaway key,
+runs the same checks except the signer's, and reports the signing half "not run". A signed
+artifact of a public repository can be downloaded by others; this is accepted, as for the macOS
+package of a pull request (§5.3).
 
 ## 6. Secrets
 
