@@ -20,6 +20,9 @@ let register () =
       name = "the login keychain";
       put =
         (fun ~domain ~key_id ~key ->
+          (* get splits the entry at this length. *)
+          if String.length key_id <> key_id_length then
+            Fail.invalid "a key id is %d characters" key_id_length;
           keychain (fun () -> put domain (key_id ^ key)));
       get =
         (fun ~domain ->

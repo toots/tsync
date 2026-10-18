@@ -79,6 +79,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         if menu === codesSubmenu {
+            menu.removeAllItems()
+            menu.addItem(Self.placeholder())
             fetchCodes(menu)
             return
         }
@@ -274,12 +276,26 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// the dialog open with the owner's sentence. Neither secret is kept.
     private func unlock(domain: String, problem: String?) {
         Thread.detachNewThread {
-            let status = try? OwnerClient.call(["action": "vault_status", "domain": domain])
-            let enrolled = status?["enrolled"] as? Bool ?? false
-            DispatchQueue.main.async {
-                self.unlockDialog(domain: domain, enrolled: enrolled, problem: problem)
+            do {
+                let status = try OwnerClient.call(["action": "vault_status", "domain": domain])
+                let enrolled = status["enrolled"] as? Bool ?? false
+                DispatchQueue.main.async {
+                    self.unlockDialog(domain: domain, enrolled: enrolled, problem: problem)
+                }
+            } catch {
+                let reason = (error as? OwnerFailure)?.message ?? "\(error)"
+                DispatchQueue.main.async { self.statusFailed(domain: domain, reason: reason) }
             }
         }
+    }
+
+    /// §10.1: a status that fails is shown, not guessed.
+    private func statusFailed(domain: String, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Cannot unlock the vault of \(domain)"
+        alert.informativeText = reason
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func unlockDialog(domain: String, enrolled: Bool, problem: String?) {
@@ -301,7 +317,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         var request: [String: Any] = [
             "action": "vault_unlock", "domain": domain, "passphrase": passphrase.stringValue,
         ]
-        if !enrolled { request["secretKey"] = secretKey.stringValue }
+        if !enrolled && !secretKey.stringValue.isEmpty { request["secretKey"] = secretKey.stringValue }
         passphrase.stringValue = ""
         secretKey.stringValue = ""
         Thread.detachNewThread {
@@ -331,16 +347,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// §10.1: issuer, account, and a secret that also takes a pasted
     /// otpauth URI. A refusal keeps the dialog open with the owner's sentence.
-    private func addCode(domain: String, problem: String?) {
+    private func addCode(domain: String, problem: String?, issuer typedIssuer: String = "",
+                         account typedAccount: String = "") {
         let alert = NSAlert()
         alert.messageText = "Add a one-time code to \(domain)"
         alert.informativeText =
             problem ?? "Paste the text code the service shows, or its otpauth:// link."
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
-        let issuer = NSTextField()
+        let issuer = NSTextField(string: typedIssuer)
         issuer.placeholderString = "Service (GitHub)"
-        let account = NSTextField()
+        let account = NSTextField(string: typedAccount)
         account.placeholderString = "Account (me@example.com)"
         let secret = Self.secureField(placeholder: "Secret, or otpauth:// link")
         alert.accessoryView = Self.column([issuer, account, secret])
@@ -357,13 +374,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             request["issuer"] = issuer.stringValue
             request["account"] = account.stringValue
         }
+        let kept = (issuer.stringValue, account.stringValue)
         Thread.detachNewThread {
             do {
                 _ = try OwnerClient.call(request)
-            } catch let failure as OwnerFailure {
-                DispatchQueue.main.async { self.addCode(domain: domain, problem: failure.message) }
             } catch {
-                DispatchQueue.main.async { self.addCode(domain: domain, problem: "\(error)") }
+                let reason = (error as? OwnerFailure)?.message ?? "\(error)"
+                DispatchQueue.main.async {
+                    self.addCode(domain: domain, problem: reason, issuer: kept.0, account: kept.1)
+                }
             }
         }
     }
