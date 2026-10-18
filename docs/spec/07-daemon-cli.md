@@ -771,7 +771,7 @@ owner, takes ownership and writes or removes the pause flag durably itself (§2.
 The status menu is one pure function from per-domain `status` replies to an icon, a tooltip and
 rows, shared by the Linux tray and the macOS menu so that the two cannot drift. It is specified in
 [frontends/menu-model.md](frontends/menu-model.md), with the form the macOS menu receives
-([§7](frontends/menu-model.md#7-json-form)). The Linux tray is
+([§8](frontends/menu-model.md#8-json-form)). The Linux tray is
 [frontends/linux-tray.md](frontends/linux-tray.md); the macOS menu is
 [file-provider §10](frontends/file-provider.md#10-menu-bar).
 
@@ -962,7 +962,7 @@ An implementation MUST exhibit:
   never delay a reply; `sync` carries the position, the pending count and the tree head as last
   read, and is answered with every store unreachable; a domain stopped on an entry it cannot
   follow reports the entry and the reason; a parked upload is counted in `queues.parked`.
-- **Menu.** [frontends/menu-model.md §8](frontends/menu-model.md#8-conformance).
+- **Menu.** [frontends/menu-model.md §9](frontends/menu-model.md#9-conformance).
 - **CLI parsing.** Shell completion offers configured domains and `DOMAIN:/` items that exist,
   folders ending in `/`, and every offer is accepted by the command; `ls` shows availability, name
   and size per file and folders with a trailing `/`; a path command finds its domain's owner socket.

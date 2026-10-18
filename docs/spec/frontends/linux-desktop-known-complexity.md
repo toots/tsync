@@ -264,7 +264,7 @@ Answered by: [linux-tray.md §4.1](linux-tray.md#41-state), [§4.3](linux-tray.m
   row. Binding: never empty; content kept across redraws; the row is a submenu from the start;
   placeholder and failure text come from the model.
 
-Answered by: [linux-tray.md §2](linux-tray.md#2-startup) step 4, [§4.3](linux-tray.md#43-installing-a-layout), [menu-model.md §6](menu-model.md#6-stats-submenu), [menu-model.md §7](menu-model.md#7-json-form).
+Answered by: [linux-tray.md §2](linux-tray.md#2-startup) step 4, [§4.3](linux-tray.md#43-installing-a-layout), [menu-model.md §6](menu-model.md#6-stats-submenu), [menu-model.md §8](menu-model.md#8-json-form).
 
 ### K15. Every call left unanswered costs the host its full timeout
 
@@ -437,7 +437,7 @@ Answered by: [linux-desktop.md §5.3](linux-desktop.md#53-icons), [§6.4](linux-
   label, the field names and nesting of the serialised form; a size prints the same in the menu
   and on the command line.
 
-Answered by: [menu-model.md](menu-model.md) as the one source of every string, [menu-model.md §3](menu-model.md#3-formatters) (one byte formatter), [menu-model.md §8](menu-model.md#8-conformance).
+Answered by: [menu-model.md](menu-model.md) as the one source of every string, [menu-model.md §3](menu-model.md#3-formatters) (one byte formatter), [menu-model.md §9](menu-model.md#9-conformance).
 
 ### K26. A count and the rows under it disagreed
 
@@ -486,7 +486,7 @@ Answered by: [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (a
   that of the real type; the serialised form carries the full relative path in the row's action
   and no icon name of another platform.
 
-Answered by: [menu-model.md §3](menu-model.md#3-formatters) (the icon comes from the full name) and [§7](menu-model.md#7-json-form) (a reader derives it from the action's path).
+Answered by: [menu-model.md §3](menu-model.md#3-formatters) (the icon comes from the full name) and [§8](menu-model.md#8-json-form) (a reader derives it from the action's path).
 
 ### K29. Quitting the icon is not quitting tsync, and a row names no absolute path
 
