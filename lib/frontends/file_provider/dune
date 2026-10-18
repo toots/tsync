@@ -5,4 +5,14 @@
  (enabled_if
   (= %{system} macosx))
  (library_flags (-linkall))
- (libraries tsync_core tsync_config tsync_owner unix))
+ (libraries tsync_core tsync_config tsync_owner unix)
+ (foreign_stubs
+  (language c)
+  (names keychain_stubs))
+ (foreign_stubs
+  (language c)
+  (names group_container_stubs)
+  (flags
+   (:standard -x objective-c)))
+ (c_library_flags
+  (-framework Security -framework CoreFoundation -framework Foundation)))

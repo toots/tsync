@@ -7,7 +7,7 @@ APP=/Applications/TsyncApp.app
 # The daemon doubles as the CLI. /usr/local/bin is in the default PATH from
 # /etc/paths but does not exist on a clean install.
 mkdir -p /usr/local/bin
-ln -sf "$APP/Contents/MacOS/tsync" /usr/local/bin/tsync
+ln -sf "$APP/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync" /usr/local/bin/tsync
 
 # Everything else belongs to the console user, not root: the LaunchAgent, the
 # login item and the File Provider domains are all per-user.

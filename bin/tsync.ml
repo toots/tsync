@@ -1,6 +1,7 @@
 open Cmdliner
 
 let () =
+  Tsync_config.Paths.claim_group ();
   exit
     (Cmd.eval'
        (Cmd.group
