@@ -14,7 +14,7 @@ let checks = ref 0
 
 let domain ?mount ?(frontends = true) name =
   Printf.sprintf
-    {|{"name":%S,"symlinks":"keep","versioning":true,"frontends":[%s],
+    {|{"name":%S,"symlinks":"keep","versioning":true,"extensions":[],"frontends":[%s],
        "backends":[{"type":"local","name":"main","role":"main","path":"/srv/%s"}]}|}
     name
     (match (frontends, mount) with

@@ -117,6 +117,21 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { secret_key : string; key_id : string }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
+  enrolled : bool;  (** this machine holds the secret key of a slot *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -212,6 +227,22 @@ type _ request =
   | Pause : bool -> bool request  (** [false] resumes; the reply is the state *)
   | Stats : string list -> Tsync_status.Status_report.answer request
   | Stop : unit request
+  | Vault_init : string -> secret request  (** the passphrase as typed *)
+  | Vault_unlock : {
+      passphrase : string;
+      secret_key : string option;
+    }
+      -> unit request
+  | Vault_lock : bool -> unit request  (** [true] also forgets the secret key *)
+  | Vault_passphrase : {
+      passphrase : string;
+      new_secret_key : bool;
+    }
+      -> secret option request
+      (** the new secret key, when one was asked for *)
+  | Vault_delete : string -> string option request
+      (** the domain's name, to confirm; why a keystore entry was left *)
+  | Vault_status : vault_status request
 
 type packed = Request : 'a request -> packed
 

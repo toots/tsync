@@ -283,7 +283,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "frontends":["android"],
+          "extensions":[],"frontends":["android"],
           "backends":[{"type":"gated","name":"main","role":"main","path":"%s"}]}]}|}
        store_path);
 

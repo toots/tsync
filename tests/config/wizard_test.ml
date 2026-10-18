@@ -75,7 +75,7 @@ let () =
   let existing =
     Yojson.Safe.from_string
       {|{"name":"box","links":{"wan":{"maxRate":1000,"minRate":200},"gone":{"maxRate":5}},
-        "domains":[{"name":"docs","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+        "domains":[{"name":"docs","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
           "backends":[{"type":"local","name":"main","role":"main","path":"/srv/docs"},
                       {"type":"http-proxy","name":"far","role":"replica","link":"wan",
                        "url":"https://far.example:5446","secret":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}]}|}
@@ -121,7 +121,7 @@ let () =
        (scripted [("[w]rite", ["1"; "w"]); ("backends:", ["d"])])
        (Some
           (Yojson.Safe.from_string
-             {|{"domains":[{"name":"docs","symlinks":"keep","versioning":true,"frontends":["fuse"],
+             {|{"domains":[{"name":"docs","symlinks":"keep","versioning":true,"extensions":[],"frontends":["fuse"],
                 "backends":[{"type":"local","name":"main","role":"main","path":"/srv/docs"}]}]}|})));
   p "\n== a deployment's outputs\n";
   let outputs =
@@ -157,7 +157,7 @@ let () =
        (Some
           (Yojson.Safe.from_string
              {|{"name":"box","maxChunkBuffers":3,"uplink":{"headroom":0.5,"minRate":"64K"},
-                "domains":[{"name":"docs","versioning":true,"frontends":["http-proxy"],
+                "domains":[{"name":"docs","versioning":true,"extensions":[],"frontends":["http-proxy"],
                   "backends":[{"type":"local","name":"main","role":"main","path":"/srv/docs"}]}]}|})));
   p "\n== not an object\n";
   match Config_wizard.edit (scripted []) (Some (`List [])) with

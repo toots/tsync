@@ -492,7 +492,7 @@ module Make (C : Engine_ctx.S) = struct
   type entry = { name : string; is_dir : bool; st : stat }
 
   (* A staged edit wins over the published entry of its path, and a staged-only
-     file is listed. *)
+     file is listed. The reserved root folder is not (01 §2.3). *)
   let list_children path =
     let published = Mirror.list mirror path in
     let from_mirror =
@@ -523,7 +523,9 @@ module Make (C : Engine_ctx.S) = struct
           else None)
         (Staged.edits_under staged path)
     in
-    List.sort (fun a b -> compare a.name b.name) (from_mirror @ staged_only)
+    List.filter
+      (fun e -> path <> "" || not (Names.is_reserved e.name))
+      (List.sort (fun a b -> compare a.name b.name) (from_mirror @ staged_only))
 
   let rec list_tree path =
     List.concat_map

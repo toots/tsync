@@ -23,10 +23,16 @@ type backend = {
 
 type frontend = { ftype : string; options : (string * value) list }
 
+(** The extensions of this release (05 §2.1). *)
+val extension_names : string list
+
 type domain = {
   name : Domain_name.t;
   backends : backend list;  (** in read order: role, then config order *)
   frontends : frontend list;
+  extensions : string list option;
+      (** the extensions this client uses; [None] follows the main's stated list
+          (05 §2.1 rule 5) *)
   symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;  (** forced when no backend has a writable role *)
@@ -55,6 +61,11 @@ val stated : domain -> Tsync_store.Store.domain_settings
     "default". *)
 val sources :
   domain -> Tsync_store.Store.domain_settings option -> (string * string) list
+
+(** The extensions a domain uses here (05 §2.1 rule 5): its configured list,
+    else the one its main states, unknown names dropped. *)
+val extensions_in_force :
+  domain -> Tsync_store.Store.domain_settings option -> string list
 
 (** The advanced settings and the symlink policy in force given what the main
     states: the main's values where it states them. INVALID naming both values

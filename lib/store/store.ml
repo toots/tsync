@@ -16,6 +16,7 @@ type domain_settings = {
   settle : float;
   entry_commands : int;
   projector : string option;
+  extensions : string list;  (** 05 §2.1 rule 5: the domain's, stated *)
 }
 
 let policies = [("keep", `Keep); ("follow", `Follow); ("skip", `Skip)]
@@ -30,6 +31,7 @@ let domain_settings_to_json s : Yojson.Safe.t =
        ("projectQuarantine", `Float s.quarantine);
        ("projectSettle", `Float s.settle);
        ("maxEntryCommands", `Int s.entry_commands);
+       ("extensions", `List (List.map (fun e -> `String e) s.extensions));
      ]
     @ match s.projector with Some p -> [("projector", `String p)] | None -> [])
 
@@ -44,6 +46,19 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
         match List.assoc_opt k l with
           | Some (`Int i) when i > 0 -> Some i
           | _ -> None
+      (* backends/http-proxy: absent is none; an ill-formed list states
+         nothing, as any ill-formed field does. *)
+      and extensions =
+        match List.assoc_opt "extensions" l with
+          | None -> Some []
+          | Some (`List names) ->
+              List.fold_right
+                (fun name acc ->
+                  match (name, acc) with
+                    | `String n, Some acc -> Some (n :: acc)
+                    | _ -> None)
+                names (Some [])
+          | Some _ -> None
       and policy =
         match List.assoc_opt "symlinks" l with
           | Some (`String p) -> List.assoc_opt p policies
@@ -63,7 +78,9 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
             Some quarantine,
             Some settle,
             Some entry_commands )
-          when 0. < lease && lease < quarantine && quarantine < settle -> (
+          when 0. < lease && lease < quarantine && quarantine < settle
+               && extensions <> None -> (
+            let extensions = Option.get extensions in
             let stated projector =
               Some
                 {
@@ -74,6 +91,7 @@ let domain_settings_of_json : Yojson.Safe.t -> domain_settings option = function
                   settle;
                   entry_commands;
                   projector;
+                  extensions;
                 }
             in
             (* A projector that is no client id is not "no projector": the

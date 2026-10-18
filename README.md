@@ -89,6 +89,7 @@ A config is a list of domains. A domain is one folder: a name, where its data li
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": ["fuse"],
       "backends": [
         { "type": "s3", "name": "cloud", "role": "main", "bucket": "my-bucket",
@@ -121,6 +122,7 @@ On the machine that has the storage, add an `http-proxy` frontend to the domain:
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": [
         { "type": "http-proxy", "port": 8443, "secret": "<at least 32 characters>",
           "ssl_certificate": "/etc/letsencrypt/live/nas.example/fullchain.pem",
@@ -143,6 +145,7 @@ On every other machine, the backend is that server:
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": ["fuse"],
       "backends": [
         { "type": "http-proxy", "name": "nas", "role": "main",

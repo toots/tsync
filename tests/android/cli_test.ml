@@ -148,7 +148,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "frontends":["android"],
+          "extensions":[],"frontends":["android"],
           "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
        root);
   ignore (run ["stat"; "root"]);

@@ -23,9 +23,9 @@ let config =
   Tsync_config.Config.of_string
     (Printf.sprintf
        {|{"name":"test","domains":[
-  {"name":"docs","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"docs","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
-  {"name":"ro","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+  {"name":"ro","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"readOnly","path":"%s/store"}]}]}|}
        root root)
 
