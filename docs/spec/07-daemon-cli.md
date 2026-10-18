@@ -489,7 +489,8 @@ designates:
 
 - **Bulk actions**, bounded by progress rather than by a total deadline: `ensure_cached`,
   `fetch_range`, `write` with `await`, `restore`, `evict` of a folder, `sync`, `prune`
-  ([08 §3.3](08-frontends.md) marks them **B**).
+  ([08 §3.3](08-frontends.md) marks them **B**), and `vault_init`, `vault_unlock` and
+  `vault_passphrase`, which derive keys ([vault §8](extensions/vault.md#8-commands)).
 - **The liveness probe** that [failure-model.md §8.2](algorithms/failure-model.md#82-requests-between-processes)
   requires: `ping`, answered `{"ok":true}` from memory by every server (owner, store
   server, supervisor), never waiting on a store, a lock held across I/O, or a pool. It is
@@ -799,7 +800,9 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   configures itself, such as `android`) is never asked about, and an entry of that type already in
   the file is kept as it is.
 - **Extensions** are one yes-or-no question per extension, default no on a new
-  domain, else whether the domain lists it. The answers write `extensions`, `[]` when none.
+  domain, else whether the domain lists it. The answers write `extensions`, `[]` when none, except
+  for a domain whose config has no `extensions` and that answers no to each: it is left without
+  the key, following its main ([05 §2.1](05-ops-config.md#21-schema-and-validation) rule 5).
 - **Advanced mode** (`tsync config --edit --advanced`). The keys [05 §2.1](05-ops-
   config.md#21-schema-and-validation) marks *advanced* are asked about only in this mode, after the
   others of their object. In the default mode they are never asked about and are kept as the file
