@@ -818,8 +818,13 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   match req with
     | Ping -> ()
     | Vault_init passphrase -> vault Vault.init passphrase
-    | Vault_unlock r ->
-        vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase
+    | Vault_unlock r -> (
+        vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase;
+        (* The vault is unlocked whatever the fold does: one left now runs at
+           the next verb. *)
+        try vault Totp_verbs.fold
+        with Fail.E f ->
+          Log.warn "totp: the fold after unlock is left: %s" f.reason)
     | Vault_lock `Screen -> vault Vault.screen_locked
     | Vault_lock ((`Lock | `Forget) as how) ->
         vault (Vault.lock ~forget_secret_key:(how = `Forget))
@@ -835,6 +840,14 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_machines name -> vault (Vault.list_machines ?name)
     | Vault_rekey r ->
         vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase
+    | Totp_add source -> vault Totp_verbs.add source
+    | Totp_list filter -> vault Totp_verbs.list filter
+    | Totp_code id -> vault Totp_verbs.code id
+    | Totp_rename r ->
+        vault (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id)
+    | Totp_remove id -> vault Totp_verbs.remove id
+    | Totp_import text -> vault Totp_verbs.import text
+    | Totp_export passphrase -> vault Totp_verbs.export passphrase
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
@@ -1152,3 +1165,4 @@ let open_version t ref_ =
   E.atomically (fun () -> E.retain (resolve_ref t.engine ref_))
 
 let path_of_ref t ref_ = resolve_ref t.engine ref_
+let extensions t = Vault.extensions ~domain:t.domain ~engine:t.engine
