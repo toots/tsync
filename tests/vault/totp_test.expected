@@ -20,17 +20,39 @@ otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=sha256&digits=8&period=60&fo
   -> issuer "" account "me" secret JBSWY3DPEHPK3PXP SHA256/8/60
   -> otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=SHA256&digits=8&period=60
 otpauth://hotp/me?secret=JBSWY3DPEHPK3PXP&counter=1
-  refused: only totp is kept, not hotp
+  refused: only otpauth://totp/ URIs are kept
 otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&digits=9
   refused: digits is 6 to 8
 otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=MD5
-  refused: unknown algorithm MD5
+  refused: unknown algorithm
 otpauth://totp/me?secret=
   refused: the secret is missing
 otpauth://totp/?secret=JBSWY3DPEHPK3PXP
   refused: issuer and account are empty
 otpauth://totp/me?secret=JBSWY3DPEHPK3PX1
   refused: the secret is not base32
+OTPAUTH://TOTP/me?secret=JBSWY3DPEHPK3PXP
+  -> issuer "" account "me" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=30
+otpauth://totp?secret=JBSWY3DPEHPK3PXP
+  refused: issuer and account are empty
+otpauth://steam?secret=JBSWY3DPEHPK3PXP
+  refused: only otpauth://totp/ URIs are kept
+otpauth://totp/me?secret=JBSWY3DPEHPK3PXP&digits=0x8
+  refused: digits is not a number
+otpauth://totp/A%3AB:me?secret=JBSWY3DPEHPK3PXP
+  -> issuer "A:B" account "me" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/A%3AB:me?secret=JBSWY3DPEHPK3PXP&issuer=A%3AB&algorithm=SHA1&digits=6&period=30
+otpauth://totp/ACME%3Ame?secret=JBSWY3DPEHPK3PXP
+  -> issuer "ACME" account "me" secret JBSWY3DPEHPK3PXP SHA1/6/30
+  -> otpauth://totp/ACME:me?secret=JBSWY3DPEHPK3PXP&issuer=ACME&algorithm=SHA1&digits=6&period=30
+otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY
+  -> issuer "" account "me" secret GEZDGNBVGY3TQOJQGEZDGNBVGY SHA1/6/30
+  -> otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY&algorithm=SHA1&digits=6&period=30
+otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGZ
+  -> issuer "" account "me" secret GEZDGNBVGY3TQOJQGEZDGNBVGY SHA1/6/30
+  -> otpauth://totp/me?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY&algorithm=SHA1&digits=6&period=30
+a refusal holds no part of a URI's seed: true
 
 == bare secrets
 "GitHub" "me" "jbsw y3dp ehpk 3pxp" -> JBSWY3DPEHPK3PXP otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&algorithm=SHA1&digits=6&period=30
@@ -39,7 +61,10 @@ otpauth://totp/me?secret=JBSWY3DPEHPK3PX1
 "GitHub" "me" "not base32!" -> refused: the secret is not base32
 "GitHub" "me" "" -> refused: the secret is missing
 the bare secret and its URI give one record: true
-export then add reproduces the record: true
+export then add reproduces "A & B" "x:y z": true
+export then add reproduces "A:B" "me": true
+export then add reproduces "" "a:b": true
+export then add reproduces "" "plain": true
 
 == plaintexts
 {"issuer":"GitHub","account":"me@example.com","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1760500000} ok, rewritten {"issuer":"GitHub","account":"me@example.com","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1","digits":6,"period":30,"modified":1760500000}

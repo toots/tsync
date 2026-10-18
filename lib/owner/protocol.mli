@@ -137,6 +137,9 @@ type totp_secret = { secret : string; issuer : string; account : string }
 (** totp §5 [code]: one record's current code. *)
 type totp_code = { code : string; seconds_left : int }
 
+(** totp §5 [export]: the URIs, and the ids of records that do not open. *)
+type totp_exported = { uris : string list; corrupt : string list }
+
 (** totp §5.2: refused lines by number and reason, never by content. *)
 type totp_imported = {
   added : int;
@@ -327,7 +330,7 @@ type _ request =
       -> unit request
   | Totp_remove : string -> unit request
   | Totp_import : string -> totp_imported request  (** the text of a file *)
-  | Totp_export : string -> string list request
+  | Totp_export : string -> totp_exported request
       (** the passphrase as typed; one URI per record *)
 
 type packed = Request : 'a request -> packed

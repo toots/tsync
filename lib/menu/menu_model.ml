@@ -609,7 +609,7 @@ let domain_codes ~indent (domain, codes) =
     | No_vault -> [row ~indent "No vault — run tsync vault init"]
     | Not_answering -> [row ~indent "not answering"]
     | Records { records; unreadable } ->
-        (if records = [] && unreadable = 0 then [row ~indent "No codes"] else [])
+        (if records = [] then [row ~indent "No codes"] else [])
         @ List.map
             (fun r ->
               row ~indent
