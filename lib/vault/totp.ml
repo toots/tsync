@@ -13,13 +13,14 @@ type t = {
 
 let base32_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
-(* RFC 4648 base32, upper case, no padding; [None] for any other symbol or
-   for trailing bits that are not zero. *)
-let base32_decode s =
+(* RFC 4648 base32, upper case, no padding; [None] for any other symbol, and
+   for trailing bits that are not zero unless [lenient]. *)
+let base32_decode ?(lenient = false) s =
   let n = String.length s in
   let out = Buffer.create (n * 5 / 8) in
   let rec go i acc bits =
-    if i = n then if acc land ((1 lsl bits) - 1) = 0 then Some () else None
+    if i = n then
+      if lenient || acc land ((1 lsl bits) - 1) = 0 then Some () else None
     else (
       match String.index_opt base32_alphabet s.[i] with
         | None -> None
@@ -55,7 +56,7 @@ let normal_secret s =
     String.uppercase_ascii
       (String.concat "" (String.split_on_char '=' (String.trim s)))
   in
-  match base32_decode s with
+  match base32_decode ~lenient:true s with
     | Some seed when String.length seed >= 1 && String.length seed <= 128 ->
         Ok (base32_encode seed)
     | Some _ -> Error "the secret decodes to 1 to 128 bytes"
@@ -189,21 +190,60 @@ let percent_encode =
 let ( let* ) = Result.bind
 
 (* §5.1: the Google Authenticator key-URI format. *)
+(* §5.1: the label splits on its first literal [:], each part decoded after;
+   one with no literal [:] splits on a decoded one. *)
+let split_label raw =
+  let part s = Result.map String.trim (percent_decode s) in
+  match String.index_opt raw ':' with
+    | Some i ->
+        let* issuer = part (String.sub raw 0 i) in
+        let* account =
+          part (String.sub raw (i + 1) (String.length raw - i - 1))
+        in
+        Ok (Some issuer, account)
+    | None -> (
+        let* label = percent_decode raw in
+        match String.index_opt label ':' with
+          | Some i ->
+              Ok
+                ( Some (String.trim (String.sub label 0 i)),
+                  String.trim
+                    (String.sub label (i + 1) (String.length label - i - 1)) )
+          | None -> Ok (None, String.trim label))
+
+let decimal v =
+  if v <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) v
+  then int_of_string_opt v
+  else None
+
+(* §5: no reason names a value, which may hold the seed. *)
 let of_uri ~now uri =
   let prefix = "otpauth://" in
-  if not (String.starts_with ~prefix uri) then Error "not an otpauth URI"
+  let n = String.length prefix in
+  if
+    String.length uri < n
+    || String.lowercase_ascii (String.sub uri 0 n) <> prefix
+  then Error "not an otpauth URI"
   else (
-    let rest = String.sub uri 10 (String.length uri - 10) in
-    let kind, rest =
-      match String.index_opt rest '/' with
-        | Some i ->
-            ( String.sub rest 0 i,
-              String.sub rest (i + 1) (String.length rest - i - 1) )
-        | None -> (rest, "")
+    let rest = String.sub uri n (String.length uri - n) in
+    let type_end =
+      match (String.index_opt rest '/', String.index_opt rest '?') with
+        | Some s, Some q -> min s q
+        | Some i, None | None, Some i -> i
+        | None, None -> String.length rest
     in
+    let kind = String.sub rest 0 type_end in
     if String.lowercase_ascii kind <> "totp" then
-      Error (Printf.sprintf "only totp is kept, not %s" kind)
+      Error "only otpauth://totp/ URIs are kept"
     else (
+      let rest =
+        let from =
+          if type_end < String.length rest && rest.[type_end] = '/' then
+            type_end + 1
+          else type_end
+        in
+        String.sub rest from (String.length rest - from)
+      in
       let label, query =
         match String.index_opt rest '?' with
           | Some i ->
@@ -211,7 +251,7 @@ let of_uri ~now uri =
                 String.sub rest (i + 1) (String.length rest - i - 1) )
           | None -> (rest, "")
       in
-      let* label = percent_decode label in
+      let* label_issuer, account = split_label label in
       let* params =
         List.fold_left
           (fun acc kv ->
@@ -231,14 +271,6 @@ let of_uri ~now uri =
           (String.split_on_char '&' query)
       in
       let param k = List.assoc_opt k params in
-      let label_issuer, account =
-        match String.index_opt label ':' with
-          | Some i ->
-              ( Some (String.trim (String.sub label 0 i)),
-                String.trim
-                  (String.sub label (i + 1) (String.length label - i - 1)) )
-          | None -> (None, String.trim label)
-      in
       let issuer =
         match (param "issuer", label_issuer) with
           | Some i, _ -> i
@@ -249,7 +281,7 @@ let of_uri ~now uri =
         match param k with
           | None -> Ok default
           | Some v -> (
-              match int_of_string_opt v with
+              match decimal v with
                 | Some n -> Ok n
                 | None -> Error (k ^ " is not a number"))
       in
@@ -264,7 +296,7 @@ let of_uri ~now uri =
           | Some a -> (
               match algorithm_of_string (String.uppercase_ascii a) with
                 | Some a -> Ok a
-                | None -> Error (Printf.sprintf "unknown algorithm %s" a))
+                | None -> Error "unknown algorithm")
       in
       let* digits = int "digits" 6 in
       let* period = int "period" 30 in
@@ -301,7 +333,9 @@ let of_secret ~now ~issuer ~account secret =
 
 let to_uri t =
   let label =
-    if t.issuer = "" then percent_encode t.account
+    if t.issuer = "" then
+      (if String.contains t.account ':' then ":" else "")
+      ^ percent_encode t.account
     else percent_encode t.issuer ^ ":" ^ percent_encode t.account
   in
   Printf.sprintf

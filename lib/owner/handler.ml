@@ -822,9 +822,12 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase;
         (* The vault is unlocked whatever the fold does: one left now runs at
            the next verb. *)
-        try vault Totp_verbs.fold
-        with Fail.E f ->
-          Log.warn "totp: the fold after unlock is left: %s" f.reason)
+        (* pitfall A-4.18 *)
+          try vault Totp_verbs.fold with
+          | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+          | e ->
+              Log.warn "totp: the fold after unlock is left: %s"
+                (Fail.classify e).reason)
     | Vault_lock `Screen -> vault Vault.screen_locked
     | Vault_lock ((`Lock | `Forget) as how) ->
         vault (Vault.lock ~forget_secret_key:(how = `Forget))

@@ -11,9 +11,9 @@ export                               locked: the vault is locked: run tsync vaul
 unlock                               ok
 == add and list
 add the §6 URI                      <id1>
-add hotp                             invalid: only totp is kept, not hotp
+add hotp                             invalid: only otpauth://totp/ URIs are kept
 add 9 digits                         invalid: digits is 6 to 8
-add an unknown algorithm             invalid: unknown algorithm MD5
+add an unknown algorithm             invalid: unknown algorithm
 add an empty secret                  invalid: the secret is missing
 add a lower-case padded secret       <id2>
 add a bare secret                    ok
@@ -43,9 +43,9 @@ export
   otpauth://totp/Other:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Other&algorithm=SHA1&digits=6&period=30
   otpauth://totp/Text:typed?secret=MFRGGZDFMZTWQ2LK&issuer=Text&algorithm=SHA1&digits=6&period=30
 == import
-import                               added 1, already 1 {"line":3,"reason":"only totp is kept, not hotp"}
-the same again                       added 0, already 2 {"line":3,"reason":"only totp is kept, not hotp"}
-separators                           added 3, already 0 {"line":1,"reason":"entry 3: only totp is kept, not hotp"}
+import                               added 1, already 1 {"line":3,"reason":"only otpauth://totp/ URIs are kept"}
+the same again                       added 0, already 2 {"line":3,"reason":"only otpauth://totp/ URIs are kept"}
+separators                           added 3, already 0 {"line":1,"reason":"entry 3: only otpauth://totp/ URIs are kept"}
 list
   <id1> "ACME Inc" "john@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
@@ -103,6 +103,17 @@ holds a label: false
   <id3> "Text" "typed" code of 6 digits
   corrupt <id9>
   after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8> <id9>
+  export names it: true
+  remove it                          ok
+  list
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
 == both change the keyring
   pause                              ok
   owner changes the passphrase       ok
