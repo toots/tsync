@@ -44,6 +44,7 @@ bundle, the data directory and the CLI link, keeping `config.json`.
 |---|---|
 | App | `org.feverdreamtv.tsync` |
 | Extension | `org.feverdreamtv.tsync.fileprovider` |
+| Daemon wrapper (`Contents/Library/Helpers/tsyncd.app`) | `org.feverdreamtv.tsync.daemon` |
 | App Group | `group.org.feverdreamtv.tsync` |
 | Daemon agent label | `org.feverdreamtv.tsync.daemon` |
 | Team ID | `PSE2VP6582` |
@@ -98,7 +99,7 @@ It takes a few environment variables:
 |---|---|
 | `CONFIGURATION` | `Release` (default) or `Debug` |
 | `SIGN_IDENTITY` | codesign identity, default `-` (ad-hoc) |
-| `PROFILE_APP` / `PROFILE_APPEX` | provisioning profiles to embed |
+| `PROFILE_APP` / `PROFILE_APPEX` / `PROFILE_DAEMON` | provisioning profiles to embed; without `PROFILE_DAEMON` the daemon claims no App Group and prompts at every start |
 | `BUNDLE_VERSION` / `BUNDLE_SHORT_VERSION` | override `CFBundleVersion` / `CFBundleShortVersionString` |
 | `JOBS` | parallel `xcodebuild` jobs, default 12 |
 
@@ -128,7 +129,7 @@ The extension has to be approved once in **System Settings → General → Login
 
 `make package` runs `build.sh` with a real identity, builds the installer with
 `pkgbuild`, then notarizes and staples it to `macos/dist/tsync.pkg`. It needs
-**two** Developer ID certificates, two provisioning profiles and an App Store
+**two** Developer ID certificates, three provisioning profiles and an App Store
 Connect key — the sections below are how to obtain each of them. Everything here
 is also what the CI secrets are made from, so do this once locally first: it is
 far quicker to debug than a push to main.
@@ -166,9 +167,12 @@ security find-identity -v                | grep "Developer ID Installer"
 
 ### 2. Provisioning profiles
 
-Both targets are sandboxed and share an App Group. Under Developer ID distribution
-that combination is only honoured when a matching provisioning profile is embedded
-in the bundle, so two are needed, one per bundle ID.
+The app and the extension are sandboxed and share an App Group with the daemon.
+Under Developer ID distribution a `group.` App Group is only honoured when a
+matching provisioning profile is embedded in the bundle, so three are needed, one
+per bundle ID. The daemon is a command-line program, so it runs from a wrapper
+bundle that can hold its profile; without one, macOS asks "tsync would like to
+access data from other apps" at every start of the daemon and forgets the answer.
 
 Register the identifiers first, at
 <https://developer.apple.com/account/resources/identifiers/list>:
@@ -176,21 +180,23 @@ Register the identifiers first, at
 1. **App Group** → identifier `group.org.feverdreamtv.tsync`.
 2. **App ID** `org.feverdreamtv.tsync` → enable **App Groups**, assign that group.
 3. **App ID** `org.feverdreamtv.tsync.fileprovider` → same group.
+4. **App ID** `org.feverdreamtv.tsync.daemon` → same group.
 
 Then at <https://developer.apple.com/account/resources/profiles/list> → **+**,
 under **Distribution** pick **Developer ID** (the plain macOS one, *not* "Developer
-ID + Mac App Store"), twice:
+ID + Mac App Store"), three times:
 
 | Profile | App ID | Save as |
 |---|---|---|
 | `tsync app` | `org.feverdreamtv.tsync` | `app.provisionprofile` |
 | `tsync fileprovider` | `org.feverdreamtv.tsync.fileprovider` | `appex.provisionprofile` |
+| `tsync daemon` | `org.feverdreamtv.tsync.daemon` | `daemon.provisionprofile` |
 
 Each asks which certificate to include: the Developer ID Application certificate
 from step 1. Inspect one with `security cms -D -i app.provisionprofile`.
 
 > They expire after a year. When the release job starts failing with a profile
-> error, regenerate both and re-set the two secrets.
+> error, regenerate them and re-set the three secrets.
 
 ### 3. App Store Connect API key
 
@@ -216,6 +222,7 @@ export SIGN_IDENTITY="Developer ID Application: Your Name (PSE2VP6582)"
 export INSTALLER_IDENTITY="Developer ID Installer: Your Name (PSE2VP6582)"
 export PROFILE_APP=$PWD/app.provisionprofile
 export PROFILE_APPEX=$PWD/appex.provisionprofile
+export PROFILE_DAEMON=$PWD/daemon.provisionprofile
 export AC_API_KEY_PATH=$PWD/AuthKey_XXXXXXXXXX.p8
 export AC_API_KEY_ID=XXXXXXXXXX
 export AC_API_ISSUER_ID=<issuer-uuid>
@@ -261,6 +268,7 @@ base64 -i cert.p12               | gh secret set MACOS_CERT_P12
 gh secret set MACOS_CERT_PASSWORD          # the .p12 password
 base64 -i app.provisionprofile   | gh secret set MACOS_PROFILE_APP
 base64 -i appex.provisionprofile | gh secret set MACOS_PROFILE_APPEX
+base64 -i daemon.provisionprofile | gh secret set MACOS_PROFILE_DAEMON
 base64 -i AuthKey_XXXXXXXXXX.p8  | gh secret set AC_API_KEY_P8
 gh secret set AC_API_KEY_ID                # 10-character key id
 gh secret set AC_API_ISSUER_ID             # issuer UUID
@@ -272,6 +280,7 @@ gh secret set AC_API_ISSUER_ID             # issuer UUID
 | `MACOS_CERT_PASSWORD` | password set when exporting the `.p12` |
 | `MACOS_PROFILE_APP` | base64 of `app.provisionprofile` |
 | `MACOS_PROFILE_APPEX` | base64 of `appex.provisionprofile` |
+| `MACOS_PROFILE_DAEMON` | base64 of `daemon.provisionprofile` |
 | `AC_API_KEY_P8` | base64 of `AuthKey_XXXXXXXXXX.p8` |
 | `AC_API_KEY_ID` | 10-character key id |
 | `AC_API_ISSUER_ID` | issuer UUID |
