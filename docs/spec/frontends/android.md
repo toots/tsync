@@ -214,6 +214,14 @@ Before the core initialises:
 5. The name of the domain to serve (empty = the only one the config names).
 6. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
    one directory under home that every `staging` and `dest` path MUST lie in.
+7. **A keystore** of three calls, the vault's on this host
+   ([vault §6.1](../extensions/vault.md#61-the-keystore)): `put(domain, keyId, K)`,
+   `get(domain) → (keyId, K) or none` and `delete(domain)`. The host seals K with AES-GCM under a
+   non-exportable Android Keystore key that needs no user authentication (the owner reads it
+   unattended at boot), and keeps the sealed bytes in its no-backup storage
+   ([security-model.md §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). A
+   call that fails answers its reason; the core then keeps K in memory. The calls are made on a
+   thread of the core's and MUST NOT call back into the bridge.
 
 **Cleartext.** The core's network traffic does not go through the platform's network stack, so the
 platform's cleartext switch does not reach it. On this host the core MUST refuse to connect to a
@@ -222,7 +230,7 @@ cleartext URL whose host is not a loopback address, even when a config names one
 
 ### 4.2 Notices
 
-The one call from the core to the host other than the log sink. A notice is one JSON object, the
+The one call from the core to the host other than the log sink and the keystore. A notice is one JSON object, the
 event a subscriber would receive ([08 §3.8](../08-frontends.md#38-events)):
 
 - `{"event":"changed","domain":D,"id":N,"refs":["root","d:<id>",…]}`: the children of these folders
