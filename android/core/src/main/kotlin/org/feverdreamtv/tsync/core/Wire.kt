@@ -14,6 +14,7 @@ enum class Code(val wire: String) {
     UNREACHABLE("unreachable"),
     BUSY("busy"),
     PAUSED("paused"),
+    LOCKED("locked"),
     INTERNAL("internal");
 
     companion object {
@@ -260,6 +261,7 @@ class Client(private val core: Core) {
 
     private fun items(rows: JSONArray?): List<Item> = objects(rows).map(Item::of)
 
-    private fun objects(rows: JSONArray?): List<JSONObject> =
-        if (rows == null) emptyList() else (0 until rows.length()).map { rows.getJSONObject(it) }
 }
+
+internal fun objects(rows: JSONArray?): List<JSONObject> =
+    if (rows == null) emptyList() else (0 until rows.length()).map { rows.getJSONObject(it) }
