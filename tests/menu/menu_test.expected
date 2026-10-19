@@ -326,6 +326,7 @@ tooltip tsync — Idle
             /home/u/tsync/Media
             cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
             queue 0 files · 0 B owed
+            extensions totp
             read 515.4 MiB · written 5 B
             sync 3 pending · 1 parked
             http-proxy (main) — reachable, 11 ms

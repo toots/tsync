@@ -93,6 +93,7 @@ type settings = {
   batch_delay : float;
   project_width : int;
   projector : string option;
+  extensions : string list;  (** 05 §2.1 rule 5: in force *)
   domain_wide : sources;
 }
 [@@deriving yojson]

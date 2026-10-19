@@ -672,6 +672,8 @@ let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
     ("projectQuarantine", from (d.project_quarantine <> None));
     ("projectSettle", from (d.project_settle <> None));
     ("maxEntryCommands", from (d.max_entry_commands <> None));
+    (* rule 5: the main's list, narrowed or not, wherever the main states one. *)
+    ("extensions", if main <> None then "main" else from (d.extensions <> None));
   ]
 
 let hostname () = try Unix.gethostname () with _ -> "tsync"
