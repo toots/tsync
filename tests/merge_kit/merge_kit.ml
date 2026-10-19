@@ -118,29 +118,47 @@ module Make (F : FOLD_FIXTURE) = struct
       && List.map fst (sorted a) = List.map fst (sorted b)
       && F.fold b = [])
 
+  (* One scale case: the heap's peak growth past building the folder. The peak
+     is never reset, so each case runs in a process of its own. *)
+  let scale_case n budget mib =
+    let files = folder n in
+    Gc.compact ();
+    let before = (Gc.quick_stat ()).top_heap_words
+    and start = Unix.gettimeofday () in
+    ignore (settle F.fold files);
+    let seconds = Unix.gettimeofday () -. start in
+    let grown =
+      ((Gc.quick_stat ()).top_heap_words - before)
+      * (Sys.word_size / 8) / (1 lsl 20)
+    in
+    check
+      (Printf.sprintf "%d clashes settle within %g s and %d MiB" n budget mib)
+      (seconds <= budget && grown <= mib)
+
   let scale () =
     List.iter
-      (fun (n, budget, mib) ->
-        let files = folder n in
-        Gc.compact ();
-        let before = (Gc.quick_stat ()).top_heap_words
-        and start = Unix.gettimeofday () in
-        ignore (settle F.fold files);
-        let seconds = Unix.gettimeofday () -. start in
-        let grown =
-          ((Gc.quick_stat ()).top_heap_words - before)
-          * (Sys.word_size / 8) / (1 lsl 20)
+      (fun (n, _, _) ->
+        flush stdout;
+        let pid =
+          Unix.create_process Sys.executable_name
+            [| Sys.executable_name; "--scale"; string_of_int n |]
+            Unix.stdin Unix.stdout Unix.stderr
         in
-        check
-          (Printf.sprintf "%d clashes settle within %g s and %d MiB" n budget
-             mib)
-          (seconds <= budget && grown <= mib))
+        match Unix.waitpid [] pid with
+          | _, WEXITED 0 -> ()
+          | _ -> check (Printf.sprintf "%d clashes: the case ran" n) false)
       F.scale
 
   let run () =
-    order ();
-    idempotence ();
-    kept ();
-    convergence ();
-    scale ()
+    match Sys.argv with
+      | [| _; "--scale"; n |] ->
+          let n = int_of_string n in
+          let _, budget, mib = List.find (fun (m, _, _) -> m = n) F.scale in
+          scale_case n budget mib
+      | _ ->
+          order ();
+          idempotence ();
+          kept ();
+          convergence ();
+          scale ()
 end
