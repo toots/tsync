@@ -419,7 +419,8 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
   checked does not block setup: the domain name can be typed.
 - **Settings**:
   - *Server*: the same fields, with the restart prompt of §6.1 on a change.
-  - *Storage*: the cache limit; how much the cache (from `stats`) and the staged bodies (from
+  - *Storage*: the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
+    when empty), with the server named when they are its list; the cache limit; how much the cache (from `stats`) and the staged bodies (from
     `status`) hold now;
     "Free up space" (`evict` on the root, after a confirmation saying that files made available
     offline are removed from the phone too).
@@ -451,12 +452,15 @@ domain: it never creates, deletes or re-keys the vault, which a computer does
 - **Add** offers:
   - *Scan a QR code*: Google Play services' code scanner (`GmsBarcodeScanning`, QR format only),
     which needs no camera permission. The scanned text is sent as `totp_add`; a refusal shows the
-    owner's sentence. Without Play services the choice is shown disabled, saying why.
+    owner's sentence. Without Play services the choice is shown disabled, saying why. A scan that
+    fails says why, and that Play services needs the camera permission where the system
+    withholds it (GrapheneOS does by default): the scanner is Play services', not the app's.
   - *Import a file*: a document picker for a plain-text export, sent as `totp_import`
     ([totp §5.2](../extensions/totp.md#52-plain-text-import)). The result says how many were added,
     already there and refused, with each refused line's number and reason.
   - *Enter a code*: fields for the issuer, the account and the secret, which also takes a pasted
-    `otpauth://totp/` URI: one starting with `otpauth://` is sent as `totp_add` with `uri`, anything
+    `otpauth://totp/` URI, masked with a show icon like the passphrase: one starting with
+    `otpauth://` is sent as `totp_add` with `uri`, anything
     else with `secret`, `issuer` and `account` ([totp §5.3](../extensions/totp.md#53-a-bare-secret)).
 - **Opened from elsewhere**: the app handles `otpauth://` links (an intent filter on the scheme, declared
   always), so the camera, Lens or a browser can hand a scanned code to tsync. Any app can send
@@ -468,7 +472,8 @@ domain: it never creates, deletes or re-keys the vault, which a computer does
 - **States**, each told apart (§10.1):
   - *no vault* (`not_found`): a sentence saying the vault is created on a computer with
     `tsync vault init`, and nothing to act on;
-  - *locked*: a passphrase field (masked, paste accepted, no autofill, no suggestions) and, when
+  - *locked*: a passphrase field (masked, paste accepted, no autofill, no suggestions, a show
+    icon that reveals it while on, [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)) and, when
     the phone is not enrolled, a secret key field (the same); **Unlock** (`vault_unlock`), which
     enrols the phone; `denied` and `invalid` stay on the fields with the owner's sentence;
   - *unreachable*, *offline* and *read-only* as everywhere else.
