@@ -105,7 +105,27 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   the `recovered` notice, or a listing that is not `outdated`, clears it: `stat`, `status` and
   mutations succeed without the store and say nothing about it.
 
-## 6. Configuration and secrets
+### 5.1 Working offline
+
+**Direction.** The phone is often offline, and the app stays useful then: what the phone has
+seen and fetched stays usable, says how old it is, and is refreshed once the server answers.
+Only what the phone never had needs the server. Every screen and every feature added later
+follows this rule rather than failing as a whole when the store is silent; the core's side is
+[android §3.3](android.md#33-working-without-the-store) and, for the vault,
+[extensions README §4.1](../extensions/README.md#41-where-they-live).
+
+- **Files.** A folder listed before is shown from its last view, `outdated` with its age
+  (§10.3). A file whose bytes are on the phone (`cached`, `pinned`) opens from such a listing,
+  in the app and through the documents provider. A file that is `online-only` while the app is
+  offline is shown as not available offline, and an open of it is refused at once with that
+  reason, never handed out as a descriptor whose reads wait on a silent store. Saves, uploads and
+  edits are accepted and pushed later (§8). Making a file available offline, `share`, and a folder
+  never listed need the server.
+- **Vault.** The vault's last view answers offline (§10.8): the codes are listed and copied, with
+  "Offline: codes as of <time>"; a code added is listed at once and pushed later; unlocking with
+  the passphrase works from the cached keyring. Each vault screen asks again when the app comes
+  to the foreground, on the `recovered` notice, and when a code expires.
+
 
 ### 6.1 The config the app writes
 
@@ -477,6 +497,9 @@ domain: it never creates, deletes or re-keys the vault, which a computer does
     the phone is not enrolled, a secret key field (the same); **Unlock** (`vault_unlock`), which
     enrols the phone; `denied` and `invalid` stay on the fields with the owner's sentence;
   - *unreachable*, *offline* and *read-only* as everywhere else.
+- **Offline** (§5.1): a reply with `outdated` shows a banner "Offline: codes as of <time>" from
+  its `pulledAt`, above the list or the unlock form; the codes still copy. The `recovered` notice
+  asks again.
 - **Screens that show secrets** (the passphrase and secret key fields, the codes list) set
   `FLAG_SECURE`: no screenshots, no recent-apps thumbnail.
 
@@ -725,6 +748,13 @@ checked.
 - The Codes and passphrase screens are absent from screenshots and the recent-apps thumbnail.
 - After an unlock, killing the app and opening it again shows the codes without a passphrase
   (the keystore, [android.md §4.1](android.md#41-what-the-host-provides)); after a lock it asks.
+
+**Offline**
+- With the store down after the folders were listed: a listed folder shows its rows with the
+  offline banner; a `cached` or `pinned` file opens; an `online-only` file's open is refused at
+  once with "not available offline"; a save is accepted and committed when the store returns.
+- With the store down after the codes were listed: the codes list with the offline banner and
+  copy; a code added appears at once; on `recovered` the banner goes and the list is asked again.
 
 **Names and writes**
 - A share-sheet save, an in-app upload, a document creation and a first camera upload never replace
