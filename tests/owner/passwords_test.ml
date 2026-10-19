@@ -224,6 +224,22 @@ let logins () =
          ("password", s "x");
          ("generate", `Assoc []);
        ]);
+  let codes () =
+    match member (ask [("action", s "totp_list")]) "records" with
+      | Some (`List l) -> List.length l
+      | _ -> -1
+  in
+  let before = codes () in
+  answer "add, otpauth and a bad site"
+    (ask
+       [
+         ("action", s "passwords_add");
+         ("title", s "X");
+         ("urls", `List [s "ftp://x"]);
+         ("password", s "x");
+         ("otpauth", s "otpauth://totp/Orphan:me?secret=JBSWY3DPEHPK3PXP");
+       ]);
+  p "%-40s %b" "  it left no TOTP record" (codes () = before);
   answer "add, a bad site"
     (ask
        [
@@ -504,6 +520,46 @@ let () =
           (fun id label acc -> if label = "<id1>" then id else acc)
           ids ""
       in
+      (match
+         bridge_session
+           [
+             `Assoc
+               [
+                 ("type", s "passkey_match");
+                 ("origin", s "https://example.com");
+                 ("rpId", s "example.com");
+               ];
+           ]
+       with
+        | [r] -> (
+            match member r "passkeys" with
+              | Some (`List (first :: _)) -> (
+                  let id = Option.get (field first "id") in
+                  match
+                    bridge_session
+                      [
+                        `Assoc
+                          [
+                            ("type", s "passkey_assert");
+                            ("domain", s "pw");
+                            ("origin", s "https://example.com");
+                            ("rpId", s "example.com");
+                            ("id", s id);
+                            ("clientDataHash", s (b64 (String.make 32 'c')));
+                            ("verified", `Bool true);
+                          ];
+                      ]
+                  with
+                    | [a] ->
+                        p
+                          "  a browser's verified without the passphrase: \
+                           flags %02x"
+                          (Char.code
+                             (unb64 (Option.get (field a "authenticatorData"))).[
+                             32])
+                    | _ -> p "  assert: no reply")
+              | _ -> p "  no passkey to assert")
+        | _ -> p "  passkey_match: no reply");
       fill "https://github.com" gh;
       fill "https://evil.example" gh;
       p "== the store";
