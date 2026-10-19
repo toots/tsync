@@ -130,6 +130,8 @@ type vault_status = {
   copies : string list;  (** keyring copies beside it *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;  (** of that view *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)

@@ -16,16 +16,23 @@ type t = {
   cached : [ `Keystore | `Memory ] Atomic.t;
   restored : bool Atomic.t;  (** the keystore was read for this owner *)
   keystore_error : string option Atomic.t;
+  pulls : Pulls.t option;  (** on a lazy tree: reads answer the last view *)
+  view : Pulls.view Atomic.t;  (** of the last read *)
 }
 
-let create () =
+let create ?pulls () =
   {
     key = Atomic.make None;
     secret_key = Atomic.make None;
     cached = Atomic.make `Memory;
     restored = Atomic.make false;
     keystore_error = Atomic.make None;
+    pulls;
+    view = Atomic.make { Pulls.pulled_at = None; outdated = false };
   }
+
+(* README §4.5. *)
+let record_keep = 30. *. 86400.
 
 (* §6.1: two entries per domain, named apart; no domain name holds a [/]. *)
 let key_entry (domain : Tsync_domain.Domain.t) =
@@ -95,22 +102,56 @@ let read_file (module E : Engine.S) path =
     ~finally:(fun () -> E.close_read h)
     (fun () -> Bigstring.to_string (E.read h ~off:0 ~len:(E.stat path).size))
 
-(* extensions README §4.1: on a lazy tree the folders the vault reads are
-   pulled first, and a failed pull fails the verb. *)
+let vault_folders = [""; ext; folder]
+
+(* README §4.1: a keyring write needs the current keyring; a failed pull fails
+   the verb. *)
 let pull (module E : Engine.S) =
   List.iter
     (fun dir -> if E.kind dir = `Dir then ignore (E.pull dir))
-    [""; ext; folder]
+    vault_folders
 
 (* vault §3 step 2: init first brings the local tree to the main's. *)
 let refresh engine ~lazy_tree =
   let (module E : Engine.S) = engine in
   if lazy_tree then pull engine else ignore (E.resync ())
 
-let read_current engine ~lazy_tree = if lazy_tree then pull engine
+(* README §4.1: a read answers the last view of the folders after the pull
+   patience, a folder never pulled waits for its pull, and the oldest view
+   read is what the reply says. *)
+let read_folders engine t dirs =
+  let (module E : Engine.S) = engine in
+  match t.pulls with
+    | None -> ()
+    | Some pulls ->
+        let view =
+          List.fold_left
+            (fun (acc : Pulls.view) dir ->
+              if E.kind dir <> `Dir then acc
+              else (
+                let v = Pulls.for_listing pulls ~pull:`Auto dir in
+                E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
+                {
+                  outdated = acc.outdated || v.outdated;
+                  pulled_at =
+                    (match (acc.pulled_at, v.pulled_at) with
+                      | Some a, Some b -> Some (Float.min a b)
+                      | a, None | None, a -> a);
+                }))
+            { pulled_at = None; outdated = false }
+            dirs
+        in
+        Atomic.set t.view view
+
+let read_current engine ~lazy_tree t =
+  if lazy_tree then read_folders engine t vault_folders
+
+(* README §4.1: a record write proceeds on the last view, pushed later. *)
+let before_write t dir =
+  Option.iter (fun pulls -> Pulls.before_mutation pulls dir) t.pulls
 
 (* §4.3: every extension's folder, whether this client uses it or not. *)
-let extension_folders engine ~lazy_tree =
+let extension_folders engine ~lazy_tree t =
   let (module E : Engine.S) = engine in
   if E.kind ext <> `Dir then []
   else
@@ -119,12 +160,13 @@ let extension_folders engine ~lazy_tree =
         if (not e.is_dir) || Names.join ext e.name = folder then None
         else (
           let dir = Names.join ext e.name in
-          if lazy_tree then ignore (E.pull dir);
+          if lazy_tree then before_write t dir;
           Some (e.name, dir)))
       (E.list_children ext)
 
-(* The files of an extension folder, read whole. *)
-let files engine dir : Tsync_vault.Fold.file list =
+(* The files of an extension folder, read whole. [keep]: on a lazy tree each
+   body stays pinned, so the last view stays whole offline (README §4.1). *)
+let files ?(keep = false) engine dir : Tsync_vault.Fold.file list =
   let (module E : Engine.S) = engine in
   if E.kind dir <> `Dir then []
   else
@@ -133,7 +175,9 @@ let files engine dir : Tsync_vault.Fold.file list =
         if e.is_dir then None
         else (
           let path = Names.join dir e.name in
-          Some { Tsync_vault.Fold.name = e.name; body = read_file engine path }))
+          let body = read_file engine path in
+          if keep then E.pin path ~keep:record_keep;
+          Some { Tsync_vault.Fold.name = e.name; body }))
       (E.list_children dir)
 
 let write_file (module E : Engine.S) ~exclusive path body =
@@ -168,7 +212,8 @@ type found = {
 let read ~(domain : Tsync_domain.Domain.t) engine =
   let (module E : Engine.S) = engine in
   let actions, others =
-    Tsync_vault.Fold.keyring ~name:"keyring" (files engine folder)
+    Tsync_vault.Fold.keyring ~name:"keyring"
+      (files ~keep:domain.lazy_tree engine folder)
   in
   if not domain.domain.read_only then apply engine folder actions;
   let keyring =
@@ -222,8 +267,9 @@ let gone ~domain t =
             f.reason)
       (Keystore.registered ())
 
-let current ~domain engine ~lazy_tree t =
-  read_current engine ~lazy_tree;
+(* [strict]: a keyring write, which needs the current keyring (README §4.1). *)
+let current ?(strict = false) ~domain engine ~lazy_tree t =
+  if strict && lazy_tree then pull engine else read_current engine ~lazy_tree t;
   match (read ~domain engine).keyring with
     | `Ok k -> k
     | `Absent ->
@@ -263,7 +309,7 @@ let unwrap ?secret_key ~domain ~engine ~lazy_tree t typed =
 
 (* vault §4.3: a machine holding a losing init's K moves every record sealed
    under it to the domain's K, then drops the keyring copies naming it. *)
-let rekey ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) =
+let rekey ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
   let module Envelope = Tsync_vault.Envelope in
   List.iter
     (fun (extension, dir) ->
@@ -277,7 +323,7 @@ let rekey ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) =
                   (Envelope.seal ~key ~key_id ~extension plaintext)
             | Error _ -> ())
         (files engine dir))
-    (extension_folders engine ~lazy_tree);
+    (extension_folders engine ~lazy_tree t);
   let copies =
     List.filter_map
       (fun (f : Tsync_vault.Fold.file) ->
@@ -299,7 +345,7 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
      failure here leaves it held for the next unlock. *)
   (match Atomic.get t.key with
     | Some ((old_id, _) as old) when old_id <> keyring.key_id ->
-        rekey ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key)
+        rekey ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key) t
     | _ -> ());
   store ~domain t ~key:(keyring.key_id, key) ~secret_key
 
@@ -342,17 +388,17 @@ let key t keyring =
     | Some (id, key) when id = keyring.Keyring.key_id -> Some key
     | _ -> None
 
-let held ~domain ~engine ~lazy_tree t =
+let held ?strict ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
   restore ~domain t;
-  let keyring = current ~domain engine ~lazy_tree t in
+  let keyring = current ?strict ~domain engine ~lazy_tree t in
   match key t keyring with
     | Some k -> (keyring, k)
     | None -> Fail.raise_ Locked "the vault is locked: run tsync vault unlock"
 
 (* vault §7: a new slot replaces every [secret-key] slot; others are kept. *)
 let passphrase ?(new_secret_key = false) ~domain ~engine ~lazy_tree t typed =
-  let keyring, key = held ~domain ~engine ~lazy_tree t in
+  let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
   let passphrase = chosen typed in
   let enrolled =
     match Atomic.get t.secret_key with
@@ -386,7 +432,7 @@ let delete ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree ~confirm t =
     Fail.invalid "deleting the vault needs the domain's name, %s"
       (Domain_name.to_string domain.name);
   let (module E : Engine.S) = engine in
-  read_current engine ~lazy_tree;
+  if lazy_tree then pull engine;
   if E.kind ext = `Dir then E.remove_tree ext;
   (* §7.1: the vault is gone whatever the keystore does now. *)
     match forget ~domain ~secret_key:true t with
@@ -399,7 +445,7 @@ let delete ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree ~confirm t =
 let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
   restore ~domain t;
-  read_current engine ~lazy_tree;
+  read_current engine ~lazy_tree t;
   let found = read ~domain engine in
   let base =
     {
@@ -411,6 +457,8 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       copies = found.copies;
       keystore_error = Atomic.get t.keystore_error;
       enrolled = false;
+      outdated = (Atomic.get t.view).outdated;
+      pulled_at = (Atomic.get t.view).pulled_at;
     }
   in
   match found.keyring with

@@ -104,5 +104,12 @@
   the peer's root                    [camera]
 == a write into a folder made here and published
   write, the store down              ok
+== the vault, then the store down (extensions README §4.1)
+  init                               ok
+  status                             unlocked pulledAt
+  status, the store down             unlocked outdated pulledAt
+  init, the store down               unreachable (the store is down)
+  passphrase, the store down         unreachable (the store is down)
+  status, the store back             unlocked pulledAt
 == status
   names the frontend                 true
