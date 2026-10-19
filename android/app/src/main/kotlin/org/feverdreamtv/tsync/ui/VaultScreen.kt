@@ -64,6 +64,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -221,25 +222,12 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
     var refusal by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val secret = KeyboardOptions(
-        capitalization = KeyboardCapitalization.None,
-        autoCorrectEnabled = false,
-        keyboardType = KeyboardType.Password,
-    )
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.vault_unlock_title), style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            passphrase, { passphrase = it },
-            label = { Text(stringResource(R.string.vault_passphrase)) },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = secret, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        )
-        if (!enrolled) OutlinedTextField(
-            secretKey, { secretKey = it },
-            label = { Text(stringResource(R.string.vault_secret_key)) },
+        SecretField(passphrase, { passphrase = it }, stringResource(R.string.vault_passphrase), Modifier.fillMaxWidth())
+        if (!enrolled) SecretField(
+            secretKey, { secretKey = it }, stringResource(R.string.vault_secret_key), Modifier.fillMaxWidth(),
             supportingText = { Text(stringResource(R.string.vault_secret_key_hint)) },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = secret, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
         refusal?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
@@ -408,7 +396,9 @@ private fun scan(context: Context, onText: (String) -> Unit, onFailure: (String)
     val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
     GmsBarcodeScanning.getClient(context, options).startScan()
         .addOnSuccessListener { barcode -> barcode.rawValue?.let(onText) }
-        .addOnFailureListener { onFailure(it.message ?: context.getString(R.string.code_scan_failed)) }
+        .addOnFailureListener {
+            onFailure((it.message ?: context.getString(R.string.code_scan_failed)) + "\n\n" + context.getString(R.string.code_scan_camera))
+        }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -485,13 +475,9 @@ private fun EnterCode(onDismiss: () -> Unit, busy: Boolean, onSubmit: (String, S
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(issuer, { issuer = it }, label = { Text(stringResource(R.string.code_issuer)) }, singleLine = true)
                 OutlinedTextField(account, { account = it }, label = { Text(stringResource(R.string.code_account)) }, singleLine = true)
-                OutlinedTextField(
-                    secret, { secret = it },
-                    label = { Text(stringResource(R.string.code_secret)) },
+                SecretField(
+                    secret, { secret = it }, stringResource(R.string.code_secret),
                     supportingText = { Text(stringResource(R.string.code_secret_hint)) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
-                    singleLine = true,
                 )
             }
         },
@@ -568,4 +554,37 @@ private fun linkName(link: String): String {
     val issuer = uri.getQueryParameter("issuer") ?: label.substringBefore(':', "")
     val account = label.substringAfter(':')
     return listOf(issuer, account).filter { it.isNotBlank() }.distinct().joinToString(" — ").ifEmpty { link.substringBefore('?') }
+}
+
+/** security-model §10.6: masked, with an icon that shows the value while on; off each time it is shown. */
+@Composable
+fun SecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    supportingText: (@Composable () -> Unit)? = null,
+) {
+    var shown by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value, onValueChange,
+        label = { Text(label) },
+        supportingText = supportingText,
+        visualTransformation = if (shown) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Password,
+        ),
+        trailingIcon = {
+            IconButton(onClick = { shown = !shown }) {
+                Icon(
+                    painterResource(if (shown) R.drawable.ic_visibility_off else R.drawable.ic_visibility),
+                    contentDescription = stringResource(if (shown) R.string.secret_hide else R.string.secret_show),
+                )
+            }
+        },
+        singleLine = true,
+        modifier = modifier,
+    )
 }
