@@ -299,7 +299,11 @@ entries.
 ## 8. Commands
 
 Every verb needs a serving owner ([README §6](README.md#6-commands-and-actions)): K may live
-only in the owner's memory.
+only in the owner's memory. Offline, `status` and `unlock` read the last view of the keyring;
+`init`, `passphrase` and `delete` need the current one
+([README §4.1](README.md#41-where-they-live)). An unlock checked against the last view lets a
+passphrase that another machine has since replaced unlock this one until it pulls again: it still
+needs this machine's secret key, so it grants nothing this machine did not already hold.
 
 | verb / action | needs K | does |
 |---|---|---|

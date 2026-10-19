@@ -63,10 +63,26 @@ a top-level command or a frontend's CLI group
   extension's spec derives it from the record under K, so that two machines adding the same
   thing meet at one name. A leaf never carries a user-visible label: names are not encrypted.
 - Records are read through the read path
-  ([04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy)). On a lazy tree, a verb or
-  fold first pulls the folders it reads (`/.tsync-ext/vault/` and its extension's) and fetches
-  each body it needs; a failed pull or fetch fails the verb, and leaves a fold for the next
-  arrival. A verb never answers from a partial set of records.
+  ([04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy)). On a lazy tree the
+  folders a verb or fold reads (the root, `/.tsync-ext/`, `/.tsync-ext/vault/` and its
+  extension's) are pulled as a listing pulls a folder, and the vault works offline as files do
+  ([android §3.3](../frontends/android.md#33-working-without-the-store)):
+  - A **read** (`vault_status`, an extension's `list` and `code`) waits for the pulls at most the
+    pull patience, then answers from the last view of those folders, its reply carrying
+    `outdated: true` and the oldest `pulledAt` among them. The pulls go on and the next read is
+    fresh. No `changed` notice names these folders (§4.4); a host showing an outdated vault
+    answer asks again on the `recovered` notice, as it re-lists folders.
+  - A **record write** (an extension's `add`, `import`, `rename`, `remove`) proceeds on the last
+    view as any mutation does, stays pending and is pushed once the store answers; the
+    extension's fold settles what a peer did meanwhile (§4.2).
+  - A **keyring write** (vault `init`, `passphrase`, `delete`) needs the current keyring: it waits
+    for its pulls and fails with their code. A slot removed offline could come back from the
+    keyring's union with a concurrent change ([vault §4.3](vault.md#43-concurrent-changes)).
+  - A folder never pulled has no view: every verb waits for its pull and fails with its code.
+  - **The view stays whole.** Every body a verb reads is pinned for `RECORD_KEEP`, renewed at
+    each read, and the folders' views are held as long, so the last view holds every record it
+    lists. A body the cache lacks is fetched; one that cannot be fetched fails the verb: a verb
+    never answers from a partial set of records.
 - Every record body is a vault envelope ([vault §5](vault.md#5-record-envelope)). An extension
   never stores plaintext.
 
@@ -118,6 +134,12 @@ it waits for an unlocked vault.
 `/.tsync-ext` is a reserved root name
 ([01 §2.3](../01-core.md#23-leaf-names-and-logical-paths)): every interface that presents the
 domain's names to a user or another party omits it, and only the extension layer reaches it.
+
+### 4.5 Parameters
+
+| name | value | rule |
+|---|---|---|
+| `RECORD_KEEP` | 30 days | how long a record body read on a lazy tree stays pinned, renewed at each read |
 
 ## 5. Host adapters
 
@@ -200,5 +222,10 @@ A record is named by the pair (domain, id).
 - An extension name equal to a top-level command or a frontend's CLI group is refused.
 - On a lazy tree with the extension's records evicted, a listing verb fetches them and answers
   every record, or fails; it never answers a partial list.
+- On a lazy tree with the store unreachable after a read: `vault_status` and an extension's
+  `list` and `code` answer from the last view with `outdated: true` and `pulledAt`; an
+  extension's `add` is answered and pushed once the store returns; `vault_init`,
+  `vault_passphrase` and `vault_delete` are refused `unreachable` and write nothing; a domain
+  whose vault folders were never pulled refuses every verb `unreachable`.
 - With no owner serving, every vault and extension verb is refused `unreachable` and writes
   nothing.
