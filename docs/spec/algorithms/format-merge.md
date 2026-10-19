@@ -23,9 +23,13 @@ with ordinary local operations pushed like any change.
 
 A folder is settled for a format that applies to it (§4):
 
-1. **When copies arrive.** The owner is told of every path an arrival changes. A conflicted-copy
-   name ([conflict-resolution §5](conflict-resolution.md#5-conflicted-copy-name)) among them
-   schedules its folder, in the background.
+1. **When copies arrive.** The owner is told of every path an arrival changes, from the engine's
+   start. A conflicted-copy name ([conflict-resolution §5](conflict-resolution.md#5-conflicted-copy-name))
+   among them that is still there schedules its folder, in the background. A copy that arrives
+   while its folder is being settled schedules one more settling after it: none is dropped. The
+   owner's own changes, the moves of a settling included, schedule nothing.
+   At owner start every format's folder that holds a copy is scheduled, so what arrived before
+   the hook was set, or before a restart, is settled too.
 2. **Before a read that needs it.** A format may require its folder settled before a verb reads
    it; the vault's extensions do ([extensions README §4.2](../extensions/README.md#42-the-fold)).
 3. **When what it needs arrives.** A format that cannot run yet (the vault locked, a content not
@@ -33,7 +37,8 @@ A folder is settled for a format that applies to it (§4):
    (an unlock).
 
 Settling one folder twice changes nothing the second time. Two clients settling one folder
-concurrently leave copies that a later settling folds.
+concurrently leave copies that a later settling folds. A domain this client may not write is
+never settled.
 
 ## 3. A format
 
@@ -99,8 +104,15 @@ intended first three-way merge. It is not specified in this version.
 ## 6. Implementation
 
 - **One runner.** Every fold goes through one runner: read the folder, fold, apply the actions
-  in order stopping at the first failure, then the format's follow-up writes (a relabel) once
-  every action ran. Nothing settles a folder outside it.
+  in order stopping at the first failure, then the format's follow-up writes (a relabel) for
+  each action that ran. Nothing settles a folder outside it.
+- **One writer of a folder at a time.** A settling and every verb that reads a folder a format
+  applies to and then writes there hold that folder's lock from the read to the write, so a
+  settling never moves a copy under a verb that has read the record, and a verb never writes
+  over what a settling just merged. A verb that needs two such folders takes them in one order
+  (an extension's before the vault's), and so does a settling.
+- **A format settles with its fold alone.** It runs no verb: a settling has none of a verb's
+  effects (a keystore read, forgetting K when the vault reads absent).
 - **A format is a pure function and a registration.** The function (a fold or a three-way merge)
   takes bytes and answers actions or bytes; the registration names the folder or files it applies
   to and how to obtain what it needs (K). No production interface exists for tests' sake.
