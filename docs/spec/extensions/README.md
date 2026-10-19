@@ -157,7 +157,8 @@ A verb reads what it needs at the cost of a listing, however many records the fo
 ## 5. Host adapters
 
 - A host adapter belongs to one extension and one host: `linux`, `macos` or `android`
-  ([README §5](../README.md#5-hosts-one-core-several-compositions)). It runs in the owner and
+  ([README §5](../README.md#5-hosts-one-core-several-compositions)). It runs in the owner, or in
+  a platform component that is the owner's client (an app extension the system loads), and
   declares a set of **capabilities**, drawn from a vocabulary the extension's spec defines.
 - An extension's spec is host-independent: it defines each capability, and what the extension
   does on a host that lacks it. Every capability is optional. Each host has its own spec,
