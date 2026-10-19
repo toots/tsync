@@ -40,7 +40,8 @@ Trust boundaries, each an enforcement point in this file:
 3. The listener host's filesystem outside its stores.
 4. Local state: mirror, staged bodies, chunk cache, sync state (before-values, position), queues. Staged bodies are the only copy of content not yet on the main.
 5. Operational information: status reports, domain names, traffic, backend settings.
-6. Vault contents: extension records (one-time-password seeds, website and app passwords), each domain's vault key K, its secret key and its passphrase ([vault](../extensions/vault.md)).
+6. Vault contents: extension records (one-time-password seeds, website and app passwords,
+   passkeys' private keys), each domain's vault key K, its secret key and its passphrase ([vault](../extensions/vault.md)).
 
 ---
 

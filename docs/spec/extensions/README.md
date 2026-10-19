@@ -14,7 +14,7 @@ Extensions: [totp](totp.md), [passwords](passwords.md).
 
 ## 1. Problem
 
-Some small, secret, per-user data (one-time-password seeds, website and app passwords)
+Some small, secret, per-user data (one-time-password seeds, website and app passwords, passkeys)
 should follow the user across machines the way files do. A domain already moves data between
 machines with history, offline edits and conflict handling. An extension reuses that, keeping
 its records encrypted in a hidden folder of the domain, instead of building a second sync
