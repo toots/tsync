@@ -55,8 +55,10 @@ Either shape:
   change that content made, by the format's own notion of a change. Where keeping both would be a
   guess, both stay, as separate files or, for a format whose files must keep a fixed form of
   name, as two such files that say which came from where.
-- **Is bounded.** Inputs above `MERGE_MAX_BYTES` each are not settled. A settling that does not
-  finish within `MERGE_DEADLINE` changes nothing.
+- **Carries its own proof.** No size or time limit is imposed on a format: the formats are ours,
+  not adversarial, and a merge of two 2 GiB files is fine when its implementation is fast and
+  bounded in memory. What a format MUST do instead is pass the suitability tests of §7 before it
+  is registered, its scale bounds included.
 
 The formats an implementation offers are listed by `tsync build-info`.
 
@@ -67,7 +69,13 @@ grouped fold with the code fields as key fields and the relabel of a record kept
 ([totp §3](../extensions/totp.md#3-fold)). It needs K, so it runs on an unlocked vault, and
 reads come after it.
 
-### 3.2 Later formats
+### 3.2 `vault-keyring`
+
+The vault's keyring and its copies, `/.tsync-ext/vault/`, a fold: the union of slots by key id
+([vault §4.3](../extensions/vault.md#43-concurrent-changes)). It needs no K, so it settles on
+arrival on a locked owner too.
+
+### 3.3 Later formats
 
 `lines` (text merged line by line, diff3), for ordinary files the domain lists (§4), is the
 intended first three-way merge. It is not specified in this version.
@@ -88,22 +96,47 @@ intended first three-way merge. It is not specified in this version.
 - A format that keeps both shows two files that say so (for `totp-records`, two records, one
   labelled with the client it came from).
 
-## 6. Parameters
+## 6. Implementation
 
-| name | value | rule |
-|---|---|---|
-| `MERGE_MAX_BYTES` | 16 MiB | per input; larger files are not settled |
-| `MERGE_DEADLINE` | 5 s | a settling that does not finish by then changes nothing |
+- **One runner.** Every fold goes through one runner: read the folder, fold, apply the actions
+  in order stopping at the first failure, then the format's follow-up writes (a relabel) once
+  every action ran. Nothing settles a folder outside it.
+- **A format is a pure function and a registration.** The function (a fold or a three-way merge)
+  takes bytes and answers actions or bytes; the registration names the folder or files it applies
+  to and how to obtain what it needs (K). No production interface exists for tests' sake.
 
-## 7. Conformance
+## 7. Suitability tests
 
-An implementation that provides format merges MUST exhibit:
+Each format is shown suitable by a suite built on a shared **merge kit**: a test-only library,
+never linked into the program, that turns a format's **fixture** into the properties below. The
+fixture is the format's knowledge, written beside its tests:
+
+- how to build a valid file of a given size from a seed;
+- an edit the format can merge, and two edits that must both be kept apart;
+- how to read a result's changes, to check none is lost;
+- the format's function itself, called directly.
+
+From a fixture the kit checks, for every format:
+
+1. **Order.** The result does not depend on the order the files are given in.
+2. **Idempotence.** Settling the result again changes nothing.
+3. **Every change kept.** Each side's change from the base is in the result.
+4. **Conflicts kept apart.** Two edits that must both be kept leave both, and a fold leaves no
+   conflicted copy behind: what it keeps apart it keeps under names of the format's own form.
+5. **Convergence.** Two clients settling the same state, or each other's results, end alike.
+6. **Scale.** Inputs of the sizes the fixture declares (records by the thousand, files by the
+   gigabyte) settle within the memory and time the fixture states, measured.
+
+A format's own behaviour (the relabel of `totp-records`, the slot union of `vault-keyring`) is
+tested in its own suite beside its fixture. The arrival trigger and the runner are tested once,
+for any format, through an owner:
 
 - A one-time code renamed on two machines: once the copy arrives on an unlocked owner, its folder
   is settled with no verb asked, one record remains with the newer labels, and settling again
   changes nothing.
 - A code whose seed differs between two copies: two records remain, the one from the copy
   labelled `(conflicted copy from <client>)`.
-- A copy that arrives on a locked owner stays until an unlock or a read settles it.
+- A copy of a record that arrives on a locked owner stays until an unlock or a read settles it;
+  a copy of the keyring settles on arrival, locked or not.
 - The merge itself is unchanged: for every input, `MERGE(R, L, M)` gives the same tree with and
   without format merges (conflict-resolution §10).
