@@ -13,6 +13,7 @@ menu_stats row: ---
 menu_stats row: docs — versioned
 menu_stats row: cache 0 chunks · 0 B
 menu_stats row: queue 0 files · 0 B owed
+menu_stats row: extensions totp
 menu_stats row: main (main)
 pause every domain           {"ok":true,"paused":true}
 menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Hold changes","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
