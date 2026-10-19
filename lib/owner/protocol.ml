@@ -117,6 +117,8 @@ type vault_status = {
   copies : string list;  (** keyring copies beside it *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;  (** of that view *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -739,7 +741,9 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ opt "keyId" (fun k -> `String k) reply.key_id
           @ opt "cached" (fun c -> `String c) reply.cached
           @ opt "keystoreError" (fun e -> `String e) reply.keystore_error
-          @ [("enrolled", `Bool reply.enrolled)])
+          @ [("enrolled", `Bool reply.enrolled)]
+          @ (if reply.outdated then [("outdated", `Bool true)] else [])
+          @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -916,6 +920,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           copies = strings "copies";
           keystore_error = str j "keystoreError";
           enrolled = flag j "enrolled";
+          outdated = flag j "outdated";
+          pulled_at = Option.map float_of_int (int j "pulledAt");
         }
     | Full_resync -> ()
     | Revert _ -> ()

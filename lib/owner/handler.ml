@@ -45,8 +45,10 @@ let no_traffic : Tsync_status.Status_report.traffic =
 (* android §4.2: a pulled tree's [changed] event names the folders concerned. *)
 let folders_changed ~domain ~(engine : (module Engine.S)) ~publish dirs =
   let (module E) = engine in
+  (* 01 §2.3: no notice names the reserved folder or anything in it. *)
   let ref_of dir =
     if dir = "" then Some "root"
+    else if Names.is_reserved dir then None
     else
       Option.map
         (fun id -> Names.ref_to_string (Names.dir_ref (Folder_id.to_string id)))
@@ -85,23 +87,25 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish ~stats ~stop
     ~dest_roots ~staging_roots () =
   let name = Domain_name.to_string domain.name in
+  let pulls =
+    if domain.lazy_tree then
+      Some
+        (Pulls.create ?params:pull_params ~engine ~silent:(silent domain)
+           ~changed:(folders_changed ~domain:name ~engine ~publish)
+           ~recovered:(fun () ->
+             ignore
+               (publish
+                  (`Assoc
+                     [
+                       ("event", `String "recovered");
+                       ("domain", `String name);
+                       ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
+                     ])))
+           ())
+    else None
+  in
   {
-    pulls =
-      (if domain.lazy_tree then
-         Some
-           (Pulls.create ?params:pull_params ~engine ~silent:(silent domain)
-              ~changed:(folders_changed ~domain:name ~engine ~publish)
-              ~recovered:(fun () ->
-                ignore
-                  (publish
-                     (`Assoc
-                        [
-                          ("event", `String "recovered");
-                          ("domain", `String name);
-                          ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
-                        ])))
-              ())
-       else None);
+    pulls;
     subscribers;
     traffic;
     unnamed = Atomic.make 0;
@@ -117,7 +121,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     staging_roots;
     answered_unreachable = Atomic.make false;
     running = Atomic.make None;
-    vault = Vault.create ();
+    vault = Vault.create ?pulls ();
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
