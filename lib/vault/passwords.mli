@@ -9,6 +9,13 @@ type site = string
     its A-label form; [Error] is why it is refused. *)
 val site_of_string : string -> (site, string) result
 
+(** §4.1: a host label in its A-label form, ASCII lower-cased, non-ASCII by
+    Punycode (RFC 3492); [Error] when it cannot be one. *)
+val a_label : string -> (string, string) result
+
+(** A site's host, or an [android://] site's package. *)
+val host_of : site -> string
+
 (** §4.2: whether a record's site matches a request's origin or app site. *)
 val matches : site:site -> origin:string -> bool
 

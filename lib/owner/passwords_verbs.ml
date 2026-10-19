@@ -14,16 +14,28 @@ include Extension_records.Make (struct
   let key_fields = Passwords.key_fields
   let modified = Passwords.modified
 
+  (* §2, §7.1: a label is at most 256 bytes, so the suffix replaces the label's
+     end where both do not fit, cut at a UTF-8 boundary. *)
+  let fit label suffix =
+    let room = 256 - String.length suffix in
+    let rec cut n =
+      if n <= 0 then 0
+      else if n >= String.length label then String.length label
+      else if Char.code label.[n] land 0xC0 = 0x80 then cut (n - 1)
+      else n
+    in
+    String.sub label 0 (cut room) ^ suffix
+
   (* totp §3, as this extension labels: a login's title, a passkey's display
      name. *)
   let relabel ~suffix = function
     | Passwords.Login l when not (String.ends_with ~suffix l.title) ->
-        Some (Passwords.Login { l with title = l.title ^ suffix })
+        Some (Passwords.Login { l with title = fit l.title suffix })
     | Passkey p when not (String.ends_with ~suffix p.user_display_name) ->
         let shown =
           if p.user_display_name = "" then p.user_name else p.user_display_name
         in
-        Some (Passkey { p with user_display_name = shown ^ suffix })
+        Some (Passkey { p with user_display_name = fit shown suffix })
     | _ -> None
 end)
 
@@ -126,19 +138,27 @@ let add ~domain ~engine ~lazy_tree t args =
       | Some p -> p
       | None -> Fail.invalid "a password or generate is needed"
   in
+  let login : Passwords.login =
+    {
+      title = required args "title";
+      urls = sites args;
+      username = Option.value ~default:"" (str args "username");
+      password;
+      notes = Option.value ~default:"" (str args "notes");
+      totp = "";
+      modified = now ();
+      unknown = [];
+    }
+  in
+  (* §6: the login is checked before a TOTP record is added for it. *)
+  ignore (checked (Login login));
   let record =
     checked
       (Login
          {
-           title = required args "title";
-           urls = sites args;
-           username = Option.value ~default:"" (str args "username");
-           password;
-           notes = Option.value ~default:"" (str args "notes");
+           login with
            totp =
              Option.value ~default:"" (link ~domain ~engine ~lazy_tree t args);
-           modified = now ();
-           unknown = [];
          })
   in
   let id = Ids.token () in
@@ -158,14 +178,19 @@ let passkeys records =
 let contains ~sub s =
   Text.contains (String.lowercase_ascii s) (String.lowercase_ascii sub)
 
+(* §6: the TOTP record ids present, read once per verb; [None] when the domain
+   does not use totp. *)
+let totp_ids ~domain ~engine ~lazy_tree t =
+  if not (uses_totp ~domain ~engine) then None
+  else (
+    let ctx = Totp_verbs.context ~domain ~engine ~lazy_tree t in
+    let ok, corrupt = Totp_verbs.records ctx in
+    Some (List.map fst ok @ corrupt))
+
 (* §6: a link to a TOTP record that is gone. *)
-let dangling ~domain ~engine ~lazy_tree t totp =
-  totp <> "" && uses_totp ~domain ~engine
-  &&
-  let ctx = Totp_verbs.context ~domain ~engine ~lazy_tree t in
-  match Totp_verbs.find ctx totp with
-    | _ -> false
-    | exception Fail.E { kind = Absent; _ } -> true
+let dangling ids totp =
+  totp <> ""
+  && match ids with Some ids -> not (List.mem totp ids) | None -> false
 
 (* §10 list: logins, then passkeys, each ordered by title then username then
    id. *)
@@ -187,12 +212,7 @@ let list ~domain ~engine ~lazy_tree t args =
   in
   let rp_of_site origin =
     match Passwords.site_of_string origin with
-      | Ok s -> (
-          match String.index_opt s ':' with
-            | Some i when String.length s > i + 3 ->
-                let rest = String.sub s (i + 3) (String.length s - i - 3) in
-                List.hd (String.split_on_char ':' rest)
-            | _ -> s)
+      | Ok site -> Passwords.host_of site
       | Error _ -> origin
   in
   let shown_passkey (p : Passwords.passkey) =
@@ -207,6 +227,7 @@ let list ~domain ~engine ~lazy_tree t args =
       | None -> true
   in
   let keys = passkeys ok in
+  let ids = totp_ids ~domain ~engine ~lazy_tree t in
   let login_rows =
     logins ok
     |> List.filter (fun (_, l) -> shown_login l)
@@ -221,7 +242,7 @@ let list ~domain ~engine ~lazy_tree t args =
             ("username", `String l.username);
             ("urls", `List (List.map (fun u -> `String u) l.urls));
             ("code", `Bool (l.totp <> ""));
-            ("dangling", `Bool (dangling ~domain ~engine ~lazy_tree t l.totp));
+            ("dangling", `Bool (dangling ids l.totp));
             ( "passkeys",
               `List
                 (List.filter_map
@@ -297,7 +318,7 @@ let edit ~domain ~engine ~lazy_tree t args =
   let record =
     match find ctx id with
       | Login l ->
-          Passwords.Login
+          let edited : Passwords.login =
             {
               l with
               title = given "title" (fun () -> required args "title") l.title;
@@ -306,10 +327,17 @@ let edit ~domain ~engine ~lazy_tree t args =
                 given "username" (fun () -> required args "username") l.username;
               password = Option.value ~default:l.password (password_of args);
               notes = given "notes" (fun () -> required args "notes") l.notes;
+              modified = now ();
+            }
+          in
+          (* §6: checked before a TOTP record is added for it. *)
+          ignore (checked (Login edited));
+          Passwords.Login
+            {
+              edited with
               totp =
                 Option.value ~default:l.totp
                   (link ~domain ~engine ~lazy_tree t args);
-              modified = now ();
             }
       | Passkey p ->
           (* §7.1: a passkey's other fields are the relying party's. *)
