@@ -13,6 +13,8 @@ user sees. Every capability is planned until it has been seen working on a signe
   extension is ([file-provider §4.2](../../frontends/file-provider.md), §4.3).
 - It holds no K and no secret beyond the one request it answers, writes nothing to disk, and
   logs no password, code, passphrase or key.
+- The app and the extension both hold the AutoFill credential provider entitlement, each under
+  its own profile: the system lists the extension only when its app holds it too.
 - Its `Info.plist` declares `ASCredentialProviderExtensionCapabilities`: `ProvidesPasswords`,
   `ProvidesPasskeys` (macOS 14), `ProvidesOneTimeCodes` (macOS 15), `ShowsConfigurationUI`.
 - **Enabling it** is the user's: macOS lists tsync under the AutoFill providers of System
