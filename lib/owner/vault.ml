@@ -316,8 +316,6 @@ let files ?(keep = false) engine dir : Tsync_vault.Fold.file list =
           Some { Tsync_vault.Fold.name = e.name; body }))
       (E.list_children dir)
 
-let write_file = Format_merge.write_file
-
 type found = {
   keyring : [ `Absent | `Corrupt of string | `Ok of Keyring.t ];
   copies : string list;  (** the conflicted copies beside it *)
@@ -326,7 +324,6 @@ type found = {
 (* §8: the keyring's fold runs only where this client may write the domain. *)
 let read ~(domain : Tsync_domain.Domain.t) engine =
   let (module E : Engine.S) = engine in
-  Format_merge.locked folder @@ fun () ->
   let actions, others =
     Tsync_vault.Fold.keyring ~name:"keyring"
       (files ~keep:domain.lazy_tree engine folder)
@@ -346,7 +343,8 @@ let read ~(domain : Tsync_domain.Domain.t) engine =
 let write engine ~exclusive keyring =
   let (module E : Engine.S) = engine in
   List.iter (fun dir -> E.mkdir dir ~exclusive:false) [ext; folder];
-  write_file engine ~exclusive keyring_path (Keyring.to_string keyring)
+  Format_merge.write_file engine ~exclusive keyring_path
+    (Keyring.to_string keyring)
 
 let now () = int_of_float (Unix.time ())
 
@@ -381,7 +379,7 @@ let write_machine ~domain engine ~key_id ~key (m : Tsync_vault.Machine.t) =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [ext; folder; machines_folder];
-  write_file engine ~exclusive:false (machine_path domain)
+  Format_merge.write_file engine ~exclusive:false (machine_path domain)
     (Tsync_vault.Envelope.seal ~key ~key_id ~extension:"vault"
        (Tsync_vault.Machine.to_string m))
 
@@ -526,7 +524,8 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
             Envelope.open_ ~key:old_key ~key_id:old_id ~extension f.body
           with
             | Ok plaintext ->
-                write_file engine ~exclusive:false (Names.join dir f.name)
+                Format_merge.write_file engine ~exclusive:false
+                  (Names.join dir f.name)
                   (Envelope.seal ~key ~key_id ~extension plaintext)
             | Error _ -> ())
         (files engine dir))
@@ -813,7 +812,7 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [ext; folder; appearance_folder];
-  write_file engine ~exclusive:false appearance_path
+  Format_merge.write_file engine ~exclusive:false appearance_path
     (Tsync_vault.Appearance.to_string next);
   List.iter
     (fun (f : Tsync_vault.Fold.file) ->
