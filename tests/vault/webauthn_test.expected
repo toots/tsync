@@ -1,0 +1,83 @@
+== §7.2 constants
+aaguid 9fa7c19fb0fa444f854b34c0b4520b66
+supported [-7]
+
+== authenticator data
+create: 164 bytes
+  rpIdHash = SHA-256(rpId)
+  flags    0x59 UP BE BS AT
+  count    00000000
+  aaguid   9fa7c19fb0fa444f854b34c0b4520b66
+  credLen  32
+  credId   70e463b7c440d017257cbc00aafc2ee6105c2e50f0b32cb78fb3bbe3627ed389
+  coseKey  a50102032620012158208ffbc6a24d1f04c06a1176949dec4c646578af82f5e049ab6904671505b10a7c225820e375f45d37cd0e605234bd673c66fa46b7315f5264f5ff1833beffdb1ecf283d
+create, UV: 164 bytes
+  rpIdHash = SHA-256(rpId)
+  flags    0x5d UP UV BE BS AT
+  count    00000000
+  aaguid   9fa7c19fb0fa444f854b34c0b4520b66
+  credLen  32
+  credId   70e463b7c440d017257cbc00aafc2ee6105c2e50f0b32cb78fb3bbe3627ed389
+  coseKey  a50102032620012158208ffbc6a24d1f04c06a1176949dec4c646578af82f5e049ab6904671505b10a7c225820e375f45d37cd0e605234bd673c66fa46b7315f5264f5ff1833beffdb1ecf283d
+assert: 37 bytes
+  rpIdHash = SHA-256(rpId)
+  flags    0x19 UP BE BS
+  count    00000000
+assert, UV: 37 bytes
+  rpIdHash = SHA-256(rpId)
+  flags    0x1d UP UV BE BS
+  count    00000000
+
+== attestation object
+a363666d74646e6f6e656761747453746d74a068617574684461746158a4a379a6f6eeafb9a55e378c118034e2751e682fab9f2d30ab13d2125586ce194759000000009fa7c19fb0fa444f854b34c0b4520b66002070e463b7c440d017257cbc00aafc2ee6105c2e50f0b32cb78fb3bbe3627ed389a50102032620012158208ffbc6a24d1f04c06a1176949dec4c646578af82f5e049ab6904671505b10a7c225820e375f45d37cd0e605234bd673c66fa46b7315f5264f5ff1833beffdb1ecf283d
+
+== SPKI
+91 bytes: 3059301306072a8648ce3d020106082a8648ce3d030107034200048ffbc6a24d1f04c06a1176949dec4c646578af82f5e049ab6904671505b10a7ce375f45d37cd0e605234bd673c66fa46b7315f5264f5ff1833beffdb1ecf283d
+x509 decodes P256, same key
+x509 re-encodes identically
+
+== signature
+signatures verifying against the COSE key: 64/64
+flipped signature byte verifies: false
+signature of other client data verifies: false
+generated key: 32 bytes, signs: true
+
+== §7.3 RP ID
+https://login.example.com        example.com      ok
+https://login.example.com        login.example.com ok
+https://login.example.com:8443   example.com      ok
+https://Login.Example.com        example.com      ok
+https://evil.github.io           github.io        refused: the RP ID is a public suffix
+https://evil.github.io           evil.github.io   ok
+http://example.com               example.com      refused: the origin is http and not localhost
+https://example.com              other.com        refused: the RP ID is neither the origin's host nor a suffix of it
+https://example.com              ample.com        refused: the RP ID is neither the origin's host nor a suffix of it
+https://example.com              com              refused: the RP ID is a public suffix
+http://localhost:8080            localhost        ok
+https://localhost                localhost        ok
+https://a.b.co.uk                b.co.uk          ok
+https://co.uk                    co.uk            refused: the RP ID is a public suffix
+https://a.b.ck                   b.ck             refused: the RP ID is a public suffix
+https://a.b.ck                   a.b.ck           ok
+https://www.ck                   www.ck           ok
+https://192.168.1.1              1.1              refused: the origin's host is an IP address
+https://example.com/path         example.com      refused: the origin's host is not a domain name
+https://example.com:             example.com      refused: the origin's port is not a number
+ftp://example.com                example.com      refused: the origin is not https
+example.com                      example.com      refused: the origin is not scheme://host
+
+== public suffixes
+com                  true
+example.com          false
+co.uk                true
+github.io            true
+ck                   true
+b.ck                 true
+www.ck               false
+a.www.ck             false
+unknowntld           true
+xn--55qx5d.cn        true
+example.xn--55qx5d.cn false
+kawasaki.jp          false
+c.kawasaki.jp        true
+city.kawasaki.jp     false
