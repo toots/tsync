@@ -53,7 +53,9 @@ entries: the conflicted copy the other client published.
 
 ### 1.3 Non-goals
 
-- Content merging, or preserving the intent of both sides beyond keeping their bytes.
+- Content merging, or preserving the intent of both sides beyond keeping their bytes. An optional
+  follow-up may combine the two files of a clash afterwards, for formats where that is no guess
+  ([format-merge](format-merge.md)); the merge itself never does.
 - Following a file through a rename made on another client (§6).
 - Version history as a home for a loser: no clash leaves a content only in history.
 
