@@ -42,8 +42,10 @@ UTF-8:
 
 ## 3. Fold
 
-The grouped fold ([README §4.3](README.md#43-the-grouped-fold)), with the code fields as key
-fields. A seed changed in place, which §2 forbids, therefore survives as a second record.
+The format merge `totp-records` ([format-merge §3.1](../algorithms/format-merge.md#31-totp-records)):
+the grouped fold ([README §4.3](README.md#43-the-grouped-fold)), with the code fields as key
+fields. It runs when a conflicted copy arrives on an unlocked owner, at an unlock, and before
+every verb that reads records. A seed changed in place, which §2 forbids, therefore survives as a second record.
 
 **The second record says where it came from.** After a fold that moved a conflicted copy to a
 digest id (rule 5), the machine that applied it writes that record again with
