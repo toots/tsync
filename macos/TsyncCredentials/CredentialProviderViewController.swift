@@ -1,6 +1,10 @@
 import AppKit
 import AuthenticationServices
 import LocalAuthentication
+import os
+
+/// §3: entry points and row counts only, never a value.
+private let trace = Logger(subsystem: "org.feverdreamtv.tsync.credentials", category: "requests")
 
 /// passwords/macos: the sheet macOS shows for tsync. Every completion follows a
 /// pick or an approval; nothing completes without the user (§3).
@@ -31,10 +35,26 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     /// §3: never without the sheet.
     override func provideCredentialWithoutUserInteraction(for credentialRequest: ASCredentialRequest)
     {
+        trace.info("without interaction: \(credentialRequest.type.rawValue)")
         cancel(.userInteractionRequired)
     }
 
+    /// §3: a remembered credential shows its kind's sheet for its service.
+    override func prepareInterfaceToProvideCredential(for credentialRequest: ASCredentialRequest) {
+        trace.info("interface for a remembered credential: \(credentialRequest.type.rawValue)")
+        if let request = credentialRequest as? ASPasskeyCredentialRequest,
+            let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity
+        {
+            passkeyList(
+                rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
+                verify: request.userVerificationPreference != .discouraged, allow: [])
+        } else {
+            prepareCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
+        }
+    }
+
     override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
+        trace.info("login list for \(serviceIdentifiers.count) services")
         let origins = serviceIdentifiers.map(origin)
         show("Choose a login") { Requests.logins(origins: origins) } pick: { choice in
             let reply = try Requests.call(choice.domain, "get", ["id": choice.id])
@@ -47,6 +67,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     @available(macOS 15.0, *)
     override func prepareOneTimeCodeCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier])
     {
+        trace.info("code list for \(serviceIdentifiers.count) services")
         let origins = serviceIdentifiers.map(origin)
         show("Choose a one-time code") { Requests.logins(origins: origins, codesOnly: true) } pick: {
             choice in
@@ -62,10 +83,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         for serviceIdentifiers: [ASCredentialServiceIdentifier],
         requestParameters: ASPasskeyCredentialRequestParameters
     ) {
-        let rpId = requestParameters.relyingPartyIdentifier
-        let hash = requestParameters.clientDataHash
-        let verify = requestParameters.userVerificationPreference != .discouraged
-        let allow = requestParameters.allowedCredentials
+        passkeyList(
+            rpId: requestParameters.relyingPartyIdentifier, hash: requestParameters.clientDataHash,
+            verify: requestParameters.userVerificationPreference != .discouraged,
+            allow: requestParameters.allowedCredentials)
+    }
+
+    private func passkeyList(rpId: String, hash: Data, verify: Bool, allow: [Data]) {
+        trace.info("passkey list")
         show("Sign in to \(rpId) with a passkey") { Requests.passkeys(rpId: rpId, allow: allow) } pick: {
             choice in
             let verified = try self.verify(verify, reason: "sign in to \(rpId)")
@@ -142,6 +167,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         stack.addArrangedSubview(NSTextField(labelWithString: "Reading…"))
         DispatchQueue.global().async {
             let listed = fetch()
+            trace.info("listed \(listed.choices.count) rows, \(listed.locked.count) locked")
             DispatchQueue.main.async {
                 self.reset(title)
                 for domain in listed.locked {
