@@ -263,6 +263,11 @@ These general rules are realised by the hosts, which link here: the vault keysto
   on a timer: a code expires by itself, and a reader of the clipboard reads it before any timer
   would. A client never copies a passphrase, and keeps a screen that shows a passphrase or codes
   out of screenshots where the platform allows (`FLAG_SECURE`). A client never logs either.
+- **Fields for a secret.** Every field a user types or pastes a secret into (a passphrase, a
+  secret key, a seed) is masked by default and has a control beside it that shows its value in
+  clear while it is on, and masks it again when turned off. The control is per field, starts off
+  each time the field is shown, and is never remembered. Turning it on changes nothing else: the
+  value is not copied, logged or sent by it, and the screen stays out of screenshots as before.
 - Implementations SHOULD overwrite the passphrase, the KEK, K and decrypted records once they are no longer needed, where the runtime allows.
 - The replies of `vault_init` and `vault_passphrase`, and the `passphrase` and `secretKey` members of any vault request, are never logged; a log of IPC traffic masks them (§10.3).
 
