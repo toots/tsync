@@ -675,6 +675,9 @@ submenu shows the model's placeholder row.
   the next open of the submenu. The secret field is a secure field, cleared after sending.
 - Each open of the codes submenu shows the placeholder until the owner's rows arrive, and keeps
   it when they do not: rows from an earlier open are never shown again.
+- Each secure field of these dialogs has a `Show` checkbox under it that shows its value in clear
+  while checked ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)),
+  unchecked each time a dialog opens.
 - The app offers neither `vault init`, `vault passphrase`, `vault delete` nor `totp export`: those
   set or print secrets, or destroy records, and stay with the CLI (totp §5).
 
