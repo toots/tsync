@@ -102,6 +102,9 @@ Every verb is of access class **owner**
 - A refusal names what is wrong, never the value given: a URI, a line or a secret may hold a seed.
 - The CLI takes a URI or a secret as `-` to read it from standard input, so that no seed sits in
   the shell's history or in the process list.
+- The CLI's `list` prints each record's id, issuer, account and seconds left, and its code only
+  with `--show-codes`: a listing is for finding a record, and a terminal's output is shared with
+  its scrollback, a screen share or a tool reading it. `code ID` prints the one code asked for.
 
 ### 5.1 `otpauth` URIs
 
@@ -166,6 +169,7 @@ base32 secret alone, with the account named beside it.
 - `add` of the secret `jbsw y3dp ehpk 3pxp` with issuer `GitHub` and account `me` stores the same
   record as the URI `otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub`; a secret
   with no issuer and no account, or with a `uri` too, is refused and writes nothing.
+- The CLI's `list` prints no code; `list --show-codes` prints each record's current code.
 - `list` replies hold no seed. `export` then `add` of each URI reproduces every record's fields
   but `modified`, an issuer or account holding `:` included.
 - `add` of `otpauth://totp?secret=JBSWY3DPEHPK3PXP`, or of an `hotp` URI, is refused with a

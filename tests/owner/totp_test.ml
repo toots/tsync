@@ -24,12 +24,12 @@ let () =
   Unix.putenv "XDG_DATA_HOME" (Filename.concat root "data");
   Unix.putenv "XDG_CACHE_HOME" (Filename.concat root "cache")
 
-let socket = Filename.concat root "data/tsync/test.sock"
+(* Where the CLI looks for the owner of [docs]. *)
+let socket = Tsync_config.Paths.owner_socket (Domain_name.v "docs")
 
-let config =
-  Tsync_config.Config.of_string
-    (Printf.sprintf
-       {|{"name":"test","domains":[
+let config_text =
+  Printf.sprintf
+    {|{"name":"test","domains":[
   {"name":"docs","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
   {"name":"plain","symlinks":"keep","versioning":true,"extensions":["passwords"],"frontends":["http-proxy"],
@@ -38,7 +38,29 @@ let config =
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/spare"}]},
   {"name":"race","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/race"}]}]}|}
-       root root root root)
+    root root root root
+
+let config = Tsync_config.Config.of_string config_text
+let () = Unix.putenv "TSYNC_CONFIG_JSON" config_text
+
+(* The CLI's [totp list] output, from the binary given as argv 1. *)
+let cli_list args =
+  let ic =
+    Unix.open_process_args_in Sys.argv.(1)
+      (Array.of_list
+         ([Sys.argv.(1); "totp"; "list"; "--domain"; "docs"] @ args))
+  in
+  let lines = In_channel.input_lines ic in
+  ignore (Unix.close_process_in ic);
+  lines
+
+(* A code: the first column, six digits grouped by three. *)
+let shows_code line =
+  String.length line > 7
+  && String.for_all
+       (function '0' .. '9' -> true | _ -> false)
+       (String.sub line 0 3)
+  && line.[3] = ' '
 
 let knowledge =
   { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
@@ -308,6 +330,12 @@ let () =
              ("uri", "otpauth://totp/a?secret=JBSWY3DPEHPK3PXP");
            ]);
       listing "list";
+      (* §5: the CLI's list prints codes only when asked. *)
+      (let plain = cli_list [] and shown = cli_list ["--show-codes"] in
+       p "%-40s %d rows, %b" "cli list: no code" (List.length plain)
+         (plain <> [] && not (List.exists shows_code plain));
+       p "%-40s %d rows, %b" "cli list --show-codes" (List.length shown)
+         (shown <> [] && List.for_all shows_code shown));
       listing ~filter:"acme" "list acme";
       (let seed =
          Result.get_ok
