@@ -316,28 +316,7 @@ let files ?(keep = false) engine dir : Tsync_vault.Fold.file list =
           Some { Tsync_vault.Fold.name = e.name; body }))
       (E.list_children dir)
 
-let write_file (module E : Engine.S) ~exclusive path body =
-  E.create path ~exclusive;
-  E.truncate path 0;
-  E.write path ~off:0 (Bigstring.of_string body);
-  E.close path
-
-(* README §4.2: a fold that cannot be applied now is left for the next. Its
-   actions run in order and stop at the first failure, so a copy is never
-   removed after what should have absorbed it failed to be written. *)
-let apply engine dir actions =
-  let (module E : Engine.S) = engine in
-  try
-    List.iter
-      (function
-        | Tsync_vault.Fold.Move { src; dst } ->
-            E.rename ~src:(Names.join dir src) ~dst:(Names.join dir dst)
-              ~exclusive:false
-        | Remove name -> E.delete (Names.join dir name)
-        | Write { name; body } ->
-            write_file engine ~exclusive:false (Names.join dir name) body)
-      actions
-  with Fail.E f -> Log.warn "vault: a fold in %s is left: %s" dir f.reason
+let write_file = Format_merge.write_file
 
 type found = {
   keyring : [ `Absent | `Corrupt of string | `Ok of Keyring.t ];
@@ -347,11 +326,13 @@ type found = {
 (* §8: the keyring's fold runs only where this client may write the domain. *)
 let read ~(domain : Tsync_domain.Domain.t) engine =
   let (module E : Engine.S) = engine in
+  Format_merge.locked folder @@ fun () ->
   let actions, others =
     Tsync_vault.Fold.keyring ~name:"keyring"
       (files ~keep:domain.lazy_tree engine folder)
   in
-  if not domain.domain.read_only then apply engine folder actions;
+  if not domain.domain.read_only then
+    ignore (Format_merge.apply engine folder actions);
   let keyring =
     match E.kind keyring_path with
       | `Absent | `Dir -> `Absent
@@ -559,7 +540,7 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
           | _ -> None)
       (files engine folder)
   in
-  apply engine folder copies
+  ignore (Format_merge.apply engine folder copies)
 
 let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
   let enrolls = secret_key <> None in

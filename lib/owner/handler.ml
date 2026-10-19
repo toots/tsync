@@ -31,6 +31,7 @@ type t = {
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
   pulls : Pulls.t option;  (** on a pulled tree *)
   vault : Vault.t;
+  formats : Format_merge.t;
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -123,8 +124,27 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       answered_unreachable = Atomic.make false;
       running = Atomic.make None;
       vault = Vault.create ?pulls ();
+      formats = Format_merge.create ();
     }
   in
+  (* format-merge §3.1, §3.2. *)
+  Format_merge.register t.formats
+    {
+      name = "vault-keyring";
+      folder = Vault.folder;
+      settle =
+        (fun () ->
+          ignore
+            (Vault.status ~domain ~engine ~lazy_tree:domain.lazy_tree t.vault));
+    };
+  Format_merge.register t.formats
+    {
+      name = "totp-records";
+      folder = Totp_verbs.folder;
+      settle =
+        (fun () ->
+          Totp_verbs.fold ~domain ~engine ~lazy_tree:domain.lazy_tree t.vault);
+    };
   (* vault §6.3: the domain's status reports new machines from the start, the
      keystore's K included. *)
   Rt.spawn ~name:"vault machines" (fun () ->
@@ -139,9 +159,16 @@ let notify_folders t dirs =
     folders_changed ~domain:(domain_name t) ~engine:t.engine ~publish:t.publish
       dirs
 
+(* format-merge §2 rule 1. *)
+let copies_arrived t keys =
+  Format_merge.arrived t.formats
+    ~spawn:(fun f -> Rt.spawn ~name:"format merge" f)
+    keys
+
 (* vault §6.3: an entry arriving in the machine list is announced at once. *)
 let keys_changed t keys =
   notify_folders t (List.map Names.parent_of keys);
+  copies_arrived t keys;
   if List.exists (fun k -> Names.parent_of k = Vault.machines_folder) keys then
     Rt.spawn ~name:"vault machines" (fun () ->
         try ignore (Vault.announce ~domain:t.domain ~engine:t.engine t.vault)

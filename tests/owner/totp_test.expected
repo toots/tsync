@@ -68,7 +68,7 @@ holds a label: false
   pause                              ok
   owner renames                      ok
   resume                             ok
-  before the fold: <id1> <id1> (conflicted copy from test) <id2> <id3> <id4> <id5> <id6> <id7>
+  after the arrival: <id1> <id2> <id3> <id4> <id5> <id6> <id7>
   list
   <id1> "ACME Inc" "b@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
@@ -78,13 +78,18 @@ holds a label: false
   <id7> "Raw, Inc" "r" code of 6 digits
   <id3> "Text" "typed" code of 6 digits
   after: <id1> <id2> <id3> <id4> <id5> <id6> <id7>
+== a copy arriving is settled with no verb asked (format-merge §2)
+  pause                              ok
+  owner renames                      ok
+  resume                             ok
+  after the arrival alone: <id1> <id2> <id3> <id4> <id5> <id6> <id7>
 == a seed changed in place on B
   pause                              ok
   owner renames                      ok
   resume                             ok
-  before the fold: <id1> <id2> <id2> (conflicted copy from test) <id3> <id4> <id5> <id6> <id7>
+  after the arrival: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
   list
-  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id1> "ACME B" "b@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
@@ -94,7 +99,7 @@ holds a label: false
   <id3> "Text" "typed" code of 6 digits
   after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
   list again, nothing to fold
-  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id1> "ACME B" "b@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
@@ -105,7 +110,7 @@ holds a label: false
   after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
 == a record whose plaintext is corrupt
   list
-  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id1> "ACME B" "b@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
@@ -118,7 +123,7 @@ holds a label: false
   export names it: true
   remove it                          ok
   list
-  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id1> "ACME B" "b@example.com" code of 6 digits
   <id4> "B" "b" code of 6 digits
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
@@ -130,7 +135,7 @@ holds a label: false
   pause                              ok
   owner changes the passphrase       ok
   resume                             ok
-  before the fold: keyring keyring (conflicted copy from test) machines
+  after the arrival: keyring machines
   status unlocked slots={"secret-key":2,"unknown":1} copies=[]
   after: keyring machines
 == two inits race; the owner's loses

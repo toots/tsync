@@ -253,6 +253,27 @@ let leaves (module B : Engine.S) =
            else show_id e.name)
          (B.list_children folder))
 
+(* format-merge §2: copies settle in the background after an arrival; wait for
+   them rather than for a duration. *)
+let settled_leaves ?(path = folder) b =
+  let (module B : Engine.S) = b in
+  let names () =
+    ignore (B.resync ());
+    List.map (fun (e : B.entry) -> e.name) (B.list_children path)
+  in
+  let deadline = Unix.gettimeofday () +. 20. in
+  let rec wait () =
+    settle_owner 100;
+    if
+      List.exists (fun n -> Tsync_vault.Fold.copied_from n <> None) (names ())
+      && Unix.gettimeofday () < deadline
+    then (
+      Rt.sleep 0.1;
+      wait ())
+  in
+  wait ();
+  if path = folder then leaves b else String.concat " " (names ())
+
 let () =
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
@@ -475,10 +496,20 @@ let () =
         ~on_b:(fun () ->
           b_edit b key acme (fun r ->
               { r with account = "b@example.com"; modified = r.modified + 3600 }));
-      p "  before the fold: %s" (leaves b);
+      p "  after the arrival: %s" (settled_leaves b);
       listing "  list";
       settle_owner 100;
       p "  after: %s" (leaves b);
+      p "== a copy arriving is settled with no verb asked (format-merge §2)";
+      concurrently b
+        ~owner:(fun () ->
+          answer "  owner renames"
+            (ask
+               [("action", "totp_rename"); ("id", acme); ("issuer", "ACME Co")]))
+        ~on_b:(fun () ->
+          b_edit b key acme (fun r ->
+              { r with issuer = "ACME B"; modified = r.modified + 7200 }));
+      p "  after the arrival alone: %s" (settled_leaves b);
       p "== a seed changed in place on B";
       concurrently b
         ~owner:(fun () ->
@@ -487,7 +518,7 @@ let () =
                [("action", "totp_rename"); ("id", bob); ("issuer", "Other Inc")]))
         ~on_b:(fun () ->
           b_edit b key bob (fun r -> { r with secret = "JBSWY3DPEHPK3PXP" }));
-      p "  before the fold: %s" (leaves b);
+      p "  after the arrival: %s" (settled_leaves b);
       listing "  list";
       settle_owner 100;
       p "  after: %s" (leaves b);
@@ -539,12 +570,7 @@ let () =
               }
           in
           put b path (V.Keyring.to_string { k with slots = later :: k.slots }));
-      p "  before the fold: %s"
-        (ignore (B.resync ());
-         String.concat " "
-           (List.map
-              (fun (e : B.entry) -> e.name)
-              (B.list_children ".tsync-ext/vault")));
+      p "  after the arrival: %s" (settled_leaves ~path:".tsync-ext/vault" b);
       let st = ask [("action", "vault_status")] in
       p "  status %s slots=%s copies=%s"
         (Option.get (field st "vault"))
