@@ -36,6 +36,32 @@ let opened ctx (f : Fold.file) =
         Hashtbl.replace ctx.opened f.body r;
         r
 
+(* §3: a record moved from a conflicted copy to a digest id (rule 5) says the
+   client it came from. A write after the fold, which sealing makes no function
+   of the bytes; concurrent relabels write the same plaintext. *)
+let relabel ctx = function
+  (* A copy's name starts with its record id: rule 4 moves it back there. *)
+  | Fold.Move { src; dst }
+    when Fold.copied_from src <> None && dst <> String.sub src 0 32 -> (
+      let client = Option.get (Fold.copied_from src) in
+      let suffix = Printf.sprintf " (conflicted copy from %s)" client in
+      let path = Names.join folder dst in
+      let file = { Fold.name = dst; body = Vault.read_file ctx.engine path } in
+      match opened ctx file with
+        | Some (r : Totp.t)
+          when not
+                 (String.ends_with ~suffix r.issuer
+                 || String.ends_with ~suffix r.account) ->
+            let r =
+              if r.issuer <> "" then { r with issuer = r.issuer ^ suffix }
+              else { r with account = r.account ^ suffix }
+            in
+            Vault.write_file ctx.engine ~exclusive:false path
+              (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
+                 (Totp.to_string r))
+        | _ -> ())
+  | _ -> ()
+
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
 let settled ctx =
@@ -48,6 +74,7 @@ let settled ctx =
     | [] -> files
     | actions ->
         Vault.apply ctx.engine folder actions;
+        List.iter (relabel ctx) actions;
         Vault.files ~keep:ctx.keep ctx.engine folder
 
 (* README §4.1: a read answers the last view of the vault's folders and this

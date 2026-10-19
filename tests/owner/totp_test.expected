@@ -87,7 +87,17 @@ holds a label: false
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
   <id2> "Other" "bob" code of 6 digits
-  <id8> "Other Inc" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+  after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
+  list again, nothing to fold
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
   <id7> "Raw, Inc" "r" code of 6 digits
   <id3> "Text" "typed" code of 6 digits
   after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
@@ -98,7 +108,7 @@ holds a label: false
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
   <id2> "Other" "bob" code of 6 digits
-  <id8> "Other Inc" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
   <id7> "Raw, Inc" "r" code of 6 digits
   <id3> "Text" "typed" code of 6 digits
   corrupt <id9>
@@ -111,7 +121,7 @@ holds a label: false
   <id5> "Foo, Inc" "a" code of 6 digits
   <id6> "Mail" "me@example.org" code of 6 digits
   <id2> "Other" "bob" code of 6 digits
-  <id8> "Other Inc" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
   <id7> "Raw, Inc" "r" code of 6 digits
   <id3> "Text" "typed" code of 6 digits
 == both change the keyring

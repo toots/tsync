@@ -11,6 +11,9 @@ type action =
 (** [32hexlower]. *)
 val is_record_id : string -> bool
 
+(** The client a conflicted copy's name says it came from. *)
+val copied_from : string -> string option
+
 (** The grouped fold (README §4.3) of every record id among [files], leaves of
     one extension folder. [open_] is [None] for a file that does not open. *)
 val grouped :
