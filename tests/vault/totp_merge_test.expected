@@ -1,0 +1,8 @@
+totp-records the result does not depend on file order           yes
+totp-records settling the result again changes nothing          yes
+totp-records the newer of two mergeable edits replaces the older yes
+totp-records no conflicted copy is left                         yes
+totp-records two conflicting edits are both kept                yes
+totp-records two clients settling one state converge            yes
+totp-records 1000 clashes settle within 5 s and 64 MiB          yes
+totp-records 10000 clashes settle within 60 s and 512 MiB       yes
