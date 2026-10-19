@@ -254,6 +254,35 @@ APPEX_ENTITLEMENTS=$(effective_entitlements "$APPEX" \
 CREDENTIALS_ENTITLEMENTS="$MACOS_DIR/TsyncCredentials/TsyncCredentials.release.entitlements"
 APP_ENTITLEMENTS=$(effective_entitlements "$APP" \
     "$MACOS_DIR/TsyncApp/TsyncApp.entitlements")
+# pitfall B-11.14: the system lists an AutoFill extension only when its app
+# holds the entitlement too, under a profile naming the app's identifier.
+if [[ -d "$CREDENTIALS_APPEX" ]]; then
+    : "${PROFILE_APP:?the AutoFill extension needs PROFILE_APP authorising AutoFill}"
+    profile_plist=$(mktemp)
+    security cms -D -i "$PROFILE_APP" >"$profile_plist"
+    app_id=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.application-identifier" "$profile_plist")
+    team=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.developer.team-identifier" "$profile_plist")
+    autofill=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.developer.authentication-services.autofill-credential-provider" \
+        "$profile_plist" 2>/dev/null || true)
+    rm -f "$profile_plist"
+    [[ "$autofill" == "true" ]] || {
+        echo "PROFILE_APP does not authorise the AutoFill credential provider" >&2
+        exit 1
+    }
+    app_entitlements="${TMPDIR:-/tmp}/TsyncApp.release.entitlements"
+    cp "$APP_ENTITLEMENTS" "$app_entitlements"
+    for claim in "com.apple.application-identifier string $app_id" \
+        "com.apple.developer.team-identifier string $team" \
+        "com.apple.developer.authentication-services.autofill-credential-provider bool true"; do
+        read -r key type value <<<"$claim"
+        /usr/libexec/PlistBuddy -c "Delete :$key" "$app_entitlements" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :$key $type $value" "$app_entitlements"
+    done
+    APP_ENTITLEMENTS="$app_entitlements"
+fi
 
 for dylib in "$DAEMON_APP/Contents/libs"/*.dylib; do
     sign "$dylib"
