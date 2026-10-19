@@ -45,3 +45,51 @@
  (alias runtest)
  (action
   (diff totp_merge_test.expected totp_merge_test.output)))
+
+(executable
+ (name webauthn_test)
+ (modules webauthn_test)
+ (libraries tsync_vault digestif mirage-crypto-ec x509))
+
+(rule
+ (action
+  (with-stdout-to
+   webauthn_test.output
+   (run ./webauthn_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff webauthn_test.expected webauthn_test.output)))
+
+(executable
+ (name passwords_test)
+ (modules passwords_test)
+ (libraries tsync_core tsync_vault yojson base64))
+
+(rule
+ (action
+  (with-stdout-to
+   passwords_test.output
+   (run ./passwords_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff passwords_test.expected passwords_test.output)))
+
+(executable
+ (name passwords_merge_test)
+ (modules passwords_merge_test)
+ (libraries tsync_vault tsync_merge_kit))
+
+(rule
+ (action
+  (with-stdout-to
+   passwords_merge_test.output
+   (run ./passwords_merge_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff passwords_merge_test.expected passwords_merge_test.output)))
