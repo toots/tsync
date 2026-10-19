@@ -116,6 +116,8 @@ type totp_row = {
 type totp_listing = {
   rows : totp_row list;
   corrupt : string list;  (** record ids that do not open *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;
 }
 
 (** totp §5.3: a seed given as its text. *)
@@ -930,22 +932,24 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
         ok [("uris", strings reply.uris); ("corrupt", strings reply.corrupt)]
     | Totp_list _ ->
         ok
-          [
-            ( "records",
-              `List
-                (List.map
-                   (fun r ->
-                     `Assoc
-                       [
-                         ("id", `String r.id);
-                         ("issuer", `String r.issuer);
-                         ("account", `String r.account);
-                         ("code", `String r.code);
-                         ("secondsLeft", `Int r.seconds_left);
-                       ])
-                   reply.rows) );
-            ("corrupt", `List (List.map (fun c -> `String c) reply.corrupt));
-          ]
+          ([
+             ( "records",
+               `List
+                 (List.map
+                    (fun r ->
+                      `Assoc
+                        [
+                          ("id", `String r.id);
+                          ("issuer", `String r.issuer);
+                          ("account", `String r.account);
+                          ("code", `String r.code);
+                          ("secondsLeft", `Int r.seconds_left);
+                        ])
+                    reply.rows) );
+             ("corrupt", `List (List.map (fun c -> `String c) reply.corrupt));
+           ]
+          @ (if reply.outdated then [("outdated", `Bool true)] else [])
+          @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at)
     | Vault_init _ -> ok (secret_fields reply)
     | Vault_kit _ -> ok (secret_fields reply)
     | Vault_rekey _ ->
@@ -1234,6 +1238,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
             List.filter_map
               (function `String s -> Some s | _ -> None)
               (strings "corrupt");
+          outdated = flag j "outdated";
+          pulled_at = Option.map float_of_int (int j "pulledAt");
         }
     | Vault_init _ -> secret_of j
     | Vault_kit _ -> secret_of j

@@ -129,6 +129,8 @@ type totp_row = {
 type totp_listing = {
   rows : totp_row list;
   corrupt : string list;  (** record ids that do not open *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;
 }
 
 (** totp §5.3: a seed given as its text. *)

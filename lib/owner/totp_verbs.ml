@@ -18,6 +18,7 @@ type ctx = {
   key_id : string;
   opened : (string, Totp.t option) Hashtbl.t;
       (** by body: a verb opens each body once, the fold's included *)
+  keep : bool;  (** a lazy tree: bodies read stay pinned (README §4.1) *)
 }
 
 let opened ctx (f : Fold.file) =
@@ -38,7 +39,7 @@ let opened ctx (f : Fold.file) =
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
 let settled ctx =
-  let files = Vault.files ctx.engine folder in
+  let files = Vault.files ~keep:ctx.keep ctx.engine folder in
   match
     Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
       ~modified:(fun (r : Totp.t) -> r.modified)
@@ -47,19 +48,25 @@ let settled ctx =
     | [] -> files
     | actions ->
         Vault.apply ctx.engine folder actions;
-        Vault.files ctx.engine folder
+        Vault.files ~keep:ctx.keep ctx.engine folder
 
-let context ~domain ~engine ~lazy_tree t =
+(* README §4.1: a read answers the last view of the vault's folders and this
+   one; a write proceeds on it, pushed later. *)
+let context ?(writing = false) ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
   let keyring, key = Vault.held ~domain ~engine ~lazy_tree t in
   if lazy_tree then (
     let (module E : Tsync_sync.Engine.S) = engine in
-    if E.kind folder = `Dir then ignore (E.pull folder));
+    if not writing then
+      Vault.read_folders engine t (Vault.vault_folders @ [folder])
+      (* The first record makes the folder: nothing to pull yet. *)
+    else if E.kind folder = `Dir then Vault.before_write t folder);
   {
     engine;
     key;
     key_id = keyring.Tsync_vault.Keyring.key_id;
     opened = Hashtbl.create 16;
+    keep = lazy_tree;
   }
 
 let now () = int_of_float (Unix.time ())
@@ -74,7 +81,7 @@ let write ctx ~exclusive id record =
        (Totp.to_string record))
 
 let add ~domain ~engine ~lazy_tree t source =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   match
     match source with
       | `Uri uri -> Totp.of_uri ~now:(now ()) uri
@@ -131,7 +138,8 @@ let list ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
     |> List.sort (fun (a : Protocol.totp_row) b ->
         compare (a.issuer, a.account, a.id) (b.issuer, b.account, b.id))
   in
-  { rows; corrupt }
+  let view = Atomic.get t.Vault.view in
+  { rows; corrupt; outdated = view.outdated; pulled_at = view.pulled_at }
 
 let find ctx id =
   if not (Fold.is_record_id id) then Fail.invalid "%S is not a record id" id;
@@ -152,7 +160,7 @@ let code ~domain ~engine ~lazy_tree t id : Protocol.totp_code =
   }
 
 let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   let r = find ctx id in
   let r =
     {
@@ -168,7 +176,7 @@ let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
 
 (* §5: removing needs no plaintext, so a record that does not open goes too. *)
 let remove ~domain ~engine ~lazy_tree t id =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   (match find ctx id with
     | _ -> ()
     | exception Fail.E { kind = Corrupt; _ } -> ());
@@ -192,7 +200,7 @@ let entries line =
 
 (* §5.2: a refusal names the line, never its content. *)
 let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   let known = ref (List.map snd (fst (records ctx))) in
   let added = ref 0 and already = ref 0 and refused = ref [] in
   List.iteri

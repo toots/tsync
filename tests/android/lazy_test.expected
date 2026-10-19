@@ -106,10 +106,16 @@
   write, the store down              ok
 == the vault, then the store down (extensions README §4.1)
   init                               ok
+  add                                ok
   status                             unlocked pulledAt
+  codes                              1 record(s)
   status, the store down             unlocked outdated pulledAt
+  codes, the store down              1 record(s), outdated
+  add, the store down                ok
+  codes after it                     2 record(s), outdated
   init, the store down               unreachable (the store is down)
   passphrase, the store down         unreachable (the store is down)
   status, the store back             unlocked pulledAt
+  codes, the store back              2 record(s)
 == status
   names the frontend                 true
