@@ -465,6 +465,9 @@ let () =
       listing "  list";
       settle_owner 100;
       p "  after: %s" (leaves b);
+      listing "  list again, nothing to fold";
+      settle_owner 100;
+      p "  after: %s" (leaves b);
       p "== a record whose plaintext is corrupt";
       let bad = String.make 32 'c' in
       put b (Names.join folder bad)

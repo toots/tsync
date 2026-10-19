@@ -20,6 +20,23 @@ let base_of name =
   in
   if String.ends_with ~suffix:")" name then find 0 else None
 
+(* conflict-resolution §5: "<base> (conflicted copy[ n] from <client>)". *)
+let copied_from name =
+  Option.bind (base_of name) (fun base ->
+      let rest =
+        String.sub name (String.length base)
+          (String.length name - String.length base)
+      in
+      let marker = " from " in
+      let n = String.length rest and m = String.length marker in
+      let rec find i =
+        if i + m > n then None
+        else if String.sub rest i m = marker then
+          Some (String.sub rest (i + m) (n - i - m - 1))
+        else find (i + 1)
+      in
+      find 0)
+
 let groups files =
   let by = Hashtbl.create 16 in
   List.iter

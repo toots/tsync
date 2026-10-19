@@ -275,3 +275,17 @@ let () =
   plaintexts ();
   folds ();
   keyrings ()
+
+let () =
+  p "\n== the client a copy came from\n";
+  let id = String.make 32 'a' in
+  List.iter
+    (fun name ->
+      p "%-60s %s\n" name
+        (Option.value ~default:"-" (Tsync_vault.Fold.copied_from name)))
+    [
+      id;
+      id ^ " (conflicted copy from laptop)";
+      id ^ " (conflicted copy 2 from the phone)";
+      id ^ " (something else)";
+    ]
