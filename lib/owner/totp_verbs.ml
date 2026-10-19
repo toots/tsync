@@ -19,6 +19,7 @@ type ctx = {
   opened : (string, Totp.t option) Hashtbl.t;
       (** by body: a verb opens each body once, the fold's included *)
   keep : bool;  (** a lazy tree: bodies read stay pinned (README §4.1) *)
+  writable : bool;  (** format-merge §2: a fold is applied only then *)
 }
 
 let opened ctx (f : Fold.file) =
@@ -56,7 +57,7 @@ let relabel ctx = function
               if r.issuer <> "" then { r with issuer = r.issuer ^ suffix }
               else { r with account = r.account ^ suffix }
             in
-            Vault.write_file ctx.engine ~exclusive:false path
+            Format_merge.write_file ctx.engine ~exclusive:false path
               (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
                  (Totp.to_string r))
         | _ -> ())
@@ -65,7 +66,7 @@ let relabel ctx = function
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
 let settled ctx =
-  Format_merge.settle_folder ~after:(relabel ctx)
+  Format_merge.settle_folder ~after:(relabel ctx) ~writable:ctx.writable
     ~read:(fun () -> Vault.files ~keep:ctx.keep ctx.engine folder)
     ~fold:
       (Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
@@ -89,6 +90,7 @@ let context ?(writing = false) ~domain ~engine ~lazy_tree t =
     key_id = keyring.Tsync_vault.Keyring.key_id;
     opened = Hashtbl.create 16;
     keep = lazy_tree;
+    writable = not domain.Tsync_domain.Domain.domain.read_only;
   }
 
 let now () = int_of_float (Unix.time ())
@@ -98,7 +100,7 @@ let write ctx ~exclusive id record =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [Names.extension_root; folder];
-  Vault.write_file ctx.engine ~exclusive (Names.join folder id)
+  Format_merge.write_file ctx.engine ~exclusive (Names.join folder id)
     (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
        (Totp.to_string record))
 

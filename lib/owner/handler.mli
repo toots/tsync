@@ -75,3 +75,7 @@ val extensions : t -> string list
 (** The paths the engine changed behind the frontends: a conflicted copy among
     them settles its folder in the background (format-merge §2). *)
 val copies_arrived : t -> string list -> unit
+
+(** At owner start: the copies already in each format's folder settle
+    (format-merge §2). *)
+val sweep_copies : t -> unit

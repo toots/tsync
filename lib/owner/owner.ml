@@ -346,6 +346,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
         E.set_changed_hook (fun keys ->
             hooks.changed keys;
             Handler.copies_arrived h keys);
+        Handler.sweep_copies h;
         { domain; go; handler = h })
       domains;
   let router =
@@ -442,7 +443,10 @@ let embed ?(start = true) ?pull_params ~role ~what ~roots ~publish ~frontend
               ~stats:(fun _ -> stats_reply [(name, report)] report)
               ~stop:ignore ~dest_roots:roots ~staging_roots:roots ()
           in
-          E.set_changed_hook (Handler.keys_changed handler);
+          E.set_changed_hook (fun keys ->
+              Handler.keys_changed handler keys;
+              Handler.copies_arrived handler keys);
+          Handler.sweep_copies handler;
           { lock; domain; engine; handler }
         with e ->
           release lock;
