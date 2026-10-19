@@ -390,6 +390,11 @@ let mutates : type a. a request -> bool = function
   | Vault_appearance _ | Vault_rekey _ | Totp_add _ | Totp_rename _
   | Totp_remove _ | Totp_import _ ->
       true
+  (* extensions README §6: an extension's verbs that write, by name. *)
+  | Extension e ->
+      List.exists
+        (fun suffix -> String.ends_with ~suffix e.action)
+        ["_add"; "_edit"; "_remove"; "_import"; "_passkey_create"]
   | _ -> false
 
 let bulk : type a. a request -> bool = function

@@ -67,22 +67,29 @@ let no_symbols =
   Arg.(
     value & flag & info ["no-symbols"] ~doc:"Generate letters and digits only.")
 
-let secret_args ~password ~generate ~no_symbols ~ask_if_absent =
+(* §5: a password typed, given or generated, one of them or none. *)
+let secret_of ~password ~generate =
   match (password, generate) with
-    | Some p, None -> [("password", s (from_stdin p))]
-    | None, Some length ->
+    | Some p, None -> Some (`Password p)
+    | None, Some length -> Some (`Generate length)
+    | None, None -> None
+    | Some _, Some _ -> Fail.invalid "give --password or --generate, not both"
+
+let secret_args ~no_symbols ~ask_if_absent secret =
+  match secret with
+    | Some (`Password p) -> [("password", s (from_stdin p))]
+    | Some (`Generate length) ->
         [
           ( "generate",
             `Assoc
               [("length", `Int length); ("symbols", `Bool (not no_symbols))] );
         ]
-    | None, None when ask_if_absent ->
+    | None when ask_if_absent ->
         [
           ( "password",
             s (Vault_cmds.read_passphrase ~prompt:"password" ~stdin:false ()) );
         ]
-    | None, None -> []
-    | Some _, Some _ -> Fail.invalid "give --password or --generate, not both"
+    | None -> []
 
 let optional fields =
   List.filter_map (fun (k, v) -> Option.map (fun v -> (k, s v)) v) fields
@@ -108,7 +115,8 @@ let add_cmd =
           let reply =
             call d "add"
               ([("title", s title); ("urls", `List (List.map s urls))]
-              @ secret_args ~password ~generate ~no_symbols ~ask_if_absent:true
+              @ secret_args ~no_symbols ~ask_if_absent:true
+                  (secret_of ~password ~generate)
               @ optional
                   [
                     ("username", username);
@@ -209,8 +217,8 @@ let edit_cmd =
             (call (holder ?name config id) "edit"
                ([("id", s id)]
                @ (if urls = [] then [] else [("urls", `List (List.map s urls))])
-               @ secret_args ~password ~generate ~no_symbols
-                   ~ask_if_absent:false
+               @ secret_args ~no_symbols ~ask_if_absent:false
+                   (secret_of ~password ~generate)
                @ optional
                    [
                      ("title", title);
@@ -329,6 +337,9 @@ let required j k =
 
 let fields_of j = match j with `Assoc l -> l | _ -> []
 
+(* The members of a request a verb takes; the rest are dropped. *)
+let only j keys = List.filter (fun (k, _) -> List.mem k keys) (fields_of j)
+
 (* §9.2: every domain using passwords, each answering on its own. *)
 let bridge_request config j =
   let all f =
@@ -366,6 +377,7 @@ let bridge_request config j =
         ]
     | Some "match" ->
         let origin = required j "origin" in
+        let answers = all (fun d -> call d "list" [("site", s origin)]) in
         [
           ( "logins",
             `List
@@ -389,7 +401,7 @@ let bridge_request config j =
                                     ]))
                            (records reply)
                      | Error _ -> [])
-                 (all (fun d -> call d "list" [("site", s origin)]))) );
+                 answers) );
           ( "locked",
             `List
               (List.filter_map
@@ -398,7 +410,7 @@ let bridge_request config j =
                      | Error (e : Fail.t) when e.kind = Locked ->
                          Some (s (dname d))
                      | _ -> None)
-                 (all (fun d -> call d "list" [("site", s origin)]))) );
+                 answers) );
         ]
     | Some "fill" ->
         let origin = required j "origin" and id = required j "id" in
@@ -425,14 +437,13 @@ let bridge_request config j =
         and username = required j "username"
         and password = required j "password" in
         let d = pick j in
-        let same, other =
-          List.partition
+        let same =
+          List.filter
             (fun row -> field row "username" = Some username)
             (List.filter
                (fun row -> field row "kind" = Some "login")
                (records (call d "list" [("site", s origin)])))
         in
-        ignore other;
         (* §8 save: equal adds nothing, one with another password is
            updated only on [update], anything else is added. *)
         let has_password row =
@@ -487,14 +498,26 @@ let bridge_request config j =
                              List.mem k ["origin"; "rpId"; "allow"])
                            (fields_of j))))) );
         ]
+    (* §7.4: a browser verifies with the passphrase only; whatever else it
+       sends, [verified] included, never reaches the owner. *)
     | Some "passkey_create" ->
         call (pick j) "passkey_create"
-          (List.filter
-             (fun (k, _) -> k <> "type" && k <> "domain")
-             (fields_of j))
+          (only j
+             [
+               "origin";
+               "rpId";
+               "userHandle";
+               "userName";
+               "userDisplayName";
+               "algorithms";
+               "exclude";
+               "clientDataHash";
+               "passphrase";
+               "login";
+             ])
     | Some "passkey_assert" ->
         call (pick j) "passkey_assert"
-          (List.filter (fun (k, _) -> k <> "type") (fields_of j))
+          (only j ["origin"; "rpId"; "id"; "clientDataHash"; "passphrase"])
     | Some other -> Fail.invalid "the bridge does not forward %s" other
     | None -> Fail.invalid "a request names its type"
 

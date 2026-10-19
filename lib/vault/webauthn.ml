@@ -152,76 +152,10 @@ let sign ~private_key ~authenticator_data ~client_data_hash =
   let body = der_integer r ^ der_integer s in
   Printf.sprintf "\x30%c%s" (Char.chr (String.length body)) body
 
-(* RFC 3492 with the IDNA parameters, for the list's U-labels. *)
-let punycode code_points =
-  let base = 36 and tmin = 1 and tmax = 26 in
-  let digit d = Char.chr (if d < 26 then d + 97 else d + 22) in
-  let adapt delta numpoints first =
-    let delta = if first then delta / 700 else delta / 2 in
-    let delta = ref (delta + (delta / numpoints)) and k = ref 0 in
-    while !delta > (base - tmin) * tmax / 2 do
-      delta := !delta / (base - tmin);
-      k := !k + base
-    done;
-    !k + ((base - tmin + 1) * !delta / (!delta + 38))
-  in
-  let out = Buffer.create 32 in
-  List.iter
-    (fun c -> if c < 0x80 then Buffer.add_char out (Char.chr c))
-    code_points;
-  let basic = Buffer.length out in
-  if basic > 0 then Buffer.add_char out '-';
-  let total = List.length code_points in
-  let n = ref 128 and delta = ref 0 and bias = ref 72 and handled = ref basic in
-  while !handled < total do
-    let m =
-      List.fold_left
-        (fun m c -> if c >= !n && c < m then c else m)
-        max_int code_points
-    in
-    delta := !delta + ((m - !n) * (!handled + 1));
-    n := m;
-    List.iter
-      (fun c ->
-        if c < !n then incr delta
-        else if c = !n then (
-          let q = ref !delta and k = ref base and fin = ref false in
-          while not !fin do
-            let t =
-              if !k <= !bias then tmin
-              else if !k >= !bias + tmax then tmax
-              else !k - !bias
-            in
-            if !q < t then fin := true
-            else (
-              Buffer.add_char out (digit (t + ((!q - t) mod (base - t))));
-              q := (!q - t) / (base - t);
-              k := !k + base)
-          done;
-          Buffer.add_char out (digit !q);
-          bias := adapt !delta (!handled + 1) (!handled = basic);
-          delta := 0;
-          incr handled))
-      code_points;
-    incr delta;
-    incr n
-  done;
-  Buffer.contents out
-
-let code_points label =
-  let rec go i acc =
-    if i >= String.length label then List.rev acc
-    else (
-      let d = String.get_utf_8_uchar label i in
-      go
-        (i + Uchar.utf_decode_length d)
-        (Uchar.to_int (Uchar.utf_decode_uchar d) :: acc))
-  in
-  go 0 []
-
+(* The list's U-labels in the A-label form RP IDs arrive in; a label that is no
+   host label ([*], [!name]) is kept as written. *)
 let a_label label =
-  if String.for_all (fun c -> Char.code c < 0x80) label then label
-  else "xn--" ^ punycode (code_points label)
+  match Passwords.a_label label with Ok a -> a | Error _ -> label
 
 type rules = {
   normal : (string, unit) Hashtbl.t;
