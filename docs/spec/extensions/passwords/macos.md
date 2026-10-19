@@ -44,7 +44,13 @@ list, never reported as empty.
   `passwords_get`.
 - The extension never answers `provideCredentialWithoutUserInteraction`: every fill shows the
   sheet and waits for the user's pick (passwords §8: no fill without a gesture). It cancels with
-  `ASExtensionError.userInteractionRequired`, and the system then shows the sheet.
+  `ASExtensionError.userInteractionRequired`, and the system then calls
+  `prepareInterfaceToProvideCredential(for:)`. The system offers such a request for a credential
+  it remembers from an earlier pick, whose record may since be gone: the extension shows the
+  sheet of the request's kind for its service (the logins, or the passkeys of its RP ID), never
+  completing from the remembered record alone.
+- It logs which entry point each request arrived through, and the number of rows it listed,
+  under the subsystem `org.feverdreamtv.tsync.credentials`.
 - The system's identity store is not filled: no site or username leaves the vault for the
   system's suggestion bar.
 - **Save** is not offered: macOS hands no typed password to a credential provider.
