@@ -40,6 +40,14 @@ class VaultTest {
     }
 
     @Test
+    fun statsCarryTheExtensionsInForce() {
+        val (_, client) = vault(listOf("totp"))
+        val stats = client.stats()
+        assertEquals(listOf("totp"), stats.extensions)
+        assertEquals(false, stats.extensionsFromServer)
+    }
+
+    @Test
     fun aVaultMadeElsewhereIsLockedUntilUnlocked() {
         val (vault, client) = vault(listOf("totp"))
         assertEquals("absent", vault.status()!!.state)

@@ -229,6 +229,12 @@
     <string name="code_scan">Scan a QR code</string>
     <string name="code_scan_unavailable">Needs Google Play services</string>
     <string name="code_scan_failed">The scan failed</string>
+    <string name="code_scan_camera">If the camera did not open, give Google Play services the camera permission: the scanner is theirs.</string>
+    <string name="secret_show">Show</string>
+    <string name="secret_hide">Hide</string>
+    <string name="settings_extensions">Extensions: %1$s</string>
+    <string name="settings_extensions_none">none</string>
+    <string name="settings_extensions_server">%1$s (the server\'s)</string>
     <string name="code_enter">Enter a code</string>
     <string name="code_import">Import a file</string>
     <string name="code_imported">Added %1$d, already there %2$d, refused %3$d</string>
