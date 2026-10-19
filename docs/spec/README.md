@@ -199,6 +199,7 @@ Extensions:
 | [algorithms/change-algebra](algorithms/change-algebra.md) | The theory: keys, values, commands, batches, the merge, and the proof of every claim the protocol relies on. |
 | [algorithms/publication](algorithms/publication.md) | The protocol: before-values, upload, the numbered log, fetch and push, projection, arrival by state, recovery, retention. |
 | [algorithms/conflict-resolution](algorithms/conflict-resolution.md) | The principle, how a merge is enacted locally, the conflicted-copy name, and the outcome of every clash. |
+| [algorithms/format-merge](algorithms/format-merge.md) | Optional: settling a file and its conflicted copies after the arrival, for formats where that is no guess; the totp records are the first. |
 | [algorithms/durable-queue](algorithms/durable-queue.md) | Durable queues, persistence rules, and crash immunity across the application. |
 | [algorithms/failure-model](algorithms/failure-model.md) | Failure kinds, propagation, response policy, error codes and deadlines. |
 | [algorithms/replication](algorithms/replication.md) | Several stores with roles presented as one: write and read paths, deferred copies, write guard, repair. |
