@@ -170,8 +170,9 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             current == null -> Loading(padding)
             current.state == "absent" -> Message(stringResource(R.string.vault_absent), padding)
             current.state == "corrupt" -> Message(stringResource(R.string.vault_corrupt), padding)
-            current.state == "locked" -> Column(Modifier.padding(padding).padding(16.dp)) {
-                UnlockForm(tsync, current.enrolled, onUnlocked = ::reload)
+            current.state == "locked" -> Column(Modifier.padding(padding)) {
+                if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+                Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
             }
             else -> CodesList(tsync, padding, onLocked = ::reload)
         }
@@ -281,6 +282,7 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
         )
         failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         val current = codes ?: return@Column Loading()
+        if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
             if (current.records.isEmpty()) item { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
             items(current.records, key = { it.id }) { record ->

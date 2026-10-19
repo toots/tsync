@@ -245,7 +245,7 @@ fun FilesScreen(
 }
 
 @Composable
-private fun age(pulledAt: Long?): String {
+fun age(pulledAt: Long?): String {
     val context = LocalContext.current
     if (pulledAt == null) return stringResource(R.string.unknown_time)
     return DateUtils.formatDateTime(context, pulledAt * 1000, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_ABBREV_ALL)

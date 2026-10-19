@@ -3,11 +3,19 @@ package org.feverdreamtv.tsync.core
 import org.json.JSONObject
 
 /** The vault's state (extensions/vault §8), as `vault_status` answers it. */
-data class VaultStatus(val state: String, val enrolled: Boolean, val cached: String?, val keystoreError: String?)
+data class VaultStatus(
+    val state: String,
+    val enrolled: Boolean,
+    val cached: String?,
+    val keystoreError: String?,
+    /** extensions README §4.1: answered from the last view, of that age. */
+    val outdated: Boolean = false,
+    val pulledAt: Long? = null,
+)
 
 data class OneTimeCode(val id: String, val issuer: String, val account: String, val code: String, val secondsLeft: Int)
 
-data class Codes(val records: List<OneTimeCode>, val corrupt: Int)
+data class Codes(val records: List<OneTimeCode>, val corrupt: Int, val outdated: Boolean = false, val pulledAt: Long? = null)
 
 data class Refusal(val line: Int, val reason: String)
 
@@ -30,6 +38,8 @@ class Vault(private val client: Client) {
             enrolled = reply.optBoolean("enrolled", false),
             cached = text(reply, "cached"),
             keystoreError = text(reply, "keystoreError"),
+            outdated = reply.optBoolean("outdated", false),
+            pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
         )
     }
 
@@ -50,7 +60,12 @@ class Vault(private val client: Client) {
         val records = objects(reply.optJSONArray("records")).map {
             OneTimeCode(it.getString("id"), it.optString("issuer"), it.optString("account"), it.optString("code"), it.optInt("secondsLeft"))
         }
-        return Codes(records, reply.optJSONArray("corrupt")?.length() ?: 0)
+        return Codes(
+            records,
+            reply.optJSONArray("corrupt")?.length() ?: 0,
+            outdated = reply.optBoolean("outdated", false),
+            pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
+        )
     }
 
     /** A pasted `otpauth://` URI goes as one; anything else is a bare secret (totp §5.3). */
