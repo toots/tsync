@@ -229,6 +229,8 @@
     <string name="code_scan">Scan a QR code</string>
     <string name="code_scan_unavailable">Needs Google Play services</string>
     <string name="code_scan_failed">The scan failed</string>
+    <string name="codes_offline_as_of">Offline: codes as of %1$s</string>
+    <string name="not_available_offline">Not available offline: make it available offline while connected</string>
     <string name="code_scan_camera">If the camera did not open, give Google Play services the camera permission: the scanner is theirs.</string>
     <string name="secret_show">Show</string>
     <string name="secret_hide">Hide</string>

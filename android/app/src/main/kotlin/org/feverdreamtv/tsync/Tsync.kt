@@ -154,6 +154,7 @@ class Tsync private constructor(val context: Context) {
                 }
                 "recovered" -> {
                     latch.recovered()
+                    vaultChanges.value++
                     notices.tryEmit(Notice.Recovered)
                     observed.keys.forEach(::notifyChildren)
                 }
