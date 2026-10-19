@@ -155,16 +155,24 @@ let list_cmd =
       & pos 0 (some string) None
       & info [] ~docv:"FILTER"
           ~doc:"Only records whose issuer or account contain it.")
+  and show_codes =
+    Arg.(
+      value & flag
+      & info ["show-codes"] ~doc:"Print each record's current code too.")
   in
-  verb "list" ~doc:"The current codes, with the seconds each has left."
+  verb "list"
+    ~doc:
+      "The records, with the seconds each code has left; codes with \
+       --show-codes."
     Term.(
-      const (fun filter ?name config ->
+      const (fun filter show_codes ?name config ->
           List.iter
             (fun ((d : Config.domain), (l : P.totp_listing)) ->
               List.iter
                 (fun (r : P.totp_row) ->
-                  say "%s  %2ds  %s%s%s  %s" (grouped r.code) r.seconds_left
-                    r.issuer
+                  say "%s%2ds  %s%s%s  %s"
+                    (if show_codes then grouped r.code ^ "  " else "")
+                    r.seconds_left r.issuer
                     (if r.issuer = "" || r.account = "" then "" else " / ")
                     r.account
                     (dname d ^ " " ^ r.id))
@@ -176,7 +184,7 @@ let list_cmd =
                 l.corrupt)
             (each ?name config (fun d -> Vault_cmds.ask d (P.Totp_list filter)));
           0)
-      $ filter)
+      $ filter $ show_codes)
 
 let code_cmd =
   verb "code"

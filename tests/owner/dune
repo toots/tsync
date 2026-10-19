@@ -191,7 +191,7 @@
 (rule
  (with-stdout-to
   totp_test.output
-  (run ./totp_test.exe)))
+  (run ./totp_test.exe %{dep:../../bin/tsync.exe})))
 
 (rule
  (alias runtest)
