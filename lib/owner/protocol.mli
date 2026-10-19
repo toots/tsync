@@ -334,6 +334,14 @@ type _ request =
   | Totp_import : string -> totp_imported request  (** the text of a file *)
   | Totp_export : string -> totp_exported request
       (** the passphrase as typed; one URI per record *)
+  | Extension : {
+      action : string;
+      args : (string * Yojson.Safe.t) list;
+    }
+      -> (string * Yojson.Safe.t) list request
+      (** extensions README §6: an extension's verb, its request members in and
+          its reply's out, for extensions whose actions the protocol does not
+          type one by one *)
 
 type packed = Request : 'a request -> packed
 

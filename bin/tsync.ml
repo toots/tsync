@@ -8,4 +8,4 @@ let () =
           (Cmd.info "tsync" ~doc:"Synchronise folders through object stores.")
           (Daemon_cmds.cmds @ Status_cmd.cmds @ Domain_cmds.cmds
          @ Store_cmds.cmds @ Setup_cmds.cmds @ Vault_cmds.cmds @ Totp_cmds.cmds
-          )))
+         @ Passwords_cmds.cmds)))
