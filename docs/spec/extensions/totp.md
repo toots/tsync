@@ -74,7 +74,7 @@ Every verb is of access class **owner**
 |---|---|---|
 | `add` / `totp_add` | `uri`, or `secret` with `issuer?` and `account?` | adds one record from an `otpauth://totp/` URI (§5.1) or from a bare secret (§5.3); replies with its id |
 | `code` / `totp_code` | `id` | the record's current code and seconds left; no seed, no labels |
-| `list` / `totp_list` | `filter?` | every record whose issuer or account contains `filter` (case-insensitive): id, issuer, account, code, seconds left; ordered by issuer, then account, then id |
+| `list` / `totp_list` | `filter?` | every record whose issuer or account contains `filter` (case-insensitive): id, issuer, account, code, seconds left; ordered by issuer, then account, then id; `outdated` and `pulledAt` when answered from the last view ([README §4.1](README.md#41-where-they-live)) |
 | `rename` / `totp_rename` | `id`, `issuer?`, `account?` | edits the labels and sets `modified` |
 | `remove` / `totp_remove` | `id` | removes the record, one that does not open included: removing needs no plaintext |
 | `import` / `totp_import` | `text` | adds one record per line of a plain-text export (§5.2); replies with what it added, skipped and refused |
@@ -171,4 +171,6 @@ base32 secret alone, with the account named beside it.
 - Two copies with different code fields fold into two records, both still producing their codes.
 - A record with a CORRUPT plaintext is reported and survives a fold.
 - Every verb on a locked vault is refused `locked` and changes nothing.
+- On a lazy tree with the store down after a list: `list` answers every record with its current
+  code, `outdated`; `add` is answered, the record listed at once and pushed when the store returns.
 - `export` with no passphrase, a wrong one or another domain's is refused and returns no URI.
