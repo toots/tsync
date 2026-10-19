@@ -140,6 +140,18 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     };
   Format_merge.register t.formats
     {
+      name = "passwords-records";
+      folder = Passwords_verbs.folder;
+      settle =
+        (fun () ->
+          Format_merge.locked Passwords_verbs.folder (fun () ->
+              Format_merge.locked Totp_verbs.folder (fun () ->
+                  Format_merge.locked Vault.folder (fun () ->
+                      Passwords_verbs.fold ~domain ~engine
+                        ~lazy_tree:domain.lazy_tree t.vault))));
+    };
+  Format_merge.register t.formats
+    {
       name = "totp-records";
       folder = Totp_verbs.folder;
       settle =
@@ -868,6 +880,11 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   let on_records f =
     Format_merge.locked Totp_verbs.folder (fun () -> on_vault f)
   in
+  (* A passwords verb may add or read a TOTP record: the three folders, an
+     extension's before another's by name, then the vault's. *)
+  let on_passwords f =
+    Format_merge.locked Passwords_verbs.folder (fun () -> on_records f)
+  in
   match req with
     | Ping -> ()
     | Vault_init passphrase -> on_vault (fun () -> vault Vault.init passphrase)
@@ -916,6 +933,11 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Totp_import text -> on_records (fun () -> vault Totp_verbs.import text)
     | Totp_export passphrase ->
         on_records (fun () -> vault Totp_verbs.export passphrase)
+    | Extension e ->
+        on_passwords (fun () ->
+            vault (fun ~domain ~engine ~lazy_tree vault ->
+                Passwords_verbs.act ~domain ~engine ~lazy_tree vault
+                  ~action:e.action e.args))
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit

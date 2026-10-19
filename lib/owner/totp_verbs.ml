@@ -3,110 +3,22 @@ module Totp = Tsync_vault.Totp
 module Fold = Tsync_vault.Fold
 module Envelope = Tsync_vault.Envelope
 
-let name = "totp"
-let folder = Names.join Names.extension_root name
+include Extension_records.Make (struct
+  type t = Totp.t
 
-let check_uses ~(domain : Tsync_domain.Domain.t) ~engine =
-  if not (List.mem name (Vault.extensions ~domain ~engine)) then
-    Fail.invalid "%s does not use %s: add it to its extensions in the config"
-      (Domain_name.to_string domain.name)
-      name
+  let name = "totp"
+  let of_string = Totp.of_string
+  let to_string = Totp.to_string
+  let key_fields = Totp.code_fields
+  let modified (r : Totp.t) = r.modified
 
-type ctx = {
-  engine : (module Tsync_sync.Engine.S);
-  key : string;
-  key_id : string;
-  opened : (string, Totp.t option) Hashtbl.t;
-      (** by body: a verb opens each body once, the fold's included *)
-  keep : bool;  (** a lazy tree: bodies read stay pinned (README §4.1) *)
-  writable : bool;  (** format-merge §2: a fold is applied only then *)
-}
-
-let opened ctx (f : Fold.file) =
-  match Hashtbl.find_opt ctx.opened f.body with
-    | Some r -> r
-    | None ->
-        let r =
-          match
-            Envelope.open_ ~key:ctx.key ~key_id:ctx.key_id ~extension:name
-              f.body
-          with
-            | Ok plaintext -> Result.to_option (Totp.of_string plaintext)
-            | Error _ -> None
-        in
-        Hashtbl.replace ctx.opened f.body r;
-        r
-
-(* §3: a record moved from a conflicted copy to a digest id (rule 5) says the
-   client it came from. A write after the fold, which sealing makes no function
-   of the bytes; concurrent relabels write the same plaintext. *)
-let relabel ctx = function
-  (* A copy's name starts with its record id: rule 4 moves it back there. *)
-  | Fold.Move { src; dst }
-    when Fold.copied_from src <> None && dst <> String.sub src 0 32 -> (
-      let client = Option.get (Fold.copied_from src) in
-      let suffix = Printf.sprintf " (conflicted copy from %s)" client in
-      let path = Names.join folder dst in
-      let file = { Fold.name = dst; body = Vault.read_file ctx.engine path } in
-      match opened ctx file with
-        | Some (r : Totp.t)
-          when not
-                 (String.ends_with ~suffix r.issuer
-                 || String.ends_with ~suffix r.account) ->
-            let r =
-              if r.issuer <> "" then { r with issuer = r.issuer ^ suffix }
-              else { r with account = r.account ^ suffix }
-            in
-            Format_merge.write_file ctx.engine ~exclusive:false path
-              (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
-                 (Totp.to_string r))
-        | _ -> ())
-  | _ -> ()
-
-(* README §4.3, run before a verb reads: what a fold settles is never shown
-   twice. *)
-let settled ctx =
-  let read () = Vault.files ~keep:ctx.keep ctx.engine folder in
-  match
-    Format_merge.settle_folder ~after:(relabel ctx) ~writable:ctx.writable ~read
-      ~fold:
-        (Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
-           ~modified:(fun (r : Totp.t) -> r.modified))
-      ctx.engine folder
-  with
-    | Some files -> files
-    | None -> read ()
-
-(* README §4.1: a read answers the last view of the vault's folders and this
-   one; a write proceeds on it, pushed later. *)
-let context ?(writing = false) ?use ~domain ~engine ~lazy_tree t =
-  check_uses ~domain ~engine;
-  let keyring, key = Vault.held ?use ~domain ~engine ~lazy_tree t in
-  if lazy_tree then (
-    let (module E : Tsync_sync.Engine.S) = engine in
-    if not writing then
-      Vault.read_folders engine t (Vault.vault_folders @ [folder])
-      (* The first record makes the folder: nothing to pull yet. *)
-    else if E.kind folder = `Dir then Vault.before_write t folder);
-  {
-    engine;
-    key;
-    key_id = keyring.Tsync_vault.Keyring.key_id;
-    opened = Hashtbl.create 16;
-    keep = lazy_tree;
-    writable = not domain.Tsync_domain.Domain.domain.read_only;
-  }
-
-let now () = int_of_float (Unix.time ())
-
-let write ctx ~exclusive id record =
-  let (module E : Tsync_sync.Engine.S) = ctx.engine in
-  List.iter
-    (fun dir -> E.mkdir dir ~exclusive:false)
-    [Names.extension_root; folder];
-  Format_merge.write_file ctx.engine ~exclusive (Names.join folder id)
-    (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
-       (Totp.to_string record))
+  (* §3: on the issuer, or the account when the issuer is empty. *)
+  let relabel ~suffix (r : Totp.t) =
+    if String.ends_with ~suffix r.issuer || String.ends_with ~suffix r.account
+    then None
+    else if r.issuer <> "" then Some { r with issuer = r.issuer ^ suffix }
+    else Some { r with account = r.account ^ suffix }
+end)
 
 let add ~domain ~engine ~lazy_tree t source =
   let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
@@ -123,21 +35,9 @@ let add ~domain ~engine ~lazy_tree t source =
         write ctx ~exclusive:true id record;
         id
 
-(* §5: records that open, by id, and the ids that do not. *)
 let same (a : Totp.t) (b : Totp.t) =
   a.issuer = b.issuer && a.account = b.account
   && Totp.code_fields a = Totp.code_fields b
-
-let records ctx =
-  List.fold_left
-    (fun (ok, corrupt) (f : Fold.file) ->
-      if not (Fold.is_record_id f.name) then (ok, corrupt)
-      else (
-        match opened ctx f with
-          | Some r -> ((f.name, r) :: ok, corrupt)
-          | None -> (ok, f.name :: corrupt)))
-    ([], []) (settled ctx)
-  |> fun (ok, corrupt) -> (List.rev ok, List.sort compare corrupt)
 
 let contains ~sub s =
   Text.contains (String.lowercase_ascii s) (String.lowercase_ascii sub)
@@ -169,15 +69,6 @@ let list ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
   let view = Atomic.get t.Vault.view in
   { rows; corrupt; outdated = view.outdated; pulled_at = view.pulled_at }
 
-let find ctx id =
-  if not (Fold.is_record_id id) then Fail.invalid "%S is not a record id" id;
-  let ok, corrupt = records ctx in
-  match List.assoc_opt id ok with
-    | Some r -> r
-    | None when List.mem id corrupt ->
-        Fail.corrupt "%s does not open under this vault's key" id
-    | None -> Fail.absent "no record %s" id
-
 let code ~domain ~engine ~lazy_tree t id : Protocol.totp_code =
   let ctx = context ~domain ~engine ~lazy_tree t in
   let r = find ctx id in
@@ -201,15 +92,6 @@ let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
   if r.issuer = "" && r.account = "" then
     Fail.invalid "issuer and account cannot both be empty";
   write ctx ~exclusive:false id r
-
-(* §5: removing needs no plaintext, so a record that does not open goes too. *)
-let remove ~domain ~engine ~lazy_tree t id =
-  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
-  (match find ctx id with
-    | _ -> ()
-    | exception Fail.E { kind = Corrupt; _ } -> ());
-  let (module E : Tsync_sync.Engine.S) = engine in
-  E.delete (Names.join folder id)
 
 (* §5.2: a [,] or [;] splits a line only before another otpauth URI. *)
 let entries line =
@@ -251,11 +133,6 @@ let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
         (entries line))
     (String.split_on_char '\n' text);
   { added = !added; already = !already; refused = List.rev !refused }
-
-(* README §4.2: the fold that waited for the key. *)
-let fold ~domain ~engine ~lazy_tree t =
-  if List.mem name (Vault.extensions ~domain ~engine) then
-    ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
 
 let export ~domain ~engine ~lazy_tree t passphrase =
   let ctx = context ~domain ~engine ~lazy_tree t in

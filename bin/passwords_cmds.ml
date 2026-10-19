@@ -1,0 +1,546 @@
+(* tsync passwords <verb> (spec extensions/passwords §9, §10): the CLI, and the
+   native-messaging bridge browsers start. *)
+open Cmdliner
+open Tsync_core
+open Tsync_config
+open Extension_cmds
+module P = Tsync_owner.Protocol
+module Passwords = Tsync_vault.Passwords
+
+let extension = "passwords"
+let write_domain ?name = write_domain ?name ~extension
+let each ?name = each ?name ~extension
+
+let call d action args =
+  Vault_cmds.ask d (P.Extension { action = "passwords_" ^ action; args })
+
+let s v = `String v
+let field = Tsync_ipc.Ipc.field
+let member j k = match j with `Assoc l -> List.assoc_opt k l | _ -> None
+let say fmt = Printf.printf (fmt ^^ "\n%!")
+
+let from_stdin v =
+  if v = "-" then Option.value ~default:"" (In_channel.input_line stdin) else v
+
+let records reply =
+  match List.assoc_opt "records" reply with Some (`List l) -> l | _ -> []
+
+(* README §6.1: an id names the record of the one domain that holds it. *)
+let holder ?name config id =
+  match name with
+    | Some n -> Cli.domain ~name:n config
+    | None -> (
+        match
+          List.filter
+            (fun (_, reply) ->
+              List.exists (fun row -> field row "id" = Some id) (records reply))
+            (each config (fun d -> call d "list" []))
+        with
+          | [(d, _)] -> d
+          | [] -> Fail.absent "no record %s" id
+          | l ->
+              Fail.invalid "%s is in %s: pick one with --domain" id
+                (String.concat ", " (List.map (fun (d, _) -> dname d) l)))
+
+let opt_string name ~doc =
+  Arg.(value & opt (some string) None & info [name] ~docv:"TEXT" ~doc)
+
+let urls_arg =
+  Arg.(
+    value & opt_all string []
+    & info ["url"] ~docv:"SITE" ~doc:"A site of the login; repeat for several.")
+
+let password_arg =
+  opt_string "password"
+    ~doc:
+      "The password; - reads it from standard input. Asked without echo when \
+       neither this nor --generate is given."
+
+let generate_arg =
+  Arg.(
+    value
+    & opt (some int) None
+    & info ["generate"] ~docv:"LENGTH"
+        ~doc:"Generate a password of LENGTH (§5).")
+
+let no_symbols =
+  Arg.(
+    value & flag & info ["no-symbols"] ~doc:"Generate letters and digits only.")
+
+let secret_args ~password ~generate ~no_symbols ~ask_if_absent =
+  match (password, generate) with
+    | Some p, None -> [("password", s (from_stdin p))]
+    | None, Some length ->
+        [
+          ( "generate",
+            `Assoc
+              [("length", `Int length); ("symbols", `Bool (not no_symbols))] );
+        ]
+    | None, None when ask_if_absent ->
+        [
+          ( "password",
+            s (Vault_cmds.read_passphrase ~prompt:"password" ~stdin:false ()) );
+        ]
+    | None, None -> []
+    | Some _, Some _ -> Fail.invalid "give --password or --generate, not both"
+
+let optional fields =
+  List.filter_map (fun (k, v) -> Option.map (fun v -> (k, s v)) v) fields
+
+let add_cmd =
+  verb "add" ~doc:"Add a login."
+    Term.(
+      const
+        (fun
+          title
+          urls
+          username
+          password
+          generate
+          no_symbols
+          notes
+          otpauth
+          totp
+          ?name
+          config
+        ->
+          let d = write_domain ?name config in
+          let reply =
+            call d "add"
+              ([("title", s title); ("urls", `List (List.map s urls))]
+              @ secret_args ~password ~generate ~no_symbols ~ask_if_absent:true
+              @ optional
+                  [
+                    ("username", username);
+                    ("notes", notes);
+                    ("otpauth", Option.map from_stdin otpauth);
+                    ("totp", totp);
+                  ])
+          in
+          say "%s %s" (dname d)
+            (Option.value ~default:"" (field (`Assoc reply) "id"));
+          0)
+      $ Arg.(
+          required
+          & opt (some string) None
+          & info ["title"] ~docv:"TEXT" ~doc:"The login's title.")
+      $ urls_arg
+      $ opt_string "username" ~doc:"The username."
+      $ password_arg $ generate_arg $ no_symbols
+      $ opt_string "notes" ~doc:"Notes."
+      $ opt_string "otpauth"
+          ~doc:
+            "An otpauth://totp/ URI to add and link; - reads it from standard \
+             input."
+      $ opt_string "totp" ~doc:"A TOTP record id to link, or empty to unlink.")
+
+let list_cmd =
+  verb "list" ~doc:"List logins and passkeys; no password."
+    Term.(
+      const (fun filter site ?name config ->
+          List.iter
+            (fun (d, reply) ->
+              List.iter
+                (fun row ->
+                  let f k = Option.value ~default:"" (field row k) in
+                  if f "kind" = "login" then
+                    say "%s %s login %s %s %s" (dname d) (f "id") (f "title")
+                      (f "username")
+                      (match member row "dangling" with
+                        | Some (`Bool true) -> "(code link dangling)"
+                        | _ -> (
+                            match member row "code" with
+                              | Some (`Bool true) -> "(code)"
+                              | _ -> ""))
+                  else
+                    say "%s %s passkey %s %s" (dname d) (f "id") (f "rpId")
+                      (f "userName"))
+                (records reply))
+            (each ?name config (fun d ->
+                 call d "list" (optional [("filter", filter); ("site", site)])));
+          0)
+      $ opt_string "filter"
+          ~doc:"Only records whose title, username or sites contain TEXT."
+      $ opt_string "site" ~doc:"Only records matching the site TEXT.")
+
+let id_arg =
+  Arg.(
+    required
+    & pos 0 (some string) None
+    & info [] ~docv:"ID" ~doc:"The record's id.")
+
+let get_cmd =
+  verb "get"
+    ~doc:
+      "Print a login's password alone, newline-terminated, or a passkey's \
+       fields."
+    Term.(
+      const (fun id ?name config ->
+          let reply = call (holder ?name config id) "get" [("id", s id)] in
+          let f k = Option.value ~default:"" (field (`Assoc reply) k) in
+          if f "kind" = "login" then print_endline (f "password")
+          else
+            List.iter
+              (fun k -> say "%s %s" k (f k))
+              ["rpId"; "userName"; "userDisplayName"; "credentialId"; "login"];
+          0)
+      $ id_arg)
+
+let edit_cmd =
+  verb "edit" ~doc:"Change a login's fields, or a passkey's login."
+    Term.(
+      const
+        (fun
+          id
+          title
+          urls
+          username
+          password
+          generate
+          no_symbols
+          notes
+          otpauth
+          totp
+          login
+          ?name
+          config
+        ->
+          ignore
+            (call (holder ?name config id) "edit"
+               ([("id", s id)]
+               @ (if urls = [] then [] else [("urls", `List (List.map s urls))])
+               @ secret_args ~password ~generate ~no_symbols
+                   ~ask_if_absent:false
+               @ optional
+                   [
+                     ("title", title);
+                     ("username", username);
+                     ("notes", notes);
+                     ("otpauth", Option.map from_stdin otpauth);
+                     ("totp", totp);
+                     ("login", login);
+                   ]));
+          0)
+      $ id_arg
+      $ opt_string "title" ~doc:"The title."
+      $ urls_arg
+      $ opt_string "username" ~doc:"The username."
+      $ password_arg $ generate_arg $ no_symbols
+      $ opt_string "notes" ~doc:"Notes."
+      $ opt_string "otpauth" ~doc:"An otpauth://totp/ URI to add and link."
+      $ opt_string "totp" ~doc:"A TOTP record id to link, or empty to unlink."
+      $ opt_string "login" ~doc:"For a passkey: the login it belongs with.")
+
+let remove_cmd =
+  verb "remove" ~doc:"Remove a login or a passkey."
+    Term.(
+      const (fun id ?name config ->
+          ignore (call (holder ?name config id) "remove" [("id", s id)]);
+          0)
+      $ id_arg)
+
+let import_cmd =
+  verb "import" ~doc:"Add one login per row of a CSV export (§10.1)."
+    Term.(
+      const (fun file ?name config ->
+          let text = In_channel.with_open_bin file In_channel.input_all in
+          let reply =
+            call (write_domain ?name config) "import" [("text", s text)]
+          in
+          let j = `Assoc reply in
+          say "added %s" (Yojson.Safe.to_string (Option.get (member j "added")));
+          (match member j "skipped" with
+            | Some (`List rows) ->
+                List.iter
+                  (fun r ->
+                    prerr_endline
+                      (Printf.sprintf "tsync: line %s skipped: %s"
+                         (Yojson.Safe.to_string (Option.get (member r "line")))
+                         (Option.value ~default:"" (field r "reason"))))
+                  rows
+            | _ -> ());
+          say "seeds added %s, dropped %s"
+            (Yojson.Safe.to_string (Option.get (member j "seedsAdded")))
+            (Yojson.Safe.to_string (Option.get (member j "seedsDropped")));
+          0)
+      $ Arg.(
+          required
+          & pos 0 (some file) None
+          & info [] ~docv:"FILE" ~doc:"The CSV file."))
+
+let export_cmd =
+  verb "export"
+    ~doc:
+      "Print every login as CSV; asks each domain's passphrase. Passkeys are \
+       not exported."
+    Term.(
+      const (fun stdin ?name config ->
+          List.iter
+            (fun (d, reply) ->
+              print_string
+                (Option.value ~default:"" (field (`Assoc reply) "csv"));
+              match List.assoc_opt "passkeys" reply with
+                | Some (`Int n) when n > 0 ->
+                    prerr_endline
+                      (Printf.sprintf "tsync: %s: %d passkeys are not exported"
+                         (dname d) n)
+                | _ -> ())
+            (each ?name config (fun d ->
+                 let passphrase =
+                   Vault_cmds.read_passphrase
+                     ~prompt:(Printf.sprintf "passphrase of %s" (dname d))
+                     ~stdin ()
+                 in
+                 call d "export" [("passphrase", s passphrase)]));
+          0)
+      $ Arg.(
+          value & flag
+          & info ["stdin"] ~doc:"Read each passphrase from standard input."))
+
+(* §9.1: a 32-bit length in this host's byte order, then that much UTF-8 JSON. *)
+let max_message = 1 lsl 20
+
+let read_message ic =
+  let header = Bytes.create 4 in
+  match really_input ic header 0 4 with
+    | () ->
+        let n = Int32.to_int (Bytes.get_int32_ne header 0) in
+        if n < 0 || n > max_message then None
+        else Some (really_input_string ic n)
+    | exception End_of_file -> None
+
+let write_message oc json =
+  let body = Yojson.Safe.to_string json in
+  let body =
+    if String.length body > max_message then
+      {|{"ok":false,"code":"internal","error":"the answer is too large"}|}
+    else body
+  in
+  let header = Bytes.create 4 in
+  Bytes.set_int32_ne header 0 (Int32.of_int (String.length body));
+  output_bytes oc header;
+  output_string oc body;
+  flush oc
+
+let str j k = match member j k with Some (`String v) -> Some v | _ -> None
+
+let required j k =
+  match str j k with Some v -> v | None -> Fail.invalid "%s is missing" k
+
+let fields_of j = match j with `Assoc l -> l | _ -> []
+
+(* §9.2: every domain using passwords, each answering on its own. *)
+let bridge_request config j =
+  let all f =
+    List.map
+      (fun (d : Config.domain) -> (d, try Ok (f d) with Fail.E e -> Error e))
+      (using ~extension config)
+  in
+  let pick j =
+    match str j "domain" with
+      | Some n -> Cli.domain ~name:n config
+      | None -> write_domain config
+  in
+  match str j "type" with
+    | Some "status" ->
+        [
+          ( "domains",
+            `List
+              (List.map
+                 (fun (d, r) ->
+                   `Assoc
+                     [
+                       ("domain", s (dname d));
+                       ( "state",
+                         s
+                           (match r with
+                             | Ok (st : P.vault_status) -> (
+                                 match st.vault with
+                                   | `Unlocked -> "unlocked"
+                                   | `Locked -> "locked"
+                                   | `Absent -> "absent"
+                                   | `Corrupt _ -> "corrupt")
+                             | Error (e : Fail.t) -> Fail.code e.kind) );
+                     ])
+                 (all (fun d -> Vault_cmds.ask d P.Vault_status))) );
+        ]
+    | Some "match" ->
+        let origin = required j "origin" in
+        [
+          ( "logins",
+            `List
+              (List.concat_map
+                 (fun (d, r) ->
+                   match r with
+                     | Ok reply ->
+                         List.filter_map
+                           (fun row ->
+                             if field row "kind" <> Some "login" then None
+                             else
+                               Some
+                                 (`Assoc
+                                    [
+                                      ("domain", s (dname d));
+                                      ("id", Option.get (member row "id"));
+                                      ("title", Option.get (member row "title"));
+                                      ( "username",
+                                        Option.get (member row "username") );
+                                      ("code", Option.get (member row "code"));
+                                    ]))
+                           (records reply)
+                     | Error _ -> [])
+                 (all (fun d -> call d "list" [("site", s origin)]))) );
+          ( "locked",
+            `List
+              (List.filter_map
+                 (fun (d, r) ->
+                   match r with
+                     | Error (e : Fail.t) when e.kind = Locked ->
+                         Some (s (dname d))
+                     | _ -> None)
+                 (all (fun d -> call d "list" [("site", s origin)]))) );
+        ]
+    | Some "fill" ->
+        let origin = required j "origin" and id = required j "id" in
+        let reply = call (pick j) "get" [("id", s id)] in
+        let got = `Assoc reply in
+        (* §9.2: a page never receives another site's login. *)
+        let urls =
+          match member got "urls" with
+            | Some (`List l) ->
+                List.filter_map (function `String u -> Some u | _ -> None) l
+            | _ -> []
+        in
+        if
+          field got "kind" <> Some "login"
+          || not
+               (List.exists (fun site -> Passwords.matches ~site ~origin) urls)
+        then Fail.invalid "the login does not match %s" origin;
+        List.filter
+          (fun (k, _) ->
+            List.mem k ["username"; "password"; "code"; "secondsLeft"])
+          reply
+    | Some "save" ->
+        let origin = required j "origin"
+        and username = required j "username"
+        and password = required j "password" in
+        let d = pick j in
+        let same, other =
+          List.partition
+            (fun row -> field row "username" = Some username)
+            (List.filter
+               (fun row -> field row "kind" = Some "login")
+               (records (call d "list" [("site", s origin)])))
+        in
+        ignore other;
+        (* §8 save: equal adds nothing, one with another password is
+           updated only on [update], anything else is added. *)
+        let has_password row =
+          field
+            (`Assoc (call d "get" [("id", s (Option.get (field row "id")))]))
+            "password"
+          = Some password
+        in
+        if List.exists has_password same then [("saved", `Bool false)]
+        else (
+          match (same, str j "update") with
+            | [row], Some id when field row "id" = Some id ->
+                ignore (call d "edit" [("id", s id); ("password", s password)]);
+                [("saved", `Bool true); ("id", s id)]
+            | [row], None ->
+                [
+                  ("saved", `Bool false);
+                  ("update", Option.get (member row "id"));
+                ]
+            | _ ->
+                let site =
+                  match Passwords.site_of_string origin with
+                    | Ok site -> site
+                    | Error reason -> Fail.invalid "%s" reason
+                in
+                let added =
+                  call d "add"
+                    [
+                      ("title", s site);
+                      ("urls", `List [s site]);
+                      ("username", s username);
+                      ("password", s password);
+                    ]
+                in
+                [("saved", `Bool true)] @ added)
+    | Some "passkey_match" ->
+        [
+          ( "passkeys",
+            `List
+              (List.concat_map
+                 (fun (_, r) ->
+                   match r with
+                     | Ok reply -> (
+                         match List.assoc_opt "passkeys" reply with
+                           | Some (`List l) -> l
+                           | _ -> [])
+                     | Error _ -> [])
+                 (all (fun d ->
+                      call d "passkey_match"
+                        (List.filter
+                           (fun (k, _) ->
+                             List.mem k ["origin"; "rpId"; "allow"])
+                           (fields_of j))))) );
+        ]
+    | Some "passkey_create" ->
+        call (pick j) "passkey_create"
+          (List.filter
+             (fun (k, _) -> k <> "type" && k <> "domain")
+             (fields_of j))
+    | Some "passkey_assert" ->
+        call (pick j) "passkey_assert"
+          (List.filter (fun (k, _) -> k <> "type") (fields_of j))
+    | Some other -> Fail.invalid "the bridge does not forward %s" other
+    | None -> Fail.invalid "a request names its type"
+
+let browser_host_cmd =
+  Cli.cmd "browser-host"
+    ~doc:
+      "The native-messaging bridge a browser starts (§9.1); not for a terminal."
+    Term.(
+      const (fun _origin ->
+          set_binary_mode_in stdin true;
+          set_binary_mode_out stdout true;
+          Cli.run @@ fun () ->
+          let config = Cli.config () in
+          let rec serve () =
+            match read_message stdin with
+              | None -> 0
+              | Some text ->
+                  let reply =
+                    match Yojson.Safe.from_string text with
+                      | j -> (
+                          match bridge_request config j with
+                            | fields -> `Assoc (("ok", `Bool true) :: fields)
+                            | exception Fail.E e -> Tsync_ipc.Ipc.failure e)
+                      | exception Yojson.Json_error _ ->
+                          Tsync_ipc.Ipc.failure (Fail.make Invalid "not JSON")
+                  in
+                  write_message stdout reply;
+                  serve ()
+          in
+          serve ())
+      (* Chromium passes the caller's origin; Firefox the manifest path. *)
+      $ Arg.(value & pos_all string [] & info [] ~docv:"ARGS"))
+
+let cmds =
+  [
+    Cmd.group
+      (Cmd.info "passwords"
+         ~doc:"Logins and passkeys kept in the domain's vault.")
+      [
+        add_cmd;
+        list_cmd;
+        get_cmd;
+        edit_cmd;
+        remove_cmd;
+        import_cmd;
+        export_cmd;
+        browser_host_cmd;
+      ];
+  ]
