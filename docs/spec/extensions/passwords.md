@@ -1,7 +1,8 @@
 # Passwords extension
 
-This file is normative. It owns the `passwords` extension: its record, its fold, site matching,
-password generation, the link to a one-time-password seed, import and export, the capabilities a host may offer and its commands. It
+This file is normative. It owns the `passwords` extension: its records (logins and passkeys), its
+fold, site matching, password generation, the link to a one-time-password seed, the passkey
+authenticator, import and export, the capabilities a host may offer and its commands. It
 is an extension as the [README](README.md) defines one, and its records are vault envelopes
 ([vault §5](vault.md#5-record-envelope)).
 
@@ -13,7 +14,7 @@ Website and app passwords are kept by each browser, or by a hosted password mana
 the user's vault on its servers. With this extension they live in the user's own storage,
 encrypted, and every machine of the user reads them.
 
-Without a host capability (§7) or a browser extension (§8) the extension is a command-line
+Without a host capability (§8) or a browser extension (§9) the extension is a command-line
 and app password store: the user looks a login up and copies its password. Filling forms in
 apps and browsers is where most of the work of this extension lies.
 
@@ -23,24 +24,27 @@ apps and browsers is where most of the work of this extension lies.
   machine whose vault is unlocked reads every password, and `vault lock` is the control
   ([vault §6](vault.md#6-unlocking-and-the-keystore)). A later version asks the host to verify
   the user before `get` and `fill`, where it can.
-- **Passkeys.** A passkey is a private key the platform's credential APIs create and use, not a
-  string the user types; it is not a record of this version.
+- **Passkey attestation and portability.** A passkey made here attests nothing (§7.2) and is not
+  exported; moving passkeys between managers (the FIDO Credential Exchange Format) is left to a
+  later version.
 - **Sharing.** A domain's vault has one passphrase; there are no per-record recipients.
 - **Field-level merge.** Two concurrent edits are settled whole (§3), never combined.
 
-## 2. Record
+## 2. Records
 
-One record per login, at `/.tsync-ext/passwords/<record id>`, the id drawn from the CSPRNG
-([README §4.1](README.md#41-where-they-live)): a site may hold several logins, so no field names
-a record. Its plaintext is one JSON object, UTF-8:
+One record per login or passkey, at `/.tsync-ext/passwords/<record id>`, the id drawn from the
+CSPRNG ([README §4.1](README.md#41-where-they-live)): a site may hold several of each, so no field
+names a record. Its plaintext is one JSON object, UTF-8, whose `kind` says which: `login`, below,
+or `passkey` (§7.1). Every rule of this section but the table holds for both.
 
 ```json
-{"title":"GitHub","urls":["https://github.com"],"username":"me@example.com",
+{"kind":"login","title":"GitHub","urls":["https://github.com"],"username":"me@example.com",
  "password":"correct horse battery staple","notes":"","totp":"","modified":1760500000}
 ```
 
 | key | type | rule |
 |---|---|---|
+| `kind` | string | `login` |
 | `title` | string | 1 to 256 bytes |
 | `urls` | array of strings | 0 to 32 entries, each a site (§4.1) |
 | `username` | string | may be empty |
@@ -60,8 +64,9 @@ a record. Its plaintext is one JSON object, UTF-8:
 
 ## 3. Fold
 
-The grouped fold ([README §4.3](README.md#43-the-grouped-fold)), with `password` as the only key
-field. Two machines that change one login's password concurrently leave two records, since only
+The format merge `passwords-records` ([format-merge](../algorithms/format-merge.md)): the grouped
+fold ([README §4.3](README.md#43-the-grouped-fold)), with the kind and, for a login, `password`,
+for a passkey `credentialId` and `privateKey`, as key fields. Two machines that change one login's password concurrently leave two records, since only
 one of the passwords works at the site and no clock can say which. Two concurrent edits that
 agree on the password keep the newest whole record; the other one's labels are superseded.
 
@@ -125,7 +130,105 @@ seeds and computes codes ([totp §4](totp.md#4-code-generation)). The login name
   with a **dangling link**: they have no code, and `list` reports them.
 - One TOTP record may be linked from several logins.
 
-## 7. Capabilities
+## 7. Passkeys
+
+A passkey is a WebAuthn credential: a key pair a site (the **relying party**, named by its **RP
+ID**, a domain) registers, and later asks to sign a challenge. The owner is the authenticator. It
+makes the key pair, keeps the private key in a record, and signs; hosts and browsers carry the
+requests between the site and the owner and never receive the private key, as no client receives
+a seed ([totp §5](totp.md#5-commands)).
+
+### 7.1 Record
+
+```json
+{"kind":"passkey","rpId":"github.com","credentialId":"<b64url>","userHandle":"<b64url>",
+ "userName":"me@example.com","userDisplayName":"Me","algorithm":-7,"privateKey":"<b64url>",
+ "login":"","created":1760500000,"modified":1760500000}
+```
+
+| key | type | rule |
+|---|---|---|
+| `kind` | string | `passkey` |
+| `rpId` | string | a domain in lower case, its A-label form, no port |
+| `credentialId` | string | base64url without padding of 32 bytes drawn from the CSPRNG at creation |
+| `userHandle` | string | base64url without padding of the relying party's user handle, 1 to 64 bytes |
+| `userName` | string | the relying party's `user.name`, may be empty, at most 256 bytes |
+| `userDisplayName` | string | its `user.displayName`, may be empty, at most 256 bytes |
+| `algorithm` | int | `-7` (ES256: ECDSA on P-256 with SHA-256) |
+| `privateKey` | string | base64url without padding of the 32-byte P-256 private scalar |
+| `login` | string | the record id of a login of this site this passkey belongs with, or empty |
+| `created`, `modified` | int | epoch seconds |
+
+- A passkey's `login` is shown with the login and filled with it; it is not a key field, and a
+  dangling one is reported as a login's `totp` is (§6).
+- `get` never answers `privateKey`, and no reply of any request carries it.
+
+### 7.2 The authenticator
+
+tsync is one WebAuthn authenticator ([WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/)) for
+every domain:
+
+- **AAGUID** `9fa7c19f-b0fa-444f-854b-34c0b4520b66`, the same on every machine and build.
+- **Attestation** `none`: the attestation object is `{"fmt":"none","attStmt":{},"authData":…}`,
+  CBOR in its deterministic encoding.
+- **Authenticator data** (§6.1 of WebAuthn): the SHA-256 of the RP ID; the flags UP (always: a
+  host only asks on the user's gesture), UV (§7.4), BE and BS (the credential is backed up and
+  synced, as every vault record is), AT on creation; the signature counter `0`, which tells the
+  relying party not to count, as synced passkeys do; on creation the attested credential data
+  (AAGUID, credential id, and the public key as a COSE_Key, kty 2, alg −7, crv 1, x, y).
+- **Algorithms.** A creation names the relying party's acceptable algorithms in order; the first
+  of them this authenticator supports is used, and a creation naming none it supports is refused
+  `invalid`. This version supports ES256 only, which every relying party accepts.
+- **Discoverable.** Every passkey is discoverable (a resident key): an assertion without an
+  allow-list offers every passkey of the RP ID.
+- **Signature.** ES256 over `authenticatorData ‖ clientDataHash`, DER-encoded, as WebAuthn §6.3.3
+  says. The client data and its hash are the host's: the host knows the origin and the
+  challenge; the owner never sees the page.
+
+### 7.3 Which passkeys answer a request
+
+- **The RP ID belongs to the origin.** The request's `origin` must be `https://` (or
+  `http://localhost`), and its `rpId` the origin's host or a suffix of it at a label boundary
+  that is not a public suffix, by the [Public Suffix List](https://publicsuffix.org/) snapshot
+  each release carries: `login.example.com` may name `example.com`, `evil.github.io` may not
+  name `github.io`. A browser checks this for its own authenticators; a browser extension that
+  stands in for them is not trusted to, so the owner checks it on every request. Anything else
+  is refused `invalid`.
+- **Matching.** A passkey answers a request whose RP ID equals its `rpId`. An assertion with an
+  allow-list answers only the passkeys whose `credentialId` it lists.
+- **Exclusion.** A creation whose exclude-list names a passkey this vault holds for the RP ID is
+  refused `exists` (WebAuthn's InvalidStateError): the site already knows this authenticator.
+
+### 7.4 User verification
+
+The UV flag says the user was verified for this request, not merely present. It is set only when
+the request carries one of:
+
+- `passphrase`, checked against the keyring as `totp export` checks it
+  ([totp §5](totp.md#5-commands)): a browser extension, which cannot verify the user itself, asks
+  for the passphrase when the relying party requires verification;
+- `verified: true` from a host adapter whose spec says its platform verified the user for this
+  request (a biometric or device-code prompt of the system's credential sheet).
+
+Otherwise UV is clear, and a relying party that requires verification refuses the passkey. Any
+process of the user can reach the owner and say `verified` ([security-model §7](../algorithms/security-model.md)):
+the flag is as trustworthy as the user's account on this machine, which is what a platform
+authenticator's flag also rests on.
+
+### 7.5 Requests
+
+| action | request | answer |
+|---|---|---|
+| `passwords_passkey_create` | `origin`, `rpId`, `userHandle`, `userName`, `userDisplayName`, `algorithms`, `exclude?`, `clientDataHash`, `passphrase?`, `verified?`, `login?` | the new record's id, `credentialId`, `attestationObject`, `authenticatorData`, the public key as SPKI DER (`publicKey`) and `algorithm` |
+| `passwords_passkey_match` | `origin`, `rpId`, `allow?` | the passkeys answering (§7.3): domain, id, `credentialId`, `userName`, `userDisplayName`, and the linked login's title |
+| `passwords_passkey_assert` | `origin`, `rpId`, `domain`, `id`, `clientDataHash`, `passphrase?`, `verified?` | `credentialId`, `authenticatorData`, `signature`, `userHandle` |
+
+Binary members are base64url without padding. `passwords_passkey_assert` of a passkey that does
+not answer the request (§7.3) is refused `invalid`. Creation picks the domain as `add` does
+(README §6.1). A host asks the user before a creation, and lets them pick the passkey of an
+assertion, as for `fill` (§8, §9.3).
+
+## 8. Capabilities
 
 Every capability is optional ([README §5](README.md#5-host-adapters)).
 
@@ -134,6 +237,7 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 | `fill` | the host's autofill asks for the logins matching a site or app (§4.2) and fills the one the user picks | the user finds the login with `list` and copies its password from `get` |
 | `fill` with codes | the host's autofill also asks for a site's one-time code, and fills the current code of the login the user picks (§6) | the user reads the code from `get` |
 | `save` | the host's autofill hands over a username and password the user just typed, and the user approves saving them | the user runs `add` |
+| `passkey` | the host's credential API asks to create a passkey or to sign with one, and the user approves the creation or picks the passkey (§7) | none: a passkey is used only through a host or a browser extension |
 
 - Each is `confirm` or `authenticate` on every host: the user picks the login, or approves the
   save. The extension never calls either by itself.
@@ -146,19 +250,19 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 No host declares a capability yet. Each gets `extensions/passwords/<host>.md` once one is seen
 ([README §5](README.md#5-host-adapters)). Planned, not declared:
 
-| host | `fill` | `save` |
-|---|---|---|
-| macOS | an AutoFill credential provider extension (`ASCredentialProviderViewController`), which also serves one-time codes | not offered to credential providers |
-| Android | an `AutofillService`, for apps and for browsers that use it | the same `AutofillService` |
-| Linux | none: no system autofill; browsers are served by §8 | none |
+| host | `fill` | `save` | `passkey` |
+|---|---|---|---|
+| macOS | an AutoFill credential provider extension (`ASCredentialProviderViewController`), which also serves one-time codes | not offered to credential providers | the same extension, as a passkey provider (macOS 14) |
+| Android | Credential Manager (`CredentialProviderService`), and an `AutofillService` for apps and browsers that use autofill | the same | Credential Manager (Android 14) |
+| Linux | none: no system autofill; browsers are served by §9 | none | none: browsers are served by §9 |
 
-## 8. Browser extensions
+## 9. Browser extensions
 
 A browser extension fills and saves logins in that browser, on any host the browser runs on. It
 is a client of the owner, not a host adapter: it reaches the owner through a **bridge**, and
 declares nothing.
 
-### 8.1 The bridge
+### 9.1 The bridge
 
 - The bridge is `tsync passwords browser-host`, started by the browser through native messaging:
   each message, both ways, is a 32-bit length in the host's byte order followed by that many
@@ -171,7 +275,7 @@ declares nothing.
   ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)). It forwards only the requests of §8.2;
   anything else is refused `invalid`. It holds no K and keeps nothing.
 
-### 8.2 Requests
+### 9.2 Requests
 
 The bridge serves every domain that uses `passwords` on this client, merged as
 [README §6.1](README.md#61-several-domains) says. Every request but `status` carries `origin`:
@@ -183,7 +287,8 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 | `status` | — | per domain: locked or unlocked, and whether it uses `totp` |
 | `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, and whether a code is linked; no password |
 | `fill` | `origin`, `domain`, `id` | the login's username, password, and current code with seconds left when one is linked |
-| `save` | `origin`, `username`, `password`, `domain?` | as a `save` (§7), with `origin` as the site |
+| `save` | `origin`, `username`, `password`, `domain?` | as a `save` (§8), with `origin` as the site |
+| `passkey_match`, `passkey_create`, `passkey_assert` | as §7.5, `origin` the frame's | as §7.5 |
 
 - A `fill` whose login does not match `origin` is refused `invalid`. A page never receives a
   login of another site, whatever the extension asks.
@@ -191,7 +296,7 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
   passphrase. Unlocking is done in the app or the CLI.
 - A locked vault is named in a `match` reply; a `fill` or `save` on it is refused `locked`.
 
-### 8.3 What the extension does
+### 9.3 What the extension does
 
 - It fills only on a gesture of the user in the page or the extension's own UI, never when a page
   loads, so a page cannot collect logins by drawing forms the user never touches.
@@ -200,7 +305,7 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 - It asks the user before every `save`.
 - It never stores a password, a code or a match result beyond the fill that asked for it.
 
-## 9. Commands
+## 10. Commands
 
 Every verb is of access class **owner**
 ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)) and needs K.
@@ -208,21 +313,23 @@ Every verb is of access class **owner**
 | verb / action | request | does |
 |---|---|---|
 | `add` / `passwords_add` | `title`, `urls?`, `username?`, `password` or `generate`, `notes?`, `otpauth` or `totp`? | adds a record; replies with its id. The CLI asks for the password without echo unless `--generate` |
-| `list` / `passwords_list` | `filter?`, `site?` | every record whose title, username or urls contain `filter` (case-insensitive), or that matches `site` (§4.2): id, title, username, urls, and whether a code is linked or its link dangles; ordered by title, then username, then id |
+| `list` / `passwords_list` | `filter?`, `site?` | every login whose title, username or urls contain `filter` (case-insensitive), or that matches `site` (§4.2): id, title, username, urls, whether a code is linked or its link dangles, and the ids of its passkeys; then every passkey whose RP ID or user name contains `filter`, or whose RP ID is `site`'s host or a suffix of it: id, RP ID, user name, and its login; ordered by title (a passkey's: its RP ID), then username, then id |
 | `get` / `passwords_get` | `id` | the record's password and notes, and the linked TOTP record's current code and seconds left. The CLI prints the password alone, newline-terminated, for a pipe to a clipboard tool |
 | `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `otpauth` or `totp` | replaces those fields and sets `modified` |
-| `remove` / `passwords_remove` | `id` | removes the record |
-| `import` (CLI only) | a CSV file | §9.1 |
-| `export` (CLI only) | the passphrase, asked as `tsync totp export` asks it | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per record, its first site in `url` |
+| `remove` / `passwords_remove` | `id` | removes the record, a login or a passkey; removing a login leaves its passkeys, whose link then dangles |
+| `import` (CLI only) | a CSV file | §10.1 |
+| `export` (CLI only) | the passphrase, asked as `tsync totp export` asks it | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per login, its first site in `url`; passkeys are not exported (§1.1), and their count is said on stderr |
 
-- `get` is the only action that replies with a password. No action but `totp_export` replies
+- `get` is the only action that replies with a password, and no action replies with a passkey's
+  private key: `get` of a passkey answers its RP ID, user name and display name, credential id and
+  login. No action but `totp_export` replies
   with a seed ([totp §5](totp.md#5-commands)): the CLI's `export` fills the `otpauth` column from
   it, so the passphrase guards both. A host that shows one SHOULD keep it
   out of screenshots and task-switcher thumbnails.
 - An `id` names a record of this extension or is refused `invalid`; a well-formed id with no
   record is `not_found`.
 
-### 9.1 Import
+### 10.1 Import
 
 `import` reads a CSV file (RFC 4180, UTF-8, a header row) as exported by a browser or another
 password manager, and adds one record per row.
@@ -249,7 +356,7 @@ password manager, and adds one record per row.
 
 The file is plaintext. tsync neither copies nor removes it.
 
-## 10. Conformance
+## 11. Conformance
 
 - The store holds no title, username, site or password in plaintext after `add`. Two records
   whose plaintexts differ in length by less than 256 bytes before padding may have envelopes of
@@ -280,3 +387,17 @@ The file is plaintext. tsync neither copies nor removes it.
   refused `invalid`; a `match` names a locked domain and still lists the other domains' logins;
   one login present in two domains is matched twice, each row naming its domain. A message from an extension
   the manifest does not name never reaches the bridge.
+- Passkeys: a creation for `https://login.example.com` with RP ID `example.com` makes a record
+  whose public key verifies the assertions it signs; the attestation object is CBOR with `fmt`
+  `none`, its authenticator data carries the AAGUID of §7.2, flags UP, BE and BS, counter 0, and
+  a COSE ES256 key; an assertion's signature verifies over `authenticatorData ‖ clientDataHash`
+  with that key.
+- RP ID `github.io` from `https://evil.github.io`, RP ID `example.com` from `http://example.com`,
+  and RP ID `other.com` from `https://example.com` are refused `invalid`.
+- UV is set when the request carries the correct passphrase or `verified: true`, clear otherwise;
+  a wrong passphrase is refused `denied`.
+- A creation whose exclude-list names a held passkey is refused `exists`; an assertion with an
+  allow-list answers only those credentials; without one, every passkey of the RP ID.
+- No reply holds a private key; the store holds no RP ID, user name or key in plaintext.
+- Two machines' passkeys for one RP ID stay two records; a rename of one passkey's user name on
+  two machines leaves one record.
