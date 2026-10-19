@@ -107,3 +107,9 @@ another key id: left and reported
   left keyring (conflicted copy from laptop)
 no copy
   nothing to do
+
+== the client a copy came from
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                             -
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy from laptop) laptop
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflicted copy 2 from the phone) the phone
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (something else)            -
