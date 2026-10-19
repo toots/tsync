@@ -155,6 +155,28 @@ APPEX="$APP/Contents/PlugIns/TsyncFileProvider.appex"
 # carry an extension the system refuses, so it carries none (passwords/macos §1).
 CREDENTIALS_APPEX="$APP/Contents/PlugIns/TsyncCredentials.appex"
 if [[ -n "${PROFILE_CREDENTIALS:-}" ]]; then
+    # pitfall B-11.13: the profile is matched by the identifier the signature
+    # claims; a mismatch is a silently ignored extension.
+    profile_plist=$(mktemp)
+    security cms -D -i "$PROFILE_CREDENTIALS" >"$profile_plist"
+    profile_id=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.application-identifier" \
+        "$profile_plist" 2>/dev/null || true)
+    autofill=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.developer.authentication-services.autofill-credential-provider" \
+        "$profile_plist" 2>/dev/null || true)
+    rm -f "$profile_plist"
+    claimed_id=$(/usr/libexec/PlistBuddy \
+        -c "Print :com.apple.application-identifier" \
+        "$MACOS_DIR/TsyncCredentials/TsyncCredentials.release.entitlements")
+    [[ "$profile_id" == "$claimed_id" ]] || {
+        echo "PROFILE_CREDENTIALS is for $profile_id, the extension claims $claimed_id" >&2
+        exit 1
+    }
+    [[ "$autofill" == "true" ]] || {
+        echo "PROFILE_CREDENTIALS does not authorise the AutoFill credential provider" >&2
+        exit 1
+    }
     cp "$PROFILE_CREDENTIALS" "$CREDENTIALS_APPEX/Contents/embedded.provisionprofile"
 else
     rm -rf "$CREDENTIALS_APPEX"
