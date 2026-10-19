@@ -258,6 +258,7 @@ let settings t : R.settings =
     batch_delay = tuning.batch_delay;
     project_width = tuning.project_width;
     projector = Option.bind main (fun m -> m.Tsync_store.Store.projector);
+    extensions = Config.extensions_in_force d main;
     domain_wide = Config.sources d main;
   }
 

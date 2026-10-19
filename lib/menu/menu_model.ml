@@ -320,6 +320,7 @@ type backend = {
 type settings = {
   read_only : flag; [@key "readOnly"] [@default false]
   versioning : flag; [@default false]
+  extensions : string list; [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -473,6 +474,10 @@ let domain_stats (d : domain) =
          (Printf.sprintf "queue %d files")
          (queued (fun q -> q.pending_files))
       @ part (fun b -> size b ^ " owed") (queued (fun q -> q.bytes_owed)))
+  @ (match d.settings with
+    | Some { extensions = _ :: _ as names; _ } ->
+        [row ~indent:1 ("extensions " ^ String.concat ", " names)]
+    | _ -> [])
   @ line ~indent:1
       (part (fun b -> "read " ^ size b) (moved (fun f -> f.bytes_read))
       @ part (fun b -> "written " ^ size b) (moved (fun f -> f.bytes_written)))

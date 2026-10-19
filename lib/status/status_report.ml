@@ -136,6 +136,7 @@ type settings = {
   batch_delay : float; [@key "batchDelay"] [@default 10.]
   project_width : int; [@key "projectWidth"] [@default 8]
   projector : string option; [@default None]
+  extensions : string list; [@default []]
   domain_wide : sources; [@key "domainWide"] [@default []]
 }
 [@@deriving yojson { strict = false }]

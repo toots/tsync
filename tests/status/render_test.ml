@@ -57,7 +57,8 @@ let settings : settings =
     batch_delay = 10.;
     project_width = 8;
     projector = None;
-    domain_wide = [];
+    extensions = ["totp"];
+    domain_wide = [("extensions", "main")];
   }
 
 let idle_sync =

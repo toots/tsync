@@ -69,6 +69,13 @@ let settings b (s : settings) =
       ]
   in
   if advanced <> [] then row b "  " "advanced" (String.concat ", " advanced);
+  (* 07 §5.5: the extensions in force, and where they come from. *)
+  row b "  " "extensions"
+    ((if s.extensions = [] then "none" else String.concat ", " s.extensions)
+    ^
+    if List.assoc_opt "extensions" s.domain_wide = Some "main" then
+      " (from the main)"
+    else "");
   (* publication §4.6: who projects the entries this machine commits. *)
   row b "  " "projection"
     (match s.projector with
