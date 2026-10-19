@@ -103,7 +103,7 @@ It takes a few environment variables:
 |---|---|
 | `CONFIGURATION` | `Release` (default) or `Debug` |
 | `SIGN_IDENTITY` | codesign identity, default `-` (ad-hoc) |
-| `PROFILE_APP` / `PROFILE_APPEX` / `PROFILE_DAEMON` | provisioning profiles to embed; without `PROFILE_DAEMON` the daemon claims no App Group and prompts at every start |
+| `PROFILE_APP` / `PROFILE_APPEX` / `PROFILE_CREDENTIALS` / `PROFILE_DAEMON` | provisioning profiles to embed; without `PROFILE_CREDENTIALS` the AutoFill extension is left out; without `PROFILE_DAEMON` the daemon claims no App Group and prompts at every start |
 | `BUNDLE_VERSION` / `BUNDLE_SHORT_VERSION` | override `CFBundleVersion` / `CFBundleShortVersionString` |
 | `JOBS` | parallel `xcodebuild` jobs, default 12 |
 
@@ -284,6 +284,7 @@ gh secret set AC_API_ISSUER_ID             # issuer UUID
 | `MACOS_CERT_PASSWORD` | password set when exporting the `.p12` |
 | `MACOS_PROFILE_APP` | base64 of `app.provisionprofile` |
 | `MACOS_PROFILE_APPEX` | base64 of `appex.provisionprofile` |
+| `MACOS_PROFILE_CREDENTIALS` | base64 of `credentials.provisionprofile`, for `org.feverdreamtv.tsync.credentials` with App Groups and AutoFill Credential Provider |
 | `MACOS_PROFILE_DAEMON` | base64 of `daemon.provisionprofile` |
 | `AC_API_KEY_P8` | base64 of `AuthKey_XXXXXXXXXX.p8` |
 | `AC_API_KEY_ID` | 10-character key id |
