@@ -6,6 +6,8 @@ struct Choice {
     let id: String
     let title: String
     let detail: String
+    /// passwords/macos §4: a passkey row of a sheet that also lists logins.
+    var passkey = false
 }
 
 /// What a list asked of every domain gave: the rows, and the domains whose
@@ -91,7 +93,7 @@ enum Requests {
                     let name = row["userDisplayName"] as? String ?? ""
                     return Choice(
                         domain: domain, id: id, title: name.isEmpty ? rpId : name,
-                        detail: row["userName"] as? String ?? "")
+                        detail: row["userName"] as? String ?? "", passkey: true)
                 }
             })
     }

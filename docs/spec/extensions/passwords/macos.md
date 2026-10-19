@@ -68,6 +68,11 @@ list, never reported as empty.
   `passwords_passkey_match` answers; the one picked is signed with `passwords_passkey_assert` and
   completes with an `ASPasskeyAssertionCredential` (user handle, RP ID, signature, client data
   hash, authenticator data, credential id).
+- The same call carries the service identifiers of the page when the page also takes a password,
+  as a sign-in page asking for a passkey in its autofill does. The sheet then lists that site's
+  logins after its passkeys, as §3 does; a login picked completes with an
+  `ASPasswordCredential`. A page that asks for a passkey and holds no login field shows the
+  passkeys alone.
 - **The origin.** macOS gives the extension the RP ID, not the page: the system has already
   checked it, against the browser's origin or the app's associated domains. The extension sends
   `https://<RP ID>` as `origin`, so the owner's check (passwords §7.3) still refuses an RP ID that
