@@ -45,6 +45,15 @@ UTF-8:
 The grouped fold ([README §4.3](README.md#43-the-grouped-fold)), with the code fields as key
 fields. A seed changed in place, which §2 forbids, therefore survives as a second record.
 
+**The second record says where it came from.** After a fold that moved a conflicted copy to a
+digest id (rule 5), the machine that applied it writes that record again with
+` (conflicted copy from <client>)` appended to its issuer, or to its account when the issuer is
+empty, `<client>` taken from the copy's name ([conflict-resolution §5](../algorithms/conflict-resolution.md#5-conflicted-copy-name))
+and `modified` kept. The user sees `Foo Provider` and `Foo Provider (conflicted copy from
+laptop)` and keeps the right one. It is a write after the fold, not part of it, since sealing
+draws a nonce: two machines that relabel concurrently write the same plaintext, and the copies
+that leaves fold by rule 4. A label that already ends with the suffix is not written again.
+
 A removal on one machine and an edit on another keep the edited record, as the merge keeps any
 edited file ([conflict-resolution §8.1](../algorithms/conflict-resolution.md#81-where-every-byte-ends-up)).
 
@@ -168,7 +177,9 @@ base32 secret alone, with the account named beside it.
   of a domain imports into an empty domain as the same records.
 - Two machines rename one record concurrently: after both fold, one record remains at its id
   with the newer labels, and no copy.
-- Two copies with different code fields fold into two records, both still producing their codes.
+- Two copies with different code fields fold into two records, both still producing their codes;
+  the one moved from the copy is listed with ` (conflicted copy from <client>)` after its issuer,
+  and a second fold changes nothing.
 - A record with a CORRUPT plaintext is reported and survives a fold.
 - Every verb on a locked vault is refused `locked` and changes nothing.
 - On a lazy tree with the store down after a list: `list` answers every record with its current
