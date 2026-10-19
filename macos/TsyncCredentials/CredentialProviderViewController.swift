@@ -57,11 +57,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         trace.info("login list for \(serviceIdentifiers.count) services")
         let origins = serviceIdentifiers.map(origin)
         show("Choose a login") { Requests.logins(origins: origins) } pick: { choice in
-            let reply = try Requests.call(choice.domain, "get", ["id": choice.id])
-            let credential = ASPasswordCredential(
-                user: reply["username"] as? String ?? "", password: reply["password"] as? String ?? "")
-            self.extensionContext.completeRequest(withSelectedCredential: credential)
+            try self.fill(choice)
         }
+    }
+
+    private func fill(_ choice: Choice) throws {
+        let reply = try Requests.call(choice.domain, "get", ["id": choice.id])
+        let credential = ASPasswordCredential(
+            user: reply["username"] as? String ?? "", password: reply["password"] as? String ?? "")
+        extensionContext.completeRequest(withSelectedCredential: credential)
     }
 
     @available(macOS 15.0, *)
@@ -86,13 +90,26 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         passkeyList(
             rpId: requestParameters.relyingPartyIdentifier, hash: requestParameters.clientDataHash,
             verify: requestParameters.userVerificationPreference != .discouraged,
-            allow: requestParameters.allowedCredentials)
+            allow: requestParameters.allowedCredentials,
+            origins: serviceIdentifiers.map(origin))
     }
 
-    private func passkeyList(rpId: String, hash: Data, verify: Bool, allow: [Data]) {
-        trace.info("passkey list")
-        show("Sign in to \(rpId) with a passkey") { Requests.passkeys(rpId: rpId, allow: allow) } pick: {
-            choice in
+    /// §4: the passkeys of `rpId`, then the logins of `origins` when the page takes one.
+    private func passkeyList(
+        rpId: String, hash: Data, verify: Bool, allow: [Data], origins: [String] = []
+    ) {
+        trace.info("passkey list, \(origins.count) login services")
+        let title = origins.isEmpty ? "Sign in to \(rpId) with a passkey" : "Sign in to \(rpId)"
+        show(title) {
+            var listed = Requests.passkeys(rpId: rpId, allow: allow)
+            if !origins.isEmpty {
+                let logins = Requests.logins(origins: origins)
+                listed.choices += logins.choices
+                listed.locked += logins.locked.filter { !listed.locked.contains($0) }
+            }
+            return listed
+        } pick: { choice in
+            guard choice.passkey else { return try self.fill(choice) }
             let verified = try self.verify(verify, reason: "sign in to \(rpId)")
             var args: [String: Any] = [
                 "origin": "https://" + rpId, "rpId": rpId, "id": choice.id,
