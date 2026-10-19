@@ -65,17 +65,12 @@ let relabel ctx = function
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
 let settled ctx =
-  let files = Vault.files ~keep:ctx.keep ctx.engine folder in
-  match
-    Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
-      ~modified:(fun (r : Totp.t) -> r.modified)
-      files
-  with
-    | [] -> files
-    | actions ->
-        Vault.apply ctx.engine folder actions;
-        List.iter (relabel ctx) actions;
-        Vault.files ~keep:ctx.keep ctx.engine folder
+  Format_merge.settle_folder ~after:(relabel ctx)
+    ~read:(fun () -> Vault.files ~keep:ctx.keep ctx.engine folder)
+    ~fold:
+      (Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
+         ~modified:(fun (r : Totp.t) -> r.modified))
+    ctx.engine folder
 
 (* README §4.1: a read answers the last view of the vault's folders and this
    one; a write proceeds on it, pushed later. *)

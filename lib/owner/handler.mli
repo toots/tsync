@@ -71,3 +71,7 @@ val path_of_ref : t -> string -> string
 (** The extensions the domain uses here: configured, else stated by its main (05
     §2.1 rule 5). *)
 val extensions : t -> string list
+
+(** The paths the engine changed behind the frontends: a conflicted copy among
+    them settles its folder in the background (format-merge §2). *)
+val copies_arrived : t -> string list -> unit

@@ -325,7 +325,6 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
                       !handler)
             | None -> (Handler.no_hooks, ignore)
         in
-        E.set_changed_hook hooks.changed;
         let report = Report.create domain engine ~frontend:hooks.frontend in
         reports := (Domain_name.to_string dom.name, report) :: !reports;
         let name = Domain_name.to_string dom.name in
@@ -344,6 +343,9 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
             ~stop:Stop.request ~dest_roots:roots ~staging_roots:roots ()
         in
         handler := Some h;
+        E.set_changed_hook (fun keys ->
+            hooks.changed keys;
+            Handler.copies_arrived h keys);
         { domain; go; handler = h })
       domains;
   let router =
