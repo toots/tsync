@@ -22,6 +22,7 @@ import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.Notifications
 import org.feverdreamtv.tsync.R
 import org.feverdreamtv.tsync.Tsync
+import org.feverdreamtv.tsync.core.Availability
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Ingest
@@ -229,6 +230,10 @@ class TsyncDocumentsProvider : DocumentsProvider() {
     }
 
     private fun openForReading(ref: String): ParcelFileDescriptor {
+        // app §5.1: offline, bytes the phone does not hold are refused at once. stat never pulls.
+        if (tsync.offline.value && asking { stat(ref) }.availability == Availability.ONLINE_ONLY) {
+            throw FileNotFoundException(string(R.string.not_available_offline))
+        }
         val handle = tsync.core.open(ref)
         if (handle <= 0) throw FileNotFoundException(string(R.string.cannot_open, OsConstants.errnoName(-handle.toInt()) ?: handle.toString()))
         tsync.keepAlive.retain(Work.OPEN_FILE)
