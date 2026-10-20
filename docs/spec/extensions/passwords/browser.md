@@ -220,7 +220,7 @@ With the extension installed, the native host installed, and the vault unlocked:
 
 | Browser | Host | Fill | Codes | Save | Passkeys |
 |---|---|---|---|---|---|
-| Chrome | macOS | planned | planned | planned | planned |
+| Chrome | macOS | seen | seen | seen | seen |
 | Chrome | Linux | planned | planned | planned | planned |
 
 ## 11. Later
