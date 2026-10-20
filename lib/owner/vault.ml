@@ -263,7 +263,7 @@ let refresh engine ~lazy_tree =
 (* README §4.1: a read answers the last view of the folders after the pull
    patience, a folder never pulled waits for its pull, and the oldest view
    read is what the reply says. *)
-let read_folders engine t dirs =
+let read_folders ?(pull = `Auto) engine t dirs =
   let (module E : Engine.S) = engine in
   match t.pulls with
     | None -> ()
@@ -273,7 +273,7 @@ let read_folders engine t dirs =
             (fun (acc : Pulls.view) dir ->
               if E.kind dir <> `Dir then acc
               else (
-                let v = Pulls.for_listing pulls ~pull:`Auto dir in
+                let v = Pulls.for_listing pulls ~pull dir in
                 E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
                 {
                   outdated = acc.outdated || v.outdated;
@@ -287,8 +287,8 @@ let read_folders engine t dirs =
         in
         Atomic.set t.view view
 
-let read_current engine ~lazy_tree t =
-  if lazy_tree then read_folders engine t vault_folders
+let read_current ?pull engine ~lazy_tree t =
+  if lazy_tree then read_folders ?pull engine t vault_folders
 
 (* README §4.1: a record write proceeds on the last view, pushed later. *)
 let before_write t dir =
@@ -482,8 +482,9 @@ let gone ~domain t =
       (Keystore.registered ()))
 
 (* [strict]: a keyring write, which needs the current keyring (README §4.1). *)
-let current ?(strict = false) ~domain engine ~lazy_tree t =
-  if strict && lazy_tree then pull engine else read_current engine ~lazy_tree t;
+let current ?(strict = false) ?pull:mode ~domain engine ~lazy_tree t =
+  if strict && lazy_tree then pull engine
+  else read_current ?pull:mode engine ~lazy_tree t;
   match (read ~domain engine).keyring with
     | `Ok k -> k
     | `Absent ->
@@ -598,11 +599,11 @@ let key t keyring =
     | Some (id, key) when id = keyring.Keyring.key_id -> Some key
     | _ -> None
 
-let held ?(use = true) ?strict ~domain ~engine ~lazy_tree t =
+let held ?(use = true) ?strict ?pull ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
   restore ~domain ~engine t;
   expire ~domain ~engine t;
-  let keyring = current ?strict ~domain engine ~lazy_tree t in
+  let keyring = current ?strict ?pull ~domain engine ~lazy_tree t in
   match key t keyring with
     | Some k ->
         if use then (

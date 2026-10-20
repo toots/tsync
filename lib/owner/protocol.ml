@@ -35,7 +35,7 @@ type page = {
 
 (** android §3.2 rule 1: pull unless fresh, pull even when fresh, or answer the
     mirror. *)
-type pull = [ `Auto | `Now | `Never ]
+type pull = [ `Auto | `Now | `Never | `Background ]
 
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
@@ -394,7 +394,7 @@ let mutates : type a. a request -> bool = function
   | Extension e ->
       List.exists
         (fun suffix -> String.ends_with ~suffix e.action)
-        ["_add"; "_edit"; "_remove"; "_import"; "_passkey_create"]
+        ["_add"; "_edit"; "_remove"; "_import"; "_passkey_create"; "_save"]
   | _ -> false
 
 let bulk : type a. a request -> bool = function
@@ -528,7 +528,8 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
         match r.pull with
         | `Auto -> []
         | `Now -> [("pull", `String "now")]
-        | `Never -> [("pull", `String "never")])
+        | `Never -> [("pull", `String "never")]
+        | `Background -> [("pull", `String "background")])
   | Ensure_cached r -> target_fields r.item @ [("dest", `String r.dest)]
   | Fetch_range r ->
       target_fields r.item
@@ -588,6 +589,7 @@ let decode j =
                    | None -> `Auto
                    | Some "now" -> `Now
                    | Some "never" -> `Never
+                   | Some "background" -> `Background
                    | Some p -> Fail.invalid "unknown pull %S" p);
              })
     | "list_all" ->

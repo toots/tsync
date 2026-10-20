@@ -42,9 +42,9 @@ type page = {
   outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
 }
 
-(** android §3.2 rule 1: pull unless fresh, pull even when fresh, or answer the
-    mirror. *)
-type pull = [ `Auto | `Now | `Never ]
+(** android §3.2 rule 1: pull unless fresh, pull even when fresh, answer the
+    mirror, or start the pull and answer the last view at once. *)
+type pull = [ `Auto | `Now | `Never | `Background ]
 
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
