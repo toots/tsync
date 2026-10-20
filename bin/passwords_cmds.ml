@@ -550,6 +550,19 @@ let bridge_request config session j =
                                       ( "username",
                                         Option.get (member row "username") );
                                       ("code", Option.get (member row "code"));
+                                      (* browser §3.2: whether the login is for
+                                         this origin itself, not by suffix. *)
+                                      ( "exact",
+                                        `Bool
+                                          (match
+                                             Passwords.site_of_string origin
+                                           with
+                                            | Ok site ->
+                                                List.mem (`String site)
+                                                  (match member row "urls" with
+                                                    | Some (`List l) -> l
+                                                    | _ -> [])
+                                            | Error _ -> false) );
                                     ]))
                            (records reply)
                      | Error _ -> [])
@@ -581,6 +594,10 @@ let bridge_request config session j =
             | Some id -> [("update", s id)]
             | None -> [])
     | Some "passkey_match" ->
+        let answers =
+          all (fun d ->
+              call d "passkey_match" (only j ["origin"; "rpId"; "allow"]))
+        in
         [
           ( "passkeys",
             `List
@@ -592,12 +609,17 @@ let bridge_request config session j =
                            | Some (`List l) -> l
                            | _ -> [])
                      | Error _ -> [])
-                 (all (fun d ->
-                      call d "passkey_match"
-                        (List.filter
-                           (fun (k, _) ->
-                             List.mem k ["origin"; "rpId"; "allow"])
-                           (fields_of j))))) );
+                 answers) );
+          (* browser §5: a locked domain is said, not passed over. *)
+          ( "locked",
+            `List
+              (List.filter_map
+                 (fun (d, r) ->
+                   match r with
+                     | Error (e : Fail.t) when e.kind = Locked ->
+                         Some (s (dname d))
+                     | _ -> None)
+                 answers) );
         ]
     (* §9.2 verify: the platform's own verifier; the prompt names the origin
        the browser gave, never a page's words. *)
@@ -754,8 +776,8 @@ let browser_install ids =
   let script = launcher () in
   Fs.mkdir_p (Filename.dirname script);
   Fs.replace ~perm:0o755 script
-    (Printf.sprintf "#!/bin/sh\nexec '%s' passwords browser-host \"$@\"\n"
-       program);
+    (Printf.sprintf "#!/bin/sh\nexec %s passwords browser-host \"$@\"\n"
+       (Filename.quote program));
   let manifest =
     Yojson.Safe.pretty_to_string
       (`Assoc
