@@ -42,9 +42,12 @@ capability. What has been seen working is recorded in §10.
     directories), naming the `.crx` and its version. The browser offers to enable it at its next
     start; a package upgrade updates it.
   - **macOS:** Chrome accepts an external extension there only from its store. The app bundle
-    carries the unpacked extension (`TsyncApp.app/Contents/Resources/browser-extension`), and the
-    user adds it once with *Load unpacked* in developer mode; `tsync passwords browser install`
-    prints the path and the steps. A configuration profile that installs it by policy is left for
+    carries the unpacked extension (`TsyncApp.app/Contents/Resources/browser-extension`). A
+    browser's folder picker cannot open a folder inside an app bundle, so
+    `tsync passwords browser install` copies it to
+    `~/Library/Application Support/tsync/browser-extension`, replacing an older copy, and prints
+    that path and the steps; the user adds it once with *Load unpacked* in developer mode, and
+    after an upgrade installs again and reloads the extension. A configuration profile that installs it by policy is left for
     later (§11).
   - Firefox needs its extensions signed by Mozilla, and comes with Firefox support (§11).
 - The popup says what is missing when it cannot reach the bridge: the native host not installed
@@ -100,6 +103,11 @@ logins (title, username, *Fill*, and *Copy code* for one linking a code), each d
 (locked, unlocked), and what is missing (§2). *Copy code* writes the code to the clipboard; the
 web has no sensitivity marker, so the popup says the code stays on the clipboard until replaced.
 The popup lists no other site's logins and no password.
+
+It also offers **Turn off the browser's own password manager**, unchecked until the user checks
+it: the browser's saving and filling of passwords (`chrome.privacy.services.passwordSavingEnabled`
+set to false), which otherwise offers alongside tsync's. Unchecking it gives the setting back to
+the browser. The extension never changes it by itself.
 
 ## 4. Saving
 

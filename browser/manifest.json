@@ -5,17 +5,72 @@
   "version": "1.0.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq21xITG6h0VlmOBUaw6Ul3LhIDkZjaqEwyhvppcKhT1jzyXAvj8LGhdy+moJLcFPTRh+2jHpJ2fIGNniWWU3Hj6qR+RHzVrtO2cnPU36L9dx68h6z9g8v7UC9pgwdqh/D9cT76o43Bg/tIJA8W1OH2t6b5uiNicqFbmxK4prqE2Yxa8ZnHZcLip+GbCnsPpuL2KDQZC5f6Bmv5Ta8cYZkO8ZRLYRRmf2IJs4XHNdzyKl5Shw2VyQT+UGGHWNjy0f58vTGml0xoBRdpdZuueLZo9v2sL0ZZouhaaq8BKzhkLu9SWYPgULc+y3dKcba8ukoccysJrjEMDuqP09Ltp4CwIDAQAB",
   "minimum_chrome_version": "111",
-  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
-  "action": { "default_popup": "popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
-  "background": { "service_worker": "background.js" },
-  "permissions": ["nativeMessaging", "storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
-  "content_scripts": [
-    { "matches": ["<all_urls>"], "all_frames": true, "run_at": "document_start", "world": "MAIN", "js": ["page.js"] },
-    { "matches": ["<all_urls>"], "all_frames": true, "run_at": "document_idle", "js": ["fields.js", "content.js"] }
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "tabs",
+    "privacy"
   ],
-  "web_accessible_resources": [{ "resources": ["icons/field.svg"], "matches": ["<all_urls>"] }],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": true,
+      "run_at": "document_start",
+      "world": "MAIN",
+      "js": [
+        "page.js"
+      ]
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle",
+      "js": [
+        "fields.js",
+        "content.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/field.svg"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "commands": {
-    "fill": { "suggested_key": { "default": "Ctrl+Shift+L", "mac": "Command+Shift+L" }, "description": "Fill from tsync" }
+    "fill": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Fill from tsync"
+    }
   }
 }

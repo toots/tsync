@@ -23,6 +23,17 @@ async function render() {
   for (const d of domains) {
     main.append(el("p", { className: "detail", textContent: `${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}` }));
   }
+  // §3.3: the user's choice, never the extension's: Chrome's own manager offers and
+  // fills too until it is turned off here.
+  const browserManager = chrome.privacy?.services?.passwordSavingEnabled;
+  if (browserManager) {
+    const setting = await browserManager.get({});
+    if (setting.levelOfControl === "controllable_by_this_extension" || setting.levelOfControl === "controlled_by_this_extension") {
+      const box = el("input", { type: "checkbox", checked: setting.value === false, onchange: () =>
+        box.checked ? browserManager.set({ value: false }) : browserManager.clear({}) });
+      main.append(el("label", { className: "detail" }, box, " Turn off the browser's own password manager"));
+    }
+  }
   if (!state.origin) return main.append(el("p", { className: "detail", textContent: "Not a web page." }));
   main.append(el("h2", { textContent: new URL(state.origin).host }));
   const logins = (state.match && state.match.ok && state.match.logins) || [];
