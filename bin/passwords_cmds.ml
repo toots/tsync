@@ -487,6 +487,11 @@ let bridge_request config session j =
   match str j "type" with
     | Some "status" ->
         [
+          (* browser §5: without one, the extension asks the passphrase. *)
+          ( "verifier",
+            match Tsync_owner.Verifier.registered () with
+              | Some v -> `String v.name
+              | None -> `Null );
           ( "domains",
             `List
               (List.map
@@ -718,6 +723,25 @@ let launcher () =
 let manifest_path dir =
   Filename.concat dir ("NativeMessagingHosts/" ^ host_name ^ ".json")
 
+(* The outermost app bundle holding this program carries the extension; a
+   Linux package puts it under /usr/share. *)
+let extension_dir program =
+  let parts = String.split_on_char '/' program in
+  let rec bundle acc = function
+    | [] -> None
+    | p :: _ when Filename.check_suffix p ".app" ->
+        Some (String.concat "/" (List.rev (p :: acc)))
+    | p :: rest -> bundle (p :: acc) rest
+  in
+  let candidates =
+    Option.to_list
+      (Option.map
+         (fun app -> Filename.concat app "Contents/Resources/browser-extension")
+         (bundle [] parts))
+    @ ["/usr/share/tsync/browser-extension"]
+  in
+  List.find_opt Sys.file_exists candidates
+
 let browser_install ids =
   List.iter
     (fun id ->
@@ -759,7 +783,15 @@ let browser_install ids =
       (browser_dirs ())
   in
   if installed = [] then say "No Chromium-family browser found for this user."
-  else List.iter (say "installed %s") installed
+  else List.iter (say "installed %s") installed;
+  (* browser §2: where the unpacked extension is, for Load unpacked. *)
+    match extension_dir program with
+    | Some dir ->
+        say
+          "To add the extension: open chrome://extensions, turn on Developer \
+           mode, choose Load unpacked, and pick %s"
+          dir
+    | None -> ()
 
 let browser_uninstall () =
   List.iter
