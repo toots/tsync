@@ -28,7 +28,7 @@ Both are the same program and the same config file. A server is a domain with an
 |---|---|
 | [Add a second machine](machines.md) | Sharing a domain between machines, and what happens when they change the same thing |
 | [Run tsync as a server](server.md) | The `http-proxy` frontend and backend, reverse proxies, checking on a server |
-| [Use it from an Android phone](android.md) | The app: setup, files, camera backup |
+| [Use it from an Android phone](android.md) | The app: setup, files, the vault and autofill, camera backup |
 | [Keep more than one copy](copies.md) | Backend roles, replicas and backfills, `tsync mirror`, data integrity |
 | [Versions and cleanup](history.md) | Reverting files, `expire` and `gc` |
 | [Share links and export](sharing.md) | Public links, and getting files out of a domain |

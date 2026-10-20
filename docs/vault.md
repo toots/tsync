@@ -188,6 +188,8 @@ tsync passwords get ID --field PIN            # one custom field's value
 - **Passkeys.** When a site offers to create a passkey, choose tsync: it is saved in the vault, after Touch ID when the site asks for verification. Signing in, Safari lists your tsync passkeys by user name; picking one signs in. tsync lists each passkey's site and user name in macOS's AutoFill list for this, never its key.
 - **A locked vault** shows as *Files is locked — Unlock it from the tsync menu* (with your domain's name): the sheet never asks for your passphrase. Unlock from the menu bar and try again.
 
+**Autofill on Android.** See [the Android page](android.md#passwords-and-autofill).
+
 **Moving from a browser or another manager.** `tsync passwords import FILE` reads the CSV export of a browser, Bitwarden or 1Password-style managers (columns named like `name`, `url`, `username`, `password`, `notes`, and `otpauth` or `login_totp` for two-factor seeds). It adds every row, so importing a file twice gives each login twice. The CSV is plaintext: delete it once imported. `tsync passwords export` prints every login as CSV after the passphrase; passkeys are not exported.
 
 Two machines editing the same login at once keep the newer edit; a login whose password was changed on both sides keeps both, the second labelled `(conflicted copy from <machine>)`.
