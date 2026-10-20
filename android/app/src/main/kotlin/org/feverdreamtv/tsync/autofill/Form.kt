@@ -21,7 +21,15 @@ class Form(
 
     companion object {
         private const val TAG = "tsync-autofill"
-        private val CODE_NAMES = listOf("otp", "totp", "2fa", "one-time", "onetime", "mfa", "verification-code", "verification_code")
+        /** Chromium's ONE_TIME_CODE pattern, plus `totp`, `mfa` and `one.time`. */
+        private val CODE_NAME = Regex("otp|verification.code|2fa|six.digit|mfa|one.time")
+        private val PASSWORD_HINTS = setOf(
+            "password", "current-password", "new-password", "account_creation_password", "new_password", "confirmation_password",
+        )
+        private val CODE_HINTS = setOf("one-time-code", "one_time_code", "2faappotpcode", "smsotpcode")
+        private val USERNAME_HINTS = setOf(
+            "username", "email", "emailaddress", "username_and_email_single_field", "single_username", "email_address",
+        )
 
         /**
          * §2: the page's origin only when a browser of the list asks; any other app is its
@@ -71,8 +79,11 @@ class Form(
             node.autofillValue?.takeIf { it.isText }?.textValue?.toString()?.takeIf { it.isNotEmpty() }
 
         /**
-         * Autofill hints first, then the HTML attributes a browser reports, then the input type.
-         * A code field is also told by its name: browsers pass `autocomplete` on unevenly.
+         * Autofill hints (a page's `autocomplete`), then the browser's own verdict, then the field's
+         * name, id and label, then the input type. Chromium's bridge (android_autofill FormData)
+         * passes its field type as `computed-autofill-hints` (`ONE_TIME_CODE`, `USERNAME`,
+         * `PASSWORD`, …), and tells a code field by `otp|verification.code|2fa|six.digit` over the
+         * name and label (form_parsing legacy_regex_patterns.json, ONE_TIME_CODE).
          */
         private fun kind(node: AssistStructure.ViewNode): Kind? {
             if (node.autofillType != View.AUTOFILL_TYPE_TEXT) return null
@@ -83,20 +94,17 @@ class Form(
                 when (attribute.first) {
                     "autocomplete", "ua-autofill-hints", "computed-autofill-hints" -> hints += value.split(' ', ',')
                     "type" -> if (value == "password") hints += "password"
-                    "name", "id" -> names += value
+                    "name", "id", "label" -> names += value
                 }
             }
             node.idEntry?.let { names += it.lowercase() }
             // Names and hints only, never a value: what to look at when a field is missed.
             Log.d(TAG, "field hints=$hints names=$names inputType=${node.inputType} html=${node.htmlInfo?.attributes?.map { it.first }}")
             return when {
-                hints.any { it == View.AUTOFILL_HINT_PASSWORD.lowercase() || it == "current-password" || it == "new-password" } -> Kind.PASSWORD
-                hints.any { it == "one-time-code" || it.startsWith("smsotpcode") || it.contains("otp") } -> Kind.CODE
-                names.any { name -> CODE_NAMES.any { name.contains(it) } } -> Kind.CODE
-                hints.any {
-                    it == View.AUTOFILL_HINT_USERNAME.lowercase() || it == View.AUTOFILL_HINT_EMAIL_ADDRESS.lowercase() ||
-                        it == "username" || it == "email"
-                } -> Kind.USERNAME
+                hints.any { it in PASSWORD_HINTS } -> Kind.PASSWORD
+                hints.any { it in CODE_HINTS || it.startsWith("smsotpcode") } -> Kind.CODE
+                names.any { CODE_NAME.containsMatchIn(it) } -> Kind.CODE
+                hints.any { it in USERNAME_HINTS } -> Kind.USERNAME
                 isPasswordInput(node.inputType) -> Kind.PASSWORD
                 node.inputType and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS -> Kind.USERNAME
                 else -> null
