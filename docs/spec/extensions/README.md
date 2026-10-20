@@ -70,7 +70,9 @@ a top-level command or a frontend's CLI group
   - A **read** (`vault_status`, an extension's `list` and `code`) waits for the pulls at most the
     pull patience, then answers from the last view of those folders, its reply carrying
     `outdated: true` and the oldest `pulledAt` among them. The pulls go on and the next read is
-    fresh. No `changed` notice names these folders (§4.4); a host showing an outdated vault
+    fresh. A read carrying `pull` takes it as a listing does
+    ([android §3.2](../frontends/android.md#32-freshness-without-a-background-cycle) rule 1):
+    `background` answers the last view without waiting. No `changed` notice names these folders (§4.4); a host showing an outdated vault
     answer asks again on the `recovered` notice, as it re-lists folders.
   - A **record write** (an extension's `add`, `import`, `rename`, `remove`) proceeds on the last
     view as any mutation does, stays pending and is pushed once the store answers; the
