@@ -521,7 +521,12 @@ let passkey_create ~domain ~engine ~lazy_tree t args =
 
 let passkey_match ~domain ~engine ~lazy_tree t args =
   let rp_id = check_rp args in
-  let allow = Option.map (List.map (unb64 "allow")) (strings args "allow") in
+  (* §7.3: an empty allow-list is none. *)
+  let allow =
+    match strings args "allow" with
+      | None | Some [] -> None
+      | Some ids -> Some (List.map (unb64 "allow") ids)
+  in
   let ctx = context ~domain ~engine ~lazy_tree t in
   let ok, _ = records ctx in
   let title id =
