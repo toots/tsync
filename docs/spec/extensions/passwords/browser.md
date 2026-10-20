@@ -95,8 +95,11 @@ The popup lists no other site's logins and no password.
 - When a form holding a password field the user typed into is submitted (a `submit` event, or a
   navigation that follows a click on the form's button), the content script hands the username
   and the password typed to the service worker, with the frame's origin from the browser.
-- The service worker asks nothing yet. It shows the extension's sheet (§5): *Save this login for
-  `<site>` in tsync?*, naming the username, with **Save**, **Not now** and **Never for this site**.
+- The service worker first checks what tsync holds, with `match` and, for a login of the same
+  username, `fill`: a login whose password equals the one typed (a sign-in with a saved login) asks
+  nothing. The page learns nothing of the check. Otherwise it shows the extension's sheet (§5):
+  *Save this login for `<site>` in tsync?*, naming the username, with **Save**, **Not now** and
+  **Never for this site**.
   Only **Save** sends `save`; a reply naming a record to update shows *Update the password for
   `<title>`?* in the same sheet, and only **Update** sends `save` with `update`.
 - The password waits in the service worker's memory until the sheet is answered or closed, then is
