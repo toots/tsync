@@ -63,6 +63,8 @@ targets:
     sources:
       - path: Shared
       - path: TsyncCredentials
+      # vault §8.1: the rows' marks, as the app's menu draws them.
+      - path: TsyncApp/VaultLook.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.credentials
