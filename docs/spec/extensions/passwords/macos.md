@@ -29,7 +29,9 @@ user sees. Every capability is planned until it has been seen working on a signe
 The extension asks every domain the shared socket serves that uses `passwords`
 ([extensions README §3](../README.md#3-opting-in)) and merges their answers as
 [README §6.1](../README.md#61-several-domains) says: each row names its domain, and a request
-for one record goes to the domain that holds it. A domain that does not answer is shown as an
+for one record goes to the domain that holds it. Each row shows its vault's mark
+([vault §8.1](../vault.md#81-appearance)): the vault's icon, or the tsync glyph in the vault's
+colour; a passkey's row says so in its detail. A domain that does not answer is shown as an
 inert row "`<domain>` did not answer — check that tsync is running", never reported as empty.
 Each sheet completes its request once: a pick or an approval replaces the sheet's buttons with a
 spinner and **Cancel**, and the request is completed or cancelled at most once.

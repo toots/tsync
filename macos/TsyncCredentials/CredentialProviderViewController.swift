@@ -316,6 +316,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         working(title)
         DispatchQueue.global().async {
             let listed = fetch()
+            // vault §8.1: each row shows its vault's mark.
+            var looks: [String: NSImage] = [:]
+            for domain in Set(listed.choices.map(\.domain)) { looks[domain] = VaultLook.image(domain: domain) }
             trace.info(
                 "listed \(listed.choices.count) rows, \(listed.locked.count) locked, \(listed.unanswered.count) unanswered")
             DispatchQueue.main.async {
@@ -327,8 +330,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 for choice in listed.choices {
                     self.add(
                         RowButton(
-                            title: choice.title, detail: choice.detail,
-                            symbol: choice.passkey ? "person.badge.key" : "key"
+                            title: choice.title,
+                            detail: choice.passkey ? [choice.detail, "passkey"].filter { !$0.isEmpty }.joined(separator: " · ") : choice.detail,
+                            symbol: choice.passkey ? "person.badge.key" : "key", image: looks[choice.domain]
                         ) { self.run(title) { try pick(choice) } })
                 }
                 for domain in listed.locked { self.add(self.lockedRow(domain)) }
@@ -432,7 +436,7 @@ final class RowButton: NSButton {
     private let handler: () -> Void
     private var hovered = false { didSet { needsDisplay = true } }
 
-    init(title: String, detail: String, symbol: String, _ action: @escaping () -> Void) {
+    init(title: String, detail: String, symbol: String, image: NSImage? = nil, _ action: @escaping () -> Void) {
         handler = action
         super.init(frame: .zero)
         isBordered = false
@@ -442,8 +446,9 @@ final class RowButton: NSButton {
         wantsLayer = true
         layer?.cornerRadius = 8
 
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .secondaryLabelColor
+        // vault §8.1: the vault's mark when there is one, else the row's kind.
+        let icon = NSImageView(image: image ?? NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
+        if image == nil { icon.contentTintColor = .secondaryLabelColor }
         let name = NSTextField(labelWithString: title)
         name.font = .systemFont(ofSize: 13, weight: .medium)
         name.lineBreakMode = .byTruncatingTail
