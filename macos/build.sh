@@ -151,32 +151,52 @@ fi
 APPEX="$APP/Contents/PlugIns/TsyncFileProvider.appex"
 [[ -n "${PROFILE_APP:-}" ]] && cp "$PROFILE_APP" "$APP/Contents/embedded.provisionprofile"
 [[ -n "${PROFILE_APPEX:-}" ]] && cp "$PROFILE_APPEX" "$APPEX/Contents/embedded.provisionprofile"
-# The AutoFill entitlement is restricted: a build without its profile would
-# carry an extension the system refuses, so it carries none (passwords/macos §1).
-CREDENTIALS_APPEX="$APP/Contents/PlugIns/TsyncCredentials.appex"
-if [[ -n "${PROFILE_CREDENTIALS:-}" ]]; then
-    # pitfall B-11.13: the profile is matched by the identifier the signature
-    # claims; a mismatch is a silently ignored extension.
+# A claim its profile does not authorise is refused at launch, after the whole
+# release, or leaves a bundle the system silently ignores (pitfalls B-11.12,
+# B-11.13): check the identifier, every App Group and the AutoFill claim here.
+check_profile() {
+    local name="$1" profile="$2" entitlements="$3"
+    local profile_plist
     profile_plist=$(mktemp)
-    security cms -D -i "$PROFILE_CREDENTIALS" >"$profile_plist"
+    security cms -D -i "$profile" >"$profile_plist"
+    local profile_id allowed autofill claimed_id claimed claims_autofill
     profile_id=$(/usr/libexec/PlistBuddy \
-        -c "Print :Entitlements:com.apple.application-identifier" \
-        "$profile_plist" 2>/dev/null || true)
+        -c "Print :Entitlements:com.apple.application-identifier" "$profile_plist" 2>/dev/null || true)
+    allowed=$(/usr/libexec/PlistBuddy \
+        -c "Print :Entitlements:com.apple.security.application-groups" "$profile_plist" 2>/dev/null || true)
     autofill=$(/usr/libexec/PlistBuddy \
         -c "Print :Entitlements:com.apple.developer.authentication-services.autofill-credential-provider" \
         "$profile_plist" 2>/dev/null || true)
     rm -f "$profile_plist"
-    claimed_id=$(/usr/libexec/PlistBuddy \
-        -c "Print :com.apple.application-identifier" \
-        "$MACOS_DIR/TsyncCredentials/TsyncCredentials.release.entitlements")
+    claimed_id=$(/usr/libexec/PlistBuddy -c "Print :com.apple.application-identifier" "$entitlements")
     [[ "$profile_id" == "$claimed_id" ]] || {
-        echo "PROFILE_CREDENTIALS is for $profile_id, the extension claims $claimed_id" >&2
+        echo "$name is for $profile_id, the bundle claims $claimed_id" >&2
         exit 1
     }
-    [[ "$autofill" == "true" ]] || {
-        echo "PROFILE_CREDENTIALS does not authorise the AutoFill credential provider" >&2
+    claimed=$(/usr/libexec/PlistBuddy \
+        -c "Print :com.apple.security.application-groups" "$entitlements" 2>/dev/null | sed '1d;$d')
+    for group in $claimed; do
+        grep -qxF "    $group" <<<"$allowed" || {
+            echo "$name does not authorise App Group $group" >&2
+            echo "it authorises: $(sed '1d;$d' <<<"$allowed" | xargs)" >&2
+            exit 1
+        }
+    done
+    claims_autofill=$(/usr/libexec/PlistBuddy \
+        -c "Print :com.apple.developer.authentication-services.autofill-credential-provider" \
+        "$entitlements" 2>/dev/null || true)
+    [[ "$claims_autofill" != "true" || "$autofill" == "true" ]] || {
+        echo "$name does not authorise the AutoFill credential provider" >&2
         exit 1
     }
+}
+
+# The AutoFill entitlement is restricted: a build without its profile would
+# carry an extension the system refuses, so it carries none (passwords/macos §1).
+CREDENTIALS_APPEX="$APP/Contents/PlugIns/TsyncCredentials.appex"
+if [[ -n "${PROFILE_CREDENTIALS:-}" ]]; then
+    check_profile PROFILE_CREDENTIALS "$PROFILE_CREDENTIALS" \
+        "$MACOS_DIR/TsyncCredentials/TsyncCredentials.release.entitlements"
     cp "$PROFILE_CREDENTIALS" "$CREDENTIALS_APPEX/Contents/embedded.provisionprofile"
 else
     rm -rf "$CREDENTIALS_APPEX"
@@ -185,35 +205,7 @@ fi
 # the claim is made only with the profile.
 DAEMON_SIGNING=()
 if [[ -n "${PROFILE_DAEMON:-}" ]]; then
-    # A claim the profile does not authorise is refused at launch, after the
-    # whole release: check every claimed group against the profile here.
-    profile_plist=$(mktemp)
-    security cms -D -i "$PROFILE_DAEMON" >"$profile_plist"
-    allowed=$(/usr/libexec/PlistBuddy \
-        -c "Print :Entitlements:com.apple.security.application-groups" \
-        "$profile_plist" 2>/dev/null || true)
-    # The profile is tied to the daemon by its application identifier.
-    profile_id=$(/usr/libexec/PlistBuddy \
-        -c "Print :Entitlements:com.apple.application-identifier" \
-        "$profile_plist" 2>/dev/null || true)
-    rm -f "$profile_plist"
-    claimed_id=$(/usr/libexec/PlistBuddy \
-        -c "Print :com.apple.application-identifier" \
-        "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements")
-    [[ "$profile_id" == "$claimed_id" ]] || {
-        echo "PROFILE_DAEMON is for $profile_id, the daemon claims $claimed_id" >&2
-        exit 1
-    }
-    claimed=$(/usr/libexec/PlistBuddy \
-        -c "Print :com.apple.security.application-groups" \
-        "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements" | sed '1d;$d')
-    for group in $claimed; do
-        grep -qxF "    $group" <<<"$allowed" || {
-            echo "PROFILE_DAEMON does not authorise App Group $group" >&2
-            echo "it authorises: $(sed '1d;$d' <<<"$allowed" | xargs)" >&2
-            exit 1
-        }
-    done
+    check_profile PROFILE_DAEMON "$PROFILE_DAEMON" "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements"
     cp "$PROFILE_DAEMON" "$DAEMON_APP/Contents/embedded.provisionprofile"
     DAEMON_SIGNING=(--entitlements "$MACOS_DIR/TsyncDaemon/tsyncd.entitlements")
 fi

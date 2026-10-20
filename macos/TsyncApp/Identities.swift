@@ -11,8 +11,11 @@ enum Identities {
     static func refresh() {
         queue.async {
             ASCredentialIdentityStore.shared.getState { state in
-                guard state.isEnabled else { return }
-                queue.async { write(current()) }
+                queue.async {
+                    // The system empties the store while AutoFill is off.
+                    guard state.isEnabled else { return written = nil }
+                    write(current())
+                }
             }
         }
     }
@@ -28,12 +31,7 @@ enum Identities {
     }
 
     private static func current() -> [ASCredentialIdentity] {
-        guard
-            let data = try? Data(contentsOf: Tsync.configFile),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-        let domains = (json["domains"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-        return domains.flatMap { domain -> [ASCredentialIdentity] in
+        Tsync.domainNames().flatMap { domain -> [ASCredentialIdentity] in
             guard
                 let reply = try? OwnerClient.call(["action": "passwords_list", "domain": domain]),
                 let rows = reply["records"] as? [[String: Any]]
@@ -46,8 +44,8 @@ enum Identities {
         switch row["kind"] as? String {
         case "passkey":
             guard let rpId = row["rpId"] as? String,
-                let credentialID = fromBase64URL(row["credentialId"] as? String ?? ""),
-                let userHandle = fromBase64URL(row["userHandle"] as? String ?? "")
+                let credentialID = Data(base64URL: row["credentialId"] as? String ?? ""),
+                let userHandle = Data(base64URL: row["userHandle"] as? String ?? "")
             else { return [] }
             return [
                 ASPasskeyCredentialIdentity(
@@ -59,20 +57,26 @@ enum Identities {
             let title = row["title"] as? String ?? ""
             let username = row["username"] as? String ?? ""
             let label = username.isEmpty ? title : "\(title) — \(username)"
-            let hosts = Set((row["urls"] as? [String] ?? []).compactMap { URL(string: $0)?.host })
-            return hosts.sorted().map { host in
+            let services = Dictionary(
+                (row["urls"] as? [String] ?? []).compactMap(service).map { ($0.identifier, $0) },
+                uniquingKeysWith: { first, _ in first })
+            return services.keys.sorted().map {
                 ASOneTimeCodeCredentialIdentity(
-                    serviceIdentifier: ASCredentialServiceIdentifier(identifier: host, type: .domain),
-                    label: label, recordIdentifier: record)
+                    serviceIdentifier: services[$0]!, label: label, recordIdentifier: record)
             }
         default:
             return []
         }
     }
 
-    private static func fromBase64URL(_ text: String) -> Data? {
-        var s = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        while s.count % 4 != 0 { s += "=" }
-        return Data(base64Encoded: s)
+    /// §3.1: a web site's service, its host alone or with its port as a URL;
+    /// an `android://` site has none.
+    private static func service(_ site: String) -> ASCredentialServiceIdentifier? {
+        guard let url = URL(string: site), let host = url.host,
+            url.scheme == "https" || url.scheme == "http"
+        else { return nil }
+        return url.port == nil
+            ? ASCredentialServiceIdentifier(identifier: host, type: .domain)
+            : ASCredentialServiceIdentifier(identifier: site, type: .URL)
     }
 }
