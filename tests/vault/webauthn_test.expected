@@ -44,6 +44,8 @@ generated key: 32 bytes, signs: true
 
 == §7.3 RP ID
 https://login.example.com        example.com      ok
+https://github.com/              github.com       ok
+https://github.com//             github.com       refused: the origin's host is not a domain name
 https://login.example.com        login.example.com ok
 https://login.example.com:8443   example.com      ok
 https://Login.Example.com        example.com      ok

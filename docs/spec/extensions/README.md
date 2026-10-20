@@ -44,7 +44,9 @@ a top-level command or a frontend's CLI group
   nothing, when the client's config lists it
   ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5). Behind an http-proxy the
   server decides: a client can only narrow its list, and one that leaves `extensions` out (the
-  Android app) decides nothing. For a domain whose config lists
+  Android app) decides nothing. A client that has not yet learned what the main states asks it
+  before deciding: an unknown statement never reads as stating nothing, and a main that does not
+  answer fails the verb with its code (UNREACHABLE), never `invalid`. For a domain whose config lists
   none, this client runs nothing of this file: it writes nothing under `/.tsync-ext/`, folds
   nothing, and refuses every vault and extension verb `invalid`. The folder still syncs, hidden,
   like any other.
