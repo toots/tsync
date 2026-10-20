@@ -373,6 +373,7 @@ let passkeys () =
   in
   p "%-40s %d" "match, no allow-list" (matched []);
   p "%-40s %d" "match, allowing one" (matched [("allow", `List [s credential])]);
+  p "%-40s %d" "match, an empty allow-list" (matched [("allow", `List [])]);
   let asserted =
     ask
       [

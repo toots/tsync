@@ -195,7 +195,8 @@ every domain:
   stands in for them is not trusted to, so the owner checks it on every request. Anything else
   is refused `invalid`.
 - **Matching.** A passkey answers a request whose RP ID equals its `rpId`. An assertion with an
-  allow-list answers only the passkeys whose `credentialId` it lists.
+  allow-list answers only the passkeys whose `credentialId` it lists. An empty allow-list is
+  none, as WebAuthn's empty `allowCredentials` is: a discoverable request.
 - **Exclusion.** A creation whose exclude-list names a passkey this vault holds for the RP ID is
   refused `exists` (WebAuthn's InvalidStateError): the site already knows this authenticator.
 
