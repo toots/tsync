@@ -9,8 +9,12 @@ The files of a domain stay unencrypted, as before. Only the vault's records are 
 A domain uses the vault when its config lists `extensions`, the kinds of secrets it keeps:
 
 ```json
-{ "name": "Files", "extensions": ["..."], "backends": [ ... ], "frontends": [ ... ] }
+{ "name": "Files", "extensions": ["totp"], "backends": [ ... ], "frontends": [ ... ] }
 ```
+
+| Extension | Keeps |
+|---|---|
+| `totp` | [Two-factor codes](#two-factor-codes) |
 
 Each kind is described in its own section below. With no `extensions`, the domain has no vault: its vault commands are refused, and nothing is written for it.
 
@@ -110,6 +114,36 @@ The colour and icon sync with the domain and show even while the vault is locked
 `tsync vault status` says whether the domain has a vault, whether it is unlocked here, and whether this machine is enrolled.
 
 `tsync vault delete` removes the vault and everything in it, for every machine, after you type the domain's name to confirm. It asks for no passphrase: forgetting the passphrase is the reason to delete and start again. In a versioned domain the sealed records stay among the domain's versions until they expire.
+
+## Two-factor codes
+
+With `totp` in `extensions`, the vault keeps the seeds of time-based two-factor codes (TOTP), the six-digit codes an authenticator app shows. tsync computes the codes; no seed ever leaves the vault, and none is printed back.
+
+**Adding a code.** A service shows its seed as a QR code, which holds an `otpauth://totp/` link, or as text:
+
+```bash
+tsync totp add -                                          # paste the otpauth:// link on standard input
+tsync totp add --secret - --issuer GitHub --account me    # the text seed, read from standard input
+```
+
+Pass `-` and paste, rather than the seed itself on the command line, so it stays out of your shell's history.
+
+**Reading a code.**
+
+```bash
+tsync totp list               # the records: issuer, account, seconds left, id
+tsync totp list github        # those whose issuer or account contains "github"
+tsync totp list --show-codes  # with their current codes
+tsync totp code ID            # one code
+```
+
+`list` prints no code unless you ask: a terminal's output ends up in its scrollback, a screen share, or a tool reading it.
+
+**Moving from another authenticator.** `tsync totp import FILE` reads a plain-text export, one `otpauth://` link per line, as Ente Auth and others write it. It says how many it added, how many were already there, and why any line was refused, by line number and never by content. Importing the same file twice adds nothing.
+
+**Moving out.** `tsync totp export` prints every record as an `otpauth://` link. It asks for the passphrase each time, even on an unlocked machine: no other way gets the seeds out.
+
+`tsync totp rename ID` and `tsync totp remove ID` change or remove one record. Two machines changing the same record at once lose nothing: two renames keep the newer name, a rename and a removal keep the renamed record, and two different codes under one record are both kept, the second labelled `(conflicted copy from <machine>)` for you to remove the one you do not want.
 
 ## What the vault protects
 
