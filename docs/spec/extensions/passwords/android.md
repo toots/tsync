@@ -124,8 +124,12 @@ the owner does not do: a passkey request from an app off the list is answered wi
 
 ### 6.3 The origin
 
-The origin is the browser's, from `getOrigin` (§2). Without one the provider answers no entry;
-the owner's check (passwords §7.3) is never skipped.
+The origin is the browser's, from `getOrigin` (§2). The platform may give none before the pick:
+the provider then lists a passkey request from a browser of the list (by its signing
+certificate, §2) for `https://<RP ID>`, which shows only names in the system's sheet, and offers
+no login. The pick needs the browser's origin from `getOrigin`, and fails without one: nothing
+is signed or filled for an origin the platform did not vouch for, and the owner's check
+(passwords §7.3) is never skipped. A caller off the list gets no entry.
 
 ## 7. User verification
 
