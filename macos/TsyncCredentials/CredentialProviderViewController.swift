@@ -15,7 +15,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     override func loadView() {
         let root = NSView()
         stack.orientation = .vertical
-        stack.alignment = .width
+        stack.alignment = .leading
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -163,7 +163,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
     override func prepareInterfaceForExtensionConfiguration() {
         reset("tsync fills logins and passkeys from your vault")
-        stack.addArrangedSubview(
+        add(
             note("Unlock a domain's vault from the tsync menu, or here when a sheet asks."))
         footer([defaultButton("Done") { self.extensionContext.completeExtensionConfigurationRequest() }])
     }
@@ -178,8 +178,19 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         heading.stringValue = title
         heading.lineBreakMode = .byTruncatingTail
-        stack.addArrangedSubview(heading)
+        add(heading)
         stack.setCustomSpacing(16, after: heading)
+    }
+
+    /// Adds a row spanning the sheet between its margins.
+    private func add(_ row: NSView, stretched: Bool = true) {
+        stack.addArrangedSubview(row)
+        if stretched { fill(width: row) }
+    }
+
+    private func fill(width row: NSView) {
+        let margins = stack.edgeInsets.left + stack.edgeInsets.right
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -margins).isActive = true
     }
 
     private func note(_ text: String) -> NSTextField {
@@ -196,7 +207,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let bar = NSStackView(views: [spacer] + buttons)
         bar.orientation = .horizontal
         bar.spacing = 8
-        stack.addArrangedSubview(bar)
+        add(bar)
     }
 
     private func cancelButton() -> NSButton {
@@ -220,24 +231,24 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.startAnimation(nil)
-        stack.addArrangedSubview(spinner)
+        add(spinner, stretched: false)
         DispatchQueue.global().async {
             let listed = fetch()
             trace.info("listed \(listed.choices.count) rows, \(listed.locked.count) locked")
             DispatchQueue.main.async {
                 self.reset(title)
                 if listed.choices.isEmpty && listed.locked.isEmpty {
-                    self.stack.addArrangedSubview(self.note("Nothing in tsync for this site."))
+                    self.add(self.note("Nothing in tsync for this site."))
                 }
                 for choice in listed.choices {
-                    self.stack.addArrangedSubview(
+                    self.add(
                         RowButton(
                             title: choice.title, detail: choice.detail,
                             symbol: choice.passkey ? "person.badge.key" : "key"
                         ) { self.run { try pick(choice) } })
                 }
                 for domain in listed.locked {
-                    self.stack.addArrangedSubview(
+                    self.add(
                         RowButton(title: "\(domain) is locked", detail: "Unlock…", symbol: "lock") {
                             self.unlockForm(domain) { self.show(title, fetch: fetch, pick: pick) }
                         })
@@ -260,14 +271,17 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let secretKey = SecretField(placeholder: "Secret key")
         let message = note("")
         message.textColor = .systemRed
-        stack.addArrangedSubview(passphrase)
+        add(passphrase)
         DispatchQueue.global().async {
             let enrolled = Requests.enrolled(domain)
             DispatchQueue.main.async {
-                if !enrolled { self.stack.insertArrangedSubview(secretKey, at: 2) }
+                if !enrolled {
+                    self.stack.insertArrangedSubview(secretKey, at: 2)
+                    self.fill(width: secretKey)
+                }
             }
         }
-        stack.addArrangedSubview(message)
+        add(message)
         let unlock = defaultButton("Unlock") {
                 let typed = passphrase.stringValue
                 let key = secretKey.superview == nil ? nil : secretKey.stringValue
@@ -296,7 +310,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 let reason = (error as? OwnerFailure)?.message ?? "\(error)"
                 DispatchQueue.main.async {
                     self.reset("tsync could not do it")
-                    self.stack.addArrangedSubview(self.note(reason))
+                    self.add(self.note(reason))
                     self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
                 }
             }
