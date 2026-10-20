@@ -232,12 +232,22 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
     var vaultShown by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vaultShown = withContext(Dispatchers.IO) {
-                try {
-                    tsync.vault.status() != null
-                } catch (e: CoreException) {
-                    vaultShown
+            // A first status may wait on the vault's first pull, which can fail at launch: ask
+            // again a few times rather than keep the Vault entry hidden until the next foreground.
+            for (attempt in 1..5) {
+                val shown = withContext(Dispatchers.IO) {
+                    try {
+                        tsync.vault.status() != null
+                    } catch (e: CoreException) {
+                        android.util.Log.w(Tsync.TAG, "vault status: ${e.code.wire}: ${e.message}")
+                        null
+                    }
                 }
+                if (shown != null) {
+                    vaultShown = shown
+                    break
+                }
+                kotlinx.coroutines.delay(attempt * 2000L)
             }
             // After the status: the warm-up holds the vault's folders while it fetches.
             if (vaultShown) tsync.warmPasswords()
