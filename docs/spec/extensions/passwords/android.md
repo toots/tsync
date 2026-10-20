@@ -34,7 +34,9 @@ never on the main thread.
 A request reads what the phone holds (§3): the records' bodies the cache keeps for
 `RECORD_KEEP` ([README §4.1](../README.md#41-where-they-live)). So that they are there when a
 form asks, the app lists the passwords once (`passwords_list`, `pull: auto`) after an unlock and
-each time it comes to the foreground, fetching the bodies it lacks. A phone whose app has not
+each time it comes to the foreground, fetching the bodies it lacks. The warm-up holds the vault's
+folders while it fetches (format-merge §6), so it runs after the vault's status is asked, one at
+a time: a screen deciding whether to show the vault never waits behind it. A phone whose app has not
 run for longer than `RECORD_KEEP` may answer its first request after that with nothing, and the
 next with the logins.
 
