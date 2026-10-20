@@ -74,7 +74,9 @@ platform vouches for:
 ## 4. One-time codes
 
 - **Fill** (`fill` with codes, `confirm`). A field with a one-time-code hint
-  (`AUTOFILL_HINT_SMS_OTP` or the `one-time-code` HTML autocomplete) gets one dataset per login
+  (`AUTOFILL_HINT_SMS_OTP`, the `one-time-code` HTML autocomplete, any hint naming `otp`), or
+  whose name or id names a code (`otp`, `totp`, `2fa`, `mfa`, `one-time`, `verification-code`:
+  browsers do not all pass `autocomplete` on) gets one dataset per login
   matching the site that links a code, gated as §3, listed with `pull: background` as §3. The pick asks `passwords_fill` and fills its
   `code`; the code is read at the pick, never when the datasets are built.
 
