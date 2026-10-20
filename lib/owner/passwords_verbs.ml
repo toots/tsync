@@ -839,13 +839,12 @@ let save ~domain ~engine ~lazy_tree t args =
         and password = required args "password" in
         let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
         let ok, _ = records ctx in
+        (* §8: a save is about the site exactly; a parent site's login that
+           also matches it by suffix is never updated from a subdomain. *)
         let same =
           List.filter
             (fun (_, (l : Passwords.login)) ->
-              l.username = username
-              && List.exists
-                   (fun s -> Passwords.matches ~site:s ~origin:site)
-                   l.urls)
+              l.username = username && List.mem site l.urls)
             (logins ok)
         in
         if

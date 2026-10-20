@@ -29,13 +29,16 @@ async function render() {
   if (!logins.length) main.append(el("p", { className: "detail", textContent: "Nothing in tsync for this site." }));
   for (const login of logins) {
     const fill = el("button", { textContent: "Fill", className: "primary", onclick: async () => {
-      await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id });
-      window.close();
+      const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+        exact: login.exact, title: login.title, username: login.username });
+      if (reply && reply.error) main.append(el("p", { className: "detail", textContent: reply.error }));
+      else window.close();
     } });
     const actions = el("div", { className: "actions" }, fill);
     if (login.code) {
       actions.prepend(el("button", { textContent: "Copy code", onclick: async () => {
-        const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id, copyCode: true });
+        const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+          exact: login.exact, title: login.title, username: login.username, kind: "code" });
         if (reply.code) await navigator.clipboard.writeText(reply.code);
         main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
       } }));

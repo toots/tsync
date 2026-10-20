@@ -243,6 +243,12 @@ let logins () =
         saved "save, then the same"
           [site; ("username", s "a"); ("password", s "two")]
     | None -> p "save: no update named");
+  saved "save, from a subdomain of its site"
+    [
+      ("site", s "https://sub.example.org");
+      ("username", s "a");
+      ("password", s "three");
+    ];
   saved "save, a bad site"
     [("site", s "ftp://x"); ("username", s "a"); ("password", s "x")];
   let gen =
