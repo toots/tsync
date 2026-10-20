@@ -13,19 +13,21 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     private let heading = NSTextField(labelWithString: "tsync")
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 320))
+        let root = NSView()
         stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.alignment = .width
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        heading.font = .boldSystemFont(ofSize: 14)
+        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        heading.lineBreakMode = .byTruncatingTail
         root.addSubview(stack)
         NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: 400),
             stack.topAnchor.constraint(equalTo: root.topAnchor),
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
     }
@@ -48,6 +50,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             passkeyList(
                 rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
                 verify: request.userVerificationPreference != .discouraged, allow: [])
+        } else if #available(macOS 15.0, *), credentialRequest.type == .oneTimeCode {
+            prepareOneTimeCodeCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
         } else {
             prepareCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
         }
@@ -160,8 +164,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     override func prepareInterfaceForExtensionConfiguration() {
         reset("tsync fills logins and passkeys from your vault")
         stack.addArrangedSubview(
-            NSTextField(wrappingLabelWithString: "Unlock a domain's vault from the tsync menu, or here when a sheet asks."))
-        stack.addArrangedSubview(button("Done") { self.extensionContext.completeExtensionConfigurationRequest() })
+            note("Unlock a domain's vault from the tsync menu, or here when a sheet asks."))
+        footer([defaultButton("Done") { self.extensionContext.completeExtensionConfigurationRequest() }])
     }
 
     // MARK: the sheet
@@ -173,7 +177,38 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     private func reset(_ title: String) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         heading.stringValue = title
+        heading.lineBreakMode = .byTruncatingTail
         stack.addArrangedSubview(heading)
+        stack.setCustomSpacing(16, after: heading)
+    }
+
+    private func note(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    /// The sheet's buttons, right-aligned below its rows.
+    private func footer(_ buttons: [NSButton]) {
+        if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(20, after: last) }
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let bar = NSStackView(views: [spacer] + buttons)
+        bar.orientation = .horizontal
+        bar.spacing = 8
+        stack.addArrangedSubview(bar)
+    }
+
+    private func cancelButton() -> NSButton {
+        let cancel = button("Cancel") { self.cancel(.userCanceled) }
+        cancel.keyEquivalent = "\u{1b}"
+        return cancel
+    }
+
+    private func defaultButton(_ title: String, _ action: @escaping () -> Void) -> NSButton {
+        let button = button(title, action)
+        button.keyEquivalent = "\r"
+        return button
     }
 
     /// Lists what `fetch` finds off the main queue; a pick runs `pick` off it too.
@@ -181,35 +216,41 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         _ title: String, fetch: @escaping () -> Listed, pick: @escaping (Choice) throws -> Void
     ) {
         reset(title)
-        stack.addArrangedSubview(NSTextField(labelWithString: "Reading…"))
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        stack.addArrangedSubview(spinner)
         DispatchQueue.global().async {
             let listed = fetch()
             trace.info("listed \(listed.choices.count) rows, \(listed.locked.count) locked")
             DispatchQueue.main.async {
                 self.reset(title)
+                if listed.choices.isEmpty && listed.locked.isEmpty {
+                    self.stack.addArrangedSubview(self.note("Nothing in tsync for this site."))
+                }
+                for choice in listed.choices {
+                    self.stack.addArrangedSubview(
+                        RowButton(
+                            title: choice.title, detail: choice.detail,
+                            symbol: choice.passkey ? "person.badge.key" : "key"
+                        ) { self.run { try pick(choice) } })
+                }
                 for domain in listed.locked {
                     self.stack.addArrangedSubview(
-                        self.button("\(domain) is locked — Unlock…") {
+                        RowButton(title: "\(domain) is locked", detail: "Unlock…", symbol: "lock") {
                             self.unlockForm(domain) { self.show(title, fetch: fetch, pick: pick) }
                         })
                 }
-                if listed.choices.isEmpty && listed.locked.isEmpty {
-                    self.stack.addArrangedSubview(NSTextField(labelWithString: "Nothing in tsync for this site."))
-                }
-                for choice in listed.choices {
-                    let label = choice.detail.isEmpty ? choice.title : "\(choice.title) — \(choice.detail)"
-                    self.stack.addArrangedSubview(
-                        self.button(label) { self.run { try pick(choice) } })
-                }
-                self.stack.addArrangedSubview(self.button("Cancel") { self.cancel(.userCanceled) })
+                self.footer([self.cancelButton()])
             }
         }
     }
 
     private func approve(_ question: String, _ action: @escaping () throws -> Void) {
         reset(question)
-        stack.addArrangedSubview(button("Save") { self.run(action) })
-        stack.addArrangedSubview(button("Cancel") { self.cancel(.userCanceled) })
+        heading.lineBreakMode = .byWordWrapping
+        footer([cancelButton(), defaultButton("Save") { self.run(action) }])
     }
 
     /// file-provider §10.1's form, in the sheet (passwords/macos §6).
@@ -217,7 +258,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         reset("Unlock the vault of \(domain)")
         let passphrase = SecretField(placeholder: "Passphrase")
         let secretKey = SecretField(placeholder: "Secret key")
-        let message = NSTextField(wrappingLabelWithString: "")
+        let message = note("")
+        message.textColor = .systemRed
         stack.addArrangedSubview(passphrase)
         DispatchQueue.global().async {
             let enrolled = Requests.enrolled(domain)
@@ -226,8 +268,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             }
         }
         stack.addArrangedSubview(message)
-        stack.addArrangedSubview(
-            button("Unlock") {
+        let unlock = defaultButton("Unlock") {
                 let typed = passphrase.stringValue
                 let key = secretKey.superview == nil ? nil : secretKey.stringValue
                 passphrase.stringValue = ""
@@ -241,8 +282,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                         DispatchQueue.main.async { message.stringValue = reason }
                     }
                 }
-            })
-        stack.addArrangedSubview(button("Cancel") { self.cancel(.userCanceled) })
+            }
+        footer([cancelButton(), unlock])
         view.window?.makeFirstResponder(passphrase.input)
     }
 
@@ -255,8 +296,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 let reason = (error as? OwnerFailure)?.message ?? "\(error)"
                 DispatchQueue.main.async {
                     self.reset("tsync could not do it")
-                    self.stack.addArrangedSubview(NSTextField(wrappingLabelWithString: reason))
-                    self.stack.addArrangedSubview(self.button("Close") { self.cancel(.failed) })
+                    self.stack.addArrangedSubview(self.note(reason))
+                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
                 }
             }
         }
@@ -300,4 +341,66 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 final class ClosureButton: NSButton {
     var handler: () -> Void = {}
     @objc func fire() { handler() }
+}
+
+/// A list row: an icon, the record's title, and its username below.
+final class RowButton: NSButton {
+    private let handler: () -> Void
+    private var hovered = false { didSet { needsDisplay = true } }
+
+    init(title: String, detail: String, symbol: String, _ action: @escaping () -> Void) {
+        handler = action
+        super.init(frame: .zero)
+        isBordered = false
+        self.title = ""
+        target = self
+        self.action = #selector(fire)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+
+        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
+        icon.contentTintColor = .secondaryLabelColor
+        let name = NSTextField(labelWithString: title)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.lineBreakMode = .byTruncatingTail
+        let below = NSTextField(labelWithString: detail)
+        below.font = .systemFont(ofSize: 12)
+        below.textColor = .secondaryLabelColor
+        below.lineBreakMode = .byTruncatingTail
+        let text = NSStackView(views: detail.isEmpty ? [name] : [name, below])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 2
+        let row = NSStackView(views: [icon, text])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 18),
+        ])
+        setAccessibilityLabel(detail.isEmpty ? title : "\(title), \(detail)")
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self))
+    }
+
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    override func updateLayer() {
+        layer?.backgroundColor =
+            (hovered ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.18)
+                : NSColor.quaternaryLabelColor.withAlphaComponent(0.08)).cgColor
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func mouseEntered(with event: NSEvent) { hovered = true }
+    override func mouseExited(with event: NSEvent) { hovered = false }
+    @objc private func fire() { handler() }
 }
