@@ -360,19 +360,34 @@ let bridge_request config j =
               (List.map
                  (fun (d, r) ->
                    `Assoc
-                     [
-                       ("domain", s (dname d));
-                       ( "state",
-                         s
-                           (match r with
-                             | Ok (st : P.vault_status) -> (
-                                 match st.vault with
-                                   | `Unlocked -> "unlocked"
-                                   | `Locked -> "locked"
-                                   | `Absent -> "absent"
-                                   | `Corrupt _ -> "corrupt")
-                             | Error (e : Fail.t) -> Fail.code e.kind) );
-                     ])
+                     ([
+                        ("domain", s (dname d));
+                        ( "state",
+                          s
+                            (match r with
+                              | Ok (st : P.vault_status) -> (
+                                  match st.vault with
+                                    | `Unlocked -> "unlocked"
+                                    | `Locked -> "locked"
+                                    | `Absent -> "absent"
+                                    | `Corrupt _ -> "corrupt")
+                              | Error (e : Fail.t) -> Fail.code e.kind) );
+                      ]
+                     (* vault §8.1: how the extension draws the domain's rows. *)
+                     @
+                       match r with
+                       | Ok { appearance = Some a; _ } ->
+                           [
+                             ( "appearance",
+                               `Assoc
+                                 (("color", s a.color)
+                                 ::
+                                   (match a.icon with
+                                   | Some png ->
+                                       [("icon", s (Base64.encode_string png))]
+                                   | None -> [])) );
+                           ]
+                       | _ -> []))
                  (all (fun d -> Vault_cmds.ask d P.Vault_status))) );
         ]
     | Some "match" ->
