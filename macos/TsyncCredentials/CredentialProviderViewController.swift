@@ -133,6 +133,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     override func prepareInterface(forPasskeyRegistration registrationRequest: ASCredentialRequest) {
+        trace.info("passkey registration")
         guard let request = registrationRequest as? ASPasskeyCredentialRequest,
             let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity
         else { return cancel(.failed) }
