@@ -169,14 +169,20 @@ class Tsync private constructor(val context: Context) {
      * locked vault, has nothing to fetch.
      */
     fun warmPasswords() {
+        if (!warming.compareAndSet(false, true)) return
         scope.launch {
             try {
                 if (boot() == Boot.Ready) passwords.list()
             } catch (e: CoreException) {
                 // Nothing to warm, or nothing reachable: the next form asks again.
+            } finally {
+                warming.set(false)
             }
         }
     }
+
+    /** One warm-up at a time: it holds the vault's folders while it fetches (format-merge §6). */
+    private val warming = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Runs a request, feeding the offline latch (app §5). */
     fun <T> ask(request: Client.() -> T): T = try {
