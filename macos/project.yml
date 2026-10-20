@@ -21,7 +21,6 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - path: Shared
-      - path: SharedUI
       - path: TsyncApp
     settings:
       base:
@@ -63,7 +62,6 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - path: Shared
-      - path: SharedUI
       - path: TsyncCredentials
     settings:
       base:
