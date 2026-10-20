@@ -11,8 +11,15 @@
   (names keychain_stubs))
  (foreign_stubs
   (language c)
-  (names group_container_stubs)
+  (names group_container_stubs local_auth_stubs)
   (flags
-   (:standard -x objective-c)))
+   (:standard -x objective-c -fobjc-arc)))
  (c_library_flags
-  (-framework Security -framework CoreFoundation -framework Foundation)))
+  (-framework
+   Security
+   -framework
+   CoreFoundation
+   -framework
+   Foundation
+   -framework
+   LocalAuthentication)))
