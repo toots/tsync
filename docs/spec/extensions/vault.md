@@ -78,7 +78,9 @@ what a user can remember and type on every machine.
 `tsync vault init` (action `vault_init`) creates the domain's vault.
 
 1. It is refused unless this client uses an extension of the domain
-   ([README §3](README.md#3-opting-in)). A domain may already have a vault another client made;
+   ([README §3](README.md#3-opting-in)), or the domain uses `encryptFiles`
+   ([file-encryption §2](../algorithms/file-encryption.md#2-turning-it-on)), which gives it a vault
+   too. A domain may already have a vault another client made;
    this client then unlocks it (§6) instead.
 2. It brings the local tree to the main's first (a cycle on a full tree, a pull of `/.tsync-ext/`
    on a lazy one), and is refused if that fails or a keyring exists. Init is a user's one-time
