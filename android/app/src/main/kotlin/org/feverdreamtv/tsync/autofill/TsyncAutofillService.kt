@@ -52,10 +52,12 @@ class TsyncAutofillService : AutofillService() {
                 else -> null
             }
         }
+        // vault §8.1: the mark the response's rows show.
+        val mark = VaultIcon.of(this, tsync)
         // §4: a form asking only for a code is offered the logins that link one.
         val offered = if (form.username.isEmpty() && form.password.isEmpty()) logins.filter { it.hasCode } else logins
         val response = FillResponse.Builder()
-        offered.forEach { response.addDataset(dataset(form, it)) }
+        offered.forEach { response.addDataset(dataset(form, it, mark)) }
         val save = form.password.isNotEmpty()
         if (save) {
             val type = SaveInfo.SAVE_DATA_TYPE_PASSWORD or (if (form.username.isNotEmpty()) SaveInfo.SAVE_DATA_TYPE_USERNAME else 0)
@@ -70,8 +72,8 @@ class TsyncAutofillService : AutofillService() {
 
     /** §3: no value until the pick, which [FillActivity] answers. */
     @Suppress("DEPRECATION")
-    private fun dataset(form: Form, login: LoginRow): Dataset {
-        val presentation = row(this, login.title, login.username)
+    private fun dataset(form: Form, login: LoginRow, mark: android.graphics.drawable.Icon?): Dataset {
+        val presentation = row(this, login.title, login.username, mark)
         val pick = Intent(this, FillActivity::class.java)
             .putExtra(FillActivity.EXTRA_SITE, form.site)
             .putExtra(FillActivity.EXTRA_ID, login.id)
@@ -109,10 +111,14 @@ class TsyncAutofillService : AutofillService() {
     }
 
     companion object {
-        fun row(context: Context, title: String, detail: String): RemoteViews =
+        fun row(context: Context, title: String, detail: String, mark: android.graphics.drawable.Icon? = null): RemoteViews =
             RemoteViews(context.packageName, R.layout.autofill_row).apply {
                 setTextViewText(R.id.autofill_title, title)
                 setTextViewText(R.id.autofill_detail, detail)
+                if (mark != null) {
+                    setImageViewIcon(R.id.autofill_mark, mark)
+                    setViewVisibility(R.id.autofill_mark, android.view.View.VISIBLE)
+                }
             }
     }
 }
