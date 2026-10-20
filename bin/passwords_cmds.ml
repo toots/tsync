@@ -806,9 +806,20 @@ let browser_install ids =
   in
   if installed = [] then say "No Chromium-family browser found for this user."
   else List.iter (say "installed %s") installed;
-  (* browser §2: where the unpacked extension is, for Load unpacked. *)
+  (* browser §2: a browser's folder picker cannot open a folder inside an app
+     bundle, so the extension is copied next to the launcher, replaced whole. *)
     match extension_dir program with
-    | Some dir ->
+    | Some source ->
+        let dir =
+          Filename.concat (Filename.dirname script) "browser-extension"
+        in
+        Fs.rm_rf dir;
+        if
+          Sys.command
+            (Printf.sprintf "cp -R %s %s" (Filename.quote source)
+               (Filename.quote dir))
+          <> 0
+        then Fail.raise_ Refused "could not copy the extension to %s" dir;
         say
           "To add the extension: open chrome://extensions, turn on Developer \
            mode, choose Load unpacked, and pick %s"
