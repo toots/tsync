@@ -87,6 +87,11 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync vault machines [--name NAME]` | The machines that joined the vault; `--name` renames this one |
 | `tsync vault status` | Whether it exists, is unlocked here, and this machine is enrolled |
 | `tsync vault delete` | Remove the vault and every record in it, after confirming the domain's name |
+| `tsync totp add [URI \| --secret S --issuer I --account A]` | Add a two-factor code; `-` reads the link or seed from standard input |
+| `tsync totp list [FILTER] [--show-codes]` | The codes' records; their current codes only with `--show-codes` |
+| `tsync totp code ID` | One current code |
+| `tsync totp import FILE`, `tsync totp export` | From another authenticator's plain-text export; out as `otpauth://` links, after the passphrase |
+| `tsync totp rename ID`, `tsync totp remove ID` | Change or remove one record |
 
 **macOS only**
 
