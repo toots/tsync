@@ -177,6 +177,10 @@ A verb reads what it needs at the cost of a listing, however many records the fo
   works on every host.
 - A host adapter is where an extension touches the platform. The record format and fold MUST NOT
   depend on which hosts have one.
+- **A host adapter never initialises, locks or unlocks a vault**, nor takes a passphrase or a
+  secret key to do so: those are core operations, done from the tsync app, its menu or the CLI,
+  never delegated to a platform's or a third party's workflow. On a locked domain it says the
+  domain is locked and where to unlock it, and asks nothing.
 
 ## 6. Commands and actions
 

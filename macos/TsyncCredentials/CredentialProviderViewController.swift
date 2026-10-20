@@ -142,6 +142,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 DispatchQueue.main.async {
                     self.passkeyList(rpId: rpId, hash: hash, verify: verify, allow: [])
                 }
+            } catch let failure as OwnerFailure where failure.code == "locked" {
+                DispatchQueue.main.async {
+                    self.reset("Signing in to \(rpId)")
+                    self.add(self.lockedRow(choice.domain))
+                    self.footer([self.defaultButton("Close") { self.cancel(.userCanceled) }])
+                }
             }
         }
     }
@@ -196,8 +202,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
     override func prepareInterfaceForExtensionConfiguration() {
         reset("tsync fills logins and passkeys from your vault")
-        add(
-            note("Unlock a domain's vault from the tsync menu, or here when a sheet asks."))
+        add(note("Unlock a domain's vault from the tsync menu."))
         footer([defaultButton("Done") { self.extensionContext.completeExtensionConfigurationRequest() }])
     }
 
@@ -281,10 +286,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                         ) { self.run { try pick(choice) } })
                 }
                 for domain in listed.locked {
-                    self.add(
-                        RowButton(title: "\(domain) is locked", detail: "Unlock…", symbol: "lock") {
-                            self.unlockForm(domain) { self.show(title, fetch: fetch, pick: pick) }
-                        })
+                    self.add(self.lockedRow(domain))
                 }
                 self.footer([self.cancelButton()])
             }
@@ -297,41 +299,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         footer([cancelButton(), defaultButton("Save") { self.run(action) }])
     }
 
-    /// file-provider §10.1's form, in the sheet (passwords/macos §6).
-    private func unlockForm(_ domain: String, then: @escaping () -> Void) {
-        reset("Unlock the vault of \(domain)")
-        let passphrase = SecretField(placeholder: "Passphrase")
-        let secretKey = SecretField(placeholder: "Secret key")
-        let message = note("")
-        message.textColor = .systemRed
-        add(passphrase)
-        DispatchQueue.global().async {
-            let enrolled = Requests.enrolled(domain)
-            DispatchQueue.main.async {
-                if !enrolled {
-                    self.stack.insertArrangedSubview(secretKey, at: 2)
-                    self.fill(width: secretKey)
-                }
-            }
-        }
-        add(message)
-        let unlock = defaultButton("Unlock") {
-                let typed = passphrase.stringValue
-                let key = secretKey.superview == nil ? nil : secretKey.stringValue
-                passphrase.stringValue = ""
-                secretKey.stringValue = ""
-                DispatchQueue.global().async {
-                    do {
-                        try Requests.unlock(domain, passphrase: typed, secretKey: key)
-                        DispatchQueue.main.async(execute: then)
-                    } catch {
-                        let reason = (error as? OwnerFailure)?.message ?? "\(error)"
-                        DispatchQueue.main.async { message.stringValue = reason }
-                    }
-                }
-            }
-        footer([cancelButton(), unlock])
-        view.window?.makeFirstResponder(passphrase.input)
+    /// §6: a locked domain, pointing to the menu; it does nothing.
+    private func lockedRow(_ domain: String) -> NSView {
+        let row = RowButton(
+            title: "\(domain) is locked", detail: "Unlock it from the tsync menu", symbol: "lock") {}
+        row.isEnabled = false
+        return row
     }
 
     /// Runs a completion off the main queue; a refusal is shown, not swallowed.

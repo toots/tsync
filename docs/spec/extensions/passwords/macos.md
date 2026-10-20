@@ -116,7 +116,8 @@ without them it shows the system's "More from tsync…", which opens the sheet.
   `provideCredentialWithoutUserInteraction`, which declines with `userInteractionRequired`;
   `prepareInterfaceToProvideCredential(for:)` of a passkey request naming a record signs that
   record with `passwords_passkey_assert`, after LocalAuthentication when verification is asked
-  (§5), showing no list. A record that is gone shows the passkey sheet of the RP ID instead.
+  (§5), showing no list. A record that is gone shows the passkey sheet of the RP ID instead; a
+  locked vault is shown as §6 says.
 
 ## 5. User verification
 
@@ -130,11 +131,11 @@ without them it shows the system's "More from tsync…", which opens the sheet.
 
 ## 6. A locked vault
 
-The sheet of any of §3 and §4 on a domain whose vault is locked shows that domain as locked with
-an **Unlock** button. It opens the unlock form the menu's dialog uses
-([file-provider §10.1](../../frontends/file-provider.md)): a secure field for the passphrase and,
-when this Mac is not enrolled, one for the secret key, each with its **Show** box, sent as
-`vault_unlock`; then the list is asked again. The extension never caches the unlocked state.
+The extension never unlocks ([README §5](../README.md#5-host-adapters)). The sheet of any of §3
+and §4 on a domain whose vault is locked shows that domain as a row "`<domain>` is locked —
+unlock it from the tsync menu", which does nothing when clicked. A passkey entry (§4.1) whose
+vault is locked shows the same and signs nothing. The user unlocks from the menu and asks again;
+the extension never caches the unlocked state.
 
 ## 7. Capabilities
 
@@ -156,6 +157,7 @@ With the extension turned on in System Settings and the vault unlocked:
 - `https://webauthn.io`: registering creates a passkey record (`tsync passwords list` shows it),
   after Touch ID when the site asks for verification; signing in with it succeeds, the site
   reporting the authenticator's AAGUID and backup flags.
-- With the vault locked, the sheet says so and unlocks with the passphrase; the list follows.
+- With the vault locked, the sheet says so and points to the tsync menu; it asks for no
+  passphrase. Unlocked from the menu, the next request lists as usual.
 - Nothing the extension does leaves a password, code, passphrase or key in a log or a file of its
   container.
