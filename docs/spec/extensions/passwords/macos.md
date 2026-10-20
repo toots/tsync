@@ -120,9 +120,9 @@ when this Mac is not enrolled, one for the secret key, each with its **Show** bo
 
 | capability | interaction | realised by | declared |
 |---|---|---|---|
-| `fill` | `confirm` | §3, the credential sheet | planned |
-| `fill` with codes | `confirm` | §3, macOS 15 | planned |
-| `passkey` | `confirm`, `authenticate` when verification is asked | §4, §5, macOS 14 | planned |
+| `fill` | `confirm` | §3, the credential sheet | declared |
+| `fill` with codes | `confirm` | §3, §3.1, macOS 15 | declared |
+| `passkey` | `confirm`, `authenticate` when verification is asked | §4, §5, macOS 14 | declared |
 | `save` | — | not offered (§3) | — |
 
 ## 8. Conformance
