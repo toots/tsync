@@ -151,6 +151,8 @@ let rp_ids () =
           | Error e -> "refused: " ^ e))
     [
       ("https://login.example.com", "example.com");
+      ("https://github.com/", "github.com");
+      ("https://github.com//", "github.com");
       ("https://login.example.com", "login.example.com");
       ("https://login.example.com:8443", "example.com");
       ("https://Login.Example.com", "example.com");

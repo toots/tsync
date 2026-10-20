@@ -231,7 +231,10 @@ let store ~domain ~engine t ~key:(key_id, key) ~secret_key =
    main states, names this release does not know dropped. *)
 let extensions ~(domain : Tsync_domain.Domain.t) ~engine =
   let (module E : Engine.S) = engine in
-  Tsync_config.Config.extensions_in_force domain.domain (E.stated_settings ())
+  (* extensions README §3: what the main states is asked before deciding, so a
+     client that has not learned it yet never reads it as stating nothing. *)
+  Tsync_config.Config.extensions_in_force domain.domain
+    (E.stated_settings ~wait:true ())
 
 (* extensions README §3: a client that uses no extension of the domain runs
    none of the vault. *)

@@ -161,6 +161,12 @@ let valid_label label =
 let ( let* ) = Result.bind
 
 let origin_host origin =
+  (* passwords §7.3: an origin serialised as a URL ends with one [/]. *)
+  let origin =
+    if String.ends_with ~suffix:"/" origin then
+      String.sub origin 0 (String.length origin - 1)
+    else origin
+  in
   let* scheme, rest =
     match String.index_opt origin ':' with
       | Some i
