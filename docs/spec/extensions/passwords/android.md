@@ -73,10 +73,11 @@ platform vouches for:
 
 ## 4. One-time codes
 
-- **Fill** (`fill` with codes, `confirm`). A field with a one-time-code hint
-  (`AUTOFILL_HINT_SMS_OTP`, the `one-time-code` HTML autocomplete, any hint naming `otp`), or
-  whose name or id names a code (`otp`, `totp`, `2fa`, `mfa`, `one-time`, `verification-code`:
-  browsers do not all pass `autocomplete` on) gets one dataset per login
+- **Fill** (`fill` with codes, `confirm`). A code field is told as Chromium tells it: a
+  one-time-code hint (`AUTOFILL_HINT_SMS_OTP`, the page's `one-time-code` autocomplete), the
+  browser's own verdict (Chromium passes its field type as the `computed-autofill-hints` HTML
+  attribute: `ONE_TIME_CODE`), or a name, id or label matching Chromium's ONE_TIME_CODE pattern
+  `otp|verification.code|2fa|six.digit` (also `mfa`, `one.time`). Such a field gets one dataset per login
   matching the site that links a code, gated as §3, listed with `pull: background` as §3. The pick asks `passwords_fill` and fills its
   `code`; the code is read at the pick, never when the datasets are built.
 
