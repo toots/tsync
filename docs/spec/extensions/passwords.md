@@ -329,14 +329,20 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
   `save` whose site and username match one record with another password asks whether to update
   it; otherwise it adds a record.
 
-No host declares a capability yet. Each host has `extensions/passwords/<host>.md`
-([README §5](README.md#5-host-adapters)): [macOS](passwords/macos.md). Planned, not declared:
+| action | request | answer |
+|---|---|---|
+| `passwords_fill` | `site`, `id`, `pull?` | the login's username, password, and current code with seconds left when one is linked; refused `invalid` when the login does not match `site` (§4.2) |
+| `passwords_save` | `site`, `username`, `password`, `update?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` with that id updates it |
 
-| host | `fill` | `save` | `passkey` |
-|---|---|---|---|
-| macOS | an AutoFill credential provider extension (`ASCredentialProviderViewController`), which also serves one-time codes | not offered to credential providers | the same extension, as a passkey provider (macOS 14) |
-| Android | Credential Manager (`CredentialProviderService`), and an `AutofillService` for apps and browsers that use autofill | the same | Credential Manager (Android 14) |
-| Linux | none: no system autofill; browsers are served by §9 | none | none: browsers are served by §9 |
+A host's `fill` and `save` are these requests, the browser bridge's (§9.2) as every platform
+host's, so the rules above hold in one place. A read (`passwords_list`, `passwords_fill`,
+`passwords_passkey_match`, `passwords_passkey_assert`) takes `pull` as a listing does
+([README §4.1](README.md#41-where-they-live)).
+
+Each host has `extensions/passwords/<host>.md` ([README §5](README.md#5-host-adapters)), which
+lists what it declares: [macOS](passwords/macos.md) (`fill`, codes, `passkey`),
+[Android](passwords/android.md) (planned). Linux has no system autofill: browsers are served by
+§9.
 
 ## 9. Browser extensions
 
@@ -368,8 +374,8 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 |---|---|---|
 | `status` | — | per domain: locked or unlocked, whether it uses `totp`, and its `appearance` (`color`, and `icon` in base64 when it has one; vault §8.1) |
 | `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, and whether a code is linked; no password |
-| `fill` | `origin`, `domain`, `id` | the login's username, password, and current code with seconds left when one is linked |
-| `save` | `origin`, `username`, `password`, `domain?` | as a `save` (§8), with `origin` as the site |
+| `fill` | `origin`, `domain`, `id` | `passwords_fill` (§8), with `origin` as the site |
+| `save` | `origin`, `username`, `password`, `domain?`, `update?` | `passwords_save` (§8), with `origin` as the site |
 | `passkey_match`, `passkey_create`, `passkey_assert` | as §7.5, `origin` the frame's | as §7.5 |
 
 - A `fill` whose login does not match `origin` is refused `invalid`. A page never receives a
