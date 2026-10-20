@@ -50,8 +50,10 @@ function render(item) {
     case "passkey-get":
       main.append(el("h1", { textContent: `Sign in to ${site} with a passkey` }));
       for (const key of item.passkeys) {
-        main.append(el("button", { className: "row", onclick: () => answer({ action: "pick", id: key.id }) },
-          el("strong", { textContent: key.userDisplayName || key.userName }), el("small", { textContent: key.userName })));
+        const look = (item.looks || {})[key.domain] || null;
+        main.append(el("button", { className: "row mark", onclick: () => answer({ action: "pick", id: key.id }) },
+          TsyncMark.element(look, 20),
+          el("span", {}, el("strong", { textContent: key.userDisplayName || key.userName }), el("small", { textContent: key.userName }))));
       }
       actions.append(button("Use another passkey or device", () => answer({ action: "fallback" })));
       break;

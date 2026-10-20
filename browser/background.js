@@ -40,6 +40,14 @@ function session(messages) {
 }
 const one = async (message) => (await session([message]))[0];
 
+// vault §8.1: each domain's look, from the bridge's status, for rows to show.
+async function looks() {
+  const status = await one({ type: "status" });
+  const out = {};
+  for (const d of (status.ok && status.domains) || []) if (d.appearance) out[d.domain] = d.appearance;
+  return out;
+}
+
 // §6: only a web page's frames, by the origin the browser reports.
 function originOf(sender) {
   const origin = sender.origin;
@@ -127,7 +135,7 @@ async function webauthnGet(publicKey, origin) {
     const answer = await sheet({ kind: "locked", origin, domains: found.locked });
     return answer.action === "fallback" ? { fallback: true } : refused({ error: "tsync is locked" });
   }
-  const answer = await sheet({ kind: "passkey-get", origin, passkeys: found.passkeys });
+  const answer = await sheet({ kind: "passkey-get", origin, passkeys: found.passkeys, looks: await looks() });
   if (answer.action === "fallback") return { fallback: true };
   if (answer.action !== "pick") return refused({ error: "cancelled" });
   const pick = found.passkeys.find((p) => p.id === answer.id);
@@ -206,7 +214,7 @@ const handlers = {
     const reply = await one({ type: "match", origin });
     if (!reply.ok) return { error: reply.error };
     const logins = m.kind === "code" ? reply.logins.filter((l) => l.code) : reply.logins;
-    return { logins, locked: reply.locked, domains: new Set(reply.logins.map((l) => l.domain)).size };
+    return { logins, locked: reply.locked, domains: new Set(reply.logins.map((l) => l.domain)).size, looks: await looks() };
   },
   async fill(m, sender) {
     const origin = originOf(sender);

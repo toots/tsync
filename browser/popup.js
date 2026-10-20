@@ -20,8 +20,11 @@ async function render() {
   }
   const domains = state.status.domains || [];
   if (!domains.length) main.append(el("p", { className: "detail", textContent: "No domain uses passwords on this machine." }));
+  const looks = {};
   for (const d of domains) {
-    main.append(el("p", { className: "detail", textContent: `${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}` }));
+    looks[d.domain] = d.appearance || null;
+    main.append(el("p", { className: "detail mark" }, TsyncMark.element(d.appearance, 16),
+      ` ${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}`));
   }
   // §3.3: the user's choice, never the extension's: Chrome's own manager offers and
   // fills too until it is turned off here.
@@ -54,7 +57,9 @@ async function render() {
         main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
       } }));
     }
-    main.append(el("div", { className: "login" }, el("strong", { textContent: login.title }), el("small", { textContent: login.username }), actions));
+    main.append(el("div", { className: "login" },
+      el("span", { className: "mark" }, TsyncMark.element(looks[login.domain], 16), el("strong", { textContent: login.title })),
+      el("small", { textContent: login.username }), actions));
   }
 }
 

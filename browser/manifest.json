@@ -50,6 +50,7 @@
       "run_at": "document_idle",
       "js": [
         "fields.js",
+        "mark.js",
         "content.js"
       ]
     }
