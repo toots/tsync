@@ -263,7 +263,8 @@ every domain:
 ### 7.3 Which passkeys answer a request
 
 - **The RP ID belongs to the origin.** The request's `origin` must be `https://` (or
-  `http://localhost`), and its `rpId` the origin's host or a suffix of it at a label boundary
+  `http://localhost`), written with or without one trailing `/` (a URL's serialisation, as
+  Android's `CallingAppInfo.getOrigin` gives it), and its `rpId` the origin's host or a suffix of it at a label boundary
   that is not a public suffix and is within the origin's registrable domain (§4.2), by the
   [Public Suffix List](https://publicsuffix.org/) snapshot each release carries:
   `login.example.com` may name `example.com`, `evil.github.io` may not name `github.io`, nor
