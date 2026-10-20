@@ -51,6 +51,7 @@ class TsyncCredentialService : CredentialProviderService() {
             try {
                 callback.onResult(entries(tsync, request))
             } catch (e: CoreException) {
+                Log.w(Tsync.TAG, "credentials: the owner refused: ${e.code.wire}: ${e.message}")
                 if (e.code == Code.LOCKED) callback.onResult(locked()) else callback.onResult(BeginGetCredentialResponse())
             } catch (e: Throwable) {
                 Log.w(Tsync.TAG, "credentials: no answer", e)
@@ -63,27 +64,42 @@ class TsyncCredentialService : CredentialProviderService() {
     /** §6.3: the caller's web origin, only for a browser of the list. */
     private fun origin(app: CallingAppInfo?): String? = try {
         app?.getOrigin(Browsers.json(this))
-    } catch (e: IllegalStateException) {
+    } catch (e: Exception) {
+        Log.w(Tsync.TAG, "credentials: the browser list was refused: ${e.message}")
         null
     }
 
     private fun entries(tsync: Tsync, request: BeginGetCredentialRequest): BeginGetCredentialResponse {
-        val origin = origin(request.callingAppInfo) ?: return BeginGetCredentialResponse()
+        val app = request.callingAppInfo
+        val origin = origin(app)
+        // §6.1: the platform may give no origin before the pick; a listed browser is then listed
+        // for the request's RP ID, and the pick checks the browser's origin before anything is signed.
+        val browser = origin != null || (app != null && Browsers.isBrowser(this, app.packageName))
+        if (!browser) {
+            Log.w(Tsync.TAG, "credentials: ${app?.packageName} is not a listed browser")
+            return BeginGetCredentialResponse()
+        }
         if (tsync.boot() != Boot.Ready) return BeginGetCredentialResponse()
         val entries = mutableListOf<CredentialEntry>()
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
                     val json = JSONObject(option.requestJson)
-                    val rpId = json.optString("rpId").ifEmpty { Webauthn.host(origin) }
+                    val rpId = json.optString("rpId").ifEmpty { origin?.let(Webauthn::host).orEmpty() }
+                    if (rpId.isEmpty()) continue
                     val allow = Webauthn.ids(json.optJSONArray("allowCredentials"))
-                    for (passkey in tsync.passwords.passkeyMatch(origin, rpId, allow, pull = Pull.BACKGROUND)) {
+                    val asked = origin ?: "https://$rpId"
+                    val matched = tsync.passwords.passkeyMatch(asked, rpId, allow, pull = Pull.BACKGROUND)
+                    Log.i(Tsync.TAG, "credentials: $rpId, origin ${if (origin == null) "after the pick" else origin}, ${allow.size} allowed, ${matched.size} matched")
+                    for (passkey in matched) {
                         val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_ID, passkey.id), passkey.id)
                         entries += PublicKeyCredentialEntry.Builder(this, passkey.userName, pick, option)
                             .setDisplayName(passkey.userDisplayName.ifEmpty { null }).build()
                     }
                 }
                 is BeginGetPasswordOption -> {
+                    // A login is offered for a known origin only: its password is what the pick hands over.
+                    if (origin == null) continue
                     for (login in tsync.passwords.list(site = origin, pull = Pull.BACKGROUND).logins) {
                         val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_LOGIN, login.id), login.id)
                         entries += PasswordCredentialEntry.Builder(this, login.username, pick, option)
@@ -109,7 +125,9 @@ class TsyncCredentialService : CredentialProviderService() {
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>,
     ) {
         // §6.2: one entry; the creation itself waits for the pick.
-        if (request !is BeginCreatePublicKeyCredentialRequest || origin(request.callingAppInfo) == null) {
+        val app = request.callingAppInfo
+        val browser = origin(app) != null || (app != null && Browsers.isBrowser(this, app.packageName))
+        if (request !is BeginCreatePublicKeyCredentialRequest || !browser) {
             return callback.onError(CreateCredentialUnknownException(getString(R.string.passkey_not_offered)))
         }
         val tsync = Tsync.get(this)
