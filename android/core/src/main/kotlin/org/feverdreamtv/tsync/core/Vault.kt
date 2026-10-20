@@ -11,7 +11,11 @@ data class VaultStatus(
     /** extensions README §4.1: answered from the last view, of that age. */
     val outdated: Boolean = false,
     val pulledAt: Long? = null,
+    val appearance: Appearance? = null,
 )
+
+/** vault §8.1: the colour in force (`#rrggbb`), and the icon's PNG bytes when there is one. */
+class Appearance(val color: String, val colorChosen: Boolean, val icon: ByteArray?)
 
 data class OneTimeCode(val id: String, val issuer: String, val account: String, val code: String, val secondsLeft: Int)
 
@@ -40,6 +44,13 @@ class Vault(private val client: Client) {
             keystoreError = text(reply, "keystoreError"),
             outdated = reply.optBoolean("outdated", false),
             pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
+            appearance = reply.optJSONObject("appearance")?.let {
+                Appearance(
+                    color = it.optString("color"),
+                    colorChosen = it.optBoolean("colorChosen"),
+                    icon = text(it, "icon")?.let { b64 -> java.util.Base64.getDecoder().decode(b64) },
+                )
+            },
         )
     }
 

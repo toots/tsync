@@ -454,6 +454,9 @@ The vault's extensions on this phone: one tab per extension the domain uses, **C
 domain: it never creates, deletes or re-keys the vault, which a computer does
 ([vault §3](../extensions/vault.md#3-initialising), §7).
 
+- **The vault's mark** heads the screen: its appearance from `vault_status`
+  ([vault §8.1](../extensions/vault.md#81-appearance)), the vault's icon or the tsync glyph in
+  its colour.
 - **Menu** (⋮): the vault's state from `vault_status` (locked or unlocked, whether this phone is
   enrolled, where K is kept); **Lock** (`vault_lock`, after a confirmation saying codes need the
   passphrase again afterwards); **Forget the secret key on this phone** (`vault_lock` with

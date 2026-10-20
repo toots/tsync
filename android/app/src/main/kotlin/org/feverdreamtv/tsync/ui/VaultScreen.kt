@@ -51,6 +51,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,6 +115,22 @@ private suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatch
 
 private fun Result<*>.reason(): String? = exceptionOrNull()?.message
 
+/** vault §8.1: the vault's icon, or tsync's glyph in the vault's colour. */
+@Composable
+fun VaultMark(appearance: org.feverdreamtv.tsync.core.Appearance, modifier: Modifier = Modifier) {
+    val icon = remember(appearance.icon) {
+        appearance.icon?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    }
+    val size = Modifier.size(24.dp)
+    if (icon != null) {
+        androidx.compose.foundation.Image(icon, contentDescription = null, modifier = modifier.then(size))
+    } else {
+        val tint = runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(appearance.color)) }.getOrNull()
+        Icon(painterResource(R.drawable.ic_notification), contentDescription = null, modifier = modifier.then(size),
+            tint = tint ?: androidx.compose.material3.LocalContentColor.current)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
@@ -140,6 +158,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
+                navigationIcon = { status?.appearance?.let { VaultMark(it, Modifier.padding(start = 16.dp)) } },
                 title = { Text(stringResource(R.string.destination_vault), Modifier.semantics { heading() }) },
                 actions = {
                     if (status != null && status?.state != "absent") {
