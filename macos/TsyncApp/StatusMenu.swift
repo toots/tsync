@@ -42,9 +42,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             self?.poll()
         }
         poll()
-        if #available(macOS 15.0, *) {
-            Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in CodeIdentities.refresh() }
-            CodeIdentities.refresh()
+        if #available(macOS 14.0, *) {
+            Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in Identities.refresh() }
+            Identities.refresh()
         }
     }
 
@@ -89,7 +89,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         if menu === self.menu {
             checkAutofill()
-            if #available(macOS 15.0, *) { CodeIdentities.refresh() }
+            if #available(macOS 14.0, *) { Identities.refresh() }
         }
         if menu === codesSubmenu {
             menu.removeAllItems()
