@@ -112,20 +112,6 @@ enum Requests {
     static func creationDomain() -> String? {
         domains().first { domain in (try? call(domain, "list")) != nil }
     }
-
-    static func unlock(_ domain: String, passphrase: String, secretKey: String?) throws {
-        var request: [String: Any] = [
-            "action": "vault_unlock", "domain": domain, "passphrase": passphrase,
-        ]
-        if let secretKey, !secretKey.isEmpty { request["secretKey"] = secretKey }
-        _ = try OwnerClient.call(request)
-    }
-
-    /// file-provider §10.1: whether the unlock form also needs the secret key.
-    static func enrolled(_ domain: String) -> Bool {
-        let status = try? OwnerClient.call(["action": "vault_status", "domain": domain])
-        return status?["enrolled"] as? Bool ?? false
-    }
 }
 
 func base64URL(_ data: Data) -> String {
