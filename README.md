@@ -19,7 +19,7 @@ The idea is the one behind iCloud Drive or Dropbox Smart Sync, pointed at your o
 - **Only what you open takes space.** The whole tree is listed; content is cached as it is read, and the cache can be capped.
 - **Several machines share it.** Each one publishes its changes and picks up the others'. Work done in two places at once ends as two files, never as a lost one.
 - **History is kept.** With versioning on, every change, rename and delete of a file leaves the previous version behind, and a deleted file can be put back.
-- **It can keep secrets too.** A domain's [vault](docs/vault.md) holds two-factor codes encrypted under your passphrase, synced to your machines like the files.
+- **It can keep secrets too.** A domain's [vault](docs/vault.md) holds two-factor codes, passwords and passkeys encrypted under your passphrase, synced to your machines like the files.
 
 ## Two ways to set it up
 

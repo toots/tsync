@@ -9,12 +9,13 @@ The files of a domain stay unencrypted, as before. Only the vault's records are 
 A domain uses the vault when its config lists `extensions`, the kinds of secrets it keeps:
 
 ```json
-{ "name": "Files", "extensions": ["totp"], "backends": [ ... ], "frontends": [ ... ] }
+{ "name": "Files", "extensions": ["totp", "passwords"], "backends": [ ... ], "frontends": [ ... ] }
 ```
 
 | Extension | Keeps |
 |---|---|
 | `totp` | [Two-factor codes](#two-factor-codes) |
+| `passwords` | [Passwords and passkeys](#passwords-and-passkeys) |
 
 Each kind is described in its own section below. With no `extensions`, the domain has no vault: its vault commands are refused, and nothing is written for it.
 
@@ -148,6 +149,38 @@ tsync totp code ID            # one code
 **On an Android phone.** The app's *Vault* screen appears when the server's domain uses an extension; see [the Android page](android.md#vault).
 
 `tsync totp rename ID` and `tsync totp remove ID` change or remove one record. Two machines changing the same record at once lose nothing: two renames keep the newer name, a rename and a removal keep the renamed record, and two different codes under one record are both kept, the second labelled `(conflicted copy from <machine>)` for you to remove the one you do not want.
+
+## Passwords and passkeys
+
+With `passwords` in `extensions`, the vault keeps your logins (a title, the sites it is for, a username, a password, notes) and your passkeys. With `totp` too, a login can carry its two-factor code.
+
+**Adding a login.**
+
+```bash
+tsync passwords add --title GitHub --url https://github.com --username me    # asks for the password
+tsync passwords add --title Bank --url https://bank.example --username me --generate 24
+tsync passwords add --title GitHub --url https://github.com --username me --otpauth -
+```
+
+`--password -` reads the password from standard input; with neither `--password` nor `--generate` it is asked without echo. `--generate LENGTH` draws one (8 to 128 characters; `--no-symbols` for letters and digits only). `--url` repeats for a login used on several sites; a site is `https://host` (a port if any, no path), or `android://package` for an Android app. A login for `example.com` also serves `login.example.com`.
+
+`--otpauth` adds a two-factor code and links it to the login; `--totp ID` links one already in the vault (`tsync totp list` gives its id), and `--totp ""` unlinks it.
+
+**Finding and reading.**
+
+```bash
+tsync passwords list                          # titles, usernames and passkeys; never a password
+tsync passwords list --site https://github.com
+tsync passwords get ID                        # the password alone, on one line
+```
+
+`list` marks a login with a linked code `(code)`. `tsync passwords edit ID` changes any field (the same options as `add`), and `tsync passwords remove ID` removes a login or a passkey.
+
+**Passkeys** are made and used by your browser or apps, through tsync's AutoFill on macOS and its autofill on Android: there is no command to create one. `list` shows them by site and user name, and `edit ID --login LOGIN_ID` files one with the login it belongs to. A passkey never leaves the vault: it signs inside tsync, and it is not exported.
+
+**Moving from a browser or another manager.** `tsync passwords import FILE` reads the CSV export of a browser, Bitwarden or 1Password-style managers (columns named like `name`, `url`, `username`, `password`, `notes`, and `otpauth` or `login_totp` for two-factor seeds). It adds every row, so importing a file twice gives each login twice. The CSV is plaintext: delete it once imported. `tsync passwords export` prints every login as CSV after the passphrase; passkeys are not exported.
+
+Two machines editing the same login at once keep the newer edit; a login whose password was changed on both sides keeps both, the second labelled `(conflicted copy from <machine>)`.
 
 ## What the vault protects
 
