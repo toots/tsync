@@ -285,6 +285,74 @@ let first_owner () =
           answer "unlock, 15 characters" (unlock (String.make 15 'a'));
           answer "unlock, the passphrase" (unlock ("  " ^ passphrase ^ " "));
           status "status";
+          p "== appearance (§8.1)";
+          let look label =
+            match member (ask [("action", "vault_status")]) "appearance" with
+              | Some a ->
+                  (* The key id is drawn at init: print what its colour is, not which. *)
+                  let color = Option.get (field a "color") in
+                  let shown =
+                    if member a "colorChosen" = Some (`Bool true) then color
+                    else if List.mem color Tsync_vault.Appearance.palette then
+                      "the key id's"
+                    else "outside the palette: " ^ color
+                  in
+                  p "%-34s color=%s chosen=%b icon=%s" label shown
+                    (member a "colorChosen" = Some (`Bool true))
+                    (match field a "icon" with
+                      | Some b ->
+                          string_of_int (String.length (Base64.decode_exn b))
+                          ^ " bytes"
+                      | None -> "none")
+              | None -> p "%-34s no appearance" label
+          in
+          (* The smallest header check_icon reads: the signature, then IHDR. *)
+          let png side =
+            let be n =
+              String.init 4 (fun i -> Char.chr ((n lsr (8 * (3 - i))) land 255))
+            in
+            "\x89PNG\r\n\x1a\n" ^ be 13 ^ "IHDR" ^ be side ^ be side
+            ^ String.make 9 '\000'
+          in
+          let set fields =
+            Ipc.call socket
+              (`Assoc
+                 (("domain", `String "docs")
+                 :: ("action", `String "vault_appearance")
+                 :: fields))
+          in
+          look "default";
+          answer "colour" (set [("color", `String "#0D9488")]);
+          look "chosen";
+          answer "a bad colour" (set [("color", `String "teal")]);
+          answer "an icon"
+            (set [("icon", `String (Base64.encode_string (png 64)))]);
+          look "with an icon";
+          answer "an oblong icon"
+            (set
+               [
+                 ( "icon",
+                   `String
+                     (Base64.encode_string
+                        (String.sub (png 64) 0 16
+                        ^ "\000\000\000\064\000\000\000\032"
+                        ^ String.make 9 '\000')) );
+               ]);
+          answer "a JPEG"
+            (set
+               [
+                 ( "icon",
+                   `String (Base64.encode_string "\xff\xd8\xff\xe0 not a png")
+                 );
+               ]);
+          answer "back to the defaults"
+            (set [("color", `Null); ("icon", `Null)]);
+          look "default again";
+          answer "colour, then lock" (set [("color", `String "#9333ea")]);
+          answer "lock" (ask [("action", "vault_lock")]);
+          answer "colour while locked" (set [("color", `String "#000000")]);
+          look "locked, still shown";
+          answer "unlock again" (unlock passphrase);
           p "== passphrase change";
           answer "passphrase"
             (ask [("action", "vault_passphrase"); ("passphrase", second)]);

@@ -8,6 +8,10 @@ let ext = Names.extension_root
 let folder = Names.join ext "vault"
 let keyring_path = Names.join folder "keyring"
 
+(* §8.1: a folder of its own, so the keyring's fold never takes it for a copy. *)
+let appearance_folder = Names.join folder "appearance"
+let appearance_path = Names.join appearance_folder "appearance"
+
 (* vault §6: K under its key id and the secret key under its id, in the owner's
    memory and, where the host has one, its keystore (§6.1). *)
 type t = {
@@ -102,7 +106,7 @@ let read_file (module E : Engine.S) path =
     ~finally:(fun () -> E.close_read h)
     (fun () -> Bigstring.to_string (E.read h ~off:0 ~len:(E.stat path).size))
 
-let vault_folders = [""; ext; folder]
+let vault_folders = [""; ext; folder; appearance_folder]
 
 (* README §4.1: a keyring write needs the current keyring; a failed pull fails
    the verb. *)
@@ -442,6 +446,50 @@ let delete ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree ~confirm t =
         Atomic.set t.secret_key None;
         Some f.reason
 
+(* §8.1: the newest of the file and its conflicted copies; one that does not
+   read is passed over. *)
+let read_appearance engine =
+  List.fold_left
+    (fun (best : Tsync_vault.Appearance.t) (f : Tsync_vault.Fold.file) ->
+      match Tsync_vault.Appearance.of_string f.body with
+        | Ok a when a.modified >= best.modified -> a
+        | _ -> best)
+    Tsync_vault.Appearance.none
+    (files engine appearance_folder)
+
+(* §8.1: a vault write, on an unlocked vault; the copies beside the file go. *)
+let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
+  let (module E : Engine.S) = engine in
+  ignore (held ~domain ~engine ~lazy_tree t);
+  if lazy_tree && E.kind appearance_folder = `Dir then
+    before_write t appearance_folder;
+  let current = read_appearance engine in
+  let change field set = function
+    | `Keep -> field
+    | `Clear -> None
+    | `Set v -> (
+        match set v with
+          | Ok v -> Some v
+          | Error reason -> Fail.invalid "%s" reason)
+  in
+  let next : Tsync_vault.Appearance.t =
+    {
+      color = change current.color Tsync_vault.Appearance.check_color color;
+      icon = change current.icon Tsync_vault.Appearance.check_icon icon;
+      modified = max (now ()) (current.modified + 1);
+    }
+  in
+  List.iter
+    (fun dir -> E.mkdir dir ~exclusive:false)
+    [ext; folder; appearance_folder];
+  write_file engine ~exclusive:false appearance_path
+    (Tsync_vault.Appearance.to_string next);
+  List.iter
+    (fun (f : Tsync_vault.Fold.file) ->
+      if f.name <> "appearance" then
+        E.delete (Names.join appearance_folder f.name))
+    (files engine appearance_folder)
+
 let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
   restore ~domain t;
@@ -459,6 +507,7 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       enrolled = false;
       outdated = (Atomic.get t.view).outdated;
       pulled_at = (Atomic.get t.view).pulled_at;
+      appearance = None;
     }
   in
   match found.keyring with
@@ -477,6 +526,15 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
           base with
           vault = (if unlocked then `Unlocked else `Locked);
           key_id = Some k.key_id;
+          appearance =
+            (let a = read_appearance engine in
+             Some
+               {
+                 Protocol.color =
+                   Tsync_vault.Appearance.color a ~key_id:k.key_id;
+                 color_chosen = a.color <> None;
+                 icon = a.icon;
+               });
           cached =
             (if not unlocked then None
              else (

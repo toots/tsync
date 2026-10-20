@@ -66,6 +66,18 @@ tsync vault passphrase --new-secret-key   # also a new secret key, printed once
 
 With `--new-secret-key`, every other machine needs the new secret key at its next unlock. Neither change revokes old secrets from someone who copied the storage earlier: a versioned domain keeps the previous keyring among its versions.
 
+## Telling vaults apart
+
+With several domains, tsync's pickers show each vault in its own colour: the tsync icon, tinted. Every vault gets a colour from its key, the same on every machine. You can choose another, or give the vault an icon of its own, which then replaces the tsync icon:
+
+```bash
+tsync vault appearance --color "#0d9488"        # a colour of your choice
+tsync vault appearance --icon work.png          # a square PNG, at most 256 pixels and 64 KiB
+tsync vault appearance --default-color --no-icon
+```
+
+The colour and icon sync with the domain and show even while the vault is locked, so they are not encrypted: do not use a private image.
+
 ## Status and deleting
 
 `tsync vault status` says whether the domain has a vault, whether it is unlocked here, and whether this machine is enrolled.

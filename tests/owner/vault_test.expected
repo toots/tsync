@@ -15,6 +15,22 @@ unlock, wrong passphrase         denied: wrong passphrase
 unlock, 15 characters            invalid: a passphrase has at least 16 characters
 unlock, the passphrase           ok
 status                             unlocked enrolled cached=memory slots={"secret-key":1}
+== appearance (§8.1)
+default                            color=the key id's chosen=false icon=none
+colour                           ok
+chosen                             color=#0d9488 chosen=true icon=none
+a bad colour                     invalid: a colour is #rrggbb
+an icon                          ok
+with an icon                       color=#0d9488 chosen=true icon=33 bytes
+an oblong icon                   invalid: an icon is square
+a JPEG                           invalid: an icon is a PNG
+back to the defaults             ok
+default again                      color=the key id's chosen=false icon=none
+colour, then lock                ok
+lock                             ok
+colour while locked              locked: the vault is locked: run tsync vault unlock
+locked, still shown                color=#9333ea chosen=true icon=none
+unlock again                     ok
 == passphrase change
 passphrase                       ok
 lock                             ok
