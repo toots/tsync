@@ -283,7 +283,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "extensions":["totp"],"frontends":["android"],
+          "extensions":["totp","passwords"],"frontends":["android"],
           "backends":[{"type":"gated","name":"main","role":"main","path":"%s"}]}]}|}
        store_path);
 
@@ -634,6 +634,36 @@ let () =
   wait_stale ();
   vault "status, the store back";
   codes "codes, the store back";
+  p "== a read with pull background, the store silent (android §3.2 rule 1)";
+  p "  %-34s %s" "add a login"
+    (outcome
+       (action "passwords_add"
+          [
+            s "title" "GitHub";
+            ("urls", `List [`String "https://github.com"]);
+            s "username" "me";
+            s "password" "hunter2";
+          ]));
+  let timed label extra =
+    let started = Unix.gettimeofday () in
+    let r = action "passwords_list" ([s "site" "https://github.com"] @ extra) in
+    let took = Unix.gettimeofday () -. started in
+    p "  %-34s %s in %s" label
+      (match field r "records" with
+        | Some (`List rows) ->
+            Printf.sprintf "%d row(s)%s" (List.length rows)
+              (if field r "outdated" = Some (`Bool true) then ", outdated"
+               else "")
+        | _ -> outcome r)
+      (if took < 1. then "under a second" else "a second or more")
+  in
+  timed "list, the store up" [];
+  wait_stale ();
+  Atomic.set mode `Hung;
+  timed "list, pull auto" [];
+  wait_stale ();
+  timed "list, pull background" [s "pull" "background"];
+  Atomic.set mode `Up;
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

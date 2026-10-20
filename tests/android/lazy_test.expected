@@ -117,5 +117,10 @@
   passphrase, the store down         unreachable (the store is down)
   status, the store back             unlocked pulledAt
   codes, the store back              2 record(s)
+== a read with pull background, the store silent (android §3.2 rule 1)
+  add a login                        ok
+  list, the store up                 1 row(s) in under a second
+  list, pull auto                    1 row(s), outdated in a second or more
+  list, pull background              1 row(s), outdated in under a second
 == status
   names the frontend                 true
