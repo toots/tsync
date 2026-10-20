@@ -19,8 +19,9 @@ user sees. Every capability is planned until it has been seen working on a signe
   `ProvidesPasskeys` (macOS 14), `ProvidesOneTimeCodes` (macOS 15), `ShowsConfigurationUI`.
 - **Enabling it** is the user's: macOS lists tsync under the AutoFill providers of System
   Settings (*General → AutoFill & Passwords* on macOS 15, *Passwords → Password Options* before).
-  The app's menu shows a row "Turn on AutoFill for tsync in System Settings…" while the system
-  says the extension is off (`ASCredentialIdentityStore.getState`) and a domain uses passwords;
+  The app's menu shows a row "Turn on AutoFill for tsync in System Settings…" on macOS 14 and
+  later, in a build that carries the extension, while the system says the extension is off
+  (`ASCredentialIdentityStore.getState`) and a domain uses passwords;
   it opens System Settings, macOS having no stable link to the pane.
 
 ## 2. Domains
@@ -28,8 +29,10 @@ user sees. Every capability is planned until it has been seen working on a signe
 The extension asks every domain the shared socket serves that uses `passwords`
 ([extensions README §3](../README.md#3-opting-in)) and merges their answers as
 [README §6.1](../README.md#61-several-domains) says: each row names its domain, and a request
-for one record goes to the domain that holds it. A domain that does not answer is left out of a
-list, never reported as empty.
+for one record goes to the domain that holds it. A domain that does not answer is shown as an
+inert row "`<domain>` did not answer — check that tsync is running", never reported as empty.
+Each sheet completes its request once: a pick or an approval replaces the sheet's buttons with a
+spinner and **Cancel**, and the request is completed or cancelled at most once.
 
 ## 3. Logins
 
@@ -68,10 +71,12 @@ The system offers a provider's code on a code field only for an entry the provid
 - **What is saved.** One `ASOneTimeCodeCredentialIdentity` per login that links a code and per
   web site of that login: the site's host as a domain service identifier, the label
   `<title> — <username>` (the title alone when there is no username), and the record identifier
-  `<domain>/<id>`. Never a seed or a code. An `android://` site is skipped.
+  `<domain>/<id>`. Never a seed or a code. A site with a port is a URL identifier, so its entry
+  matches that port only; an `android://` site is skipped.
 - **Who saves it.** The app, from `passwords_list` of every domain using passwords, when its
   menu opens and every 60 seconds; it replaces the store's whole set of entries, codes and
-  passkeys, and writes only when the set changed. A locked or unreachable domain contributes nothing, so the entries go once every
+  passkeys, and writes only when the set changed. The system empties the store while AutoFill
+  is off, so the next refresh after it is turned on writes the whole set again. A locked or unreachable domain contributes nothing, so the entries go once every
   vault is locked. Nothing is written while AutoFill is off for tsync.
 - **A code request** for an entry reaches `provideCredentialWithoutUserInteraction`, which
   declines as for a login (§3); `prepareInterfaceToProvideCredential(for:)` of a one-time code
@@ -81,11 +86,13 @@ The system offers a provider's code on a code field only for an entry the provid
 ## 4. Passkeys
 
 - **Creation** (`passkey`, macOS 14). `prepareInterface(forPasskeyRegistration:)` receives an
-  `ASPasskeyCredentialRequest`. The extension's sheet names the site (the RP ID) and the user
-  name; on approval it sends `passwords_passkey_create` with origin `https://<RP ID>`, the RP ID,
-  the user handle, user name and display name, the algorithms the request supports, the request's
-  `clientDataHash`, and `verified` (§5), and completes with an `ASPasskeyRegistrationCredential`
-  from the reply's credential id and attestation object.
+  `ASPasskeyCredentialRequest`. The new passkey goes to the first domain using passwords
+  (README §6.1); a locked one is shown as §6 says, not passed over for the next. The sheet names
+  the site (the RP ID), the user name and that domain; on approval it sends
+  `passwords_passkey_create` with origin `https://<RP ID>`, the RP ID, the user handle, user name
+  and display name, the algorithms the request supports, its excluded credentials as `exclude`
+  (macOS 15), the request's `clientDataHash`, and `verified` (§5), and completes with an
+  `ASPasskeyRegistrationCredential` from the reply's credential id and attestation object.
 - **Assertion** (`passkey`, macOS 14). `prepareCredentialList(for:requestParameters:)` receives
   the RP ID, the client data hash and the allowed credentials. The sheet lists the passkeys
   `passwords_passkey_match` answers; the one picked is signed with `passwords_passkey_assert` and
@@ -100,8 +107,9 @@ The system offers a provider's code on a code field only for an entry the provid
   checked it, against the browser's origin or the app's associated domains. The extension sends
   `https://<RP ID>` as `origin`, so the owner's check (passwords §7.3) still refuses an RP ID that
   is a public suffix.
-- An exclusion the owner refuses `exists` completes the registration with
+- An exclusion the owner refuses `exists` cancels the registration with
   `ASExtensionError.Code.matchedExcludedCredential` where the system has it, else a failure.
+- A reply missing a binary member fails the request; nothing completes with empty data.
 
 ### 4.1 Passkey entries
 
@@ -124,7 +132,9 @@ without them it shows the system's "More from tsync…", which opens the sheet.
 - When the request's user verification preference is `required` or `preferred`, the extension
   asks LocalAuthentication to verify the device's owner (`deviceOwnerAuthentication`: Touch ID,
   or the account password) before it sends the request, and sends `verified: true` only when that
-  succeeded. A refused or cancelled verification sends nothing and cancels the request.
+  succeeded. A cancelled verification sends nothing and cancels the request as the user's; a
+  refused one shows why. A passkey an entry names (§4.1) is asked of the owner first, so a locked
+  vault or a gone record is told before any verification.
 - With `discouraged`, it verifies nothing and sends no `verified`.
 - The extension never sends a passphrase for verification: LocalAuthentication is this host's
   means (passwords §7.4).
