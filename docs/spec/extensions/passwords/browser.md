@@ -196,7 +196,9 @@ user before a passkey request (§5).
 ## 8. Several domains
 
 A machine may use passwords in several domains (README §6.1): every list merges them, each row
-naming its domain when there is more than one; a new login or passkey goes to the first domain
+showing its vault's mark ([vault §8.1](../vault.md#81-appearance), from the bridge's `status`:
+the vault's icon, or the tsync glyph in its colour, the glyph also where a page's policy blocks the
+icon) and naming its domain when there is more than one; a new login or passkey goes to the first domain
 using passwords.
 
 ## 9. Conformance
