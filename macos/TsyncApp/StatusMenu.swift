@@ -143,6 +143,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// passwords/macos §1: asked when the menu opens, off the main queue.
     private func checkAutofill() {
+        guard #available(macOS 14.0, *), Self.hasCredentialsExtension else { return }
         ASCredentialIdentityStore.shared.getState { state in
             let enabled = state.isEnabled
             DispatchQueue.global().async {
@@ -157,14 +158,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
     }
 
+    /// A build without the extension's profile carries no extension (build.sh).
+    private static let hasCredentialsExtension: Bool = {
+        guard let plugins = Bundle.main.builtInPlugInsURL else { return false }
+        return FileManager.default.fileExists(
+            atPath: plugins.appendingPathComponent("TsyncCredentials.appex").path)
+    }()
+
     /// A domain answering a passwords request, or refusing it as locked.
     private func anyDomainUsesPasswords() -> Bool {
-        guard
-            let data = try? Data(contentsOf: Tsync.configFile),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-        let names = (json["domains"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-        return names.contains { name in
+        Tsync.domainNames().contains { name in
             do {
                 _ = try OwnerClient.call(["action": "passwords_list", "domain": name])
                 return true

@@ -21,6 +21,15 @@ enum Tsync {
     }
 
     static var configFile: URL { groupContainer.appendingPathComponent("config.json") }
+
+    /// The names of the domains the config lists; none when it cannot be read.
+    static func domainNames(_ url: URL = configFile) -> [String] {
+        guard
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return (json["domains"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+    }
     static var dataDir: URL { groupContainer.appendingPathComponent("tsync") }
     static var socketPath: String { dataDir.appendingPathComponent("tsync.sock").path }
     static var resetMarker: URL { dataDir.appendingPathComponent("fileprovider-reset") }

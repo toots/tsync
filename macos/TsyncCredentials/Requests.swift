@@ -13,26 +13,30 @@ struct Choice {
     var passkey = false
 }
 
-/// What a list asked of every domain gave: the rows, and the domains whose
-/// vault is locked.
+/// What a list asked of every domain gave: the rows, the domains whose vault is
+/// locked, and those that did not answer (§2: never reported as empty).
 struct Listed {
     var choices: [Choice] = []
     var locked: [String] = []
+    var unanswered: [String] = []
+
+    mutating func merge(_ other: Listed) {
+        choices += other.choices
+        locked += other.locked.filter { !locked.contains($0) }
+        unanswered += other.unanswered.filter { !unanswered.contains($0) }
+    }
+}
+
+/// §4: where a new passkey goes.
+enum CreationDomain {
+    case domain(String)
+    case locked(String)
+    case none
 }
 
 /// The owner's passwords requests, one per call, each blocking its thread
 /// (file-provider §4.3): callers keep them off the main queue.
 enum Requests {
-    /// passwords/macos §2: every configured domain; one that does not use
-    /// passwords answers `invalid` and is left out.
-    static func domains(_ url: URL = Tsync.configFile) -> [String] {
-        guard
-            let data = try? Data(contentsOf: url),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
-        return (json["domains"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-    }
-
     static func call(_ domain: String, _ action: String, _ args: [String: Any] = [:]) throws
         -> [String: Any]
     {
@@ -42,20 +46,22 @@ enum Requests {
         return try OwnerClient.call(request)
     }
 
-    /// Every domain answering `ask`, its rows read by `rows`.
+    /// Every domain answering `ask`, its rows read by `rows`. A domain that
+    /// does not use passwords refuses `invalid` and is left out.
     private static func merged(
         _ ask: (String) throws -> [String: Any], _ rows: (String, [String: Any]) -> [Choice]
     ) -> Listed {
         var listed = Listed()
-        for domain in domains() {
+        for domain in Tsync.domainNames() {
             do {
                 listed.choices += rows(domain, try ask(domain))
             } catch let failure as OwnerFailure where failure.code == "locked" {
                 listed.locked.append(domain)
-            } catch let failure as OwnerFailure {
-                trace.info("\(domain, privacy: .public) refused: \(failure.code, privacy: .public)")
+            } catch let failure as OwnerFailure where failure.code == "invalid" {
+                trace.info("\(domain, privacy: .public) refused: invalid")
             } catch {
                 trace.info("\(domain, privacy: .public) did not answer")
+                listed.unanswered.append(domain)
             }
         }
         return listed
@@ -92,7 +98,7 @@ enum Requests {
         return merged(
             { domain in
                 var args: [String: Any] = ["origin": "https://" + rpId, "rpId": rpId]
-                if !allow.isEmpty { args["allow"] = allow.map(base64URL) }
+                if !allow.isEmpty { args["allow"] = allow.map(\.base64URL) }
                 return try call(domain, "passkey_match", args)
             },
             { domain, reply in
@@ -106,23 +112,25 @@ enum Requests {
             })
     }
 
-    /// The domain a new passkey goes to: the only one using passwords, else
-    /// the first that answers (README §6.1 asks for a pick on the CLI; the
-    /// sheet names the domain it chose).
-    static func creationDomain() -> String? {
-        domains().first { domain in (try? call(domain, "list")) != nil }
+    /// §4: the first domain using passwords; a locked one is named so the sheet
+    /// can say so, an unlocked one after it is not taken in its place.
+    static func creationDomain() -> CreationDomain {
+        for domain in Tsync.domainNames() {
+            do {
+                _ = try call(domain, "list")
+                return .domain(domain)
+            } catch let failure as OwnerFailure where failure.code == "locked" {
+                return .locked(domain)
+            } catch {}
+        }
+        return .none
     }
-}
 
-func base64URL(_ data: Data) -> String {
-    data.base64EncodedString()
-        .replacingOccurrences(of: "+", with: "-")
-        .replacingOccurrences(of: "/", with: "_")
-        .replacingOccurrences(of: "=", with: "")
-}
-
-func fromBase64URL(_ text: String) -> Data? {
-    var s = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-    while s.count % 4 != 0 { s += "=" }
-    return Data(base64Encoded: s)
+    /// A binary member of a reply; a reply without it is malformed.
+    static func data(_ reply: [String: Any], _ key: String) throws -> Data {
+        guard let text = reply[key] as? String, let data = Data(base64URL: text), !data.isEmpty else {
+            throw OwnerFailure.refused(code: "internal", message: "the reply has no \(key)", item: nil)
+        }
+        return data
+    }
 }

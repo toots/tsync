@@ -47,17 +47,17 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         if let request = credentialRequest as? ASPasskeyCredentialRequest,
             let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity
         {
+            let verify = request.userVerificationPreference != .discouraged
             if let record = identity.recordIdentifier, let slash = record.firstIndex(of: "/") {
                 return signIn(
                     Choice(
                         domain: String(record[..<slash]), id: String(record[record.index(after: slash)...]),
                         title: identity.userName, detail: "", passkey: true),
-                    rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
-                    verify: request.userVerificationPreference != .discouraged)
+                    rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash, verify: verify)
             }
             passkeyList(
-                rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
-                verify: request.userVerificationPreference != .discouraged, allow: [])
+                rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash, verify: verify,
+                allow: [])
         } else if #available(macOS 15.0, *), credentialRequest.type == .oneTimeCode {
             prepareOneTimeCodeCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
         } else {
@@ -77,7 +77,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let reply = try Requests.call(choice.domain, "get", ["id": choice.id])
         let credential = ASPasswordCredential(
             user: reply["username"] as? String ?? "", password: reply["password"] as? String ?? "")
-        extensionContext.completeRequest(withSelectedCredential: credential)
+        finish { $0.completeRequest(withSelectedCredential: credential) }
     }
 
     @available(macOS 15.0, *)
@@ -91,7 +91,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             guard let code = reply["code"] as? String else {
                 throw OwnerFailure.refused(code: "not_found", message: "no code is linked", item: nil)
             }
-            self.extensionContext.completeOneTimeCodeRequest(using: ASOneTimeCodeCredential(code: code))
+            self.finish { $0.completeOneTimeCodeRequest(using: ASOneTimeCodeCredential(code: code)) }
         }
     }
 
@@ -114,11 +114,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let title = origins.isEmpty ? "Sign in to \(rpId) with a passkey" : "Sign in to \(rpId)"
         show(title) {
             var listed = Requests.passkeys(rpId: rpId, allow: allow)
-            if !origins.isEmpty {
-                let logins = Requests.logins(origins: origins)
-                listed.choices += logins.choices
-                listed.locked += logins.locked.filter { !listed.locked.contains($0) }
-            }
+            if !origins.isEmpty { listed.merge(Requests.logins(origins: origins)) }
             return listed
         } pick: { choice in
             guard choice.passkey else { return try self.fill(choice) }
@@ -126,29 +122,22 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         }
     }
 
-    /// §4.1: a passkey Safari's own list named, signed without another list.
+    /// §4.1: a passkey Safari's own list named, signed without another list. The
+    /// owner is asked first, so a locked vault or a gone record is told before
+    /// any verification.
     private func signIn(_ choice: Choice, rpId: String, hash: Data, verify: Bool) {
         trace.info("passkey named by an entry")
-        reset("Signing in to \(rpId)")
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.startAnimation(nil)
-        add(spinner, stretched: false)
-        run {
+        run("Signing in to \(rpId)") {
             do {
-                try self.signAssertion(choice, rpId: rpId, hash: hash, verify: verify)
+                _ = try Requests.call(choice.domain, "get", ["id": choice.id])
             } catch let failure as OwnerFailure where failure.code == "not_found" {
-                DispatchQueue.main.async {
+                return DispatchQueue.main.async {
                     self.passkeyList(rpId: rpId, hash: hash, verify: verify, allow: [])
                 }
             } catch let failure as OwnerFailure where failure.code == "locked" {
-                DispatchQueue.main.async {
-                    self.reset("Signing in to \(rpId)")
-                    self.add(self.lockedRow(choice.domain))
-                    self.footer([self.defaultButton("Close") { self.cancel(.userCanceled) }])
-                }
+                return DispatchQueue.main.async { self.lockedSheet("Signing in to \(rpId)", choice.domain) }
             }
+            try self.signAssertion(choice, rpId: rpId, hash: hash, verify: verify)
         }
     }
 
@@ -156,18 +145,18 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let verified = try self.verify(verify, reason: "sign in to \(rpId)")
         var args: [String: Any] = [
             "origin": "https://" + rpId, "rpId": rpId, "id": choice.id,
-            "clientDataHash": base64URL(hash),
+            "clientDataHash": hash.base64URL,
         ]
         if verified { args["verified"] = true }
         let reply = try Requests.call(choice.domain, "passkey_assert", args)
         let credential = ASPasskeyAssertionCredential(
-            userHandle: fromBase64URL(reply["userHandle"] as? String ?? "") ?? Data(),
+            userHandle: try Requests.data(reply, "userHandle"),
             relyingParty: rpId,
-            signature: fromBase64URL(reply["signature"] as? String ?? "") ?? Data(),
+            signature: try Requests.data(reply, "signature"),
             clientDataHash: hash,
-            authenticatorData: fromBase64URL(reply["authenticatorData"] as? String ?? "") ?? Data(),
-            credentialID: fromBase64URL(reply["credentialId"] as? String ?? "") ?? Data())
-        self.extensionContext.completeAssertionRequest(using: credential)
+            authenticatorData: try Requests.data(reply, "authenticatorData"),
+            credentialID: try Requests.data(reply, "credentialId"))
+        finish { $0.completeAssertionRequest(using: credential) }
     }
 
     override func prepareInterface(forPasskeyRegistration registrationRequest: ASCredentialRequest) {
@@ -176,34 +165,83 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity
         else { return cancel(.failed) }
         let rpId = identity.relyingPartyIdentifier
-        let verify = request.userVerificationPreference != .discouraged
-        approve("Save a passkey for \(identity.userName) on \(rpId)?") {
-            guard let domain = Requests.creationDomain() else {
-                throw OwnerFailure.refused(
-                    code: "invalid", message: "no domain uses passwords", item: nil)
+        let title = "Save a passkey for \(identity.userName) on \(rpId)"
+        working(title)
+        DispatchQueue.global().async {
+            let target = Requests.creationDomain()
+            DispatchQueue.main.async {
+                switch target {
+                case .locked(let domain):
+                    self.lockedSheet(title, domain)
+                case .none:
+                    self.reset(title)
+                    self.add(self.note("No domain on this Mac uses passwords."))
+                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
+                case .domain(let domain):
+                    self.approve("\(title) in \(domain)?") {
+                        try self.register(request, identity, in: domain)
+                    }
+                }
             }
-            let verified = try self.verify(verify, reason: "save a passkey for \(rpId)")
-            var args: [String: Any] = [
-                "origin": "https://" + rpId, "rpId": rpId,
-                "userHandle": base64URL(identity.userHandle),
-                "userName": identity.userName, "userDisplayName": identity.userName,
-                "algorithms": request.supportedAlgorithms.map { $0.rawValue },
-                "clientDataHash": base64URL(request.clientDataHash),
-            ]
-            if verified { args["verified"] = true }
-            let reply = try Requests.call(domain, "passkey_create", args)
-            let credential = ASPasskeyRegistrationCredential(
-                relyingParty: rpId, clientDataHash: request.clientDataHash,
-                credentialID: fromBase64URL(reply["credentialId"] as? String ?? "") ?? Data(),
-                attestationObject: fromBase64URL(reply["attestationObject"] as? String ?? "") ?? Data())
-            self.extensionContext.completeRegistrationRequest(using: credential)
         }
+    }
+
+    private func register(
+        _ request: ASPasskeyCredentialRequest, _ identity: ASPasskeyCredentialIdentity, in domain: String
+    ) throws {
+        let rpId = identity.relyingPartyIdentifier
+        let verified = try verify(
+            request.userVerificationPreference != .discouraged, reason: "save a passkey for \(rpId)")
+        var args: [String: Any] = [
+            "origin": "https://" + rpId, "rpId": rpId,
+            "userHandle": identity.userHandle.base64URL,
+            "userName": identity.userName, "userDisplayName": identity.userName,
+            "algorithms": request.supportedAlgorithms.map { $0.rawValue },
+            "clientDataHash": request.clientDataHash.base64URL,
+        ]
+        if #available(macOS 15.0, *), let excluded = request.excludedCredentials, !excluded.isEmpty {
+            args["exclude"] = excluded.map { $0.credentialID.base64URL }
+        }
+        if verified { args["verified"] = true }
+        // A cancel during verification leaves nothing to write.
+        guard !DispatchQueue.main.sync(execute: { finished }) else { return }
+        let reply: [String: Any]
+        do {
+            reply = try Requests.call(domain, "passkey_create", args)
+        } catch let failure as OwnerFailure where failure.code == "exists" {
+            if #available(macOS 15.0, *) { return cancel(.matchedExcludedCredential) }
+            return cancel(.failed)
+        }
+        let credential = ASPasskeyRegistrationCredential(
+            relyingParty: rpId, clientDataHash: request.clientDataHash,
+            credentialID: try Requests.data(reply, "credentialId"),
+            attestationObject: try Requests.data(reply, "attestationObject"))
+        finish { $0.completeRegistrationRequest(using: credential) }
     }
 
     override func prepareInterfaceForExtensionConfiguration() {
         reset("tsync fills logins and passkeys from your vault")
         add(note("Unlock a domain's vault from the tsync menu."))
-        footer([defaultButton("Done") { self.extensionContext.completeExtensionConfigurationRequest() }])
+        footer([defaultButton("Done") { self.finish { $0.completeExtensionConfigurationRequest() } }])
+    }
+
+    // MARK: completing
+
+    /// Main queue only: set by the first completion or cancel, so a request
+    /// completes once.
+    private var finished = false
+
+    /// Completes the request on the main queue, once.
+    private func finish(_ complete: @escaping (ASCredentialProviderExtensionContext) -> Void) {
+        DispatchQueue.main.async {
+            guard !self.finished else { return }
+            self.finished = true
+            complete(self.extensionContext)
+        }
+    }
+
+    private func cancel(_ code: ASExtensionError.Code) {
+        finish { $0.cancelRequest(withError: NSError(domain: ASExtensionErrorDomain, code: code.rawValue)) }
     }
 
     // MARK: the sheet
@@ -260,22 +298,30 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         return button
     }
 
-    /// Lists what `fetch` finds off the main queue; a pick runs `pick` off it too.
-    private func show(
-        _ title: String, fetch: @escaping () -> Listed, pick: @escaping (Choice) throws -> Void
-    ) {
+    /// A sheet waiting on the owner: a spinner, and Cancel.
+    private func working(_ title: String) {
         reset(title)
         let spinner = NSProgressIndicator()
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.startAnimation(nil)
         add(spinner, stretched: false)
+        footer([cancelButton()])
+    }
+
+    /// Lists what `fetch` finds off the main queue; a pick runs `pick` off it too.
+    private func show(
+        _ title: String, fetch: @escaping () -> Listed, pick: @escaping (Choice) throws -> Void
+    ) {
+        working(title)
         DispatchQueue.global().async {
             let listed = fetch()
-            trace.info("listed \(listed.choices.count) rows, \(listed.locked.count) locked")
+            trace.info(
+                "listed \(listed.choices.count) rows, \(listed.locked.count) locked, \(listed.unanswered.count) unanswered")
             DispatchQueue.main.async {
+                guard !self.finished else { return }
                 self.reset(title)
-                if listed.choices.isEmpty && listed.locked.isEmpty {
+                if listed.choices.isEmpty && listed.locked.isEmpty && listed.unanswered.isEmpty {
                     self.add(self.note("Nothing in tsync for this site."))
                 }
                 for choice in listed.choices {
@@ -283,11 +329,10 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                         RowButton(
                             title: choice.title, detail: choice.detail,
                             symbol: choice.passkey ? "person.badge.key" : "key"
-                        ) { self.run { try pick(choice) } })
+                        ) { self.run(title) { try pick(choice) } })
                 }
-                for domain in listed.locked {
-                    self.add(self.lockedRow(domain))
-                }
+                for domain in listed.locked { self.add(self.lockedRow(domain)) }
+                for domain in listed.unanswered { self.add(self.unansweredRow(domain)) }
                 self.footer([self.cancelButton()])
             }
         }
@@ -296,25 +341,49 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     private func approve(_ question: String, _ action: @escaping () throws -> Void) {
         reset(question)
         heading.lineBreakMode = .byWordWrapping
-        footer([cancelButton(), defaultButton("Save") { self.run(action) }])
+        footer([cancelButton(), defaultButton("Save") { self.run(question, action) }])
     }
 
     /// §6: a locked domain, pointing to the menu; it does nothing.
     private func lockedRow(_ domain: String) -> NSView {
-        let row = RowButton(
-            title: "\(domain) is locked", detail: "Unlock it from the tsync menu", symbol: "lock") {}
+        inertRow(title: "\(domain) is locked", detail: "Unlock it from the tsync menu", symbol: "lock")
+    }
+
+    /// §2: a domain whose owner did not answer, so its absence is not taken for
+    /// an empty list.
+    private func unansweredRow(_ domain: String) -> NSView {
+        inertRow(
+            title: "\(domain) did not answer", detail: "Check that tsync is running",
+            symbol: "exclamationmark.triangle")
+    }
+
+    private func inertRow(title: String, detail: String, symbol: String) -> NSView {
+        let row = RowButton(title: title, detail: detail, symbol: symbol) {}
         row.isEnabled = false
         return row
     }
 
-    /// Runs a completion off the main queue; a refusal is shown, not swallowed.
-    private func run(_ action: @escaping () throws -> Void) {
+    private func lockedSheet(_ title: String, _ domain: String) {
+        reset(title)
+        add(lockedRow(domain))
+        footer([defaultButton("Close") { self.cancel(.userCanceled) }])
+    }
+
+    /// Runs a pick or an approval off the main queue, the sheet waiting with
+    /// only Cancel, so a second click cannot run it again. A refusal is shown;
+    /// a verification the user cancelled cancels the request.
+    private func run(_ title: String, _ action: @escaping () throws -> Void) {
+        guard !finished else { return }
+        working(title)
         DispatchQueue.global().async {
             do {
                 try action()
+            } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
+                self.cancel(.userCanceled)
             } catch {
-                let reason = (error as? OwnerFailure)?.message ?? "\(error)"
+                let reason = (error as? OwnerFailure)?.message ?? error.localizedDescription
                 DispatchQueue.main.async {
+                    guard !self.finished else { return }
                     self.reset("tsync could not do it")
                     self.add(self.note(reason))
                     self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
@@ -341,11 +410,6 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 ?? OwnerFailure.refused(code: "denied", message: "the user was not verified", item: nil)
         }
         return true
-    }
-
-    private func cancel(_ code: ASExtensionError.Code) {
-        extensionContext.cancelRequest(
-            withError: NSError(domain: ASExtensionErrorDomain, code: code.rawValue))
     }
 
     private func button(_ title: String, _ action: @escaping () -> Void) -> NSButton {
