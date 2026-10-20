@@ -651,6 +651,9 @@ submenu shows the model's placeholder row.
 
 - The owner renders the `One-time codes` row with every domain whose config lists `totp` as a code
   domain ([menu-model.md §5](menu-model.md#5-rows)).
+- Each record's row shows its vault's appearance
+  ([vault §8.1](../extensions/vault.md#81-appearance)): the vault's icon, or the tsync glyph in
+  the vault's colour, asked of `vault_status` once per domain at each open.
 - `menu_codes` answers `{"ok":true,"entries":[…]}`: the rows of
   [menu-model.md §7](menu-model.md#7-codes-submenu), built from each code domain's `totp_list`. It
   is fetched each time the submenu opens, never cached: a record added on another machine shows at

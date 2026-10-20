@@ -171,9 +171,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         Thread.detachNewThread {
             let reply = try? OwnerClient.call(["action": "menu_codes"])
             guard let entries = reply?["entries"] as? [[String: Any]] else { return }
+            // vault §8.1: each code row shows its vault, so domains tell apart.
+            let domains = Set(entries.compactMap { (($0["action"] as? [String: Any])?["copyCode"] as? [String: Any])?["domain"] as? String })
+            var looks: [String: NSImage] = [:]
+            for domain in domains { looks[domain] = VaultLook.image(domain: domain) }
             DispatchQueue.main.async {
                 submenu.removeAllItems()
-                for entry in entries { submenu.addItem(self.menuItem(entry)) }
+                for entry in entries {
+                    let item = self.menuItem(entry)
+                    if let domain = ((entry["action"] as? [String: Any])?["copyCode"] as? [String: Any])?["domain"] as? String {
+                        item.image = looks[domain]
+                    }
+                    submenu.addItem(item)
+                }
             }
         }
     }
