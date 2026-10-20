@@ -264,6 +264,8 @@ let list ~domain ~engine ~lazy_tree t args =
             ("kind", `String "passkey");
             ("rpId", `String p.rp_id);
             ("userName", `String p.user_name);
+            ("credentialId", `String (b64 p.credential_id));
+            ("userHandle", `String (b64 p.user_handle));
             ("login", `String p.login);
           ])
   in
