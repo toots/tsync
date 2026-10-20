@@ -101,13 +101,13 @@ module Make (R : RECORD) = struct
 
   (* README §4.1: a read answers the last view of the vault's folders and this
      one; a write proceeds on it, pushed later. *)
-  let context ?(writing = false) ?use ~domain ~engine ~lazy_tree t =
+  let context ?(writing = false) ?use ?pull ~domain ~engine ~lazy_tree t =
     check_uses ~domain ~engine;
-    let keyring, key = Vault.held ?use ~domain ~engine ~lazy_tree t in
+    let keyring, key = Vault.held ?use ?pull ~domain ~engine ~lazy_tree t in
     if lazy_tree then (
       let (module E : Tsync_sync.Engine.S) = engine in
       if not writing then
-        Vault.read_folders engine t (Vault.vault_folders @ [folder])
+        Vault.read_folders ?pull engine t (Vault.vault_folders @ [folder])
         (* The first record makes the folder: nothing to pull yet. *)
       else if E.kind folder = `Dir then Vault.before_write t folder);
     {

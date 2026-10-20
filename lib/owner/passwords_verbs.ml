@@ -43,6 +43,16 @@ end)
 
 let arg args k = List.assoc_opt k args
 
+(* android §3.2 rule 1, for a read: a host with a deadline asks for
+   [background]. *)
+let pull_of args : Protocol.pull =
+  match List.assoc_opt "pull" args with
+    | Some (`String "background") -> `Background
+    | Some (`String "now") -> `Now
+    | Some (`String "never") -> `Never
+    | None | Some (`String "auto") -> `Auto
+    | Some _ -> Fail.invalid "unknown pull"
+
 let str args k =
   match arg args k with
     | Some (`String s) -> Some s
@@ -250,10 +260,10 @@ let contains ~sub s =
 
 (* §6: the TOTP record ids present, read once per verb; [None] when the domain
    does not use totp. *)
-let totp_ids ~domain ~engine ~lazy_tree t =
+let totp_ids ?pull ~domain ~engine ~lazy_tree t =
   if not (uses_totp ~domain ~engine) then None
   else (
-    let ctx = Totp_verbs.context ~domain ~engine ~lazy_tree t in
+    let ctx = Totp_verbs.context ?pull ~domain ~engine ~lazy_tree t in
     let ok, corrupt = Totp_verbs.records ctx in
     Some (List.map fst ok @ corrupt))
 
@@ -265,7 +275,7 @@ let dangling ids totp =
 (* §10 list: logins, then passkeys, each ordered by title then username then
    id. *)
 let list ~domain ~engine ~lazy_tree t args =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   let ok, corrupt = records ctx in
   let filter = str args "filter" and site = str args "site" in
   let shown_login (l : Passwords.login) =
@@ -297,7 +307,7 @@ let list ~domain ~engine ~lazy_tree t args =
       | None -> true
   in
   let keys = passkeys ok in
-  let ids = totp_ids ~domain ~engine ~lazy_tree t in
+  let ids = totp_ids ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   (* §2.1: a note matches no site; it is listed by title alone. *)
   let note_rows =
     if site <> None then []
@@ -382,16 +392,16 @@ let list ~domain ~engine ~lazy_tree t args =
     | Some at -> [("pulledAt", `Int (int_of_float at))]
     | None -> []
 
-let code ~domain ~engine ~lazy_tree t totp =
+let code ?pull ~domain ~engine ~lazy_tree t totp =
   if totp = "" || not (uses_totp ~domain ~engine) then []
   else (
-    match Totp_verbs.code ~domain ~engine ~lazy_tree t totp with
+    match Totp_verbs.code ?pull ~domain ~engine ~lazy_tree t totp with
       | c -> [("code", `String c.code); ("secondsLeft", `Int c.seconds_left)]
       | exception Fail.E { kind = Absent; _ } -> [("dangling", `Bool true)])
 
 (* §10: the only reply with a password; never a private key. *)
 let get ~domain ~engine ~lazy_tree t args =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   let id = required args "id" in
   match find ctx id with
     | Login l ->
@@ -405,7 +415,7 @@ let get ~domain ~engine ~lazy_tree t args =
           ("totp", `String l.totp);
           ("fields", fields_json l.fields);
         ]
-        @ code ~domain ~engine ~lazy_tree t l.totp
+        @ code ~pull:(pull_of args) ~domain ~engine ~lazy_tree t l.totp
     | Note n ->
         [
           ("kind", `String "note");
@@ -693,7 +703,7 @@ let passkey_match ~domain ~engine ~lazy_tree t args =
       | None | Some [] -> None
       | Some ids -> Some (List.map (unb64 "allow") ids)
   in
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   let ok, _ = records ctx in
   let title id =
     match List.assoc_opt id (logins ok) with Some l -> l.title | None -> ""
@@ -731,7 +741,7 @@ let passkey_assert ~domain ~engine ~lazy_tree t args =
   let rp_id = check_rp args in
   let client_data_hash = client_data_hash args in
   let user_verified = user_verified ~domain ~engine ~lazy_tree t args in
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   match find ctx (required args "id") with
     | Passkey p when p.rp_id = rp_id ->
         let authenticator_data =
@@ -748,6 +758,60 @@ let passkey_assert ~domain ~engine ~lazy_tree t args =
           ("userHandle", `String (b64 p.user_handle));
         ]
     | _ -> Fail.invalid "the record is no passkey of %s" rp_id
+
+(* §8: a login for the site that asks, never another site's. *)
+let fill ~domain ~engine ~lazy_tree t args =
+  let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
+  let site = required args "site" and id = required args "id" in
+  match find ctx id with
+    | Login l
+      when List.exists (fun s -> Passwords.matches ~site:s ~origin:site) l.urls
+      ->
+        [("username", `String l.username); ("password", `String l.password)]
+        @ List.filter
+            (fun (k, _) -> k = "code" || k = "secondsLeft")
+            (code ~pull:(pull_of args) ~domain ~engine ~lazy_tree t l.totp)
+    | _ -> Fail.invalid "the login does not match %s" site
+
+(* §8 save: an equal login adds nothing; one login of the site and username
+   with another password is updated only on [update] naming it; anything else
+   is added. *)
+let save ~domain ~engine ~lazy_tree t args =
+  let site =
+    match Passwords.site_of_string (required args "site") with
+      | Ok site -> site
+      | Error reason -> Fail.invalid "%s" reason
+  in
+  let username = required args "username"
+  and password = required args "password" in
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
+  let ok, _ = records ctx in
+  let same =
+    List.filter
+      (fun (_, (l : Passwords.login)) ->
+        l.username = username
+        && List.exists (fun s -> Passwords.matches ~site:s ~origin:site) l.urls)
+      (logins ok)
+  in
+  if List.exists (fun (_, (l : Passwords.login)) -> l.password = password) same
+  then [("saved", `Bool false)]
+  else (
+    match (same, str args "update") with
+      | [(id, _)], Some update when update = id ->
+          ignore
+            (edit ~domain ~engine ~lazy_tree t
+               [("id", `String id); ("password", `String password)]);
+          [("saved", `Bool true); ("id", `String id)]
+      | [(id, _)], _ -> [("saved", `Bool false); ("update", `String id)]
+      | _ ->
+          add ~domain ~engine ~lazy_tree t
+            [
+              ("title", `String site);
+              ("urls", `List [`String site]);
+              ("username", `String username);
+              ("password", `String password);
+            ]
+          |> List.cons ("saved", `Bool true))
 
 let remove_record ~domain ~engine ~lazy_tree t args =
   remove ~domain ~engine ~lazy_tree t (required args "id");
@@ -767,6 +831,8 @@ let act ~domain ~engine ~lazy_tree t ~action args =
       | "passwords_add" -> add
       | "passwords_list" -> list
       | "passwords_get" -> get
+      | "passwords_fill" -> fill
+      | "passwords_save" -> save
       | "passwords_edit" -> edit
       | "passwords_remove" -> remove_record
       | "passwords_import" -> import

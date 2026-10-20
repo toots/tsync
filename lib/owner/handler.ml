@@ -925,7 +925,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase)
     | Totp_add source -> on_records (fun () -> vault Totp_verbs.add source)
     | Totp_list filter -> on_records (fun () -> vault Totp_verbs.list filter)
-    | Totp_code id -> on_records (fun () -> vault Totp_verbs.code id)
+    | Totp_code id ->
+        on_records (fun () -> vault (Totp_verbs.code ?pull:None) id)
     | Totp_rename r ->
         on_records (fun () ->
             vault
