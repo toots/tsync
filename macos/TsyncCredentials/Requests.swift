@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let trace = Logger(subsystem: "org.feverdreamtv.tsync.credentials", category: "requests")
 
 /// passwords/macos §2: one row of a merged answer, naming the domain it came from.
 struct Choice {
@@ -49,7 +52,11 @@ enum Requests {
                 listed.choices += rows(domain, try ask(domain))
             } catch let failure as OwnerFailure where failure.code == "locked" {
                 listed.locked.append(domain)
-            } catch {}
+            } catch let failure as OwnerFailure {
+                trace.info("\(domain, privacy: .public) refused: \(failure.code, privacy: .public)")
+            } catch {
+                trace.info("\(domain, privacy: .public) did not answer")
+            }
         }
         return listed
     }
@@ -81,7 +88,8 @@ enum Requests {
 
     /// passwords/macos §4: the passkeys answering the RP ID.
     static func passkeys(rpId: String, allow: [Data]) -> Listed {
-        merged(
+        trace.info("passkeys of \(rpId, privacy: .public), \(allow.count) allowed")
+        return merged(
             { domain in
                 var args: [String: Any] = ["origin": "https://" + rpId, "rpId": rpId]
                 if !allow.isEmpty { args["allow"] = allow.map(base64URL) }
