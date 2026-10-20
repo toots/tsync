@@ -18,9 +18,9 @@ never on the main thread.
 | Credential provider | `androidx.credentials.provider.CredentialProviderService`, Android 14 | passkeys, and logins asked through Credential Manager (§6) |
 
 - **Enabling them** is the user's: *Settings → Passwords, passkeys & accounts* (Android 14), or
-  *Autofill service* before. The Vault screen shows a row "Turn on tsync for autofill" while the
-  autofill service is not the selected one (`AutofillManager.hasEnabledAutofillServices`), which
-  opens that setting (`ACTION_REQUEST_SET_AUTOFILL_SERVICE`).
+  *Autofill service* before. The Passwords tab (§8) shows a row "Turn on tsync for autofill"
+  while the autofill service is not the selected one (`AutofillManager.hasEnabledAutofillServices`),
+  which opens that setting (`ACTION_REQUEST_SET_AUTOFILL_SERVICE`).
 - Neither holds a secret beyond the request it answers, nor writes one to disk, nor logs a
   password, code, passphrase, seed or key.
 - The phone serves one domain (android-app §2); there is no domain merge.
@@ -64,8 +64,8 @@ platform vouches for:
   authentication intent, so the platform has nothing to fill until the user picks. The pick
   starts a transparent activity that asks `passwords_fill` (passwords §8) and returns the dataset with the
   username and password.
-- **Inline suggestions** (Android 11) show the same datasets in the keyboard when the request
-  carries an inline specification.
+- **Inline suggestions** (Android 11, in the keyboard) are planned: this version answers the
+  dropdown only.
 - **Nothing to offer**: no dataset, and no save info unless §5 applies. A fill request never
   answers from a cache.
 
@@ -83,8 +83,10 @@ platform vouches for:
   `onSaveRequest` sends `passwords_save` (passwords §8) with the request's site, and the username and
   password typed. The platform's prompt is the approval.
 - A reply naming a record to update (passwords §8: same site and username, another password)
-  shows a notification "Update the password of `<title>`?" with **Update**, which sends
-  `passwords_save` again with `update`. Nothing is updated without that tap.
+  shows a notification "Update the password for `<site>`?", private on the lock screen, with
+  **Update**, which sends `passwords_save` again with `update`. Nothing is updated without that
+  tap. The new password waits in that button's pending intent, which the system holds for this
+  app alone and drops when the notification is dismissed; it is never written to disk.
 - A locked vault refuses the save, and a notification says it was not saved and why.
 
 ## 6. Passkeys
@@ -100,7 +102,8 @@ the owner does not do: a passkey request from an app off the list is answered wi
   answers for the request's RP
   ID and allow-list, and for each `BeginGetPasswordOption` one `PasswordCredentialEntry` per login
   matching the origin. Each entry carries a pending intent; nothing is signed or read before the
-  pick.
+  pick. A locked vault answers one authentication action, "tsync is locked", opening the Vault
+  screen (§1).
 - The pick starts an activity that verifies the user when asked (§7), sends
   `passwords_passkey_assert` with the origin, the RP ID and the request's client data hash, and
   returns the assertion as WebAuthn's JSON (`PublicKeyCredential`). A login entry returns a
@@ -108,10 +111,10 @@ the owner does not do: a passkey request from an app off the list is answered wi
 
 ### 6.2 Creation
 
-- `onBeginCreateCredentialRequest` of a `BeginCreatePublicKeyCredentialRequest` answers one entry,
-  "Save in tsync". The pick starts an activity that names the site and the user name, verifies
-  the user when asked (§7), sends `passwords_passkey_create` and returns the registration
-  response's JSON. An exclusion the owner refuses `exists` returns WebAuthn's
+- `onBeginCreateCredentialRequest` of a `BeginCreatePublicKeyCredentialRequest` from a browser of
+  the list answers one entry, named by the domain. The system's sheet names the site and the user
+  name; picking tsync's entry is the approval. The activity it starts verifies the user when asked
+  (§7), sends `passwords_passkey_create` and returns the registration response's JSON. An exclusion the owner refuses `exists` returns WebAuthn's
   `InvalidStateError`.
 
 ### 6.3 The origin

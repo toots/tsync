@@ -53,6 +53,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Tab
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -106,7 +109,7 @@ fun SecureWindow() {
 }
 
 /** Runs a vault call off the main thread; a refusal comes back as the owner's sentence. */
-private suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatchers.IO) {
+internal suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatchers.IO) {
     try {
         Result.success(call())
     } catch (e: CoreException) {
@@ -114,7 +117,7 @@ private suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatch
     }
 }
 
-private fun Result<*>.reason(): String? = exceptionOrNull()?.message
+internal fun Result<*>.reason(): String? = exceptionOrNull()?.message
 
 /** vault §8.1: the vault's icon, or tsync's glyph in the vault's colour. */
 @Composable
@@ -142,6 +145,9 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Boolean?>(null) }
     var adding by remember { mutableStateOf(false) }
+    // android-app §10.8: one tab per extension the domain uses.
+    var extensions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var tab by rememberSaveable { mutableStateOf("totp") }
     val scope = rememberCoroutineScope()
     val changes by tsync.vaultChanges.collectAsState()
     val lifecycle = LocalLifecycleOwner.current
@@ -151,6 +157,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             attempt { tsync.vault.status() }
                 .onSuccess { status = it; failure = null }
                 .onFailure { failure = it.message }
+            attempt { tsync.ask { stats() }.extensions }.onSuccess { extensions = it }
         }
     }
     val unlocked = status?.state == "unlocked"
@@ -179,7 +186,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             )
         },
         floatingActionButton = {
-            if (unlocked) FloatingActionButton(onClick = { adding = true }) {
+            if (unlocked && shownTab(extensions, tab) == "totp") FloatingActionButton(onClick = { adding = true }) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = stringResource(R.string.code_add))
             }
         },
@@ -195,14 +202,22 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
                 if (current.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
                 Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
             }
-            current.newMachines.isNotEmpty() -> Column(Modifier.padding(padding)) {
+            else -> Column(Modifier.padding(padding)) {
                 current.newMachines.forEach { Banner(stringResource(R.string.vault_machine_joined, it)) }
-                TextButton(onClick = {
+                if (current.newMachines.isNotEmpty()) TextButton(onClick = {
                     scope.launch { attempt { tsync.vault.acknowledgeMachines() }; reload() }
                 }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.vault_machines_seen)) }
-                CodesList(tsync, PaddingValues(0.dp), onLocked = ::reload)
+                val tabs = listOf("totp", "passwords").filter { it in extensions }
+                if (tabs.size > 1) TabRow(selectedTabIndex = tabs.indexOf(shownTab(extensions, tab)).coerceAtLeast(0)) {
+                    tabs.forEach { name ->
+                        Tab(selected = shownTab(extensions, tab) == name, onClick = { tab = name }, text = {
+                            Text(stringResource(if (name == "totp") R.string.vault_tab_codes else R.string.vault_tab_passwords))
+                        })
+                    }
+                }
+                if (shownTab(extensions, tab) == "passwords") PasswordsTab(tsync, PaddingValues(), onLocked = ::reload)
+                else CodesList(tsync, PaddingValues(), onLocked = ::reload)
             }
-            else -> CodesList(tsync, padding, onLocked = ::reload)
         }
     }
     confirm?.let { forget ->
@@ -223,6 +238,11 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     }
     if (adding) AddCodeSheet(tsync, onDismiss = { adding = false; tsync.vaultChanges.value++ })
 }
+
+/** The tab asked for when the domain uses its extension, else the one it uses. */
+private fun shownTab(extensions: List<String>, asked: String): String =
+    if (asked in extensions || "totp" !in extensions && "passwords" !in extensions) asked
+    else if ("totp" in extensions) "totp" else "passwords"
 
 private fun describe(context: Context, status: VaultStatus): String {
     val state = context.getString(if (status.state == "unlocked") R.string.vault_state_unlocked else R.string.vault_state_locked)
@@ -267,7 +287,10 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
                     val result = attempt { tsync.vault.unlock(passphrase, secretKey.takeUnless { enrolled }) }
                     busy = false
                     refusal = result.reason()
-                    if (result.isSuccess) onUnlocked()
+                    if (result.isSuccess) {
+                        tsync.warmPasswords()
+                        onUnlocked()
+                    }
                 }
             },
         ) { Text(stringResource(R.string.vault_unlock)) }

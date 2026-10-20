@@ -18,6 +18,7 @@ import org.feverdreamtv.tsync.bridge.Native
 import org.feverdreamtv.tsync.bridge.NativeCore
 import org.feverdreamtv.tsync.core.Client
 import org.feverdreamtv.tsync.core.Vault
+import org.feverdreamtv.tsync.core.Passwords
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.ConfigStore
 import org.feverdreamtv.tsync.core.Core
@@ -55,6 +56,7 @@ class Tsync private constructor(val context: Context) {
     val core: Core = NativeCore
     val client = Client(core)
     val vault = Vault(client)
+    val passwords = Passwords(client)
 
     /** Bumped by every vault change the app makes, so each vault screen asks again (pitfall B-8.18). */
     val vaultChanges = MutableStateFlow(0)
@@ -157,6 +159,21 @@ class Tsync private constructor(val context: Context) {
                 ingest.pending().filter { it.intent == null }.forEach { Notifications.unreadableSave(this@Tsync, it.staging) }
             } finally {
                 keepAlive.release(Work.SAVE)
+            }
+        }
+    }
+
+    /**
+     * passwords/android §1.1: one listing fetches the record bodies the phone lacks, so a form
+     * that asks later is answered from what the phone holds. A domain not using passwords, or a
+     * locked vault, has nothing to fetch.
+     */
+    fun warmPasswords() {
+        scope.launch {
+            try {
+                if (boot() == Boot.Ready) passwords.list()
+            } catch (e: CoreException) {
+                // Nothing to warm, or nothing reachable: the next form asks again.
             }
         }
     }
