@@ -102,8 +102,11 @@ process completed a pull of it less than `pull_freshness` ago, measured on the m
 1. A child listing (`list_dir`) pulls the folder first unless it is fresh. A request carrying
    `after` never pulls: it continues the view its first page was answered from, however long ago,
    so a listing is never re-read under its own pages. A caller MAY say
-   `"pull":"now"` (pull even when fresh: a user's refresh gesture) or `"pull":"never"` (answer the
-   mirror).
+   `"pull":"now"` (pull even when fresh: a user's refresh gesture), `"pull":"never"` (answer the
+   mirror) or `"pull":"background"` (start the pull unless the folder is fresh and answer the last
+   view at once, `outdated` unless fresh; a folder never pulled still waits for its pull): a caller
+   with a deadline of its own, such as a platform's autofill, answers in time and the next request
+   sees what the pull brought.
 2. A mutation that names a child by name (`create`, `mkdir`, `write` by parent and name, `symlink`,
    the destination of a `rename`) pulls the destination folder first unless it is fresh, so that an
    existence check sees what peers committed.
