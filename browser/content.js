@@ -26,7 +26,8 @@
     .row { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit;
            padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
     .row:hover, .row:focus { background: #8882; }
-    .row small { display: block; opacity: .65; }
+    .row small { display: block; opacity: .65; margin-left: 24px; }
+    .row > svg, .row > img { vertical-align: -3px; margin-right: 8px; }
     .note { padding: 6px 8px; opacity: .7; }
   </style><button class="icon" hidden title="tsync"></button><div class="menu" hidden></div>`;
   const icon = shadow.querySelector(".icon");
@@ -119,10 +120,11 @@
   icon.addEventListener("mousedown", (e) => e.preventDefault());
   icon.addEventListener("click", (e) => seen(e) && target && open(target));
 
-  function row(title, detail, action) {
+  function row(title, detail, action, look) {
     const b = document.createElement("button");
     b.className = "row";
-    b.textContent = title;
+    if (look !== undefined) b.appendChild(TsyncMark.element(look, 16));
+    b.appendChild(document.createTextNode(title));
     if (detail) {
       const small = document.createElement("small");
       small.textContent = detail;
@@ -155,7 +157,8 @@
     for (const login of answer.logins || []) {
       const title = answer.domains > 1 ? `${login.title} · ${login.domain}` : login.title;
       const detail = kind === "code" ? "one-time code" : login.username;
-      menu.appendChild(row(title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind)));
+      menu.appendChild(row(title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind),
+        (answer.looks || {})[login.domain] || null));
     }
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
     for (const domain of answer.locked || []) menu.appendChild(note(`${domain}: tsync is locked — unlock it in tsync`));
