@@ -155,10 +155,10 @@ The Vault screen ([android-app §10.8](../../frontends/android-app.md#108-vault)
 
 | capability | interaction | realised by | declared |
 |---|---|---|---|
-| `fill` | `confirm` | §3, the autofill service | planned |
-| `fill` with codes | `confirm` | §4 | planned |
+| `fill` | `confirm` | §3, the autofill service | declared |
+| `fill` with codes | `confirm` | §4 | declared |
 | `save` | `confirm` | §5, the platform's save prompt | planned |
-| `passkey` | `confirm`, `authenticate` when verification is asked | §6, §7, Android 14, browsers of the list | planned |
+| `passkey` | `confirm`, `authenticate` when verification is asked | §6, §7, Android 14, browsers of the list | declared |
 
 ## 10. Conformance
 
