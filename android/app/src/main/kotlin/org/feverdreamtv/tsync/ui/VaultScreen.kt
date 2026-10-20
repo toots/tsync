@@ -157,6 +157,8 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             attempt { tsync.vault.status() }
                 .onSuccess { status = it; failure = null }
                 .onFailure { failure = it.message }
+            // passwords/android §1.1: after an unlock, once the status is shown.
+            if (status?.state == "unlocked") tsync.warmPasswords()
             attempt { tsync.ask { stats() }.extensions }.onSuccess { extensions = it }
         }
     }
@@ -287,10 +289,7 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
                     val result = attempt { tsync.vault.unlock(passphrase, secretKey.takeUnless { enrolled }) }
                     busy = false
                     refusal = result.reason()
-                    if (result.isSuccess) {
-                        tsync.warmPasswords()
-                        onUnlocked()
-                    }
+                    if (result.isSuccess) onUnlocked()
                 }
             },
         ) { Text(stringResource(R.string.vault_unlock)) }

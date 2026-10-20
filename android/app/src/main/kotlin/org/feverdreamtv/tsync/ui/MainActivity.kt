@@ -240,7 +240,6 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
     var vaultShown by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            tsync.warmPasswords()
             vaultShown = withContext(Dispatchers.IO) {
                 try {
                     tsync.vault.status() != null
@@ -248,6 +247,8 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
                     vaultShown
                 }
             }
+            // After the status: the warm-up holds the vault's folders while it fetches.
+            if (vaultShown) tsync.warmPasswords()
         }
     }
     LaunchedEffect(requested, vaultShown) {
