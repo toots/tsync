@@ -51,9 +51,27 @@ list, never reported as empty.
   completing from the remembered record alone.
 - It logs which entry point each request arrived through, and the number of rows it listed,
   under the subsystem `org.feverdreamtv.tsync.credentials`.
-- The system's identity store is not filled: no site or username leaves the vault for the
-  system's suggestion bar.
+- **The identity store** holds one-time code entries only (§3.1); no login or passkey identity
+  leaves the vault for the system's suggestion bar.
 - **Save** is not offered: macOS hands no typed password to a credential provider.
+
+### 3.1 One-time code entries
+
+The system offers a provider's code on a code field only for an entry the provider saved in
+`ASCredentialIdentityStore`; without one it never asks the extension for a code.
+
+- **What is saved.** One `ASOneTimeCodeCredentialIdentity` per login that links a code and per
+  web site of that login: the site's host as a domain service identifier, the label
+  `<title> — <username>` (the title alone when there is no username), and the record identifier
+  `<domain>/<id>`. Never a seed or a code. An `android://` site is skipped.
+- **Who saves it.** The app, from `passwords_list` of every domain using passwords, when its
+  menu opens and every 60 seconds; it replaces the store's whole set, and writes only when the
+  set changed. A locked or unreachable domain contributes nothing, so the entries go once every
+  vault is locked. Nothing is written while AutoFill is off for tsync.
+- **A code request** for an entry reaches `provideCredentialWithoutUserInteraction`, which
+  declines as for a login (§3); `prepareInterfaceToProvideCredential(for:)` of a one-time code
+  request shows the code sheet of the entry's site, and the code picked completes with an
+  `ASOneTimeCodeCredential`.
 
 ## 4. Passkeys
 
