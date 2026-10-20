@@ -14,8 +14,10 @@
   const pending = new Map();
   let next = 0;
 
+  // A buffer from another frame is not this realm's ArrayBuffer: tell it by its tag.
+  const isArrayBuffer = (v) => Object.prototype.toString.call(v) === "[object ArrayBuffer]";
   const toB64 = (buffer) => {
-    const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const bytes = isArrayBuffer(buffer) ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     let text = "";
     for (const b of bytes) text += String.fromCharCode(b);
     return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -26,7 +28,7 @@
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
     return bytes.buffer;
   };
-  const isBuffer = (v) => v instanceof ArrayBuffer || ArrayBuffer.isView(v);
+  const isBuffer = (v) => isArrayBuffer(v) || ArrayBuffer.isView(v);
 
   // The options as plain JSON, binary members in base64url.
   function plain(value) {
@@ -105,7 +107,7 @@
     const reply = await ask(kind, options);
     if (reply.aborted) throw new DOMException("The operation was aborted.", "AbortError");
     if (reply.fallback) return original[kind](options);
-    if (reply.error) throw new DOMException(reply.error.message, reply.error.name);
+    if (reply.error) throw new DOMException(reply.error.message || String(reply.error), reply.error.name || "NotAllowedError");
     return credential(reply.credential);
   }
 
