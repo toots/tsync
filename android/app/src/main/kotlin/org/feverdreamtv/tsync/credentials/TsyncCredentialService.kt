@@ -80,6 +80,7 @@ class TsyncCredentialService : CredentialProviderService() {
             return BeginGetCredentialResponse()
         }
         if (tsync.boot() != Boot.Ready) return BeginGetCredentialResponse()
+        val mark = org.feverdreamtv.tsync.autofill.VaultIcon.of(this, tsync)
         val entries = mutableListOf<CredentialEntry>()
         for (option in request.beginGetCredentialOptions) {
             when (option) {
@@ -94,7 +95,8 @@ class TsyncCredentialService : CredentialProviderService() {
                     for (passkey in matched) {
                         val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_ID, passkey.id), passkey.id)
                         entries += PublicKeyCredentialEntry.Builder(this, passkey.userName, pick, option)
-                            .setDisplayName(passkey.userDisplayName.ifEmpty { null }).build()
+                            .setDisplayName(passkey.userDisplayName.ifEmpty { null })
+                            .apply { mark?.let { setIcon(it) } }.build()
                     }
                 }
                 is BeginGetPasswordOption -> {
@@ -103,7 +105,8 @@ class TsyncCredentialService : CredentialProviderService() {
                     for (login in tsync.passwords.list(site = origin, pull = Pull.BACKGROUND).logins) {
                         val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_LOGIN, login.id), login.id)
                         entries += PasswordCredentialEntry.Builder(this, login.username, pick, option)
-                            .setDisplayName(login.title).build()
+                            .setDisplayName(login.title)
+                            .apply { mark?.let { setIcon(it) } }.build()
                     }
                 }
             }
