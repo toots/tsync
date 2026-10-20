@@ -344,7 +344,7 @@ host's, so the rules above hold in one place. A read (`passwords_list`, `passwor
 
 Each host has `extensions/passwords/<host>.md` ([README §5](README.md#5-host-adapters)), which
 lists what it declares: [macOS](passwords/macos.md) (`fill`, codes, `passkey`),
-[Android](passwords/android.md) (`fill`, codes, `passkey`; `save` planned). Linux has no system autofill: browsers are served by
+[Android](passwords/android.md) (`fill`, codes, `save`, `passkey`). Linux has no system autofill: browsers are served by
 §9.
 
 ## 9. Browser extensions
