@@ -374,6 +374,16 @@ let passkeys () =
   p "%-40s %d" "match, no allow-list" (matched []);
   p "%-40s %d" "match, allowing one" (matched [("allow", `List [s credential])]);
   p "%-40s %d" "match, an empty allow-list" (matched [("allow", `List [])]);
+  (* §5: a list's passkey row carries its public ids. *)
+    (match member (ask [("action", s "passwords_list")]) "records" with
+    | Some (`List rows) ->
+        p "%-40s %b" "list, a passkey's credential id"
+          (List.exists
+             (fun row ->
+               field row "credentialId" = Some credential
+               && field row "userHandle" <> None)
+             rows)
+    | _ -> p "list: no records");
   let asserted =
     ask
       [
