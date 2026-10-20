@@ -291,7 +291,8 @@ the request carries one of:
   ([totp §5](totp.md#5-commands)): a browser extension, which cannot verify the user itself, asks
   for the passphrase when the relying party requires verification;
 - `verified: true` from a host adapter whose spec says its platform verified the user for this
-  request (a biometric or device-code prompt of the system's credential sheet).
+  request (a biometric or device-code prompt of the system's credential sheet), or from the
+  browser bridge after its own platform verification (§9.2, `verify`).
 
 Otherwise UV is clear, and a relying party that requires verification refuses the passkey. Any
 process of the user can reach the owner and say `verified` ([security-model §7](../algorithms/security-model.md)):
@@ -352,7 +353,8 @@ lists what it declares: [macOS](passwords/macos.md) (`fill`, codes, `passkey`),
 
 A browser extension fills and saves logins in that browser, on any host the browser runs on. It
 is a client of the owner, not a host adapter: it reaches the owner through a **bridge**, and
-declares nothing.
+declares nothing. The extension itself is [browser](passwords/browser.md); this section owns the
+bridge it talks to.
 
 ### 9.1 The bridge
 
@@ -381,11 +383,15 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 | `fill` | `origin`, `domain`, `id` | `passwords_fill` (§8), with `origin` as the site |
 | `save` | `origin`, `username`, `password`, `domain?`, `update?` | `passwords_save` (§8), with `origin` as the site |
 | `passkey_match`, `passkey_create`, `passkey_assert` | as §7.5, `origin` the frame's | as §7.5 |
+| `verify` | — | verifies the user by the platform's own means before a passkey request ([browser §5](passwords/browser.md#5-passkeys)): on macOS LocalAuthentication, answering `verified`; elsewhere refused `invalid` (the extension then asks the passphrase) |
 
 - A `fill` whose login does not match `origin` is refused `invalid`. A page never receives a
   login of another site, whatever the extension asks.
-- No request lists every login, returns a login by id alone, or carries a seed, notes or the
-  passphrase. Unlocking is done in the app or the CLI.
+- No request lists every login, returns a login by id alone, or carries a seed or notes. The
+  passphrase travels only in `passkey_create` and `passkey_assert`, to verify the user where the
+  platform has no verifier (§7.4); unlocking is done in the app or the CLI.
+- A passkey request carries `verified: true` only after the bridge's own `verify` succeeded in the
+  same session: the bridge sets it, not the extension, and drops a `verified` the extension sends.
 - A locked vault is named in a `match` reply; a `fill` or `save` on it is refused `locked`.
 
 ### 9.3 What the extension does
