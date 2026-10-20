@@ -181,6 +181,13 @@ tsync passwords get ID --field PIN            # one custom field's value
 
 **Passkeys** are made and used by your browser or apps, through tsync's AutoFill on macOS and its autofill on Android: there is no command to create one. `list` shows them by site and user name, and `edit ID --login LOGIN_ID` files one with the login it belongs to. A passkey never leaves the vault: it signs inside tsync, and it is not exported.
 
+**AutoFill on macOS** (macOS 14 and later). Turn on tsync in *System Settings → General → AutoFill & Passwords* (*Passwords → Password Options* before macOS 15); the menu bar shows *Turn on AutoFill for tsync in System Settings…* until you do.
+
+- **Logins.** In Safari or an app, click the username field and choose tsync's suggestion, or *Other passwords…*: tsync's sheet lists the site's logins by title and username, and the one you pick is filled. Nothing is filled without a pick.
+- **Two-factor codes** (macOS 15). On a site's code field, Safari offers the code of the login that links one; pick it and tsync fills the current code. For this, tsync lists `title — username` for each such site in macOS's AutoFill list, never the code or the seed.
+- **Passkeys.** When a site offers to create a passkey, choose tsync: it is saved in the vault, after Touch ID when the site asks for verification. Signing in, Safari lists your tsync passkeys by user name; picking one signs in. tsync lists each passkey's site and user name in macOS's AutoFill list for this, never its key.
+- **A locked vault** shows as *Files is locked — Unlock it from the tsync menu* (with your domain's name): the sheet never asks for your passphrase. Unlock from the menu bar and try again.
+
 **Moving from a browser or another manager.** `tsync passwords import FILE` reads the CSV export of a browser, Bitwarden or 1Password-style managers (columns named like `name`, `url`, `username`, `password`, `notes`, and `otpauth` or `login_totp` for two-factor seeds). It adds every row, so importing a file twice gives each login twice. The CSV is plaintext: delete it once imported. `tsync passwords export` prints every login as CSV after the passphrase; passkeys are not exported.
 
 Two machines editing the same login at once keep the newer edit; a login whose password was changed on both sides keeps both, the second labelled `(conflicted copy from <machine>)`.
