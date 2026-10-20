@@ -1,0 +1,47 @@
+// passwords/browser §3.1: what a field is, as Chromium's own autofill tells it.
+// A plain script: the content script loads it first, and node's tests require it.
+"use strict";
+
+const TsyncFields = (() => {
+  // Chromium's ONE_TIME_CODE pattern (form_parsing legacy_regex_patterns.json),
+  // plus mfa and one-time.
+  const CODE_NAME = /otp|verification.code|2fa|six.digit|mfa|one.time/i;
+  const USERNAME_NAME = /user.?name|login|e.?mail|account|identifier/i;
+
+  // A field is described by plain data, so the rule can be tested without a DOM.
+  function kind(field) {
+    if (field.hidden || field.disabled || field.readOnly) return null;
+    const type = (field.type || "text").toLowerCase();
+    if (!["text", "email", "password", "tel", "number", "search", ""].includes(type)) return null;
+    const autocomplete = (field.autocomplete || "").toLowerCase().split(/\s+/);
+    if (autocomplete.includes("one-time-code")) return "code";
+    if (autocomplete.includes("current-password") || autocomplete.includes("new-password")) return "password";
+    if (autocomplete.includes("username") || autocomplete.includes("email")) return "username";
+    if (type === "password") return "password";
+    const names = [field.name, field.id, field.label, field.placeholder].filter(Boolean).join(" ");
+    if (CODE_NAME.test(names)) return "code";
+    if (type === "email" || USERNAME_NAME.test(names)) return "username";
+    return null;
+  }
+
+  // The fields of one form: a lone text field before a password field is its
+  // username, as most sign-in pages draw it.
+  function classify(fields) {
+    const kinds = fields.map(kind);
+    const firstPassword = kinds.indexOf("password");
+    if (firstPassword > 0 && !kinds.includes("username")) {
+      for (let i = firstPassword - 1; i >= 0; i--) {
+        const type = (fields[i].type || "text").toLowerCase();
+        if (kinds[i] === null && (type === "text" || type === "email" || type === "") && !fields[i].hidden) {
+          kinds[i] = "username";
+          break;
+        }
+      }
+    }
+    return kinds;
+  }
+
+  return { kind, classify };
+})();
+
+if (typeof module !== "undefined") module.exports = TsyncFields;

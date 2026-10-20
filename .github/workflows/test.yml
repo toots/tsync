@@ -212,6 +212,18 @@ jobs:
       - name: Swift tests
         run: make -C macos test
 
+  # passwords/browser: the extension's field classifier.
+  browser-extension:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Field classifier
+        run: node --test 'browser/test/*.test.js'
+
   # 10 §3.1 items 3 and 4: the bucket functions, and the vectors that keep
   # their second implementation of the chunk key and the delete-request key in
   # agreement with the OCaml suite's golden files.

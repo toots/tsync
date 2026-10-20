@@ -383,7 +383,7 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 
 | request | carries | answer |
 |---|---|---|
-| `status` | — | per domain: locked or unlocked, whether it uses `totp`, and its `appearance` (`color`, and `icon` in base64 when it has one; vault §8.1) |
+| `status` | — | per domain: locked or unlocked, whether it uses `totp`, and its `appearance` (`color`, and `icon` in base64 when it has one; vault §8.1); `verifier`, the platform's verifier `verify` uses, or null |
 | `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, and whether a code is linked; no password |
 | `fill` | `origin`, `domain`, `id` | `passwords_fill` (§8), with `origin` as the site |
 | `save` | `origin`, `username`, `password`, `domain?`, `update?` | `passwords_save` (§8), with `origin` as the site |

@@ -831,7 +831,8 @@ let () =
                   (String.concat " "
                      (List.filter_map
                         (fun (k, v) ->
-                          if k = "ok" then None
+                          (* The platform's verifier differs by machine. *)
+                          if k = "ok" || k = "verifier" then None
                           else
                             Some
                               (k ^ "="
