@@ -47,6 +47,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         if let request = credentialRequest as? ASPasskeyCredentialRequest,
             let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity
         {
+            if let record = identity.recordIdentifier, let slash = record.firstIndex(of: "/") {
+                return signIn(
+                    Choice(
+                        domain: String(record[..<slash]), id: String(record[record.index(after: slash)...]),
+                        title: identity.userName, detail: "", passkey: true),
+                    rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
+                    verify: request.userVerificationPreference != .discouraged)
+            }
             passkeyList(
                 rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash,
                 verify: request.userVerificationPreference != .discouraged, allow: [])
@@ -114,22 +122,46 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             return listed
         } pick: { choice in
             guard choice.passkey else { return try self.fill(choice) }
-            let verified = try self.verify(verify, reason: "sign in to \(rpId)")
-            var args: [String: Any] = [
-                "origin": "https://" + rpId, "rpId": rpId, "id": choice.id,
-                "clientDataHash": base64URL(hash),
-            ]
-            if verified { args["verified"] = true }
-            let reply = try Requests.call(choice.domain, "passkey_assert", args)
-            let credential = ASPasskeyAssertionCredential(
-                userHandle: fromBase64URL(reply["userHandle"] as? String ?? "") ?? Data(),
-                relyingParty: rpId,
-                signature: fromBase64URL(reply["signature"] as? String ?? "") ?? Data(),
-                clientDataHash: hash,
-                authenticatorData: fromBase64URL(reply["authenticatorData"] as? String ?? "") ?? Data(),
-                credentialID: fromBase64URL(reply["credentialId"] as? String ?? "") ?? Data())
-            self.extensionContext.completeAssertionRequest(using: credential)
+            try self.signAssertion(choice, rpId: rpId, hash: hash, verify: verify)
         }
+    }
+
+    /// §4.1: a passkey Safari's own list named, signed without another list.
+    private func signIn(_ choice: Choice, rpId: String, hash: Data, verify: Bool) {
+        trace.info("passkey named by an entry")
+        reset("Signing in to \(rpId)")
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        add(spinner, stretched: false)
+        run {
+            do {
+                try self.signAssertion(choice, rpId: rpId, hash: hash, verify: verify)
+            } catch let failure as OwnerFailure where failure.code == "not_found" {
+                DispatchQueue.main.async {
+                    self.passkeyList(rpId: rpId, hash: hash, verify: verify, allow: [])
+                }
+            }
+        }
+    }
+
+    private func signAssertion(_ choice: Choice, rpId: String, hash: Data, verify: Bool) throws {
+        let verified = try self.verify(verify, reason: "sign in to \(rpId)")
+        var args: [String: Any] = [
+            "origin": "https://" + rpId, "rpId": rpId, "id": choice.id,
+            "clientDataHash": base64URL(hash),
+        ]
+        if verified { args["verified"] = true }
+        let reply = try Requests.call(choice.domain, "passkey_assert", args)
+        let credential = ASPasskeyAssertionCredential(
+            userHandle: fromBase64URL(reply["userHandle"] as? String ?? "") ?? Data(),
+            relyingParty: rpId,
+            signature: fromBase64URL(reply["signature"] as? String ?? "") ?? Data(),
+            clientDataHash: hash,
+            authenticatorData: fromBase64URL(reply["authenticatorData"] as? String ?? "") ?? Data(),
+            credentialID: fromBase64URL(reply["credentialId"] as? String ?? "") ?? Data())
+        self.extensionContext.completeAssertionRequest(using: credential)
     }
 
     override func prepareInterface(forPasskeyRegistration registrationRequest: ASCredentialRequest) {

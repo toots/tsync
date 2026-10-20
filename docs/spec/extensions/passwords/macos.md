@@ -51,11 +51,16 @@ list, never reported as empty.
   completing from the remembered record alone.
 - It logs which entry point each request arrived through, and the number of rows it listed,
   under the subsystem `org.feverdreamtv.tsync.credentials`.
-- **The identity store** holds one-time code entries only (§3.1); no login or passkey identity
-  leaves the vault for the system's suggestion bar.
+- **The identity store** holds one-time code entries (§3.1) and passkey entries (§4.1); no login
+  identity leaves the vault for the system's suggestion bar.
 - **Save** is not offered: macOS hands no typed password to a credential provider.
 
-### 3.1 One-time code entries
+### 3.1 Identity entries
+
+Both kinds of entry are written together by the app, as one set (§3.1 "Who saves it" below);
+§4.1 says what a passkey entry holds.
+
+#### One-time codes
 
 The system offers a provider's code on a code field only for an entry the provider saved in
 `ASCredentialIdentityStore`; without one it never asks the extension for a code.
@@ -65,8 +70,8 @@ The system offers a provider's code on a code field only for an entry the provid
   `<title> — <username>` (the title alone when there is no username), and the record identifier
   `<domain>/<id>`. Never a seed or a code. An `android://` site is skipped.
 - **Who saves it.** The app, from `passwords_list` of every domain using passwords, when its
-  menu opens and every 60 seconds; it replaces the store's whole set, and writes only when the
-  set changed. A locked or unreachable domain contributes nothing, so the entries go once every
+  menu opens and every 60 seconds; it replaces the store's whole set of entries, codes and
+  passkeys, and writes only when the set changed. A locked or unreachable domain contributes nothing, so the entries go once every
   vault is locked. Nothing is written while AutoFill is off for tsync.
 - **A code request** for an entry reaches `provideCredentialWithoutUserInteraction`, which
   declines as for a login (§3); `prepareInterfaceToProvideCredential(for:)` of a one-time code
@@ -97,6 +102,21 @@ The system offers a provider's code on a code field only for an entry the provid
   is a public suffix.
 - An exclusion the owner refuses `exists` completes the registration with
   `ASExtensionError.Code.matchedExcludedCredential` where the system has it, else a failure.
+
+### 4.1 Passkey entries
+
+Safari names a provider's passkeys in its suggestions only for entries the provider saved;
+without them it shows the system's "More from tsync…", which opens the sheet.
+
+- **What is saved.** One `ASPasskeyCredentialIdentity` per passkey: its RP ID, user name,
+  credential id and user handle, and the record identifier `<domain>/<id>`. All of them a
+  relying party holds; never the private key. Written with the code entries, under the same
+  rules (§3.1).
+- **Picking one is the pick** (passwords §8). The request reaches
+  `provideCredentialWithoutUserInteraction`, which declines with `userInteractionRequired`;
+  `prepareInterfaceToProvideCredential(for:)` of a passkey request naming a record signs that
+  record with `passwords_passkey_assert`, after LocalAuthentication when verification is asked
+  (§5), showing no list. A record that is gone shows the passkey sheet of the RP ID instead.
 
 ## 5. User verification
 
