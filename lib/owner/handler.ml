@@ -807,6 +807,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_unlock r ->
         vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase
     | Vault_lock forget -> vault (Vault.lock ~forget_secret_key:forget)
+    | Vault_appearance c ->
+        vault (Vault.set_appearance ~color:c.set_color ~icon:c.set_icon)
     | Vault_passphrase r ->
         vault (Vault.passphrase ~new_secret_key:r.new_secret_key) r.passphrase
     | Vault_delete confirm ->

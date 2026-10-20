@@ -158,6 +158,7 @@
   tsync_owner
   tsync_vault
   unix
+  base64
   yojson))
 
 (rule

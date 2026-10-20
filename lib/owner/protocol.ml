@@ -107,6 +107,16 @@ type shared = { url : string; expires : float }
 (** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
 type secret = { secret_key : string; key_id : string }
 
+(** vault §8.1: the colour in force, whether the user chose it, and the icon
+    (PNG bytes). *)
+type appearance = { color : string; color_chosen : bool; icon : string option }
+
+(** What [vault_appearance] changes: each field kept, set or cleared. *)
+type appearance_change = {
+  set_color : [ `Keep | `Set of string | `Clear ];
+  set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
+}
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -119,6 +129,7 @@ type vault_status = {
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
   pulled_at : float option;  (** of that view *)
+  appearance : appearance option;  (** vault §8.1; none without a keyring *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -220,6 +231,7 @@ type _ request =
     }
       -> unit request
   | Vault_lock : bool -> unit request  (** [true] also forgets the secret key *)
+  | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;
@@ -271,13 +283,15 @@ let action : type a. a request -> string = function
   | Vault_init _ -> "vault_init"
   | Vault_unlock _ -> "vault_unlock"
   | Vault_lock _ -> "vault_lock"
+  | Vault_appearance _ -> "vault_appearance"
   | Vault_passphrase _ -> "vault_passphrase"
   | Vault_delete _ -> "vault_delete"
   | Vault_status -> "vault_status"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
-  | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _ ->
+  | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
+  | Vault_appearance _ ->
       true
   | _ -> false
 
@@ -363,6 +377,14 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       ("passphrase", `String r.passphrase)
       :: opt "secretKey" (fun k -> `String k) r.secret_key
   | Vault_lock forget -> if forget then [("forget", `Bool true)] else []
+  | Vault_appearance c ->
+      let field k encode = function
+        | `Keep -> []
+        | `Clear -> [(k, `Null)]
+        | `Set v -> [(k, `String (encode v))]
+      in
+      field "color" Fun.id c.set_color
+      @ field "icon" Base64.encode_string c.set_icon
   | Vault_passphrase r ->
       ("passphrase", `String r.passphrase)
       :: (if r.new_secret_key then [("newSecretKey", `Bool true)] else [])
@@ -556,6 +578,25 @@ let decode j =
                secret_key = str j "secretKey";
              })
     | "vault_lock" -> Request (Vault_lock (flag j "forget"))
+    | "vault_appearance" ->
+        (* §8.1: an absent member is kept, null clears it. *)
+        let change k decode =
+          match member j k with
+            | None -> `Keep
+            | Some `Null -> `Clear
+            | Some (`String v) -> `Set (decode v)
+            | Some _ -> Fail.invalid "%s is a string or null" k
+        in
+        Request
+          (Vault_appearance
+             {
+               set_color = change "color" Fun.id;
+               set_icon =
+                 change "icon" (fun b ->
+                     match Base64.decode b with
+                       | Ok png -> png
+                       | Error _ -> Fail.invalid "the icon is not base64");
+             })
     | "vault_passphrase" ->
         Request
           (Vault_passphrase
@@ -714,7 +755,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
     | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _
-    | Vault_unlock _ | Vault_lock _ ->
+    | Vault_unlock _ | Vault_lock _ | Vault_appearance _ ->
         ok []
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Vault_init _ -> ok (secret_fields reply)
@@ -743,7 +784,18 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ opt "keystoreError" (fun e -> `String e) reply.keystore_error
           @ [("enrolled", `Bool reply.enrolled)]
           @ (if reply.outdated then [("outdated", `Bool true)] else [])
-          @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at)
+          @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at
+          @ opt "appearance"
+              (fun (a : appearance) ->
+                `Assoc
+                  ([
+                     ("color", `String a.color);
+                     ("colorChosen", `Bool a.color_chosen);
+                   ]
+                  @ opt "icon"
+                      (fun i -> `String (Base64.encode_string i))
+                      a.icon))
+              reply.appearance)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -889,6 +941,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Ping -> ()
     | Vault_unlock _ -> ()
     | Vault_lock _ -> ()
+    | Vault_appearance _ -> ()
     | Vault_delete _ -> str j "keystoreLeft"
     | Vault_init _ -> secret_of j
     | Vault_passphrase _ ->
@@ -922,6 +975,17 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           enrolled = flag j "enrolled";
           outdated = flag j "outdated";
           pulled_at = Option.map float_of_int (int j "pulledAt");
+          appearance =
+            Option.map
+              (fun a ->
+                {
+                  color = Option.value ~default:"" (str a "color");
+                  color_chosen = flag a "colorChosen";
+                  icon =
+                    Option.bind (str a "icon") (fun b ->
+                        Result.to_option (Base64.decode b));
+                })
+              (member j "appearance");
         }
     | Full_resync -> ()
     | Revert _ -> ()

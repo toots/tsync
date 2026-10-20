@@ -169,11 +169,83 @@ let status_cmd =
            (say "unusable slot: %s (past the readers' limits)")
            s.unusable;
          List.iter (say "keyring copy: %s") s.copies;
+         Option.iter
+           (fun (a : P.appearance) ->
+             say "colour: %s%s" a.color
+               (if a.color_chosen then "" else " (from the key id)");
+             say "icon: %s"
+               (match a.icon with
+                 | Some png -> Printf.sprintf "%d-byte PNG" (String.length png)
+                 | None -> "none (the tsync icon in the colour)"))
+           s.appearance;
          0))
+
+(* vault §8.1 *)
+let appearance_cmd =
+  let color =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["color"] ~docv:"#RRGGBB" ~doc:"The vault's colour.")
+  and default_color =
+    Arg.(
+      value & flag
+      & info ["default-color"] ~doc:"Go back to the colour the key id gives.")
+  and icon =
+    Arg.(
+      value
+      & opt (some file) None
+      & info ["icon"] ~docv:"FILE"
+          ~doc:
+            "A square PNG, at most 256 pixels a side and 64 KiB, shown in \
+             place of the tsync icon.")
+  and no_icon =
+    Arg.(
+      value & flag
+      & info ["no-icon"] ~doc:"Show the tsync icon in the colour again.")
+  in
+  verb "appearance"
+    ~doc:
+      "Set how the vault looks in pickers: a colour, and an icon in place of \
+       tsync's."
+    Term.(
+      const (fun color default_color icon no_icon dom ->
+          let pick ~set ~clear what =
+            match (set, clear) with
+              | Some v, false -> `Set v
+              | None, true -> `Clear
+              | None, false -> `Keep
+              | Some _, true ->
+                  Fail.invalid "give --%s or its opposite, not both" what
+          in
+          let set_icon =
+            pick
+              ~set:
+                (Option.map
+                   (fun f -> In_channel.with_open_bin f In_channel.input_all)
+                   icon)
+              ~clear:no_icon "icon"
+          in
+          ask dom
+            (P.Vault_appearance
+               {
+                 set_color = pick ~set:color ~clear:default_color "color";
+                 set_icon;
+               });
+          0)
+      $ color $ default_color $ icon $ no_icon)
 
 let cmds =
   [
     Cmd.group
       (Cmd.info "vault" ~doc:"The domain's vault, shared by its extensions.")
-      [init_cmd; unlock_cmd; lock_cmd; passphrase_cmd; delete_cmd; status_cmd];
+      [
+        init_cmd;
+        unlock_cmd;
+        lock_cmd;
+        passphrase_cmd;
+        delete_cmd;
+        status_cmd;
+        appearance_cmd;
+      ];
   ]

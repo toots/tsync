@@ -312,7 +312,8 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 | `lock` / `vault_lock` | — | §6 |
 | `passphrase` / `vault_passphrase` | yes | §7 |
 | `delete` / `vault_delete` | — | §7.1 |
-| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); slot count by kind; unusable slots; keyring copies. Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
+| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); slot count by kind; unusable slots; keyring copies; the appearance (§8.1). Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
+| `appearance` / `vault_appearance` | yes | §8.1 |
 
 `vault_init`, and `vault_passphrase` with a new secret key, are the only replies that carry a
 secret: the secret key.
@@ -329,6 +330,33 @@ Refusals: init over a keyring EXISTS (`exists`); unlock or passphrase with no ke
 shorter than §2.2 allows, a malformed secret key, or no secret key on a machine not enrolled
 INVALID (`invalid`); a wrong passphrase or a wrong secret key DENIED (`denied`), each saying which;
 a passphrase change on a locked or not enrolled vault `locked`.
+
+### 8.1 Appearance
+
+A machine may show several domains' vaults side by side: every picker that lists codes, logins or
+passkeys names each row's domain ([README §6.1](README.md#61-several-domains)). The appearance
+lets the user tell them apart at a glance.
+
+- **A colour, always.** Without a choice, it is the key id's: `palette[k mod 10]`, `k` the key
+  id's first byte, from the palette `#2563eb #dc2626 #16a34a #9333ea #ea580c #0d9488 #db2777
+  #ca8a04 #4f46e5 #475569`. Every machine computes the same colour with nothing written, and two
+  vaults rarely share one. The user may choose another, `#rrggbb`.
+- **An icon, if the user gives one:** a square PNG, at most 256 pixels a side and 64 KiB, told by
+  its signature and its IHDR chunk; anything else is refused INVALID.
+- **What a picker draws:** the icon when there is one, in place of tsync's; otherwise tsync's icon
+  in the vault's colour. Everything else about a row stays as it is.
+- **Where it lives:** `/.tsync-ext/vault/appearance/appearance`, a JSON object `{"color"?,
+  "icon"? (base64), "modified"}`, in a folder of its own so the keyring's fold (§4.3) never takes
+  it for a copy. It is **not sealed**: a locked vault's rows need it, and it holds nothing secret.
+  An icon is readable by whoever reads the store; it should not be a sensitive image.
+- **Concurrent changes:** a reader takes the newest of the file and its conflicted copies by
+  `modified`, passing over one that does not read; a write replaces the file and removes the
+  copies.
+- **Changing it** (`tsync vault appearance --color C | --default-color, --icon FILE | --no-icon`,
+  action `vault_appearance`: `color` and `icon` each a string to set, `null` to clear, absent to
+  keep) is a vault write: it needs an unlocked vault, like every verb that changes the vault.
+- `vault_status` answers `appearance`: `color` (the one in force), `colorChosen`, and `icon`
+  (base64) when there is one; none without a keyring.
 
 ## 9. Parameters
 

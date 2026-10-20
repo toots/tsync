@@ -120,6 +120,16 @@ type shared = { url : string; expires : float }
 (** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
 type secret = { secret_key : string; key_id : string }
 
+(** vault §8.1: the colour in force, whether the user chose it, and the icon
+    (PNG bytes). *)
+type appearance = { color : string; color_chosen : bool; icon : string option }
+
+(** What [vault_appearance] changes: each field kept, set or cleared. *)
+type appearance_change = {
+  set_color : [ `Keep | `Set of string | `Clear ];
+  set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
+}
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -132,6 +142,7 @@ type vault_status = {
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
   pulled_at : float option;  (** of that view *)
+  appearance : appearance option;  (** vault §8.1; none without a keyring *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -236,6 +247,7 @@ type _ request =
     }
       -> unit request
   | Vault_lock : bool -> unit request  (** [true] also forgets the secret key *)
+  | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;
