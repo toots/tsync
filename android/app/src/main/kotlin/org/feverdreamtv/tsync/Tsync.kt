@@ -19,6 +19,7 @@ import org.feverdreamtv.tsync.bridge.NativeCore
 import org.feverdreamtv.tsync.core.Client
 import org.feverdreamtv.tsync.core.Vault
 import org.feverdreamtv.tsync.core.Passwords
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.ConfigStore
 import org.feverdreamtv.tsync.core.Core
@@ -164,15 +165,15 @@ class Tsync private constructor(val context: Context) {
     }
 
     /**
-     * passwords/android §1.1: one listing fetches the record bodies the phone lacks, so a form
-     * that asks later is answered from what the phone holds. A domain not using passwords, or a
-     * locked vault, has nothing to fetch.
+     * passwords/android §1.1: a background listing starts the fetch of the record bodies the
+     * phone lacks, outside the vault's locks, so a form that asks later is answered from what
+     * the phone holds. A domain not using passwords, or a locked vault, has nothing to fetch.
      */
     fun warmPasswords() {
         if (!warming.compareAndSet(false, true)) return
         scope.launch {
             try {
-                if (boot() == Boot.Ready) passwords.list()
+                if (boot() == Boot.Ready) passwords.list(pull = Pull.BACKGROUND)
             } catch (e: CoreException) {
                 // Nothing to warm, or nothing reachable: the next form asks again.
             } finally {
@@ -181,7 +182,7 @@ class Tsync private constructor(val context: Context) {
         }
     }
 
-    /** One warm-up at a time: it holds the vault's folders while it fetches (format-merge §6). */
+    /** One warm-up at a time. */
     private val warming = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Runs a request, feeding the offline latch (app §5). */
