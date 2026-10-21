@@ -36,12 +36,13 @@ never on the main thread.
 
 A request reads what the phone holds (§3): the records' bodies the cache keeps for
 `RECORD_KEEP` ([README §4.1](../README.md#41-where-they-live)). So that they are there when a
-form asks, the app lists the passwords once (`passwords_list`, `pull: auto`) after an unlock and
-each time it comes to the foreground, fetching the bodies it lacks. The warm-up holds the vault's
-folders while it fetches (format-merge §6), so it runs after the vault's status is asked, one at
-a time: a screen deciding whether to show the vault never waits behind it. A phone whose app has not
-run for longer than `RECORD_KEEP` may answer its first request after that with nothing, and the
-next with the logins.
+form asks, the app lists the passwords once (`passwords_list`, `pull: background`) after an
+unlock and each time it comes to the foreground, after the vault's status is asked, one at a
+time. That listing answers at once; the bodies it lacks are fetched after it, outside the vault's
+locks ([README §4.1](../README.md#41-where-they-live)), so neither a form nor a screen deciding
+whether to show the vault waits behind them. A request while they arrive answers without the
+records still missing, saying it is outdated, and the next has them. A phone whose app has not
+run for longer than `RECORD_KEEP` may answer its first request after that with fewer logins.
 
 ## 2. Who is asking
 

@@ -122,5 +122,8 @@
   list, the store up                 1 row(s) in under a second
   list, pull auto                    1 row(s), outdated in a second or more
   list, pull background              1 row(s), outdated in under a second
+== a record whose body the phone lacks (extensions README §4.1)
+  list, bodies withheld              0 not opening, outdated in under a second
+  list once it is fetched            1 not opening
 == status
   names the frontend                 true

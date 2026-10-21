@@ -36,6 +36,9 @@ module Make (R : RECORD) = struct
 
   type ctx = {
     domain : string;
+    vault : Vault.t;
+    background : bool;
+        (** android §3.2 rule 1: a body not on this machine is not waited for *)
     engine : (module Tsync_sync.Engine.S);
     key : string;
     key_id : string;
@@ -112,6 +115,8 @@ module Make (R : RECORD) = struct
       else if E.kind folder = `Dir then Vault.before_write t folder);
     {
       domain = Vault.key_entry domain;
+      vault = t;
+      background = lazy_tree && pull = Some `Background;
       engine;
       key;
       key_id = keyring.Tsync_vault.Keyring.key_id;
@@ -149,11 +154,67 @@ module Make (R : RECORD) = struct
               (fun (d, _) c -> if d = domain then None else Some c)
               cache))
 
+  (* README §4.1: bodies a background read left out, fetched after its answer
+     and opened into the cache, outside the folders' locks: a fetch writes no
+     record, and what it caches is keyed by the version it read. *)
+  (* README §4.5 PREFETCH_WORKERS. *)
+  let prefetch_workers = 4
+  let prefetching : (string, unit) Hashtbl.t = Hashtbl.create 64
+  let prefetch_lock = Mutex.create ()
+
+  let prefetch ctx missing =
+    let (module E : Tsync_sync.Engine.S) = ctx.engine in
+    let todo =
+      Mutex.protect prefetch_lock (fun () ->
+          List.filter
+            (fun (name, _) ->
+              let fresh = not (Hashtbl.mem prefetching name) in
+              if fresh then Hashtbl.replace prefetching name ();
+              fresh)
+            missing)
+    in
+    let fetch (name, version) =
+      let path = Names.join folder name in
+      E.pin path ~keep:Vault.record_keep;
+      let body = Vault.read_file ctx.engine path in
+      let record = opened ctx { Fold.name; body } in
+      Mutex.protect cache_lock (fun () ->
+          Hashtbl.replace cache (ctx.domain, name)
+            {
+              version;
+              key_id = ctx.key_id;
+              record;
+              pinned = Unix.gettimeofday ();
+            })
+    in
+    if todo <> [] then (
+      let queue = Queue.of_seq (List.to_seq todo) in
+      let next () =
+        Mutex.protect prefetch_lock (fun () -> Queue.take_opt queue)
+      in
+      let rec work () =
+        match next () with
+          | None -> ()
+          | Some ((name, _) as item) ->
+              Fun.protect
+                ~finally:(fun () ->
+                  Mutex.protect prefetch_lock (fun () ->
+                      Hashtbl.remove prefetching name))
+                (fun () ->
+                  (* Offline, gone or locked meanwhile: the next read asks again. *)
+                  try fetch item with Fail.E _ -> ());
+              work ()
+      in
+      Rt.spawn ~name:"record prefetch" (fun () ->
+          ignore (Rt.all (List.init prefetch_workers (fun _ -> work)))))
+
   (* README §4.6, no copy to settle: a read of each file not opened at this
-     version. *)
+     version. A background read leaves out what is not on this machine and
+     says the answer is outdated. *)
   let listed ctx entries =
     let (module E : Tsync_sync.Engine.S) = ctx.engine in
     let now = Unix.gettimeofday () in
+    let missing = ref [] in
     List.filter_map
       (fun (name, is_dir, (st : Tsync_sync.Local_ops.stat)) ->
         if is_dir || not (Fold.is_record_id name) then None
@@ -168,25 +229,31 @@ module Make (R : RECORD) = struct
             Mutex.protect cache_lock (fun () -> Hashtbl.find_opt cache key)
           in
           let pin () = if ctx.keep then E.pin path ~keep:Vault.record_keep in
-          let record =
-            match hit with
-              | Some c when c.version = version && c.key_id = ctx.key_id ->
-                  if ctx.keep && now -. c.pinned > Vault.record_keep /. 2. then (
-                    pin ();
-                    Mutex.protect cache_lock (fun () ->
-                        Hashtbl.replace cache key { c with pinned = now }));
-                  c.record
-              | _ ->
-                  let body = Vault.read_file ctx.engine path in
+          match hit with
+            | Some c when c.version = version && c.key_id = ctx.key_id ->
+                if ctx.keep && now -. c.pinned > Vault.record_keep /. 2. then (
                   pin ();
-                  let record = opened ctx { Fold.name; body } in
                   Mutex.protect cache_lock (fun () ->
-                      Hashtbl.replace cache key
-                        { version; key_id = ctx.key_id; record; pinned = now });
-                  record
-          in
-          Some (name, record)))
+                      Hashtbl.replace cache key { c with pinned = now }));
+                Some (name, c.record)
+            | _ when ctx.background && E.availability path = `Online_only ->
+                missing := (name, version) :: !missing;
+                None
+            | _ ->
+                let body = Vault.read_file ctx.engine path in
+                pin ();
+                let record = opened ctx { Fold.name; body } in
+                Mutex.protect cache_lock (fun () ->
+                    Hashtbl.replace cache key
+                      { version; key_id = ctx.key_id; record; pinned = now });
+                Some (name, record)))
       entries
+    |> fun found ->
+    if !missing <> [] then (
+      Atomic.set ctx.vault.view
+        { (Atomic.get ctx.vault.view) with outdated = true };
+      prefetch ctx !missing);
+    found
 
   (* Records that open, by id, and the ids that do not. *)
   let records ctx =
