@@ -84,8 +84,39 @@ jobs:
           path: ~/.opam
           key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
+      # Share previews (10 §4.2): the static FFmpeg build of
+      # savonet/ffmpeg-static-build.
+      - name: Install FFmpeg
+        run: |
+          apt-get install -y --no-install-recommends gnupg
+          curl -fsSL https://liquidsoap.info/ffmpeg-static-build/key.asc \
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/liquidsoap-ffmpeg.gpg
+          echo "deb https://liquidsoap.info/ffmpeg-static-build stable main" \
+            > /etc/apt/sources.list.d/liquidsoap-ffmpeg.list
+          apt-get update
+          apt-get install -y --no-install-recommends ffmpeg-liquidsoap
+          # The package bundles a static OpenSSL, which would shadow the
+          # system's and leave tsync's TLS out of the distribution's security
+          # updates: FFmpeg links the system's libssl instead.
+          rm -rf /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a \
+            /usr/local/lib/pkgconfig/openssl.pc /usr/local/lib/pkgconfig/libssl.pc \
+            /usr/local/lib/pkgconfig/libcrypto.pc /usr/local/include/openssl
+          # FFmpeg's assembly (NEON on arm64, MMX on amd64) uses relocations ld
+          # refuses in a shared object, which the bindings' stubs are, unless
+          # symbols bind locally.
+          mv /usr/bin/ld /usr/bin/ld.real
+          printf '#!/bin/sh\nfor a; do [ "$a" = "-shared" ] && exec /usr/bin/ld.real -Bsymbolic "$@"; done\nexec /usr/bin/ld.real "$@"\n' > /usr/bin/ld
+          chmod +x /usr/bin/ld
+
       - name: Build
         run: ./linux/build.sh
+        env:
+          TSYNC_FFMPEG: 1
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
+          # The libraries are static: their own dependencies are in
+          # Libs.private. Read by the FFmpeg bindings alone, in dune's default
+          # context; every other package keeps plain pkg-config.
+          PKG_CONFIG_default: pkg-config --static
 
       - name: Save the opam root
         if: steps.opam-root.outputs.cache-hit != 'true'
