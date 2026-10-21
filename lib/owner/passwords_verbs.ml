@@ -279,6 +279,8 @@ let list ~domain ~engine ~lazy_tree t args =
   let use = arg args "use" <> Some (`Bool false) in
   let ctx = context ~use ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   let ok, corrupt = records ctx in
+  (* The rows' code lookups read the TOTP folder, which sets the view again. *)
+  let records_view = Atomic.get t.Vault.view in
   let filter = str args "filter" and site = str args "site" in
   let shown_login (l : Passwords.login) =
     (match filter with
@@ -384,6 +386,7 @@ let list ~domain ~engine ~lazy_tree t args =
           ])
   in
   let view = Atomic.get t.Vault.view in
+  let view = { view with outdated = view.outdated || records_view.outdated } in
   [
     ("records", `List (login_rows @ note_rows @ passkey_rows));
     ("corrupt", `List (List.map (fun c -> `String c) corrupt));

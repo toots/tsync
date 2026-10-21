@@ -50,7 +50,6 @@ let csv =
               %06d,\n"
              i i i i))
 
-(* The seconds [f] took, said on stderr; whether they are within [budget]. *)
 (* The seconds [f] took, said on stderr; whether they are within [budget]:
    seconds, or a multiple of the first site lookup's, which opens every
    record, so that the check holds on a slow machine as on a fast one. *)
@@ -155,6 +154,21 @@ let () =
                 | _ -> "")
           | _ -> ""
       in
+      let filled =
+        timed "a fill" ~budget:(`Times_first 0.5) (fun () ->
+            ask
+              [
+                ("action", s "passwords_fill");
+                ("id", s id);
+                ("site", s "https://site1.example");
+              ])
+      in
+      p "%-44s %s" "  it answered"
+        (match Ipc.field filled "error" with
+          | Some e -> e
+          | None ->
+              if Ipc.field filled "password" <> None then "a password"
+              else "nothing");
       ignore
         (timed "a passkey match" ~budget:(`Times_first 0.5) (fun () ->
              ask
