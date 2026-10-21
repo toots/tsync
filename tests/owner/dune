@@ -245,6 +245,37 @@
   (diff passwords_test.expected passwords_test.output)))
 
 (executable
+ (name passwords_scale_test)
+ (modules passwords_scale_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  tsync_ipc
+  tsync_owner
+  tsync_vault
+  unix
+  yojson
+  base64
+  digestif
+  mirage-crypto-ec
+  x509))
+
+(rule
+ (with-stdout-to
+  passwords_scale_test.output
+  (run ./passwords_scale_test.exe %{dep:../../bin/tsync.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff passwords_scale_test.expected passwords_scale_test.output)))
+
+(executable
  (name autolock_test)
  (modules autolock_test)
  (libraries
