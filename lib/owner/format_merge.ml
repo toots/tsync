@@ -42,18 +42,31 @@ let apply engine dir actions =
 let folders = Keyed_locks.create ()
 let locked dir f = Keyed_locks.with_key folders dir f
 
+(* ponytail: the conflicted-copy name is parsed by the vault's fold, the one
+   reader of it; move it to the merge's module when a second shape needs it. *)
+let is_copy path = Tsync_vault.Fold.copied_from (Names.leaf_of path) <> None
+
+(* §2: told by the names alone. *)
+let has_copies (module E : Engine.S) dir =
+  E.kind dir = `Dir
+  && List.exists
+       (fun (e : E.entry) -> (not e.is_dir) && is_copy e.name)
+       (E.list_children dir)
+
 (* §3 a fold, under the folder's lock the caller holds: the folder's files,
    folded, applied, then the format's writes for each action that ran (a
-   relabel); the files as they stand after. Nothing is applied on a domain
-   this client may not write (§2). *)
+   relabel); [None] when no file is a copy, nothing read (§2). Nothing is
+   applied on a domain this client may not write. *)
 let settle_folder ?(after = fun _ -> ()) ~writable ~read ~fold engine dir =
-  let files = read () in
-  match fold files with
-    | [] -> files
-    | _ when not writable -> files
-    | actions ->
-        List.iter after (apply engine dir actions);
-        read ()
+  if not (has_copies engine dir) then None
+  else (
+    let files = read () in
+    match fold files with
+      | [] -> Some files
+      | _ when not writable -> Some files
+      | actions ->
+          List.iter after (apply engine dir actions);
+          Some (read ()))
 
 type format = {
   name : string;
@@ -77,10 +90,6 @@ let register t format = Atomic.set t.formats (format :: Atomic.get t.formats)
 
 let registered_folders t =
   List.map (fun (f : format) -> f.folder) (Atomic.get t.formats)
-
-(* ponytail: the conflicted-copy name is parsed by the vault's fold, the one
-   reader of it; move it to the merge's module when a second shape needs it. *)
-let is_copy path = Tsync_vault.Fold.copied_from (Names.leaf_of path) <> None
 
 (* Whether this call starts the folder's settling; one already running is
    asked to go again (§2 rule 1). *)

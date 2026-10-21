@@ -36,6 +36,10 @@ A folder is settled for a format that applies to it (§4):
    fetched) is skipped without failing anything and runs at the next of 1 or 2, or when it can
    (an unlock).
 
+**A folder with no conflicted copy has nothing to settle.** Whether it has one is told by its
+files' names alone, so such a folder is settled without reading a byte: a read that needs it
+settled (2) costs a listing, however many files the folder holds.
+
 Settling one folder twice changes nothing the second time. Two clients settling one folder
 concurrently leave copies that a later settling folds. A domain this client may not write is
 never settled.
@@ -103,9 +107,10 @@ intended first three-way merge. It is not specified in this version.
 
 ## 6. Implementation
 
-- **One runner.** Every fold goes through one runner: read the folder, fold, apply the actions
-  in order stopping at the first failure, then the format's follow-up writes (a relabel) for
-  each action that ran. Nothing settles a folder outside it.
+- **One runner.** Every fold goes through one runner: list the folder and stop there when no
+  name is a conflicted copy (§2); otherwise read the folder, fold, apply the actions in order
+  stopping at the first failure, then the format's follow-up writes (a relabel) for each action
+  that ran. Nothing settles a folder outside it.
 - **One writer of a folder at a time.** A settling and every verb that reads a folder a format
   applies to and then writes there hold that folder's lock from the read to the write, so a
   settling never moves a copy under a verb that has read the record, and a verb never writes
