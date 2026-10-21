@@ -72,7 +72,7 @@ With several domains, tsync's pickers show each vault in its own colour: the tsy
 
 ```bash
 tsync vault appearance --color "#0d9488"        # a colour of your choice
-tsync vault appearance --icon work.png          # a square PNG, at most 256 pixels and 64 KiB
+tsync vault appearance --icon work.jpg          # any image or an http(s) URL, cropped square
 tsync vault appearance --default-color --no-icon
 ```
 

@@ -181,6 +181,34 @@ let status_cmd =
          0))
 
 (* vault §8.1 *)
+(* vault §8.1: the stored form as it is, otherwise converted by this build when
+   it can; the owner accepts only the stored form. *)
+let icon_of source =
+  let module A = Tsync_vault.Appearance in
+  let is_url =
+    String.starts_with ~prefix:"https://" source
+    || String.starts_with ~prefix:"http://" source
+  in
+  let given =
+    if is_url then None
+    else Some (In_channel.with_open_bin source In_channel.input_all)
+  in
+  match (given, Atomic.get Icon_image.converter) with
+    | Some icon, _ when Result.is_ok (A.check_icon icon) -> icon
+    | _, Some convert ->
+        convert ~max_side:A.icon_max_side ~max_bytes:A.icon_max_bytes
+          ~deadline:(Rt.now () +. 30.)
+          source
+    | Some icon, None -> (
+        match A.check_icon icon with
+          | Ok icon -> icon
+          | Error why ->
+              Fail.invalid
+                "%s; this build converts no image: give a square PNG of at \
+                 most %d pixels and %d KiB"
+                why A.icon_max_side (A.icon_max_bytes / 1024))
+    | None, None -> Fail.invalid "this build fetches no image: give a file"
+
 let appearance_cmd =
   let color =
     Arg.(
@@ -194,11 +222,13 @@ let appearance_cmd =
   and icon =
     Arg.(
       value
-      & opt (some file) None
-      & info ["icon"] ~docv:"FILE"
+      & opt (some string) None
+      & info ["icon"] ~docv:"IMAGE"
           ~doc:
-            "A square PNG, at most 256 pixels a side and 64 KiB, shown in \
-             place of the tsync icon.")
+            "An image file or an http(s) URL, shown in place of the tsync \
+             icon: its centre square, scaled to at most 256 pixels and kept as \
+             a PNG of at most 64 KiB. A build without FFmpeg takes only a PNG \
+             already in that form.")
   and no_icon =
     Arg.(
       value & flag
@@ -219,12 +249,7 @@ let appearance_cmd =
                   Fail.invalid "give --%s or its opposite, not both" what
           in
           let set_icon =
-            pick
-              ~set:
-                (Option.map
-                   (fun f -> In_channel.with_open_bin f In_channel.input_all)
-                   icon)
-              ~clear:no_icon "icon"
+            pick ~set:(Option.map icon_of icon) ~clear:no_icon "icon"
           in
           ask dom
             (P.Vault_appearance
