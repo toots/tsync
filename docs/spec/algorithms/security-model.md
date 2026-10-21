@@ -265,7 +265,7 @@ These general rules are realised by the hosts, which link here: the vault keysto
     `NSWorkspace.willSleepNotification`.
   - Android: by the app, on `ACTION_SCREEN_OFF`.
 - K leaves a machine only wrapped in the keyring. A keystore that would copy it to another device or into a backup is not used that way.
-- **Plaintext records** exist only in the owner's memory. Only envelopes reach staged bodies, the chunk cache and the store.
+- **Plaintext records** exist only in the owner's memory, which keeps those it opened until it forgets their K ([extensions README §4.6](../extensions/README.md#46-opened-records)). Only envelopes reach staged bodies, the chunk cache and the store.
 - **Codes and passphrases in a UI.** A client copies a one-time code only on the user's gesture,
   and marks it sensitive where the platform has a marker (macOS `org.nspasteboard.ConcealedType`,
   Android `EXTRA_IS_SENSITIVE`) so clipboard history, sync and previews skip it. It is not cleared
