@@ -35,6 +35,7 @@ module Make (R : RECORD) = struct
         name
 
   type ctx = {
+    domain : string;
     engine : (module Tsync_sync.Engine.S);
     key : string;
     key_id : string;
@@ -110,6 +111,7 @@ module Make (R : RECORD) = struct
         (* The first record makes the folder: nothing to pull yet. *)
       else if E.kind folder = `Dir then Vault.before_write t folder);
     {
+      domain = Vault.key_entry domain;
       engine;
       key;
       key_id = keyring.Tsync_vault.Keyring.key_id;
@@ -128,16 +130,93 @@ module Make (R : RECORD) = struct
     Format_merge.write_file ctx.engine ~exclusive (Names.join folder id)
       (seal ctx record)
 
+  (* README §4.6: each record as opened, by domain and file, until its K is
+     forgotten. [pinned] is when a lazy tree's pin was last renewed (§4.5). *)
+  type cached = {
+    version : string * string option * int * float * bool;
+    key_id : string;
+    record : R.t option;
+    pinned : float;
+  }
+
+  let cache : (string * string, cached) Hashtbl.t = Hashtbl.create 64
+  let cache_lock = Mutex.create ()
+
+  let () =
+    Vault.when_forgotten (fun domain ->
+        Mutex.protect cache_lock (fun () ->
+            Hashtbl.filter_map_inplace
+              (fun (d, _) c -> if d = domain then None else Some c)
+              cache))
+
+  (* README §4.6, no copy to settle: a read of each file not opened at this
+     version. *)
+  let listed ctx entries =
+    let (module E : Tsync_sync.Engine.S) = ctx.engine in
+    let now = Unix.gettimeofday () in
+    List.filter_map
+      (fun (name, is_dir, (st : Tsync_sync.Local_ops.stat)) ->
+        if is_dir || not (Fold.is_record_id name) then None
+        else (
+          let version =
+            Tsync_sync.Local_ops.
+              (st.etag, st.content_id, st.size, st.mtime, st.staged)
+          in
+          let path = Names.join folder name in
+          let key = (ctx.domain, name) in
+          let hit =
+            Mutex.protect cache_lock (fun () -> Hashtbl.find_opt cache key)
+          in
+          let pin () = if ctx.keep then E.pin path ~keep:Vault.record_keep in
+          let record =
+            match hit with
+              | Some c when c.version = version && c.key_id = ctx.key_id ->
+                  if ctx.keep && now -. c.pinned > Vault.record_keep /. 2. then (
+                    pin ();
+                    Mutex.protect cache_lock (fun () ->
+                        Hashtbl.replace cache key { c with pinned = now }));
+                  c.record
+              | _ ->
+                  let body = Vault.read_file ctx.engine path in
+                  pin ();
+                  let record = opened ctx { Fold.name; body } in
+                  Mutex.protect cache_lock (fun () ->
+                      Hashtbl.replace cache key
+                        { version; key_id = ctx.key_id; record; pinned = now });
+                  record
+          in
+          Some (name, record)))
+      entries
+
   (* Records that open, by id, and the ids that do not. *)
   let records ctx =
+    let (module E : Tsync_sync.Engine.S) = ctx.engine in
+    let entries =
+      if E.kind folder <> `Dir then []
+      else
+        List.map
+          (fun (e : E.entry) -> (e.name, e.is_dir, e.st))
+          (E.list_children folder)
+    in
+    let opened_files =
+      if
+        List.exists
+          (fun (name, is_dir, _) -> (not is_dir) && Format_merge.is_copy name)
+          entries
+      then
+        List.filter_map
+          (fun (f : Fold.file) ->
+            if Fold.is_record_id f.name then Some (f.name, opened ctx f)
+            else None)
+          (settled ctx)
+      else listed ctx entries
+    in
     List.fold_left
-      (fun (ok, corrupt) (f : Fold.file) ->
-        if not (Fold.is_record_id f.name) then (ok, corrupt)
-        else (
-          match opened ctx f with
-            | Some r -> ((f.name, r) :: ok, corrupt)
-            | None -> (ok, f.name :: corrupt)))
-      ([], []) (settled ctx)
+      (fun (ok, corrupt) (name, record) ->
+        match record with
+          | Some r -> ((name, r) :: ok, corrupt)
+          | None -> (ok, name :: corrupt))
+      ([], []) opened_files
     |> fun (ok, corrupt) -> (List.rev ok, List.sort compare corrupt)
 
   let find ctx id =
