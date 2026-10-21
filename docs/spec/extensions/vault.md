@@ -341,8 +341,15 @@ lets the user tell them apart at a glance.
   id's first byte, from the palette `#2563eb #dc2626 #16a34a #9333ea #ea580c #0d9488 #db2777
   #ca8a04 #4f46e5 #475569`. Every machine computes the same colour with nothing written, and two
   vaults rarely share one. The user may choose another, `#rrggbb`.
-- **An icon, if the user gives one:** a square PNG, at most 256 pixels a side and 64 KiB, told by
-  its signature and its IHDR chunk; anything else is refused INVALID.
+- **An icon, if the user gives one:** stored as a square PNG, at most 256 pixels a side and 64
+  KiB, told by its signature and its IHDR chunk; the owner refuses anything else INVALID.
+- **Any image becomes one in the client**, which has the platform's decoder and sends only the
+  stored form: the owner's socket takes a request of at most 1 MiB, less than a photo. The CLI,
+  where the build links FFmpeg, takes a file or an `http(s)` URL: it sends a PNG already in the
+  stored form as it is, and otherwise the image's first frame as shown (turned as its display
+  matrix asks), its centre square scaled to 256 pixels, halved until its PNG fits 64 KiB. A build
+  without FFmpeg takes only the stored form, and says so. An app converts with its platform's
+  image API.
 - **What a picker draws:** the icon when there is one, in place of tsync's; otherwise tsync's icon
   in the vault's colour. Everything else about a row stays as it is.
 - **Where it lives:** `/.tsync-ext/vault/appearance/appearance`, a JSON object `{"color"?,
@@ -352,7 +359,7 @@ lets the user tell them apart at a glance.
 - **Concurrent changes:** a reader takes the newest of the file and its conflicted copies by
   `modified`, passing over one that does not read; a write replaces the file and removes the
   copies.
-- **Changing it** (`tsync vault appearance --color C | --default-color, --icon FILE | --no-icon`,
+- **Changing it** (`tsync vault appearance --color C | --default-color, --icon IMAGE | --no-icon`,
   action `vault_appearance`: `color` and `icon` each a string to set, `null` to clear, absent to
   keep) is a vault write: it needs an unlocked vault, like every verb that changes the vault.
 - `vault_status` answers `appearance`: `color` (the one in force), `colorChosen`, and `icon`
