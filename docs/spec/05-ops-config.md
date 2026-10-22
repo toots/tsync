@@ -120,7 +120,10 @@ it unasked. The config editor asks about it only in its advanced mode
    and is refused only for more.
 4. The values are learned in the background from owner start on, and asked again every `SWEEP`
    ([publication §7](algorithms/publication.md#7-parameters)): a change on the main reaches a
-   running client within that time, the projector it states included. Until then a local operation never waits on a
+   running client within that time, the projector it states included. **What a client learned is
+   kept** on its disk, per domain, and stands after a restart, offline included, until the main
+   answers again; a main that answers stating nothing removes it. A client that never learned
+   anything has nothing to keep. Until then a local operation never waits on a
    store: the chunk size and the symlink policy are the configured one, else the default, and what
    was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
    client neither projects nor takes an entry over before it has learned them
@@ -129,8 +132,8 @@ it unasked. The config editor asks about it only in its advanced mode
    them, and a client may only narrow them: a domain that leaves `extensions` out uses the list
    its main states, and one that lists `extensions` behind a main that states a list is refused
    by rule 3 unless its list is a subset of the main's, naming both. A domain whose main states
-   nothing (a plain store) uses its own list, else none. Until the main's list is learned, a
-   domain that leaves `extensions` out uses none.
+   nothing (a plain store) uses its own list, else none. Until the main's list is learned, kept
+   from an earlier run included (rule 4), a domain that leaves `extensions` out uses none.
 6. A main that states its values MAY state a projector with them
    ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
    client: a client names it in the entries it creates and leaves their projection to it
