@@ -649,7 +649,7 @@ submenu shows the model's placeholder row.
 
 ### 10.1 One-time codes
 
-- The owner renders the `One-time codes` row with every domain whose config lists `totp` as a code
+- The owner renders the `One-time codes` row with every domain that uses `totp` as a code
   domain ([menu-model.md §5](menu-model.md#5-rows)).
 - A domain's header row, which the model names `vault` when there are several code domains,
   shows its vault's appearance ([vault §8.1](../extensions/vault.md#81-appearance)): the vault's

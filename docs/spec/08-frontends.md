@@ -270,13 +270,16 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `poll` | — | `{}` at once; the owner rescans its logs for submitted records and ends the cycle's wait, so a cycle runs now ([03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)) | |
 | `notify_reset` | — | `{delivered: N}` after publishing a `reset` event to the domain's subscribers | |
 | `ping` | — | `{}` from memory: the liveness probe | |
-| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, subscribers, unnamed?, newMachines?`, traffic, hook fields; `newMachines` the names of the machines that joined the domain's vault ([vault §6.3](extensions/vault.md#63-machines)), absent when none or locked | |
+| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, subscribers, unnamed?, newMachines?, extensions`, traffic, hook fields; `newMachines` the names of the machines that joined the domain's vault ([vault §6.3](extensions/vault.md#63-machines)), absent when none or locked | |
 | `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
 | `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
 | `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
 | `subscribe` | `domain?` | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
+- `extensions` in `status` is the list the domain uses here
+  ([05 §2.1](05-ops-config.md#21-schema-and-validation) rule 5), from the main's statement as
+  last kept: `status` never asks the main.
 - On a pulled tree `list_dir` also takes `pull` and answers `pulledAt` and `outdated`, and the
   change-feed actions are refused
   ([android.md §6](frontends/android.md#6-the-handler-on-a-pulled-tree)).

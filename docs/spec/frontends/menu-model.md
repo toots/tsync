@@ -182,7 +182,8 @@ In order:
 4. A separator.
 5. **Stats**: label `Stats`, action `ShowStats`, `submenu`.
    **One-time codes**, only when the caller gives a non-empty list of **code domains** (the
-   domains whose config lists `totp` and whose codes this client can copy): label
+   domains that use `totp`, [extensions README §3](../extensions/README.md#3-opting-in), and whose codes this
+   client can copy): label
    `One-time codes`, action `ShowCodes`, `submenu`.
 6. **Hold changes**: label `Hold changes`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that

@@ -26,12 +26,7 @@ let watcher_path = "/StatusNotifierWatcher"
 let properties_interface = "org.freedesktop.DBus.Properties"
 let error name = "org.freedesktop.DBus.Error." ^ name
 
-type domain = {
-  name : string;
-  socket : string;
-  configured : string option;
-  codes : bool;  (** its config lists [totp] (§6.5) *)
-}
+type domain = { name : string; socket : string; configured : string option }
 
 (* [lock] guards every mutable field and the layout; it is never held across
    a wait. *)
@@ -46,6 +41,7 @@ type t = {
   mutable reported_mounts : (string * string) list;
   mutable stats_started : float;
   mutable unlocking : bool;
+  mutable code_domains : string list;  (** at the last refresh (§6.5) *)
   refreshing : Rt.Fmutex.t;
   finished : int Rt.Promise.t;
 }
@@ -212,10 +208,6 @@ let configured_domains () =
                     name = Domain_name.to_string d.name;
                     socket = Paths.owner_socket d.name;
                     configured = Mounts.configured d;
-                    codes =
-                      (match d.extensions with
-                        | Some l -> List.mem "totp" l
-                        | None -> false);
                   })
                 config.domains
           | exception Config.Invalid reason -> none reason)
@@ -232,9 +224,10 @@ let on_path program =
     (String.split_on_char ':'
        (Option.value (Sys.getenv_opt "PATH") ~default:""))
 
-(* §6.5: the domains whose codes this tray can copy. *)
-let code_domains domains =
-  match List.filter (fun d -> d.codes) domains with
+(* §6.5: of the domains whose status lists totp, those whose codes this tray
+   can copy. *)
+let code_domains listed =
+  match listed with
     | [] -> []
     | listed -> (
         match (Sys.getenv_opt "WAYLAND_DISPLAY", on_path "wl-copy") with
@@ -263,13 +256,22 @@ let refresh t =
       (fun d reply -> (d, reply, Option.bind reply M.status_of_json))
       domains replies
   in
+  let codes =
+    code_domains
+      (List.filter_map
+         (fun (d, reply, status) ->
+           match (status, Option.map (Protocol.decode_reply Status) reply) with
+             | Some _, Some s when List.mem "totp" s.extensions -> Some d.name
+             | _ | (exception Fail.E _) -> None)
+         answers)
+  in
   let menu =
-    M.render ~quit:"Quit tsync tray"
-      ~codes:(List.map (fun d -> d.name) (code_domains domains))
+    M.render ~quit:"Quit tsync tray" ~codes
       (List.map (fun (d, _, status) -> (d.name, status)) answers)
   in
   locked t (fun () ->
       t.domains <- domains;
+      t.code_domains <- codes;
       t.reported_mounts <-
         List.filter_map
           (fun (d, reply, status) ->
@@ -326,7 +328,10 @@ let mark d =
 
 (* §6.5: rows from an earlier opening are never shown again. *)
 let fetch_codes t =
-  let domains = code_domains (locked t (fun () -> t.domains)) in
+  let domains =
+    locked t (fun () ->
+        List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
+  in
   if domains <> [] then (
     ignore
       (change_layout t (fun layout ->
@@ -959,6 +964,7 @@ let serve bus =
       reported_mounts = [];
       stats_started = neg_infinity;
       unlocking = false;
+      code_domains = [];
       refreshing = Rt.Fmutex.create ();
       finished = Rt.Promise.create ();
     }
