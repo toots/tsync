@@ -349,7 +349,7 @@ asks for a passphrase through `kdialog`, whose password dialog has the show-in-c
 helper ever receives a secret in its arguments, which other processes can list.
 
 - **Code domains.** When `WAYLAND_DISPLAY` is set and `wl-copy` is on the `PATH`, the tray gives
-  the menu model every domain whose config lists `totp` as a code domain
+  the menu model every domain whose last `status` lists `totp` in `extensions` as a code domain
   ([menu-model.md §5](menu-model.md#5-rows)); otherwise none, and it warns once why. It does not
   add codes ([menu-model.md §7](menu-model.md#7-codes-submenu)): that is `tsync totp add`.
 - **The submenu.** Every opening notice (§4.4) sets the codes row's children to the placeholder,

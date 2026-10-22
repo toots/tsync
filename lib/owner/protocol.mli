@@ -219,6 +219,7 @@ type status = {
   unnamed : int;
   traffic : R.traffic;
   mount : string option;
+  extensions : string list;  (** in force (05 §2.1 rule 5) *)
   new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
 }
 
