@@ -255,7 +255,7 @@ let exit_status ?(timeout = patience) pid =
 let socket w name = path w (Printf.sprintf "d/tsync/tsync-%s.sock" name)
 let script w name action = path w (Printf.sprintf "o-%s/%s" name action)
 
-let configure ?(extensions = []) w names =
+let configure w names =
   write
     (path w "c/tsync/config.json")
     (Printf.sprintf {|{"name":"test","domains":[%s]}|}
@@ -264,11 +264,9 @@ let configure ?(extensions = []) w names =
              (fun name ->
                Printf.sprintf
                  {|{"name":%S,"symlinks":"keep","versioning":true,
-                    "extensions":[%s],"frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
+                    "frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
                     "backends":[{"type":"local","name":"main","role":"main","path":"/srv/%s"}]}|}
-                 name
-                 (String.concat "," (List.map (Printf.sprintf "%S") extensions))
-                 name name)
+                 name name name)
              names)))
 
 let owner ?(mode = "scripted") ?(status = {|{"ok":true}|}) w name =
@@ -1093,6 +1091,9 @@ let icon_data n =
              (List.to_seq bytes))
     | _ -> ""
 
+(* The config lists no extension: the status says which are in force. *)
+let with_totp = {|{"ok":true,"extensions":["totp"]}|}
+
 let two_records =
   {|{"ok":true,"records":[{"id":"3f2a","issuer":"ACME Co","account":"john","code":"000000","secondsLeft":9},{"id":"9c1e","issuer":"GitHub","account":"me","code":"000000","secondsLeft":9}],"corrupt":[]}|}
 
@@ -1104,9 +1105,10 @@ let restart_tray ?wayland ?bare w =
 
 (* §9 "Codes". *)
 let codes w =
-  configure ~extensions:["totp"] w ["work"; "home"];
-  owner w "work";
-  owner w "home";
+  configure w ["work"; "home"; "plain"];
+  owner w "work" ~status:with_totp;
+  owner w "home" ~status:with_totp;
+  owner w "plain";
   write (script w "work" "totp_list") two_records;
   write
     (script w "work" "vault_status")
@@ -1134,6 +1136,8 @@ let codes w =
     && List.for_all
          (fun n -> String.starts_with ~prefix:png_signature (icon_data n))
          records);
+  check w "a domain whose status lists no totp has no codes"
+    (not (List.mem "plain" (codes_children w)));
   check w "no row is Add a code"
     (not
        (List.exists (fun l -> Text.contains l "Add a code") (codes_children w)));
@@ -1158,8 +1162,8 @@ let codes w =
 
 (* §9 "Unlock". *)
 let unlock w =
-  configure ~extensions:["totp"] w ["home"];
-  owner w "home";
+  configure w ["home"];
+  owner w "home" ~status:with_totp;
   write
     (script w "home" "totp_list")
     {|{"ok":false,"code":"locked","error":"the vault is locked"}|};
