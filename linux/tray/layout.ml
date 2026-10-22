@@ -39,6 +39,10 @@ let submenu_action = function
   | Menu_model.Item { submenu = true; action; _ } -> Some action
   | _ -> None
 
+let placeholder = function
+  | Menu_model.Show_codes -> Menu_model.codes_placeholder
+  | _ -> Menu_model.stats_placeholder
+
 (* §4.3, row identity. *)
 let place t old entries =
   List.mapi
@@ -60,7 +64,7 @@ let place t old entries =
                           List.map
                             (fun entry ->
                               { id = fresh t; entry; children = [] })
-                            Menu_model.stats_placeholder)
+                            (placeholder action))
             in
             { id = fresh t; entry; children })
     entries
@@ -100,21 +104,19 @@ let set_menu t ~now entries =
     t.held <- None;
     install t entries)
 
-let set_stats t entries =
+let set_children t action entries =
   match
-    List.find_opt
-      (fun r -> submenu_action r.entry = Some Menu_model.Show_stats)
-      t.rows
+    List.find_opt (fun r -> submenu_action r.entry = Some action) t.rows
   with
     | None -> []
-    | Some stats when List.map (fun r -> r.entry) stats.children = entries -> []
-    | Some stats ->
-        let children = place t stats.children entries in
+    | Some row when List.map (fun r -> r.entry) row.children = entries -> []
+    | Some row ->
+        let children = place t row.children entries in
         t.rows <-
           List.map
-            (fun r -> if r.id = stats.id then { r with children } else r)
+            (fun r -> if r.id = row.id then { r with children } else r)
             t.rows;
-        updated t stats.id
+        updated t row.id
 
 let opening t ~now id =
   let previous = t.last_notice in

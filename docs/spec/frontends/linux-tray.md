@@ -360,7 +360,7 @@ helper ever receives a secret in its arguments, which other processes can list.
 - **The mark.** Each record's row carries its vault's mark
   ([vault §8.1](../extensions/vault.md#81-appearance)) as `icon-data` (`ay`, a PNG): the vault's
   icon as stored, or the tsync glyph in the vault's colour. A domain whose `vault_status` did not
-  answer gets the glyph in the key id's colour, or none without a key id.
+  answer gets none.
 - **`CopyCode(domain, id)`** asks the owner `totp_code`, then runs
   `wl-copy --sensitive --type text/plain` with the code on its standard input, which offers
   `x-kde-passwordManagerHint` = `secret` beside the text so Klipper keeps no history of it. The

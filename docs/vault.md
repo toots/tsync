@@ -144,7 +144,7 @@ tsync totp code ID            # one code
 
 **Moving out.** `tsync totp export` prints every record as an `otpauth://` link. It asks for the passphrase each time, even on an unlocked machine: no other way gets the seeds out.
 
-**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray shows no codes: use `tsync totp list` there.
+**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray lists and copies codes, and unlocks, the same way, on Wayland; it has no *Add a code…* ([desktop](desktop.md#tray)).
 
 **On an Android phone.** The app's *Vault* screen appears when the server's domain uses an extension; see [the Android page](android.md#vault).
 
