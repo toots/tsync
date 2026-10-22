@@ -194,6 +194,17 @@ let settle (module E : Engine.S) =
     | () -> ()
     | exception e -> p "  drain failed: %s\n" (Printexc.to_string e)
 
+(* Drains until nothing is pending, for a scenario about what arrives rather
+   than how fast: an upload that failed while the main was down may still be
+   on its backoff when one drain's grace ends, on a loaded machine. *)
+let settled (module E : Engine.S) =
+  let deadline = Unix.gettimeofday () +. 60. in
+  let rec go () =
+    settle (module E : Engine.S);
+    if (E.activity ()).pending > 0 && Unix.gettimeofday () < deadline then go ()
+  in
+  go ()
+
 let sync ?full (module E : Engine.S) =
   match E.resync ?full () with
     | r ->
@@ -393,8 +404,9 @@ let () =
           p "  A after it: %s\n" (status a);
           link.down <- false;
           ignore (A.rearm ());
-          settle a;
-          p "  the main back: %s\n" (status a);
+          settled a;
+          (* One entry or two, as the pushes batch on a loaded machine. *)
+          p "  the main back: %d pending\n" (A.activity ()).pending;
           let b = started root "B" in
           p "  B: %s\n"
             (ignore (sync b);

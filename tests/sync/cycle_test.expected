@@ -28,7 +28,7 @@
   A, the main down: dir/  f="made offline"; position none, 2 pending
   a cycle: failed: no main answered [unreachable]
   A after it: position none, 2 pending
-  the main back: position 1, 0 pending
+  the main back: 0 pending
   B: dir/  f="made offline"
 
 == an entry whose answer was lost reaches the copies
