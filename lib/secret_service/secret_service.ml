@@ -62,18 +62,29 @@ let open_connection address =
     | [_; Object_path session] -> { bus; session }
     | _ -> fail "OpenSession answered an unexpected reply"
 
+(* security-model §10.6: an owner started by a system unit has neither
+   variable, and finds the user's bus where systemd puts it once they log in. *)
+let address () =
+  match Dbus.session_address () with
+    | Some address -> address
+    | None -> (
+        let socket = Printf.sprintf "/run/user/%d/bus" (Unix.getuid ()) in
+        match (Sys.getenv_opt "XDG_RUNTIME_DIR", Unix.stat socket) with
+          | (None | Some ""), { st_kind = S_SOCK; _ } -> "unix:path=" ^ socket
+          | _ | (exception Unix.Unix_error _) -> fail "no session bus")
+
 let lock = Rt.Fmutex.create ()
 let current = ref None
 
 (* One connection per process, opened again after any failure. *)
-let with_connection address f =
+let with_connection f =
   Rt.Fmutex.with_lock lock (fun () ->
       let c =
         match !current with
           | Some c -> c
           | None ->
               let c =
-                try open_connection address
+                try open_connection (address ())
                 with Dbus.Error reason -> fail "%s" reason
               in
               current := Some c;
@@ -218,15 +229,13 @@ let delete c ~domain =
     | unlocked, [] -> List.iter (delete_item c) unlocked
 
 let register () =
-  match Dbus.session_address () with
-    | Some address when Dbus.available () ->
-        Tsync_owner.Keystore.register
-          {
-            name = "the Secret Service";
-            put =
-              (fun ~domain ~key_id ~key ->
-                with_connection address (fun c -> put c ~domain ~key_id ~key));
-            get = (fun ~domain -> with_connection address (get ~domain));
-            delete = (fun ~domain -> with_connection address (delete ~domain));
-          }
-    | _ -> ()
+  if Dbus.available () then
+    Tsync_owner.Keystore.register
+      {
+        name = "the Secret Service";
+        put =
+          (fun ~domain ~key_id ~key ->
+            with_connection (fun c -> put c ~domain ~key_id ~key));
+        get = (fun ~domain -> with_connection (get ~domain));
+        delete = (fun ~domain -> with_connection (delete ~domain));
+      }

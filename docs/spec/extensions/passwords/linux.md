@@ -25,7 +25,9 @@ The owner keeps K and the secret key in a Secret Service item, as
 under the rules every keystore follows ([vault §6.1](../vault.md#61-the-keystore)). A desktop
 whose provider (KWallet's `ksecretd`, GNOME Keyring) has its collection unlocked at login keeps
 the vault unlocked across restarts of the owner; any other keeps K in memory, and status says
-`cached: memory`.
+`cached: memory`. The owner runs as a system service from boot, before the user's session and
+its bus exist: after a reboot the vault is locked until the user logs in, and unlocks from the
+keystore at the first look after that.
 
 ## 3. The tray
 
