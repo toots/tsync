@@ -79,12 +79,6 @@ let label ~indent text =
    opening. One tray runs per process (§2 step 3). *)
 let marks : (string * string) list Atomic.t = Atomic.make []
 
-let bytes s =
-  Dbus.Array
-    ( "y",
-      List.of_seq (Seq.map (fun c -> Dbus.Byte (Char.code c)) (String.to_seq s))
-    )
-
 let row_properties : M.entry -> (string * Dbus.value) list = function
   | Separator -> [("type", String "separator")]
   | Item i ->
@@ -99,7 +93,7 @@ let row_properties : M.entry -> (string * Dbus.value) list = function
       @ (match i.action with
         | Copy_code { domain; _ } -> (
             match List.assoc_opt domain (Atomic.get marks) with
-              | Some png -> [("icon-data", bytes png)]
+              | Some png -> [("icon-data", Dbus.byte_array png)]
               | None -> [])
         | _ -> [])
       @ (match i.checked with
@@ -218,6 +212,14 @@ let string_field name = function
       match List.assoc_opt name l with Some (`String s) -> Some s | _ -> None)
   | _ -> None
 
+(* §6.5: whether a status reply lists totp among the extensions in force. *)
+let lists_totp = function
+  | `Assoc l -> (
+      match List.assoc_opt "extensions" l with
+        | Some (`List e) -> List.mem (`String "totp") e
+        | _ -> false)
+  | _ -> false
+
 let on_path program =
   List.exists
     (fun dir -> dir <> "" && Sys.file_exists (Filename.concat dir program))
@@ -233,12 +235,12 @@ let code_domains listed =
         match (Sys.getenv_opt "WAYLAND_DISPLAY", on_path "wl-copy") with
           | Some display, true when display <> "" -> listed
           | Some display, false when display <> "" ->
-              Log.once "tray-codes" Log.Warn
+              Log.once "tray-codes-wl-copy" Log.Warn
                 "tray: no one-time codes: wl-copy (wl-clipboard) is not \
                  installed";
               []
           | _ ->
-              Log.once "tray-codes" Log.Warn
+              Log.once "tray-codes-wayland" Log.Warn
                 "tray: no one-time codes: they are copied on Wayland only";
               [])
 
@@ -260,9 +262,9 @@ let refresh t =
     code_domains
       (List.filter_map
          (fun (d, reply, status) ->
-           match (status, Option.map (Protocol.decode_reply Status) reply) with
-             | Some _, Some s when List.mem "totp" s.extensions -> Some d.name
-             | _ | (exception Fail.E _) -> None)
+           match (status, reply) with
+             | Some _, Some reply when lists_totp reply -> Some d.name
+             | _ -> None)
          answers)
   in
   let menu =
@@ -326,6 +328,9 @@ let mark d =
     | Ok { appearance = Some { color; _ }; _ } -> Mark.glyph color
     | _ -> None
 
+(* One code domain's answer at an opening. *)
+type code_answer = { domain : string; codes : M.codes; mark : string option }
+
 (* §6.5: rows from an earlier opening are never shown again. *)
 let fetch_codes t =
   let domains =
@@ -344,16 +349,15 @@ let fetch_codes t =
               (Ipc.ask ~deadline:stats_deadline d.socket
                  (Protocol.encode (Totp_list { filter = None; pull = `Auto })))
           in
-          (d.name, codes, mark d))
+          { domain = d.name; codes; mark = mark d })
         domains
     in
     Atomic.set marks
       (List.filter_map
-         (fun (name, _, mark) -> Option.map (fun m -> (name, m)) mark)
+         (fun a -> Option.map (fun m -> (a.domain, m)) a.mark)
          answers);
     let rows =
-      M.codes ~add:false
-        (List.map (fun (name, codes, _) -> (name, codes)) answers)
+      M.codes ~add:false (List.map (fun a -> (a.domain, a.codes)) answers)
     in
     ignore
       (change_layout t (fun layout ->
@@ -425,7 +429,7 @@ let dialog ~title text =
 let unlock_deadline = 120.
 
 (* §6.5: [sentence] is the owner's word on the previous attempt. *)
-let rec unlock_dialogs t d ~enrolled ?sentence () =
+let rec unlock_dialogs ?sentence ~enrolled t d =
   let title = "Unlock " ^ d.name in
   let above text =
     match sentence with Some s -> s ^ "\n\n" ^ text | None -> text
@@ -460,7 +464,7 @@ let rec unlock_dialogs t d ~enrolled ?sentence () =
                     match Protocol.failure_of_reply reply with
                       | None -> ()
                       | Some { kind = Denied | Invalid; reason; _ } ->
-                          unlock_dialogs t d ~enrolled ~sentence:reason ()
+                          unlock_dialogs ~sentence:reason ~enrolled t d
                       | Some f ->
                           notify t ("Unlocking " ^ d.name ^ " failed") f.reason)
               ))
@@ -490,7 +494,7 @@ let unlock t domain =
                     notify t
                       ("Cannot unlock " ^ domain)
                       ("kdialog is not installed. " ^ run_cli)
-                | Ok status -> unlock_dialogs t d ~enrolled:status.enrolled ()))
+                | Ok status -> unlock_dialogs ~enrolled:status.enrolled t d))
 
 let fetch_stats t =
   let due =
