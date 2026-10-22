@@ -39,11 +39,11 @@ the vault unlocked across restarts of the owner; any other keeps K in memory, an
 
 ## 4. The browser extension
 
-The [browser extension](browser.md) on Linux: the packages install it as an external extension
-([browser §2](browser.md#2-installing)), `tsync passwords browser install` writes the
-native-messaging host, and a passkey request asking for user verification asks the vault's
-passphrase in the extension's sheet ([browser §5](browser.md#5-passkeys)), Linux having no
-platform verifier.
+The [browser extension](browser.md) on Linux comes from the Chrome Web Store, as on every host;
+the packages carry none, and loading `browser/` unpacked is for development only.
+`tsync passwords browser install` writes the native-messaging host. A passkey request asking for
+user verification asks the vault's passphrase in the extension's sheet
+([browser §5](browser.md#5-passkeys)), Linux having no platform verifier.
 
 ## 5. Later
 
