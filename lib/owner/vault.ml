@@ -31,7 +31,8 @@ type t = {
       *)
   secret_key : (string * string) option Atomic.t;
   cached : [ `Keystore | `Memory ] Atomic.t;
-  restored : bool Atomic.t;  (** the keystore was read for this owner *)
+  keystore_read : [ `Unread | `Read | `Failed of float ] Atomic.t;
+      (** [`Failed at]: the last read failed at [at], with no K held since *)
   keystore_error : string option Atomic.t;
   pulls : Pulls.t option;  (** on a lazy tree: reads answer the last view *)
   view : Pulls.view Atomic.t;  (** of the last read *)
@@ -46,7 +47,7 @@ let create ?pulls () =
     announced = Atomic.make [];
     secret_key = Atomic.make None;
     cached = Atomic.make `Memory;
-    restored = Atomic.make false;
+    keystore_read = Atomic.make `Unread;
     keystore_error = Atomic.make None;
     pulls;
     view = Atomic.make { Pulls.pulled_at = None; outdated = false };
@@ -66,7 +67,10 @@ let secret_key_entry domain = key_entry domain ^ "/secret-key"
 let forgotten : (string -> unit) list Atomic.t = Atomic.make []
 let when_forgotten f = Atomic.set forgotten (f :: Atomic.get forgotten)
 
+(* §6.1: once K was held or dropped on purpose, the keystore is not read again,
+   so an entry its delete left behind never comes back. *)
 let drop_key ~domain t =
+  Atomic.set t.keystore_read `Read;
   Atomic.set t.key None;
   Atomic.set t.since None;
   Atomic.set t.announced [];
@@ -128,8 +132,9 @@ let expire ~domain ~engine t =
   let p = policy ~domain ~engine in
   if not (Vault_lock.is_none p) then (
     if Atomic.get t.cached = `Keystore then clear_keystore_key ~domain t;
-    match (Atomic.get t.since, Atomic.get t.key) with
-      | Some since, Some _ ->
+    match Atomic.get t.since with
+      | None -> ()
+      | Some since ->
           let now = Rt.now () and m = Atomic.get minute in
           let past limit from scale =
             match limit with
@@ -138,8 +143,7 @@ let expire ~domain ~engine t =
           in
           if past p.idle_minutes since.last_use m then lock_for ~domain t `Idle
           else if past p.max_hours since.unlocked_at (60. *. m) then
-            lock_for ~domain t `Age
-      | _ -> ())
+            lock_for ~domain t `Age)
 
 let adopt ~domain ~engine t entry =
   let now = Rt.now () in
@@ -163,13 +167,23 @@ let adopt ~domain ~engine t entry =
         in
         loop ())
 
-(* §6.1 owner start: read before the first use of either secret, and again while
-   no K is held and the last read failed. *)
+(* §9 [VAULT_KEYSTORE_RETRY]; a test shortens it. *)
+let keystore_retry = Atomic.make 60.
+
+(* §6.1 owner start: read before the first use of either secret, and again after
+   a failed read while no K is held, at most once per [keystore_retry]. *)
 let restore ~domain ~engine t =
   let auto_locks = auto_locks ~domain ~engine in
-  let first = not (Atomic.exchange t.restored true) in
-  if first || (Atomic.get t.key = None && Atomic.get t.keystore_error <> None)
-  then (
+  let seen = Atomic.get t.keystore_read in
+  let due =
+    match seen with
+      | `Unread -> true
+      | `Failed at ->
+          Atomic.get t.key = None
+          && Rt.now () -. at >= Atomic.get keystore_retry
+      | `Read -> false
+  in
+  if due && Atomic.compare_and_set t.keystore_read seen `Read then (
     if auto_locks then clear_keystore_key ~domain t;
     Option.iter
       (fun (ks : Keystore.t) ->
@@ -191,7 +205,9 @@ let restore ~domain ~engine t =
                 (fun entry ->
                   ignore (Atomic.compare_and_set t.secret_key None (Some entry)))
                 secret_key
-          | exception Fail.E f -> Atomic.set t.keystore_error (Some f.reason))
+          | exception Fail.E f ->
+              Atomic.set t.keystore_error (Some f.reason);
+              Atomic.set t.keystore_read (`Failed (Rt.now ())))
       (Keystore.registered ()))
 
 (* §7.2: a re-key keeps the new secret key before its records are re-encrypted,
@@ -211,6 +227,7 @@ let keep_secret_key ~domain t secret_key =
 (* §6.1 unlock: a keystore that refuses leaves both in memory. *)
 let store ~domain ~engine t ~key:(key_id, key) ~secret_key =
   let auto_locks = auto_locks ~domain ~engine in
+  Atomic.set t.keystore_read `Read;
   adopt ~domain ~engine t (key_id, key);
   Atomic.set t.locked_by None;
   Atomic.set t.secret_key (Some (Secret_key.id secret_key, secret_key));

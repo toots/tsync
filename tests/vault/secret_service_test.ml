@@ -104,6 +104,14 @@ let () =
           ks.delete ~domain;
           "deleted");
       check "no prompt was ever shown" (not (List.mem "Prompt" (calls ())));
+      let sessions () =
+        List.length (List.filter (( = ) "OpenSession") (calls ()))
+      in
+      let before = sessions () in
+      for _ = 1 to 3 do
+        try ignore (ks.get ~domain) with Fail.E _ -> ()
+      done;
+      check "refusals keep the connection" (sessions () = before);
       Sys.remove (path "locked");
       show "get once unlocked" (fun () -> entry (ks.get ~domain));
       ks.delete ~domain;

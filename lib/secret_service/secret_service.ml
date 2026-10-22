@@ -12,10 +12,14 @@ type connection = { bus : Dbus.t; session : string }
 
 let fail fmt = Fail.raise_ Refused ("the Secret Service: " ^^ fmt)
 
+(* The bus failed, as opposed to the service refusing: only this drops the
+   connection. *)
+exception Broken of string
+
 (* Reads until the reply to [serial] arrives; other messages are dropped. *)
 let await bus serial ~deadline =
   let rec next () =
-    if not (Dbus.read_write bus) then fail "the session bus closed";
+    if not (Dbus.read_write bus) then raise (Broken "the session bus closed");
     let rec reply () =
       match Dbus.pop bus with
         | None -> None
@@ -29,7 +33,8 @@ let await bus serial ~deadline =
       | Some m -> m
       | None ->
           let left = deadline -. Rt.now () in
-          if left <= 0. then fail "no answer within %.0f s" timeout;
+          if left <= 0. then
+            raise (Broken (Printf.sprintf "no answer within %.0f s" timeout));
           (try
              Rt.wait_readable
                ~timeout:(if Dbus.has_output bus then min left 0.02 else left)
@@ -41,10 +46,15 @@ let await bus serial ~deadline =
 
 let call bus ~path ~interface ~member arguments =
   let deadline = Rt.now () +. timeout in
-  let message =
-    Dbus.method_call ~destination:service ~path ~interface ~member arguments
+  let reply =
+    match
+      Dbus.send bus
+        (Dbus.method_call ~destination:service ~path ~interface ~member
+           arguments)
+    with
+      | serial -> await bus serial ~deadline
+      | exception Dbus.Error reason -> raise (Broken reason)
   in
-  let reply = await bus (Dbus.send bus message) ~deadline in
   match (Dbus.kind reply, Dbus.body reply) with
     | Error_reply, Dbus.String text :: _ ->
         fail "%s: %s" (Dbus.error_name reply) text
@@ -60,7 +70,15 @@ let open_connection address =
       [String "plain"; Variant (String "")]
   with
     | [_; Object_path session] -> { bus; session }
-    | _ -> fail "OpenSession answered an unexpected reply"
+    | _ ->
+        Dbus.close bus;
+        fail "OpenSession answered an unexpected reply"
+    | exception Broken reason ->
+        Dbus.close bus;
+        fail "%s" reason
+    | exception e ->
+        Dbus.close bus;
+        raise e
 
 (* security-model §10.6: an owner started by a system unit has neither
    variable, and finds the user's bus where systemd puts it once they log in. *)
@@ -91,9 +109,10 @@ let with_connection f =
               c
       in
       try f c
-      with e ->
+      with Broken reason ->
+        Dbus.close c.bus;
         current := None;
-        raise e)
+        fail "%s" reason)
 
 let no_prompt = function
   | Dbus.Object_path "/" -> ()
@@ -136,18 +155,12 @@ let key_id c item =
           pairs
     | _ -> None
 
-let bytes values =
-  String.of_seq
-    (Seq.filter_map
-       (function Dbus.Byte b -> Some (Char.chr b) | _ -> None)
-       (List.to_seq values))
-
 let secret c item =
   match
     call c.bus ~path:item ~interface:item_interface ~member:"GetSecret"
       [Object_path c.session]
   with
-    | [Struct [_; _; Array (_, value); _]] -> bytes value
+    | [Struct [_; _; Array (_, value); _]] -> Dbus.string_of_bytes value
     | _ -> fail "GetSecret answered an unexpected reply"
 
 (* A put interrupted before its old item went leaves two; the newest is the
@@ -199,11 +212,7 @@ let put c ~domain ~key_id:id ~key =
       [
         Object_path c.session;
         Array ("y", []);
-        Array
-          ( "y",
-            List.of_seq
-              (Seq.map (fun ch -> Dbus.Byte (Char.code ch)) (String.to_seq key))
-          );
+        Dbus.byte_array key;
         String "application/octet-stream";
       ]
   in

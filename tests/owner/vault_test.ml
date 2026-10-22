@@ -198,10 +198,13 @@ let keystore_phase = function
           status "status";
           p "%-34s [%s]" "keystore entries" (entries ()))
   | "ks-late" ->
+      Atomic.set Tsync_owner.Vault.keystore_retry 1.;
       with_keystore ~late:true ~broken:false (fun _ _ ->
           status "status";
           Fs.write_file_for_test up_marker "";
-          status "status, the keystore up";
+          status "status, the keystore up, within the retry";
+          Rt.sleep 1.5;
+          status "status, the keystore up, after the retry";
           Sys.remove up_marker)
   | "ks-restart" ->
       with_keystore ~broken:false (fun _ _ ->

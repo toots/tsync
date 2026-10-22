@@ -271,9 +271,10 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
 - **Owner start** reads the domain's entry. One for the keyring's key id unlocks the vault with
   `cached: keystore`. One for another key id is held as the K of §4.3, the vault staying locked:
   the next unlock re-encrypts under the domain's K and replaces the entry. A read that fails leaves
-  the vault locked, and status reports the keystore's reason; while no K is held, each verb that
-  needs the vault reads again, since a keystore may come up after the owner (a desktop session
-  that starts after it).
+  the vault locked, and status reports the keystore's reason. A keystore may come up after the
+  owner (a desktop session that starts after it): until K is held or dropped, a verb that needs the
+  vault reads again, at most once per `VAULT_KEYSTORE_RETRY`. A K this owner held or dropped is never
+  read back, so an entry a failed delete left behind does not return.
 - **Lock** deletes the domain's K entry (and with `forget` its secret key entry), then forgets
   each entry deleted. Both deletes are attempted. One that fails leaves what that entry held, in
   the keystore and in memory, and the lock is refused `internal` with the keystore's reason: a
@@ -495,6 +496,7 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
 | `VAULT_KDF_MAX_MEM` / `VAULT_KDF_MAX_ITERATIONS` / `VAULT_KDF_MAX_PARALLELISM` | 256 MiB / 10 / 4 | readers refuse above; MUST fit the smallest host that unlocks |
 | `VAULT_MAX_SLOTS` | 8 | slots one unlock derives for |
 | `VAULT_MIN_PASSPHRASE` | 16 | characters of a chosen passphrase |
+| `VAULT_KEYSTORE_RETRY` | 60 s | between reads of a keystore whose last read failed (§6.1) |
 
 ## 10. Conformance
 

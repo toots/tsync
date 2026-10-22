@@ -45,6 +45,7 @@ external new_signal : string -> string -> string -> message
 
 external available : unit -> bool = "tsync_dbus_available"
 external connect : string -> t = "tsync_dbus_connect"
+external close : t -> unit = "tsync_dbus_close"
 external descriptor : t -> Unix.file_descr = "tsync_dbus_descriptor"
 external send : t -> message -> int = "tsync_dbus_send"
 external read_write : t -> bool = "tsync_dbus_read_write"
@@ -92,6 +93,16 @@ let error_reply call ~name text_ = new_error call name (text text_)
 let signal ~path ~interface ~member values =
   loaded ();
   filled (new_signal path interface member) values
+
+let byte_array s =
+  Array
+    ("y", List.of_seq (Seq.map (fun c -> Byte (Char.code c)) (String.to_seq s)))
+
+let string_of_bytes values =
+  String.of_seq
+    (Seq.filter_map
+       (function Byte b -> Some (Char.chr b) | _ -> None)
+       (List.to_seq values))
 
 let session_address () =
   match Sys.getenv_opt "DBUS_SESSION_BUS_ADDRESS" with
