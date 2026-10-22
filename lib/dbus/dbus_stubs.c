@@ -504,6 +504,16 @@ static DBusConnection *open_connection(value _connection) {
   return connection;
 }
 
+CAMLprim value tsync_dbus_close(value _connection) {
+  DBusConnection *connection = Connection_val(_connection);
+  if (connection != NULL) {
+    Connection_val(_connection) = NULL;
+    dbus_connection_close(connection);
+    dbus_connection_unref(connection);
+  }
+  return Val_unit;
+}
+
 CAMLprim value tsync_dbus_descriptor(value _connection) {
   int descriptor = -1;
   if (!dbus_connection_get_unix_fd(open_connection(_connection), &descriptor))
