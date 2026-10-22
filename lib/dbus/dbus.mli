@@ -63,6 +63,16 @@ val signal :
 
 type t
 
+(** Whether libdbus can be called: always in [tsync_dbus], and in
+    [tsync_dbus_dl] once it was found at run time. Every other call raises
+    {!Error} without it. *)
+val available : unit -> bool
+
+(** The session bus of this environment: [DBUS_SESSION_BUS_ADDRESS], else
+    [$XDG_RUNTIME_DIR/bus] when that socket exists. Never one started for the
+    caller (linux-tray §2). *)
+val session_address : unit -> string option
+
 (** Opens a private connection to the bus at this address and registers on it. A
     closed bus never ends the process. Blocks for the handshake. *)
 val connect : string -> t

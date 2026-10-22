@@ -1,4 +1,4 @@
-; A libdbus binding holding only what the tray's two protocols need. The
+; A libdbus binding holding only what the tray and the vault keystore need. The
 ; include path comes from pkg-config: dbus-arch-deps.h sits in a directory
 ; that differs per distribution and architecture.
 

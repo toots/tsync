@@ -24,6 +24,8 @@ depends: [
   "re"
   "x509"
   "yojson"
+  # The vault keystore's headers; libdbus itself is loaded at run time.
+  "conf-dbus" {os = "linux"}
   "odoc" {with-doc}
   # One TLS implementation is required. Native comes first: it builds
   # anywhere, where OpenSSL is faster but wants a system libssl. With both,
