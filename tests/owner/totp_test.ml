@@ -435,20 +435,36 @@ let () =
         (ask ~domain:"spare"
            [("action", "totp_export"); ("passphrase", passphrase)]);
       imported ~domain:"spare" "an export into an empty domain" exported;
-      p "%-36s %b" "  the same records"
-        (match
-           member
-             (ask ~domain:"spare"
-                [("action", "totp_export"); ("passphrase", spare)])
-             "uris"
-         with
+      let again =
+        match
+          member
+            (ask ~domain:"spare"
+               [("action", "totp_export"); ("passphrase", spare)])
+            "uris"
+        with
           | Some (`List uris) ->
               String.concat "\n"
                 (List.filter_map
                    (function `String u -> Some u | _ -> None)
                    uris)
-              = exported
-          | _ -> false);
+          | _ -> ""
+      in
+      p "%-36s %b" "  the same records" (again = exported);
+      (* What differs, by label, should it ever. *)
+      if again <> exported then (
+        let labels text =
+          List.map
+            (fun u -> List.hd (String.split_on_char '?' u))
+            (String.split_on_char '\n' text)
+        in
+        let only a b = List.filter (fun x -> not (List.mem x b)) a in
+        List.iter (p "    only in docs: %s")
+          (only (labels exported) (labels again));
+        List.iter
+          (p "    only in spare: %s")
+          (only (labels again) (labels exported));
+        if labels exported = labels again then
+          p "    the same labels, another URI");
       answer "list on a domain without totp"
         (ask ~domain:"plain" [("action", "totp_list")]);
       Rt.sleep 0.5;
