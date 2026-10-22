@@ -182,8 +182,8 @@ In order:
 4. A separator.
 5. **Stats**: label `Stats`, action `ShowStats`, `submenu`.
    **One-time codes**, only when the caller gives a non-empty list of **code domains** (the
-   domains whose config lists `totp` and whose codes this client can copy; the Linux tray gives
-   none): label `One-time codes`, action `ShowCodes`, `submenu`.
+   domains whose config lists `totp` and whose codes this client can copy): label
+   `One-time codes`, action `ShowCodes`, `submenu`.
 6. **Hold changes**: label `Hold changes`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that
    answers ([07 §2.6](../07-daemon-cli.md#26-pause) says what a pause holds).
@@ -351,8 +351,9 @@ is never drawn stale and never travels in a menu.
     is not empty, ellipsised to `LABEL_MAX`; action `CopyCode(domain, id)`.
 - Records the reply lists as `corrupt` add one informational row
   `<n> unreadable — run tsync totp list`.
-- A domain that answered with records, or with none, ends with a row `Add a code…`, action
-  `AddCode(domain)`; a locked, vault-less or silent domain has none.
+- When the caller adds codes (the macOS menu does, the Linux tray does not), a domain that
+  answered with records, or with none, ends with a row `Add a code…`, action `AddCode(domain)`;
+  a locked, vault-less or silent domain has none.
 - Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
 
 Worked example, two code domains, one locked:
@@ -428,7 +429,8 @@ someone agrees to; and both functions are total.
 - the JSON form of a menu containing every kind of entry and action;
 - the stats rows: full, sparse, an entry that cannot be followed, nothing answering;
 - the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable, the Add a code row only where the domain answered;
-  records, a label longer than `LABEL_MAX`; no code domain gives no `One-time codes` row; no row
+  records, a label longer than `LABEL_MAX`; a caller that adds no codes gets no `Add a code…` row;
+  no code domain gives no `One-time codes` row; no row
   of any menu carries a code;
 - the formatter tables of §3;
 - replies with fields of the wrong type, and an empty object: no failure.
