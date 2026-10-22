@@ -24,4 +24,9 @@
   tsync_http_proxy
   qrc
   unix
-  yojson))
+  yojson
+  (select
+   platform_keystore.ml
+   from
+   (tsync_secret_service -> platform_keystore.linux.ml)
+   (-> platform_keystore.none.ml))))

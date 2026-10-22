@@ -1,0 +1,8 @@
+; Linked by the tsync binary alone: the tray links tsync_dbus, and the two
+; builds of the binding define the same C symbols.
+
+(library
+ (name tsync_secret_service)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_owner tsync_dbus_dl unix))

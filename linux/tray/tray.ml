@@ -667,19 +667,6 @@ let dispatch t exported message =
         after ()
     | Method_return | Error_reply -> ()
 
-(* §2 step 1: the tray never lets a bus be started for it. *)
-let bus_address () =
-  match Sys.getenv_opt "DBUS_SESSION_BUS_ADDRESS" with
-    | Some address when address <> "" -> Some address
-    | _ -> (
-        match Sys.getenv_opt "XDG_RUNTIME_DIR" with
-          | Some dir when dir <> "" -> (
-              let socket = Filename.concat dir "bus" in
-              match Unix.stat socket with
-                | { st_kind = S_SOCK; _ } -> Some ("unix:path=" ^ socket)
-                | _ | (exception Unix.Unix_error _) -> None)
-          | _ -> None)
-
 let bus_call bus member arguments =
   Bus.call bus ~timeout:watcher_timeout ~destination:"org.freedesktop.DBus"
     ~path:"/org/freedesktop/DBus" ~interface:"org.freedesktop.DBus" ~member
@@ -758,7 +745,7 @@ let serve bus =
               Rt.Promise.await t.finished)
 
 let run () =
-  match bus_address () with
+  match Dbus.session_address () with
     | None ->
         prerr_endline
           "tsync-tray: no session bus: the tray needs a running desktop session";
