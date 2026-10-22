@@ -275,6 +275,57 @@ let () =
             (Log_store.tree_head (log root));
           p "  S: %s\n" (sync server);
           p "  S has: the tree head %d\n" (Log_store.tree_head (log root)));
+      scenario "the main's settings are kept for a start without it (05 2.1)"
+        (fun root ->
+          let stated : Tsync_store.Store.domain_settings =
+            {
+              chunk = 4;
+              symlinks = `Keep;
+              lease = 30.;
+              quarantine = 300.;
+              settle = 600.;
+              entry_commands = 256;
+              projector = None;
+              extensions = ["passwords"];
+            }
+          in
+          let extensions (module E : Engine.S) =
+            match E.stated_settings () with
+              | Some s -> "[" ^ String.concat ", " s.extensions ^ "]"
+              | None -> "nothing"
+              | exception Fail.E f -> "failed: " ^ f.reason
+          in
+          (* Learned in the background from owner start. *)
+          let rec learned (module E : Engine.S) n =
+            if E.stated_settings () = None && n > 0 then (
+              Rt.sleep 0.05;
+              learned (module E : Engine.S) (n - 1))
+          in
+          let a = client ~stated root "A" in
+          learned a 100;
+          p "  A, the main up: %s\n" (extensions a);
+          let down = link () in
+          down.down <- true;
+          p "  A again, the main down: %s\n"
+            (extensions (client ~link:down ~stated root "A"));
+          p "  B, which never reached the main, the main down: %s\n"
+            (extensions (client ~link:down ~stated root "B"));
+          let unstating = client root "A" in
+          let rec forgotten n =
+            let (module E : Engine.S) = unstating in
+            ignore (E.stated_settings ());
+            if
+              Sys.file_exists
+                (Filename.concat root "A/data/domain-settings/"
+                ^ Domain_name.to_string d)
+              && n > 0
+            then (
+              Rt.sleep 0.05;
+              forgotten (n - 1))
+          in
+          forgotten 100;
+          p "  A after the main stated nothing, then down: %s\n"
+            (extensions (client ~link:down root "A")));
       scenario "a run of pushes projects each entry before the next"
         (fun root ->
           let link = link () in

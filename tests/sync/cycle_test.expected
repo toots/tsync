@@ -6,6 +6,12 @@
   S: 1 entries merged, 0 committed, 0 pending
   S has: the tree head 1
 
+== the main's settings are kept for a start without it (05 2.1)
+  A, the main up: [passwords]
+  A again, the main down: [passwords]
+  B, which never reached the main, the main down: nothing
+  A after the main stated nothing, then down: nothing
+
 == a run of pushes projects each entry before the next
   paused at the second push: position 2, 3 pending; entries on the main: 2
   resumed: 0 entries merged, 2 committed, 0 pending

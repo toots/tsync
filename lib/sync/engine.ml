@@ -6,6 +6,12 @@ module type S = Engine_intf.S
 let pause_flag ~data_dir d =
   List.fold_left Filename.concat data_dir ["paused"; Domain_name.to_string d]
 
+(* 05 §2.1: the main's last stated settings, kept for an owner that starts
+   without reaching it. *)
+let settings_file ~data_dir d =
+  List.fold_left Filename.concat data_dir
+    ["domain-settings"; Domain_name.to_string d]
+
 let feed_retention = 30. *. 86400.
 let feed_watermark_max_age = 180. *. 86400.
 
@@ -237,9 +243,43 @@ module Make (C : Engine_ctx.S) = struct
     if not on then request_cycle ()
 
   let is_paused () = Atomic.get paused
+  let settings_path = settings_file ~data_dir:C.data_dir d
 
+  (* Read once; the disk is written only when the statement changes, since
+     this is asked on every file operation. *)
+  let kept =
+    Atomic.make
+      (Option.bind (Fs.read_file_opt settings_path) (fun text ->
+           match Yojson.Safe.from_string text with
+             | j -> Tsync_store.Store.domain_settings_of_json j
+             | exception Yojson.Json_error _ -> None))
+
+  let remembered () = Atomic.get kept
+
+  let keep settings =
+    if Atomic.exchange kept settings <> settings then (
+      match settings with
+        | Some s ->
+            Fs.mkdir_p (Filename.dirname settings_path);
+            Fs.durable_replace settings_path
+              (Yojson.Safe.to_string
+                 (Tsync_store.Store.domain_settings_to_json s))
+        | None -> Fs.unlink_quiet settings_path)
+
+  (* 05 §2.1 rule 4: what the main states is kept; while it cannot be asked,
+     the last statement stands. *)
   let stated_settings () =
-    match R.stated () with `Stated s -> Some s | `Unstated | `Unknown -> None
+    match R.stated () with
+      | `Stated s ->
+          (try keep (Some s)
+           with Fail.E f -> Log.warn "domain settings not kept: %s" f.reason);
+          Some s
+      | `Unstated ->
+          keep None;
+          None
+      | `Unknown -> remembered ()
+      | exception (Fail.E _ as e) -> (
+          match remembered () with Some s -> Some s | None -> raise e)
 
   let start ?(background = true) () =
     let is_paused = Fs.exists paused_path in
