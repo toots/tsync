@@ -29,10 +29,13 @@ once, and mounts them with FUSE.
 %package tray
 Summary:        Tray icon for tsync
 Requires:       tsync = %{version}-%{release}
+# linux-tray §6.5: copying codes and unlocking, which the tray does without.
+Recommends:     wl-clipboard kdialog
 
 %description tray
 Shows the state of every tsync domain as an icon in the desktop's
-notification area, with a menu to open folders and hold changes.
+notification area, with a menu to open folders, hold changes and copy
+one-time codes.
 
 %package dolphin
 Summary:        Dolphin context menu for tsync
