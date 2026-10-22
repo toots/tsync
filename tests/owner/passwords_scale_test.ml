@@ -51,14 +51,25 @@ let csv =
              i i i i))
 
 (* The seconds [f] took, said on stderr; whether they are within [budget]. *)
+(* The seconds [f] took, said on stderr; whether they are within [budget]:
+   seconds, or a multiple of the first site lookup's, which opens every
+   record, so that the check holds on a slow machine as on a fast one. *)
+let first_lookup = ref nan
+
 let timed label ~budget f =
   let t0 = Unix.gettimeofday () in
   let r = f () in
   let dt = Unix.gettimeofday () -. t0 in
   Printf.eprintf "%s: %.3f s\n%!" label dt;
+  let what, limit =
+    match budget with
+      | `Seconds s -> (Printf.sprintf "%g s" s, s)
+      | `Times_first k ->
+          (Printf.sprintf "%g times the first lookup" k, k *. !first_lookup)
+  in
   p "%-44s %s"
-    (Printf.sprintf "%s within %g s" label budget)
-    (if dt <= budget then "yes" else "NO");
+    (Printf.sprintf "%s within %s" label what)
+    (if dt <= limit then "yes" else "NO");
   r
 
 let records r =
@@ -76,7 +87,7 @@ let () =
       in
       wait_serving 100;
       ignore
-        (timed "init" ~budget:35. (fun () ->
+        (timed "init" ~budget:(`Seconds 35.) (fun () ->
              ask
                [
                  ("action", s "vault_init");
@@ -125,11 +136,14 @@ let () =
             ("site", s (Printf.sprintf "https://site%d.example" i));
           ]
       in
-      let first = timed "first site lookup" ~budget:2. (lookup 1) in
+      let t0 = Unix.gettimeofday () in
+      let first = timed "first site lookup" ~budget:(`Seconds 30.) (lookup 1) in
+      first_lookup := Unix.gettimeofday () -. t0;
       p "%-44s %d" "  its matches" (List.length (records first));
-      (* Budgets that the reads before README §4.6 miss (3.8 s and 0.2 s on a
-         laptop) on a slower machine too. *)
-      timed "20 more site lookups" ~budget:3. (fun () ->
+      (* Before README §4.6 every read opened every record, as the first
+         lookup does: 20 lookups took 20 times as long, a passkey match as
+         long. *)
+      timed "20 more site lookups" ~budget:(`Times_first 8.) (fun () ->
           for i = 2 to 21 do
             ignore (lookup i ())
           done);
@@ -142,7 +156,7 @@ let () =
           | _ -> ""
       in
       ignore
-        (timed "a passkey match" ~budget:0.25 (fun () ->
+        (timed "a passkey match" ~budget:(`Times_first 0.5) (fun () ->
              ask
                [
                  ("action", s "passwords_passkey_match");
