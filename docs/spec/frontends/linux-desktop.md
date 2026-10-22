@@ -187,7 +187,7 @@ Package names and installed paths are compatibility surface.
 | package | installs | depends on |
 |---|---|---|
 | `tsync` | among the rest ([fuse.md §B6](fuse.md#b6-packaging)): `<libdir>/tsync/libtsync_mounts.so`, the application icon `hicolor/scalable/apps/tsync.svg` | no desktop library |
-| `tsync-tray` | `/usr/bin/tsync-tray`, `/etc/xdg/autostart/tsync-tray.desktop`, the four status icons (§5.3) | the session-bus library it links; `tsync` at exactly the same version |
+| `tsync-tray` | `/usr/bin/tsync-tray`, `/etc/xdg/autostart/tsync-tray.desktop`, the four status icons (§5.3) | the session-bus library it links; `tsync` at exactly the same version; recommends `wl-clipboard` and `kdialog`, which codes and unlocking use ([linux-tray §6.5](linux-tray.md#65-one-time-codes)) |
 | `tsync-dolphin` | `<Qt 6 plugin directory>/kf6/kfileitemaction/tsyncdolphin.so` | Qt 6 and KDE Frameworks 6; `tsync` at exactly the same version |
 
 - **The split** keeps bus and toolkit libraries off a headless machine, and the file manager's
@@ -285,7 +285,9 @@ directory tree with a symbolic link in it; an owner that accepts connections and
 Each check is made on the package as built, not on the build tree, and each MUST have been seen to
 fail against a deliberately bad artifact before its pass counts.
 
-- `tsync` declares no dependency on a bus or toolkit library. `tsync-tray` declares the bus
+- `tsync` declares no dependency on a bus or toolkit library: the owner loads the bus library at
+  run time for the vault's keystore
+  ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). `tsync-tray` declares the bus
   library and not the file manager's toolkit. `tsync-dolphin` declares the toolkit.
 - `tsync-tray` and `tsync-dolphin` each depend on `tsync` at exactly their own version.
 - The installed plugin resolves every library it needs, `libtsync_mounts.so` among them, on a
