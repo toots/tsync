@@ -63,9 +63,12 @@ let () =
 |}
         (path "bus"));
   Unix.putenv "DBUS_SESSION_BUS_ADDRESS" "";
-  Unix.putenv "XDG_RUNTIME_DIR" "";
+  (* Unset, it would mean /run/user/<uid>: this machine's own session. *)
+  Unix.putenv "XDG_RUNTIME_DIR" dir;
   Secret_service.register ();
-  check "no session bus registers nothing" (Keystore.registered () = None);
+  let ks = Option.get (Keystore.registered ()) in
+  show "with no session bus yet" (fun () ->
+      Rt.run_sync (fun () -> entry (ks.get ~domain:"photos")));
   let daemon, address =
     spawn_reading "dbus-daemon"
       ["--config-file=" ^ path "bus.conf"; "--nofork"; "--print-address=1"]
@@ -77,8 +80,6 @@ let () =
   in
   check "the double is on the bus" (ready = "ready");
   Unix.putenv "DBUS_SESSION_BUS_ADDRESS" address;
-  Secret_service.register ();
-  let ks = Option.get (Keystore.registered ()) in
   Rt.run_sync (fun () ->
       let domain = "photos" in
       let key = String.init 32 Char.chr in

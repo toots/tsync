@@ -271,7 +271,9 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
 - **Owner start** reads the domain's entry. One for the keyring's key id unlocks the vault with
   `cached: keystore`. One for another key id is held as the K of §4.3, the vault staying locked:
   the next unlock re-encrypts under the domain's K and replaces the entry. A read that fails leaves
-  the vault locked, and status reports the keystore's reason.
+  the vault locked, and status reports the keystore's reason; while no K is held, each verb that
+  needs the vault reads again, since a keystore may come up after the owner (a desktop session
+  that starts after it).
 - **Lock** deletes the domain's K entry (and with `forget` its secret key entry), then forgets
   each entry deleted. Both deletes are attempted. One that fails leaves what that entry held, in
   the keystore and in memory, and the lock is refused `internal` with the keystore's reason: a

@@ -143,11 +143,13 @@ let after_restart () =
           status "status"))
 
 (* vault §6.1 against a keystore kept in files of ROOT, as a host's would
-   survive the owner; [broken] refuses every write. *)
+   survive the owner; [broken] refuses every write, and reads fail until the
+   file [up_marker] exists when [late]. *)
 let keystore_dir = Filename.concat root "keystore"
+let up_marker = Filename.concat root "keystore-up"
 
-let file_keystore ?(stuck = false) ?(stuck_secret_key = false) ~broken () :
-    Keystore.t =
+let file_keystore ?(stuck = false) ?(stuck_secret_key = false) ?(late = false)
+    ~broken () : Keystore.t =
   let path name =
     Filename.concat keystore_dir
       (String.map (function '/' -> '#' | c -> c) name)
@@ -161,6 +163,8 @@ let file_keystore ?(stuck = false) ?(stuck_secret_key = false) ~broken () :
         Fs.write_file_for_test (path domain) (key_id ^ key));
     get =
       (fun ~domain ->
+        if late && not (Sys.file_exists up_marker) then
+          Fail.raise_ Refused "the test keystore is not up yet";
         Option.map
           (fun s -> (String.sub s 0 16, String.sub s 16 (String.length s - 16)))
           (Fs.read_file_opt (path domain)));
@@ -179,8 +183,8 @@ let entries () =
       (List.sort compare (Array.to_list (Sys.readdir keystore_dir)))
   else ""
 
-let with_keystore ?stuck ?stuck_secret_key ~broken f =
-  Keystore.register (file_keystore ?stuck ?stuck_secret_key ~broken ());
+let with_keystore ?stuck ?stuck_secret_key ?late ~broken f =
+  Keystore.register (file_keystore ?stuck ?stuck_secret_key ?late ~broken ());
   let passphrase = Fs.read_file passphrase_file
   and secret_key = Fs.read_file secret_key_file in
   Owner.stop_on_signals ();
@@ -193,6 +197,12 @@ let keystore_phase = function
           answer "unlock" (unlock ~secret_key passphrase);
           status "status";
           p "%-34s [%s]" "keystore entries" (entries ()))
+  | "ks-late" ->
+      with_keystore ~late:true ~broken:false (fun _ _ ->
+          status "status";
+          Fs.write_file_for_test up_marker "";
+          status "status, the keystore up";
+          Sys.remove up_marker)
   | "ks-restart" ->
       with_keystore ~broken:false (fun _ _ ->
           status "status";
@@ -440,6 +450,8 @@ let () =
         child "restart";
         p "== with a keystore: unlock";
         child "ks-unlock";
+        p "== with a keystore that comes up after the owner";
+        child "ks-late";
         p "== with a keystore: a restart, then lock";
         child "ks-restart";
         p "== with a keystore: a restart after the lock";

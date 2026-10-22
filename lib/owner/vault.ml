@@ -163,10 +163,13 @@ let adopt ~domain ~engine t entry =
         in
         loop ())
 
-(* §6.1 owner start: read once, before the first use of either secret. *)
+(* §6.1 owner start: read before the first use of either secret, and again while
+   no K is held and the last read failed. *)
 let restore ~domain ~engine t =
   let auto_locks = auto_locks ~domain ~engine in
-  if not (Atomic.exchange t.restored true) then (
+  let first = not (Atomic.exchange t.restored true) in
+  if first || (Atomic.get t.key = None && Atomic.get t.keystore_error <> None)
+  then (
     if auto_locks then clear_keystore_key ~domain t;
     Option.iter
       (fun (ks : Keystore.t) ->
@@ -175,6 +178,7 @@ let restore ~domain ~engine t =
             ks.get ~domain:(secret_key_entry domain) )
         with
           | key, secret_key ->
+              Atomic.set t.keystore_error None;
               (* §6: a read never replaces a K the owner already holds. *)
               if not auto_locks then
                 Option.iter
