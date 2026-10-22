@@ -1,6 +1,6 @@
 (library
  (name tsync_tray_lib)
- (modules bus layout tray)
+ (modules bus layout mark tray)
  (enabled_if
   (= %{system} linux))
  (libraries

@@ -26,8 +26,9 @@ val all : t -> row list
     equal to what is installed. *)
 val set_menu : t -> now:float -> Menu_model.entry list -> int list
 
-(** §4.3: the children of the Stats row, open menu or not. *)
-val set_stats : t -> Menu_model.entry list -> int list
+(** §4.3: the children of the top-level submenu row with this action (Stats,
+    One-time codes), open menu or not. *)
+val set_children : t -> Menu_model.action -> Menu_model.entry list -> int list
 
 (** §4.4: an opening notice for this id. *)
 val opening : t -> now:float -> int -> int list

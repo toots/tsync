@@ -604,7 +604,7 @@ let record_label r =
     | i, "" -> i
     | i, a -> i ^ " — " ^ a
 
-let domain_codes ~indent (domain, codes) =
+let domain_codes ~add ~indent (domain, codes) =
   match codes with
     | Locked -> [row ~indent ~action:(Unlock domain) "Locked — unlock…"]
     | No_vault -> [row ~indent "No vault — run tsync vault init"]
@@ -624,15 +624,17 @@ let domain_codes ~indent (domain, codes) =
                     unreadable);
              ]
            else [])
-        @ [row ~indent ~action:(Add_code domain) "Add a code…"]
+        @
+        if add then [row ~indent ~action:(Add_code domain) "Add a code…"]
+        else []
 
-let codes = function
+let codes ?(add = true) = function
   | [] -> [row "No codes"]
-  | [one] -> domain_codes ~indent:0 one
+  | [one] -> domain_codes ~add ~indent:0 one
   | several ->
       List.concat_map
         (fun ((domain, _) as one) ->
-          row ~vault:domain domain :: domain_codes ~indent:1 one)
+          row ~vault:domain domain :: domain_codes ~add ~indent:1 one)
         several
 
 let action_to_yojson = function

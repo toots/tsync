@@ -158,4 +158,29 @@ repaired without a restart: yes
 rewritten twice in quick succession: music — Idle
 one warning per distinct reason: 3
 
-13 scenarios
+== one-time codes
+a code domain on Wayland with wl-copy has the codes row: yes
+an opening fills the codes row: yes
+the codes row holds: work |     ACME Co — john |     GitHub — me | home |     Locked — unlock…
+each record row carries a PNG mark: yes
+no row is Add a code: yes
+a click runs wl-copy: yes
+wl-copy ran with: --sensitive --type text/plain
+the owner's code is on its standard input: yes
+no argument holds the code: yes
+with no WAYLAND_DISPLAY there is no codes row: yes
+with no wl-copy there is no codes row: yes
+
+== unlock
+the codes row holds: Locked — unlock…
+the click sends vault_unlock: yes
+a denied unlock asks again: yes
+the second answer is sent: yes
+the second dialog carries the owner's sentence: yes
+each answer went to the owner, in order: yes
+no helper's arguments hold a passphrase: yes
+a cancelled dialog sends nothing: yes
+with no kdialog, a notification: yes
+it says: Cannot unlock home: kdialog is not installed. Run tsync vault unlock in a terminal.
+
+15 scenarios

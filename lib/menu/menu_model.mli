@@ -78,8 +78,9 @@ val codes_of_json : Yojson.Safe.t option -> codes
 val codes_placeholder : entry list
 
 (** The code domains in configuration order with their answers; never empty, and
-    no row carries a code. *)
-val codes : (string * codes) list -> entry list
+    no row carries a code. [add] (default [true]) ends each answering domain
+    with its Add a code row. *)
+val codes : ?add:bool -> (string * codes) list -> entry list
 
 (** {1 JSON form (§8)} *)
 
