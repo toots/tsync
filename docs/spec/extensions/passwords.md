@@ -335,7 +335,9 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 | action | request | answer |
 |---|---|---|
 | `passwords_fill` | `site`, `id`, `pull?` | the login's username, password, and current code with seconds left when one is linked; refused `invalid` when the login does not match `site` (§4.2) |
-| `passwords_save` | `site`, `username`, `password`, `update?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` with that id updates it |
+| `passwords_save` | `site`, `username`, `password` (absent with `suggested`), `update?`, `suggested?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` with that id updates it; one carrying `suggested` sets that record's username (§5.1) |
+| `passwords_suggest` | `site`, `username` | §5.1: the generated password and the new record's `id` |
+| `passwords_generate` | `generate` | a password (§5), saved nowhere |
 
 A host's `fill` and `save` are these requests, the browser bridge's (§9.2) as every platform
 host's, so the rules above hold in one place. A read (`passwords_list`, `passwords_fill`,
@@ -344,7 +346,7 @@ host's, so the rules above hold in one place. A read (`passwords_list`, `passwor
 
 Each host has `extensions/passwords/<host>.md` ([README §5](README.md#5-host-adapters)), which
 lists what it declares: [macOS](passwords/macos.md) (`fill`, codes, `passkey`),
-[Android](passwords/android.md) (`fill`, codes, `save`, `passkey`). Linux has no system autofill: browsers are served by
+[Android](passwords/android.md) (`fill`, codes, `save`, `suggest`, `passkey`). Linux has no system autofill: browsers are served by
 §9.
 
 ## 9. Browser extensions
