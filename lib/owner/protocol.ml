@@ -121,6 +121,16 @@ type appearance_change = {
     from ([config] or [main]), by member name. *)
 type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
 
+(** vault §6.3: a machine's entry as [vault_machines] lists it; [entry] is
+    [None] for one that does not open under K. *)
+type machine_entry = { name : string; enrolled : int; last_unlock : int }
+
+type machine = { uuid : string; this : bool; entry : machine_entry option }
+
+(** vault §7.2: the new secret key, and why re-encrypting the records stopped,
+    when it did; the next unlock resumes it. *)
+type rekeyed = { secret : secret; pending : string option }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -136,6 +146,8 @@ type vault_status = {
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
   auto_lock : auto_lock option;  (** none without a policy *)
   locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
+  new_machines : string list;  (** §6.3: names enrolled since the last list *)
+  secret_key_replaced : bool;  (** §7.2: the held secret key opens no slot *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -240,6 +252,13 @@ type _ request =
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_machines : string option -> machine list request
+      (** vault §6.3; [Some name] renames this machine's entry *)
+  | Vault_rekey : {
+      passphrase : string;
+      new_passphrase : string option;
+    }
+      -> rekeyed request  (** vault §7.2 *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;
@@ -295,17 +314,20 @@ let action : type a. a request -> string = function
   | Vault_passphrase _ -> "vault_passphrase"
   | Vault_delete _ -> "vault_delete"
   | Vault_status -> "vault_status"
+  | Vault_machines _ -> "vault_machines"
+  | Vault_rekey _ -> "vault_rekey"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
   | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
-  | Vault_appearance _ ->
+  | Vault_appearance _ | Vault_rekey _ ->
       true
   | _ -> false
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
-  | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ ->
+  | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ | Vault_rekey _
+    ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
@@ -399,6 +421,10 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       ("passphrase", `String r.passphrase)
       :: (if r.new_secret_key then [("newSecretKey", `Bool true)] else [])
   | Vault_delete confirm -> [("confirm", `String confirm)]
+  | Vault_machines name -> opt "name" (fun n -> `String n) name
+  | Vault_rekey r ->
+      ("passphrase", `String r.passphrase)
+      :: opt "newPassphrase" (fun p -> `String p) r.new_passphrase
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
   | List_all r ->
@@ -587,6 +613,14 @@ let decode j =
                passphrase = required j "passphrase";
                secret_key = str j "secretKey";
              })
+    | "vault_machines" -> Request (Vault_machines (str j "name"))
+    | "vault_rekey" ->
+        Request
+          (Vault_rekey
+             {
+               passphrase = required j "passphrase";
+               new_passphrase = str j "newPassphrase";
+             })
     | "vault_lock" ->
         Request
           (Vault_lock
@@ -774,6 +808,30 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
         ok []
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Vault_init _ -> ok (secret_fields reply)
+    | Vault_rekey _ ->
+        ok
+          (secret_fields reply.secret
+          @ opt "pending" (fun r -> `String r) reply.pending)
+    | Vault_machines _ ->
+        ok
+          [
+            ( "machines",
+              `List
+                (List.map
+                   (fun (m : machine) ->
+                     `Assoc
+                       ([("id", `String m.uuid); ("this", `Bool m.this)]
+                       @
+                         match m.entry with
+                         | Some e ->
+                             [
+                               ("name", `String e.name);
+                               ("enrolled", `Int e.enrolled);
+                               ("lastUnlock", `Int e.last_unlock);
+                             ]
+                         | None -> []))
+                   reply) );
+          ]
     | Vault_passphrase _ -> (
         match reply with Some s -> ok (secret_fields s) | None -> ok [])
     | Vault_status ->
@@ -798,6 +856,11 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ opt "cached" (fun c -> `String c) reply.cached
           @ opt "keystoreError" (fun e -> `String e) reply.keystore_error
           @ [("enrolled", `Bool reply.enrolled)]
+          @ (if reply.new_machines = [] then []
+             else [("newMachines", strings reply.new_machines)])
+          @ (if reply.secret_key_replaced then
+               [("secretKeyReplaced", `Bool true)]
+             else [])
           @ opt "autoLock"
               (fun (a : auto_lock) ->
                 match Vault_lock.to_json a.policy with
@@ -981,6 +1044,29 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Vault_appearance _ -> ()
     | Vault_delete _ -> str j "keystoreLeft"
     | Vault_init _ -> secret_of j
+    | Vault_rekey _ -> { secret = secret_of j; pending = str j "pending" }
+    | Vault_machines _ -> (
+        match member j "machines" with
+          | Some (`List l) ->
+              List.map
+                (fun m ->
+                  {
+                    uuid = Option.value ~default:"" (str m "id");
+                    this = flag m "this";
+                    entry =
+                      Option.map
+                        (fun name ->
+                          {
+                            name;
+                            enrolled =
+                              Option.value ~default:0 (int m "enrolled");
+                            last_unlock =
+                              Option.value ~default:0 (int m "lastUnlock");
+                          })
+                        (str m "name");
+                  })
+                l
+          | _ -> [])
     | Vault_passphrase _ ->
         if member j "secretKey" = None then None else Some (secret_of j)
     | Vault_status ->
@@ -1010,6 +1096,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           copies = strings "copies";
           keystore_error = str j "keystoreError";
           enrolled = flag j "enrolled";
+          new_machines = strings "newMachines";
+          secret_key_replaced = flag j "secretKeyReplaced";
           auto_lock =
             Option.bind (member j "autoLock") (fun a ->
                 match Vault_lock.of_json a with

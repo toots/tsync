@@ -197,3 +197,25 @@
  (alias runtest-serial)
  (action
   (diff autolock_test.expected autolock_test.output)))
+
+(executable
+ (name rekey_test)
+ (modules rekey_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  rekey_test.output
+  (run ./rekey_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rekey_test.expected rekey_test.output)))

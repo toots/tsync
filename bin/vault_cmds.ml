@@ -125,6 +125,66 @@ let passphrase_cmd =
       $ new_secret_key
       $ stdin_flag "the new passphrase")
 
+let rekey_cmd =
+  let change =
+    Arg.(
+      value & flag
+      & info ["new-passphrase"]
+          ~doc:"Also choose a new passphrase; advised when a machine was lost.")
+  in
+  verb "rekey"
+    ~doc:
+      "Replace the vault's key and secret key, re-encrypting every record: how \
+       a lost machine is shut out. Every other machine then needs the new \
+       secret key."
+    Term.(
+      const (fun change stdin dom ->
+          let passphrase = read_passphrase ~stdin () in
+          let new_passphrase =
+            if change then Some (new_passphrase ~stdin ()) else None
+          in
+          let r = ask dom (P.Vault_rekey { passphrase; new_passphrase }) in
+          show_secret r.secret;
+          Option.iter
+            (fun reason ->
+              prerr_endline
+                ("re-encrypting the records stopped (" ^ reason
+               ^ "): unlock this machine again to finish"))
+            r.pending;
+          0)
+      $ change
+      $ stdin_flag "the passphrase, then the new one")
+
+let machines_cmd =
+  let name =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["name"] ~docv:"NAME" ~doc:"Rename this machine in the list.")
+  in
+  let date t =
+    let tm = Unix.localtime (float_of_int t) in
+    Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
+      tm.tm_mday
+  in
+  verb "machines"
+    ~doc:
+      "The machines enrolled in the vault: informative, a re-key is what shuts \
+       one out."
+    Term.(
+      const (fun name dom ->
+          List.iter
+            (fun (m : P.machine) ->
+              match m.entry with
+                | Some e ->
+                    say "%s%s  enrolled %s, last unlocked %s" e.name
+                      (if m.this then " (this machine)" else "")
+                      (date e.enrolled) (date e.last_unlock)
+                | None -> say "%s  does not open under this key" m.uuid)
+            (ask dom (P.Vault_machines name));
+          0)
+      $ name)
+
 let delete_cmd =
   verb "delete"
     ~doc:"Delete the domain's vault and every record in it, for good."
@@ -164,6 +224,13 @@ let status_cmd =
              (if s.enrolled then "enrolled"
               else "not enrolled (needs the secret key)");
          Option.iter (say "keystore not used: %s") s.keystore_error;
+         if s.secret_key_replaced then
+           say
+             "secret key: replaced elsewhere (a re-key or a new one); unlock \
+              with the new one";
+         List.iter
+           (say "new machine: %s (tsync vault machines lists them)")
+           s.new_machines;
          Option.iter
            (fun (a : P.auto_lock) ->
              let from part =
@@ -303,6 +370,8 @@ let cmds =
         unlock_cmd;
         lock_cmd;
         passphrase_cmd;
+        rekey_cmd;
+        machines_cmd;
         delete_cmd;
         status_cmd;
         appearance_cmd;
