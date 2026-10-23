@@ -93,6 +93,10 @@ capability. What has been seen working is recorded in §10.
   the pick fills the current code from `fill`. The popup also lists them with **Copy code**
   (§3.3). A two-factor code no login links is not offered in the browser: it is read from the
   tsync menu or `tsync totp`.
+- **Suggesting a password** (passwords §5.1). A new-password field's icon offers *Use a strong
+  password* above the logins. The pick, counted as a fill's is, sends `suggest` with the frame's
+  origin and the form's username, fills the field and its confirmation with the answer, firing the
+  same events, and keeps the record's id for that form.
 - **Frames.** A login is filled only into the frame whose origin it matches: a form in a
   cross-origin frame is filled from that frame's matches, never the top page's.
 
@@ -123,6 +127,9 @@ the browser. The extension never changes it by itself.
   site (`exact`), with **Save** or **Update**, **Not now** and, for a new one, **Never for this
   site**. Only that click sends `save`; the owner adds nothing when the password is already the one
   it holds, and updates only a login of the exact site (passwords §8).
+- **A suggested password's submit** shows no sheet: the content script sends `save` with
+  `suggested`, the id kept at the pick, and the username submitted. The password itself is not
+  sent again.
 - The password waits in the service worker's memory until the sheet is answered or closed, then is
   dropped. *Never for this site* is the one thing the extension keeps (§1): a list of origins,
   without usernames.
