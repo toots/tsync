@@ -333,7 +333,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // §3.3: once installed, the extension turns off the browser's own password saving, so
 // nothing lands there by default; the popup gives it back on the user's choice.
-const BROWSER_OWN = ["passwordSavingEnabled"];
+const BROWSER_OWN = ["passwordSavingEnabled", "autofillAddressEnabled", "autofillCreditCardEnabled"];
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason !== "install") return;
   for (const name of BROWSER_OWN) chrome.privacy?.services?.[name]?.set({ value: false }).catch(() => {});

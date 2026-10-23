@@ -26,16 +26,18 @@ async function render() {
     main.append(el("p", { className: "detail mark" }, TsyncMark.element(d.appearance, 16),
       ` ${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}`));
   }
-  // §3.3: the user's choice, never the extension's: Chrome's own manager offers and
-  // fills too until it is turned off here.
-  const browserManager = chrome.privacy?.services?.passwordSavingEnabled;
-  if (browserManager) {
-    const setting = await browserManager.get({});
-    if (setting.levelOfControl === "controllable_by_this_extension" || setting.levelOfControl === "controlled_by_this_extension") {
-      const box = el("input", { type: "checkbox", checked: setting.value === false, onchange: () =>
-        box.checked ? browserManager.set({ value: false }) : browserManager.clear({}) });
-      main.append(el("label", { className: "detail" }, box, " Turn off the browser's own password manager"));
-    }
+  // §3.3: off from the extension's install; turning them back on is the user's choice.
+  const services = chrome.privacy?.services || {};
+  const browserOwn = ["passwordSavingEnabled", "autofillAddressEnabled", "autofillCreditCardEnabled"]
+    .map((name) => services[name]).filter(Boolean);
+  const settings = await Promise.all(browserOwn.map((s) => s.get({})));
+  const ours = (s) => s.levelOfControl === "controllable_by_this_extension" || s.levelOfControl === "controlled_by_this_extension";
+  const controllable = browserOwn.filter((_, i) => ours(settings[i]));
+  if (controllable.length) {
+    const box = el("input", { type: "checkbox", checked: settings.filter(ours).every((s) => s.value === false), onchange: () =>
+      controllable.forEach((s) => (box.checked ? s.set({ value: false }) : s.clear({}))) });
+    main.append(el("label", { className: "detail" }, box, " Turn off the browser's own password saving and autofill"),
+      el("p", { className: "detail", textContent: "Passwords the browser already saved still fill from its own list: remove them in its password manager." }));
   }
   if (!state.origin) return main.append(el("p", { className: "detail", textContent: "Not a web page." }));
   main.append(el("h2", { textContent: new URL(state.origin).host }));
