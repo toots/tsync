@@ -193,6 +193,35 @@ let rp_ids () =
       "city.kawasaki.jp";
     ]
 
+let related () =
+  p "\n== §7.3 related origins\n";
+  List.iter
+    (fun d -> p "%-24s %b\n" d (Webauthn.related_host d))
+    ["accounts.meta.com"; "com"; "co.uk"; "evil.com/x"; "a b.com"];
+  let meta =
+    {|{"origins": ["https://www.facebook.com", "https://www.instagram.com/"]}|}
+  in
+  let six =
+    {|{"origins": ["https://a.one.com", "https://b.two.com", "https://three.com",
+     "https://four.co.uk", "https://five.org", "https://www.one.com",
+     "https://six.com"]}|}
+  in
+  List.iter
+    (fun (origin, body) ->
+      p "%-28s %b\n" origin (Webauthn.related_allows ~origin body))
+    [
+      ("https://www.facebook.com", meta);
+      ("https://WWW.Instagram.com", meta);
+      ("https://evil.facebook.com", meta);
+      ("http://www.facebook.com", {|{"origins": ["http://www.facebook.com"]}|});
+      ("https://www.facebook.com", "not json");
+      ("https://www.facebook.com", {|{"origins": "https://www.facebook.com"}|});
+      (* A sixth label is past the limit; a fifth label's second origin is not. *)
+      ("https://www.one.com", six);
+      ("https://six.com", six);
+    ]
+
 let () =
   bytes ();
-  rp_ids ()
+  rp_ids ();
+  related ()

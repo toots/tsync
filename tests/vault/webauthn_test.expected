@@ -81,3 +81,18 @@ example.xn--55qx5d.cn false
 kawasaki.jp          false
 c.kawasaki.jp        true
 city.kawasaki.jp     false
+
+== §7.3 related origins
+accounts.meta.com        true
+com                      false
+co.uk                    false
+evil.com/x               false
+a b.com                  false
+https://www.facebook.com     true
+https://WWW.Instagram.com    true
+https://evil.facebook.com    false
+http://www.facebook.com      false
+https://www.facebook.com     false
+https://www.facebook.com     false
+https://www.one.com          true
+https://six.com              false

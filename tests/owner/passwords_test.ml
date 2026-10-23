@@ -560,6 +560,21 @@ let passkeys () =
          ("id", s id);
          ("clientDataHash", s (b64 client_data_hash));
        ]);
+  let fetched = ref [] and document = ref None in
+  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+      fetched := (host ^ path) :: !fetched;
+      !document);
+  let related origin =
+    create ~origin ~rp:"accounts.meta.com" ~user:"related@meta.com" ()
+  in
+  answer "create, related origins unreachable"
+    (related "https://www.facebook.com");
+  document := Some {|{"origins": ["https://www.facebook.com"]}|};
+  answer "create, a related origin" (related "https://www.facebook.com");
+  answer "create, an origin not listed" (related "https://evil.example");
+  answer "create, an RP ID that is a public suffix"
+    (create ~origin:"https://www.facebook.com" ~rp:"co.uk" ());
+  p "%-40s %s" "fetched" (String.concat ", " (List.rev !fetched));
   let got = ask [("action", s "passwords_get"); ("id", s second)] in
   p "%-40s kind %s, a private key in the reply %b" "get, a passkey"
     (Option.get (field got "kind"))
