@@ -213,6 +213,10 @@
     <string name="vault_machines_seen">Seen</string>
     <string name="autofill_suggest">Use a strong password</string>
     <string name="passwords_note">Note</string>
+    <string name="autofill_other_logins">Other logins…</string>
+    <string name="autofill_other_logins_detail">Pick one for this app</string>
+    <string name="autofill_link_confirm">Use %1$s for %2$s? tsync will offer it to this app from now on.</string>
+    <string name="autofill_link_use">Use it</string>
     <string name="passwords_copy_notes">Copy notes</string>
     <string name="passwords_notes_copied">Notes of %1$s copied</string>
     <string name="passwords_copy_field">Copy %1$s</string>
