@@ -76,6 +76,11 @@ class Passwords(private val client: Client) {
         return Filled(reply.optString("username"), reply.optString("password"), text(reply, "code"))
     }
 
+    /** passwords §4.3: a login linked to an app by hand names the app's site too. */
+    fun setSites(id: String, urls: List<String>) {
+        client.call(action("edit").put("id", id).put("urls", JSONArray(urls)))
+    }
+
     /** The one reply with a password, for the Passwords tab's copy (android §8). */
     fun get(id: String): JSONObject = client.call(action("get").put("id", id))
 

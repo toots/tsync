@@ -58,6 +58,8 @@ class TsyncAutofillService : AutofillService() {
         val offered = if (form.username.isEmpty() && form.password.isEmpty()) logins.filter { it.hasCode } else logins
         val response = FillResponse.Builder()
         offered.forEach { response.addDataset(dataset(form, it, mark)) }
+        // passwords §4.3: an app may use a login no rule matched, linked once by hand.
+        if (form.site.startsWith("android://")) response.addDataset(others(form))
         // passwords §5.1: a new-password field is also offered a generated password.
         if (form.newPassword) response.addDataset(suggestion(form, mark))
         val save = form.password.isNotEmpty()
@@ -69,7 +71,8 @@ class TsyncAutofillService : AutofillService() {
                 }.build(),
             )
         }
-        return if (offered.isEmpty() && !save && !form.newPassword) null else response.build()
+        return if (offered.isEmpty() && !save && !form.newPassword && !form.site.startsWith("android://")) null
+        else response.build()
     }
 
     /** §3: no value until the pick, which [FillActivity] answers. */
@@ -87,6 +90,22 @@ class TsyncAutofillService : AutofillService() {
             PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
         ).intentSender
         val builder = Dataset.Builder(presentation)
+        form.ids.forEach { builder.setValue(it, null) }
+        return builder.setAuthentication(sender).build()
+    }
+
+    /** §3: *Other logins…*, the app's search over every login. */
+    @Suppress("DEPRECATION")
+    private fun others(form: Form): Dataset {
+        val pick = Intent(this, LinkActivity::class.java)
+            .putExtra(LinkActivity.EXTRA_SITE, form.site)
+            .putParcelableArrayListExtra(FillActivity.EXTRA_USERNAME, ArrayList(form.username))
+            .putParcelableArrayListExtra(FillActivity.EXTRA_PASSWORD, ArrayList(form.password))
+        val sender = PendingIntent.getActivity(
+            this, "link:${form.site}".hashCode(), pick,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
+        ).intentSender
+        val builder = Dataset.Builder(row(this, getString(R.string.autofill_other_logins), getString(R.string.autofill_other_logins_detail)))
         form.ids.forEach { builder.setValue(it, null) }
         return builder.setAuthentication(sender).build()
     }
