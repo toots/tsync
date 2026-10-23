@@ -88,8 +88,10 @@ capability. What has been seen working is recorded in §10.
   not a page load, not a focus, not a script.
 - On the gesture the service worker asks `match` with the **origin of the frame**, taken from the
   browser (`MessageSender.origin` of the content script's message), never from the page. It shows
-  the logins it answers in a menu under the field, drawn by the extension (§1), by title and
-  username. A locked domain is a row *tsync is locked — unlock it in tsync*, which does nothing
+  the logins it answers in a menu above the field, drawn by the extension (§1), by title and
+  username; below the field only when there is no room above. The browser draws its own autofill
+  dropdown below the field, over anything a page or an extension draws, so a menu there would be
+  hidden under it. A locked domain is a row *tsync is locked — unlock it in tsync*, which does nothing
   (extensions README §5).
 - **A pick counts only as the user saw it**: a trusted click (`isTrusted`) on the icon or a row, the
   overlay on top at the click's point (`elementFromPoint`), visible, unfiltered, with nothing in the
@@ -122,11 +124,14 @@ logins (title, username, *Fill*, and *Copy code* for one linking a code), each d
 web has no sensitivity marker, so the popup says the code stays on the clipboard until replaced.
 The popup lists no other site's logins and no password.
 
-It also offers **Turn off the browser's own password manager**: the browser's saving and filling
-of passwords (`chrome.privacy.services.passwordSavingEnabled` set to false), which otherwise offers
-alongside tsync's and keeps what a user meant for tsync. The extension turns it off once, when it
-is installed, so the box starts checked; unchecking it gives the setting back to the browser, and
-the extension never turns it off again by itself.
+It also offers **Turn off the browser's own password saving and autofill**: the browser's offer to
+save passwords and passkeys, and its address and card autofill (`chrome.privacy.services`
+`passwordSavingEnabled`, `autofillAddressEnabled` and `autofillCreditCardEnabled` set to false),
+which otherwise offer alongside tsync's and keep what a user meant for tsync. The extension turns
+them off once, when it is installed, so the box starts checked; unchecking it gives the settings
+back to the browser, and the extension never turns them off again by itself. No extension setting
+stops the browser filling the passwords it already holds: the popup says to remove them from the
+browser's password manager for that.
 
 ## 4. Saving
 
@@ -256,7 +261,7 @@ With the extension installed, the native host installed, and the vault unlocked:
 | Browser | Host | Fill | Codes | Save | Passkeys |
 |---|---|---|---|---|---|
 | Chrome | macOS | seen | seen | seen | seen |
-| Chrome | Linux | planned | planned | planned | planned |
+| Chrome | Linux | seen | seen | seen | seen |
 
 ## 11. Later
 
