@@ -57,14 +57,24 @@
   if (document.documentElement) mount();
   else document.addEventListener("DOMContentLoaded", mount, { once: true });
 
-  function place(el, node, below) {
+  function placeIcon(el, node) {
     const r = el.getBoundingClientRect();
-    if (below) {
-      node.style.left = `${r.left}px`;
-      node.style.top = `${r.bottom + 2}px`;
+    node.style.left = `${r.right - 28}px`;
+    node.style.top = `${r.top + (r.height - 20) / 2}px`;
+  }
+
+  // §3.2: Chrome draws its own autofill dropdown below the field, above anything a
+  // page holds, so the menu opens above the field and grows upward; below only
+  // when there is no room above.
+  function placeMenu(el) {
+    const r = el.getBoundingClientRect();
+    menu.style.left = `${r.left}px`;
+    if (r.top >= menu.offsetHeight + 4) {
+      menu.style.top = "";
+      menu.style.bottom = `${innerHeight - r.top + 2}px`;
     } else {
-      node.style.left = `${r.right - 28}px`;
-      node.style.top = `${r.top + (r.height - 20) / 2}px`;
+      menu.style.bottom = "";
+      menu.style.top = `${r.bottom + 2}px`;
     }
   }
 
@@ -150,7 +160,7 @@
     for (const [el, b] of badges) {
       const r = el.getBoundingClientRect();
       b.hidden = r.width < 48 || r.height < 16 || r.bottom < 0 || r.top > innerHeight || !drawn(el, r);
-      if (!b.hidden) place(el, b, false);
+      if (!b.hidden) placeIcon(el, b);
     }
   }
 
@@ -220,8 +230,8 @@
   async function open(el) {
     const kind = kinds.get(el);
     menu.replaceChildren(note("…"));
-    place(el, menu, true);
     menu.hidden = false;
+    placeMenu(el);
     let answer;
     try {
       answer = await chrome.runtime.sendMessage({ type: "match", kind });
@@ -246,6 +256,7 @@
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
     for (const domain of answer.locked || []) menu.appendChild(note(`${domain}: tsync is locked — unlock it in tsync`));
     if (!menu.children.length) menu.appendChild(note("Nothing in tsync for this site"));
+    placeMenu(el);
   }
 
   // §5.1: every password field of the form gets the suggestion, its confirmation
