@@ -41,7 +41,14 @@ async function render() {
   main.append(el("h2", { textContent: new URL(state.origin).host }));
   const logins = (state.match && state.match.ok && state.match.logins) || [];
   if (!logins.length) main.append(el("p", { className: "detail", textContent: "Nothing in tsync for this site." }));
-  for (const login of logins) {
+  // vault §8.1: with several domains, each one's logins under a header carrying its mark.
+  const several = new Set(logins.map((l) => l.domain)).size > 1;
+  let heading = null;
+  for (const login of several ? [...logins].sort((a, b) => a.domain.localeCompare(b.domain)) : logins) {
+    if (several && login.domain !== heading) {
+      heading = login.domain;
+      main.append(el("p", { className: "detail mark" }, TsyncMark.element(looks[login.domain], 16), ` ${login.domain}`));
+    }
     const fill = el("button", { textContent: "Fill", className: "primary", onclick: async () => {
       const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
         exact: login.exact, title: login.title, username: login.username });
@@ -58,7 +65,7 @@ async function render() {
       } }));
     }
     main.append(el("div", { className: "login" },
-      el("span", { className: "mark" }, TsyncMark.element(looks[login.domain], 16), el("strong", { textContent: login.title })),
+      el("strong", { textContent: login.title }),
       el("small", { textContent: login.username }), actions));
   }
 }

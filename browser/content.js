@@ -31,6 +31,8 @@
     .row small { display: block; opacity: .65; margin-left: 24px; }
     .row > svg, .row > img { vertical-align: -3px; margin-right: 8px; }
     .note { padding: 6px 8px; opacity: .7; }
+    .heading { font-weight: 600; opacity: .8; padding-bottom: 2px; }
+    .heading > svg, .heading > img { vertical-align: -2px; }
   </style><div class="menu" hidden></div>`;
   const menu = shadow.querySelector(".menu");
 
@@ -175,6 +177,12 @@
     b.addEventListener("click", (e) => seen(e) && action());
     return b;
   }
+  function header(domain, look) {
+    const d = document.createElement("div");
+    d.className = "note heading";
+    d.append(TsyncMark.element(look, 14), document.createTextNode(` ${domain}`));
+    return d;
+  }
   function note(text) {
     const d = document.createElement("div");
     d.className = "note";
@@ -196,11 +204,17 @@
     menu.replaceChildren();
     if (newPassword.has(el)) menu.appendChild(row("Use a strong password", "saved in tsync as you pick it", () => suggest(el)));
     if (answer.error) menu.appendChild(note(answer.error));
-    for (const login of answer.logins || []) {
-      const title = answer.domains > 1 ? `${login.title} · ${login.domain}` : login.title;
+    // vault §8.1: with several domains, each one's logins under a header carrying its mark.
+    let heading = null;
+    const order = [...new Set((answer.logins || []).map((l) => l.domain))];
+    const grouped = [...(answer.logins || [])].sort((a, b) => order.indexOf(a.domain) - order.indexOf(b.domain));
+    for (const login of grouped) {
+      if (answer.domains > 1 && login.domain !== heading) {
+        heading = login.domain;
+        menu.appendChild(header(login.domain, (answer.looks || {})[login.domain] || null));
+      }
       const detail = kind === "code" ? "one-time code" : login.username;
-      menu.appendChild(row(title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind),
-        (answer.looks || {})[login.domain] || null));
+      menu.appendChild(row(login.title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind)));
     }
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
     for (const domain of answer.locked || []) menu.appendChild(note(`${domain}: tsync is locked — unlock it in tsync`));
