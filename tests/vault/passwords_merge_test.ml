@@ -27,6 +27,7 @@ module Passwords_records = struct
         password = Printf.sprintf "password %06d" seed;
         notes = "";
         totp = "";
+        fields = [];
         modified = 1760500000;
         unknown = [];
       }
@@ -57,6 +58,7 @@ module Passwords_records = struct
   let change = function
     | Passwords.Login l ->
         Printf.sprintf "%s/%s/%s" l.title l.username l.password
+    | Note n -> n.title
     | Passkey p -> p.rp_id
 
   let scale = [(1000, 10., 128); (10000, 120., 1024)]

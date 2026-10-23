@@ -26,11 +26,13 @@ include Extension_records.Make (struct
     in
     String.sub label 0 (cut room) ^ suffix
 
-  (* totp §3, as this extension labels: a login's title, a passkey's display
-     name. *)
+  (* totp §3, as this extension labels: a login's or a note's title, a
+     passkey's display name. *)
   let relabel ~suffix = function
     | Passwords.Login l when not (String.ends_with ~suffix l.title) ->
         Some (Passwords.Login { l with title = fit l.title suffix })
+    | Note n when not (String.ends_with ~suffix n.title) ->
+        Some (Note { n with title = fit n.title suffix })
     | Passkey p when not (String.ends_with ~suffix p.user_display_name) ->
         let shown =
           if p.user_display_name = "" then p.user_name else p.user_display_name
@@ -141,39 +143,97 @@ let link ~domain ~engine ~lazy_tree t args =
     | None, None -> None
     | Some _, Some _ -> Fail.invalid "give otpauth or totp, not both"
 
-let add ~domain ~engine ~lazy_tree t args =
+(* §2.2: a field list as given, every entry checked with the record. *)
+let fields_arg args =
+  match arg args "fields" with
+    | None -> []
+    | Some (`List l) ->
+        List.map
+          (function
+            | `Assoc f -> (
+                match (arg f "name", arg f "value", arg f "secret") with
+                  | Some (`String name), Some (`String value), secret ->
+                      {
+                        Passwords.name;
+                        value;
+                        secret =
+                          (match secret with Some (`Bool b) -> b | _ -> false);
+                      }
+                  | _ -> Fail.invalid "a field is {name, value, secret}")
+            | _ -> Fail.invalid "a field is {name, value, secret}")
+          l
+    | Some _ -> Fail.invalid "fields is a list"
+
+let fields_json (fields : Passwords.field list) =
+  `List
+    (List.map
+       (fun (f : Passwords.field) ->
+         `Assoc
+           [
+             ("name", `String f.name);
+             ("value", `String f.value);
+             ("secret", `Bool f.secret);
+           ])
+       fields)
+
+(* §2.1: a note has no site, password or code. *)
+let add_note ~domain ~engine ~lazy_tree t args =
   let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
-  let password =
-    match password_of args with
-      | Some p -> p
-      | None -> Fail.invalid "a password or generate is needed"
-  in
-  let login : Passwords.login =
-    {
-      title = required args "title";
-      urls = sites args;
-      username = Option.value ~default:"" (str args "username");
-      password;
-      notes = Option.value ~default:"" (str args "notes");
-      totp = "";
-      modified = now ();
-      unknown = [];
-    }
-  in
-  (* §6: the login is checked before a TOTP record is added for it. *)
-  ignore (checked (Login login));
+  List.iter
+    (fun k -> if arg args k <> None then Fail.invalid "a note has no %s" k)
+    ["urls"; "username"; "password"; "generate"; "otpauth"; "totp"];
   let record =
     checked
-      (Login
+      (Note
          {
-           login with
-           totp =
-             Option.value ~default:"" (link ~domain ~engine ~lazy_tree t args);
+           title = required args "title";
+           notes = Option.value ~default:"" (str args "notes");
+           fields = fields_arg args;
+           modified = now ();
+           unknown = [];
          })
   in
   let id = Ids.token () in
   write ctx ~exclusive:true id record;
   [("id", `String id)]
+
+let add ~domain ~engine ~lazy_tree t args =
+  if str args "kind" = Some "note" then
+    add_note ~domain ~engine ~lazy_tree t args
+  else (
+    let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
+    let password =
+      match password_of args with
+        | Some p -> p
+        | None -> Fail.invalid "a password or generate is needed"
+    in
+    let login : Passwords.login =
+      {
+        title = required args "title";
+        urls = sites args;
+        username = Option.value ~default:"" (str args "username");
+        password;
+        notes = Option.value ~default:"" (str args "notes");
+        totp = "";
+        fields = fields_arg args;
+        modified = now ();
+        unknown = [];
+      }
+    in
+    (* §6: the login is checked before a TOTP record is added for it. *)
+    ignore (checked (Login login));
+    let record =
+      checked
+        (Login
+           {
+             login with
+             totp =
+               Option.value ~default:"" (link ~domain ~engine ~lazy_tree t args);
+           })
+    in
+    let id = Ids.token () in
+    write ctx ~exclusive:true id record;
+    [("id", `String id)])
 
 let logins records =
   List.filter_map
@@ -238,6 +298,28 @@ let list ~domain ~engine ~lazy_tree t args =
   in
   let keys = passkeys ok in
   let ids = totp_ids ~domain ~engine ~lazy_tree t in
+  (* §2.1: a note matches no site; it is listed by title alone. *)
+  let note_rows =
+    if site <> None then []
+    else
+      List.filter_map
+        (function
+          | id, Passwords.Note n
+            when match filter with
+                   | Some sub -> contains ~sub n.title
+                   | None -> true ->
+              Some (n.title, id)
+          | _ -> None)
+        ok
+      |> List.sort compare
+      |> List.map (fun (title, id) ->
+          `Assoc
+            [
+              ("id", `String id);
+              ("kind", `String "note");
+              ("title", `String title);
+            ])
+  in
   let login_rows =
     logins ok
     |> List.filter (fun (_, l) -> shown_login l)
@@ -281,7 +363,7 @@ let list ~domain ~engine ~lazy_tree t args =
   in
   let view = Atomic.get t.Vault.view in
   [
-    ("records", `List (login_rows @ passkey_rows));
+    ("records", `List (login_rows @ note_rows @ passkey_rows));
     ("corrupt", `List (List.map (fun c -> `String c) corrupt));
   ]
   @ (if view.outdated then [("outdated", `Bool true)] else [])
@@ -311,8 +393,16 @@ let get ~domain ~engine ~lazy_tree t args =
           ("password", `String l.password);
           ("notes", `String l.notes);
           ("totp", `String l.totp);
+          ("fields", fields_json l.fields);
         ]
         @ code ~domain ~engine ~lazy_tree t l.totp
+    | Note n ->
+        [
+          ("kind", `String "note");
+          ("title", `String n.title);
+          ("notes", `String n.notes);
+          ("fields", fields_json n.fields);
+        ]
     | Passkey p ->
         [
           ("kind", `String "passkey");
@@ -339,6 +429,7 @@ let edit ~domain ~engine ~lazy_tree t args =
                 given "username" (fun () -> required args "username") l.username;
               password = Option.value ~default:l.password (password_of args);
               notes = given "notes" (fun () -> required args "notes") l.notes;
+              fields = given "fields" (fun () -> fields_arg args) l.fields;
               modified = now ();
             }
           in
@@ -350,6 +441,22 @@ let edit ~domain ~engine ~lazy_tree t args =
               totp =
                 Option.value ~default:l.totp
                   (link ~domain ~engine ~lazy_tree t args);
+            }
+      | Note n ->
+          if
+            List.exists
+              (fun (k, _) ->
+                not (List.mem k ["id"; "title"; "notes"; "fields"]))
+              args
+          then
+            Fail.invalid "a note's fields to edit are title, notes and fields";
+          Note
+            {
+              n with
+              title = given "title" (fun () -> required args "title") n.title;
+              notes = given "notes" (fun () -> required args "notes") n.notes;
+              fields = given "fields" (fun () -> fields_arg args) n.fields;
+              modified = now ();
             }
       | Passkey p ->
           (* §7.1: a passkey's other fields are the relying party's. *)
@@ -401,6 +508,7 @@ let import ~domain ~engine ~lazy_tree t args =
                      password = row.password;
                      notes = row.notes;
                      totp;
+                     fields = [];
                      modified = now ();
                      unknown = [];
                    })

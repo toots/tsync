@@ -231,6 +231,8 @@ let matches ~site ~origin =
     | Ok (Android a), Ok (Android b) -> a = b
     | _ -> false
 
+type field = { name : string; value : string; secret : bool }
+
 type login = {
   title : string;
   urls : site list;
@@ -238,6 +240,15 @@ type login = {
   password : string;
   notes : string;
   totp : string;
+  fields : field list;
+  modified : int;
+  unknown : (string * Yojson.Safe.t) list;
+}
+
+type note = {
+  title : string;
+  notes : string;
+  fields : field list;
   modified : int;
   unknown : (string * Yojson.Safe.t) list;
 }
@@ -256,10 +267,19 @@ type passkey = {
   unknown : (string * Yojson.Safe.t) list;
 }
 
-type t = Login of login | Passkey of passkey
+type t = Login of login | Note of note | Passkey of passkey
 
 let between ~min ~max s = String.length s >= min && String.length s <= max
 let is_link s = s = "" || Fold.is_record_id s
+
+(* §2.2 *)
+let check_fields fields =
+  let* () = check (List.length fields <= 32) "fields holds at most 32" in
+  check
+    (List.for_all
+       (fun f -> between ~min:1 ~max:64 f.name && String.length f.value <= 4096)
+       fields)
+    "a field's name is 1 to 64 bytes and its value at most 4 KiB"
 
 (* §2: every rule a login keeps; no reason names a value. *)
 let check_login (l : login) =
@@ -271,7 +291,15 @@ let check_login (l : login) =
   in
   let* () = check (String.length l.notes <= 65536) "notes is at most 64 KiB" in
   let* () = check (is_link l.totp) "totp is neither empty nor a record id" in
+  let* () = check_fields l.fields in
   Ok l
+
+(* §2.1 *)
+let check_note (n : note) =
+  let* () = check (between ~min:1 ~max:256 n.title) "title is 1 to 256 bytes" in
+  let* () = check (String.length n.notes <= 65536) "notes is at most 64 KiB" in
+  let* () = check_fields n.fields in
+  Ok n
 
 let is_rp_id s =
   s <> "" && (not (String.contains s ':')) && is_site ("https://" ^ s)
@@ -305,7 +333,19 @@ let check_passkey (k : passkey) =
 let b64 s = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet s
 
 let login_keys =
-  ["kind"; "title"; "urls"; "username"; "password"; "notes"; "totp"; "modified"]
+  [
+    "kind";
+    "title";
+    "urls";
+    "username";
+    "password";
+    "notes";
+    "totp";
+    "fields";
+    "modified";
+  ]
+
+let note_keys = ["kind"; "title"; "notes"; "fields"; "modified"]
 
 let passkey_keys =
   [
@@ -350,6 +390,47 @@ let binary members k =
     | Ok d when b64 d = v -> Ok d
     | _ -> Error (k ^ " is not base64url without padding")
 
+(* §2.2: absent is none. *)
+let fields_of members =
+  let wrong = Error "fields is not an array of {name, value, secret}" in
+  match List.assoc_opt "fields" members with
+    | None -> Ok []
+    | Some (`List l) ->
+        List.fold_right
+          (fun v acc ->
+            match (v, acc) with
+              | `Assoc f, Ok acc -> (
+                  match
+                    ( List.assoc_opt "name" f,
+                      List.assoc_opt "value" f,
+                      List.assoc_opt "secret" f )
+                  with
+                    | ( Some (`String name),
+                        Some (`String value),
+                        Some (`Bool secret) ) ->
+                        Ok ({ name; value; secret } :: acc)
+                    | _ -> wrong)
+              | _ -> wrong)
+          l (Ok [])
+    | Some _ -> wrong
+
+let fields_json fields =
+  if fields = [] then []
+  else
+    [
+      ( "fields",
+        `List
+          (List.map
+             (fun f ->
+               `Assoc
+                 [
+                   ("name", `String f.name);
+                   ("value", `String f.value);
+                   ("secret", `Bool f.secret);
+                 ])
+             fields) );
+    ]
+
 let unknown ~known members =
   List.filter (fun (k, _) -> not (List.mem k known)) members
 
@@ -360,6 +441,7 @@ let login_of members =
   let* password = str members "password" in
   let* notes = str members "notes" in
   let* totp = str members "totp" in
+  let* fields = fields_of members in
   let* modified = int members "modified" in
   check_login
     {
@@ -369,8 +451,23 @@ let login_of members =
       password;
       notes;
       totp;
+      fields;
       modified;
       unknown = unknown ~known:login_keys members;
+    }
+
+let note_of members =
+  let* title = str members "title" in
+  let* notes = str members "notes" in
+  let* fields = fields_of members in
+  let* modified = int members "modified" in
+  check_note
+    {
+      title;
+      notes;
+      fields;
+      modified;
+      unknown = unknown ~known:note_keys members;
     }
 
 let passkey_of members =
@@ -409,9 +506,11 @@ let of_string s =
           match List.assoc_opt "kind" members with
             | Some (`String "login") ->
                 Result.map (fun l -> Login l) (login_of members)
+            | Some (`String "note") ->
+                Result.map (fun n -> Note n) (note_of members)
             | Some (`String "passkey") ->
                 Result.map (fun k -> Passkey k) (passkey_of members)
-            | _ -> Error "kind is neither login nor passkey")
+            | _ -> Error "kind is not login, note or passkey")
       | _ -> Error "not a JSON object")
 
 let to_json = function
@@ -425,9 +524,20 @@ let to_json = function
            ("password", `String l.password);
            ("notes", `String l.notes);
            ("totp", `String l.totp);
-           ("modified", `Int l.modified);
          ]
+        @ fields_json l.fields
+        @ [("modified", `Int l.modified)]
         @ l.unknown)
+  | Note n ->
+      `Assoc
+        ([
+           ("kind", `String "note");
+           ("title", `String n.title);
+           ("notes", `String n.notes);
+         ]
+        @ fields_json n.fields
+        @ [("modified", `Int n.modified)]
+        @ n.unknown)
   | Passkey k ->
       `Assoc
         ([
@@ -453,10 +563,14 @@ let to_string t =
 (* §3 *)
 let key_fields = function
   | Login l -> "login\000" ^ l.password
+  | Note n -> "note\000" ^ n.title ^ "\000" ^ n.notes
   | Passkey k ->
       "passkey\000" ^ b64 k.credential_id ^ "\000" ^ b64 k.private_key
 
-let modified = function Login l -> l.modified | Passkey k -> k.modified
+let modified = function
+  | Login l -> l.modified
+  | Note n -> n.modified
+  | Passkey k -> k.modified
 
 let alphanumeric =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -614,6 +728,7 @@ let import_csv text =
                       password;
                       notes = get notes_column;
                       totp = "";
+                      fields = [];
                       modified = 0;
                       unknown = [];
                     }

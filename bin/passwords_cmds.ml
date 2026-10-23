@@ -102,15 +102,60 @@ let secret_args ~no_symbols ~ask_if_absent secret =
         ]
     | None -> []
 
+(* §2.2: [--field NAME=VALUE] and [--secret-field NAME], its value asked
+   without echo; [None] when neither is given, so an edit keeps the list. *)
+let fields_arg =
+  let plain =
+    Arg.(
+      value & opt_all string []
+      & info ["field"] ~docv:"NAME=VALUE"
+          ~doc:
+            "A custom field; repeat for several. On edit, the list replaces \
+             the fields.")
+  and secret =
+    Arg.(
+      value & opt_all string []
+      & info ["secret-field"] ~docv:"NAME"
+          ~doc:
+            "A secret custom field, its value asked without echo; repeat for \
+             several.")
+  in
+  Term.(const (fun plain secret -> (plain, secret)) $ plain $ secret)
+
+let fields_json (plain, secret) =
+  if plain = [] && secret = [] then []
+  else (
+    let field ~secret name value =
+      `Assoc [("name", s name); ("value", s value); ("secret", `Bool secret)]
+    in
+    [
+      ( "fields",
+        `List
+          (List.map
+             (fun nv ->
+               match String.index_opt nv '=' with
+                 | Some i ->
+                     field ~secret:false (String.sub nv 0 i)
+                       (String.sub nv (i + 1) (String.length nv - i - 1))
+                 | None -> Fail.invalid "a field is NAME=VALUE, not %s" nv)
+             plain
+          @ List.map
+              (fun name ->
+                field ~secret:true name
+                  (Vault_cmds.read_passphrase ~prompt:name ~stdin:false ()))
+              secret) );
+    ])
+
 let optional fields =
   List.filter_map (fun (k, v) -> Option.map (fun v -> (k, s v)) v) fields
 
 let add_cmd =
-  verb "add" ~doc:"Add a login."
+  verb "add" ~doc:"Add a login, or a note with --note."
     Term.(
       const
         (fun
           title
+          note
           urls
           username
           password
@@ -119,15 +164,19 @@ let add_cmd =
           notes
           otpauth
           totp
+          fields
           ?name
           config
         ->
           let d = write_domain ?name config in
           let reply =
             call d "add"
-              ([("title", s title); ("urls", `List (List.map s urls))]
-              @ secret_args ~no_symbols ~ask_if_absent:true
-                  (secret_of ~password ~generate)
+              ((if note then [("kind", s "note"); ("title", s title)]
+                else
+                  [("title", s title); ("urls", `List (List.map s urls))]
+                  @ secret_args ~no_symbols ~ask_if_absent:true
+                      (secret_of ~password ~generate))
+              @ fields_json fields
               @ optional
                   [
                     ("username", username);
@@ -143,6 +192,12 @@ let add_cmd =
           required
           & opt (some string) None
           & info ["title"] ~docv:"TEXT" ~doc:"The login's title.")
+      $ Arg.(
+          value & flag
+          & info ["note"]
+              ~doc:
+                "A note (§2.1): a title, notes and fields, with no site or \
+                 password.")
       $ urls_arg
       $ opt_string "username" ~doc:"The username."
       $ password_arg $ generate_arg $ no_symbols
@@ -151,7 +206,8 @@ let add_cmd =
           ~doc:
             "An otpauth://totp/ URI to add and link; - reads it from standard \
              input."
-      $ opt_string "totp" ~doc:"A TOTP record id to link, or empty to unlink.")
+      $ opt_string "totp" ~doc:"A TOTP record id to link, or empty to unlink."
+      $ fields_arg)
 
 let list_cmd =
   verb "list" ~doc:"List logins and passkeys; no password."
@@ -171,6 +227,8 @@ let list_cmd =
                             match member row "code" with
                               | Some (`Bool true) -> "(code)"
                               | _ -> ""))
+                  else if f "kind" = "note" then
+                    say "%s %s note %s" (dname d) (f "id") (f "title")
                   else
                     say "%s %s passkey %s %s" (dname d) (f "id") (f "rpId")
                       (f "userName"))
@@ -191,19 +249,45 @@ let id_arg =
 let get_cmd =
   verb "get"
     ~doc:
-      "Print a login's password alone, newline-terminated, or a passkey's \
-       fields."
+      "Print a login's password alone, newline-terminated, a note's notes, a \
+       field's value with --field, or a passkey's fields."
     Term.(
-      const (fun id ?name config ->
+      const (fun id wanted ?name config ->
           let reply = call (holder ?name config id) "get" [("id", s id)] in
           let f k = Option.value ~default:"" (field (`Assoc reply) k) in
-          if f "kind" = "login" then print_endline (f "password")
-          else
-            List.iter
-              (fun k -> say "%s %s" k (f k))
-              ["rpId"; "userName"; "userDisplayName"; "credentialId"; "login"];
-          0)
-      $ id_arg)
+          match wanted with
+            | Some wanted -> (
+                let value =
+                  match member (`Assoc reply) "fields" with
+                    | Some (`List l) ->
+                        List.find_map
+                          (fun j ->
+                            if field j "name" = Some wanted then field j "value"
+                            else None)
+                          l
+                    | _ -> None
+                in
+                match value with
+                  | Some v ->
+                      print_endline v;
+                      0
+                  | None -> Fail.absent "no field %s" wanted)
+            | None ->
+                if f "kind" = "login" then print_endline (f "password")
+                else if f "kind" = "note" then print_endline (f "notes")
+                else
+                  List.iter
+                    (fun k -> say "%s %s" k (f k))
+                    [
+                      "rpId";
+                      "userName";
+                      "userDisplayName";
+                      "credentialId";
+                      "login";
+                    ];
+                0)
+      $ id_arg
+      $ opt_string "field" ~doc:"Print the value of the field NAME instead.")
 
 let generate_cmd =
   verb "generate"
@@ -245,6 +329,7 @@ let edit_cmd =
           otpauth
           totp
           login
+          fields
           ?name
           config
         ->
@@ -254,6 +339,7 @@ let edit_cmd =
                @ (if urls = [] then [] else [("urls", `List (List.map s urls))])
                @ secret_args ~no_symbols ~ask_if_absent:false
                    (secret_of ~password ~generate)
+               @ fields_json fields
                @ optional
                    [
                      ("title", title);
@@ -272,7 +358,8 @@ let edit_cmd =
       $ opt_string "notes" ~doc:"Notes."
       $ opt_string "otpauth" ~doc:"An otpauth://totp/ URI to add and link."
       $ opt_string "totp" ~doc:"A TOTP record id to link, or empty to unlink."
-      $ opt_string "login" ~doc:"For a passkey: the login it belongs with.")
+      $ opt_string "login" ~doc:"For a passkey: the login it belongs with."
+      $ fields_arg)
 
 let remove_cmd =
   verb "remove" ~doc:"Remove a login or a passkey."
