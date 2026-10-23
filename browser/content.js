@@ -18,8 +18,10 @@
   const shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `<style>
     :host { all: initial; }
-    .icon { position: fixed; width: 18px; height: 18px; cursor: pointer; z-index: 2147483647;
-            background: url("${ICON}") center / 16px no-repeat; border: 0; padding: 0; }
+    .icon { position: fixed; width: 22px; height: 22px; cursor: pointer; z-index: 2147483646;
+            background: url("${ICON}") center / 22px no-repeat; border: 0; padding: 0; border-radius: 6px;
+            box-shadow: 0 1px 3px #0004; }
+    .icon:hover { box-shadow: 0 0 0 2px #2563eb55, 0 1px 3px #0004; }
     .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px;
             background: Canvas; color: CanvasText; border: 1px solid #8884; border-radius: 8px;
             box-shadow: 0 4px 16px #0003; font: 13px system-ui, sans-serif; padding: 4px; }
@@ -29,10 +31,8 @@
     .row small { display: block; opacity: .65; margin-left: 24px; }
     .row > svg, .row > img { vertical-align: -3px; margin-right: 8px; }
     .note { padding: 6px 8px; opacity: .7; }
-  </style><button class="icon" hidden title="tsync"></button><div class="menu" hidden></div>`;
-  const icon = shadow.querySelector(".icon");
+  </style><div class="menu" hidden></div>`;
   const menu = shadow.querySelector(".menu");
-  let target = null;
 
   // §6: a page's stylesheet cannot fade, hide or reshape the overlay; inline
   // !important wins over it.
@@ -50,8 +50,8 @@
       node.style.left = `${r.left}px`;
       node.style.top = `${r.bottom + 2}px`;
     } else {
-      node.style.left = `${r.right - 22}px`;
-      node.style.top = `${r.top + (r.height - 18) / 2}px`;
+      node.style.left = `${r.right - 28}px`;
+      node.style.top = `${r.top + (r.height - 22) / 2}px`;
     }
   }
 
@@ -89,7 +89,48 @@
         else newPassword.delete(input);
       });
     }
+    mark();
   }
+
+  // §3.1: every field found carries its icon from the start, as long as it is drawn.
+  const badges = new Map();
+
+  function badge(el) {
+    const b = document.createElement("button");
+    b.className = "icon";
+    b.title = "tsync";
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", (e) => seen(e) && open(el));
+    shadow.insertBefore(b, menu);
+    return b;
+  }
+
+  function mark() {
+    for (const [el, b] of badges) {
+      if (!kinds.has(el) || !el.isConnected) {
+        b.remove();
+        badges.delete(el);
+      }
+    }
+    for (const el of document.querySelectorAll("input")) {
+      if (kinds.has(el) && !badges.has(el)) badges.set(el, badge(el));
+    }
+    follow();
+  }
+
+  // ponytail: a field clipped by a scrolled container keeps its icon over the clip; hide by intersection if pages show it.
+  function follow() {
+    for (const [el, b] of badges) {
+      const r = el.getBoundingClientRect();
+      b.hidden = r.width < 48 || r.height < 16 || r.bottom < 0 || r.top > innerHeight;
+      if (!b.hidden) place(el, b, false);
+    }
+  }
+
+  let following = 0;
+  const refollow = () => {
+    if (!following) following = requestAnimationFrame(() => { following = 0; follow(); });
+  };
 
   let scanning = null;
   const rescan = () => {
@@ -99,17 +140,9 @@
   new MutationObserver(rescan).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["type", "autocomplete", "hidden", "style", "class"] });
   scan();
 
-  document.addEventListener("focusin", (e) => {
-    const el = e.target;
-    if (!(el instanceof HTMLInputElement) || !kinds.has(el)) return;
-    target = el;
-    place(el, icon, false);
-    icon.hidden = false;
-  }, true);
-  document.addEventListener("focusout", () => setTimeout(() => {
-    if (!shadow.activeElement && menu.hidden) icon.hidden = true;
-  }, 150), true);
-  window.addEventListener("scroll", () => { icon.hidden = true; menu.hidden = true; }, true);
+  window.addEventListener("scroll", () => { menu.hidden = true; refollow(); }, true);
+  window.addEventListener("resize", refollow);
+  document.addEventListener("focusin", refollow, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; }, true);
 
   // --- filling (§3.2): on a gesture only -------------------------------------
@@ -127,8 +160,6 @@
     return true;
   }
 
-  icon.addEventListener("mousedown", (e) => e.preventDefault());
-  icon.addEventListener("click", (e) => seen(e) && target && open(target));
 
   function row(title, detail, action, look) {
     const b = document.createElement("button");
