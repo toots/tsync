@@ -116,7 +116,7 @@ let unlock_cmd =
           let passphrase = read_passphrase ~stdin () in
           (* vault §6: only a machine not enrolled is asked for the secret key. *)
           let secret_key =
-            if (ask dom P.Vault_status).enrolled then None
+            if (ask dom (P.Vault_status `Auto)).enrolled then None
             else Some (read_passphrase ~prompt:"secret key" ~stdin ())
           in
           ask dom (P.Vault_unlock { passphrase; secret_key });
@@ -269,7 +269,7 @@ let delete_cmd =
 let status_cmd =
   verb "status" ~doc:"Whether the vault exists and is unlocked, and its slots."
     (Term.const (fun dom ->
-         let s = ask dom P.Vault_status in
+         let s = ask dom (P.Vault_status `Auto) in
          say "vault: %s"
            (match s.vault with
              | `Absent -> "none"

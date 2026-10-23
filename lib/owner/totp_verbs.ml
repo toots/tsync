@@ -42,8 +42,8 @@ let same (a : Totp.t) (b : Totp.t) =
 let contains ~sub s =
   Text.contains (String.lowercase_ascii s) (String.lowercase_ascii sub)
 
-let list ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+let list ?pull ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
+  let ctx = context ?pull ~domain ~engine ~lazy_tree t in
   let ok, corrupt = records ctx in
   let unix_time = Int64.of_float (Unix.time ()) in
   let rows =

@@ -302,11 +302,11 @@ type _ request =
       (** the new secret key, when one was asked for *)
   | Vault_delete : string -> string option request
       (** the domain's name, to confirm; why a keystore entry was left *)
-  | Vault_status : vault_status request
+  | Vault_status : pull -> vault_status request
   | Totp_add : [ `Uri of string | `Secret of totp_secret ] -> string request
       (** a URI, or a secret with its issuer and account (totp §5.3); the new
           record's id *)
-  | Totp_list : string option -> totp_listing request
+  | Totp_list : { filter : string option; pull : pull } -> totp_listing request
   | Totp_code : string -> totp_code request  (** a record id *)
   | Totp_rename : {
       id : string;
@@ -371,7 +371,7 @@ let action : type a. a request -> string = function
   | Vault_appearance _ -> "vault_appearance"
   | Vault_passphrase _ -> "vault_passphrase"
   | Vault_delete _ -> "vault_delete"
-  | Vault_status -> "vault_status"
+  | Vault_status _ -> "vault_status"
   | Vault_kit _ -> "vault_kit"
   | Vault_machines _ -> "vault_machines"
   | Vault_rekey _ -> "vault_rekey"
@@ -467,14 +467,29 @@ let target_of j =
         Child { parent_ref; name = required j "name" }
     | None, None, None -> Fail.invalid "ref, rel or parentRef is required"
 
+let pull_fields : pull -> (string * Yojson.Safe.t) list = function
+  | `Auto -> []
+  | `Now -> [("pull", `String "now")]
+  | `Never -> [("pull", `String "never")]
+  | `Background -> [("pull", `String "background")]
+
+let pull_of j : pull =
+  match str j "pull" with
+    | None -> `Auto
+    | Some "now" -> `Now
+    | Some "never" -> `Never
+    | Some "background" -> `Background
+    | Some p -> Fail.invalid "unknown pull %S" p
+
 let destination_of j =
   { parent_ref = required j "parentRef"; name = required j "name" }
 
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
   | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
-  | Stop | Share_clear_cache | Vault_status ->
+  | Stop | Share_clear_cache ->
       []
+  | Vault_status pull -> pull_fields pull
   | Totp_export p | Vault_init p -> [("passphrase", `String p)]
   | Extension e -> e.args
   | Vault_unlock r ->
@@ -507,7 +522,8 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
         ("issuer", `String s.issuer);
         ("account", `String s.account);
       ]
-  | Totp_list filter -> opt "filter" (fun f -> `String f) filter
+  | Totp_list r ->
+      opt "filter" (fun f -> `String f) r.filter @ pull_fields r.pull
   | Totp_rename r ->
       (("id", `String r.id) :: opt "issuer" (fun i -> `String i) r.issuer)
       @ opt "account" (fun a -> `String a) r.account
@@ -520,16 +536,11 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ opt "limit" (fun l -> `Int l) r.limit
   | Changes_since r ->
       ("arg", `String r.anchor) :: opt "limit" (fun l -> `Int l) r.limit
-  | List_dir r -> (
+  | List_dir r ->
       target_fields r.dir
       @ opt "after" (fun a -> `String a) r.after
       @ opt "limit" (fun l -> `Int l) r.limit
-      @
-        match r.pull with
-        | `Auto -> []
-        | `Now -> [("pull", `String "now")]
-        | `Never -> [("pull", `String "never")]
-        | `Background -> [("pull", `String "background")])
+      @ pull_fields r.pull
   | Ensure_cached r -> target_fields r.item @ [("dest", `String r.dest)]
   | Fetch_range r ->
       target_fields r.item
@@ -584,13 +595,7 @@ let decode j =
                dir = target_of j;
                after = str j "after";
                limit = int j "limit";
-               pull =
-                 (match str j "pull" with
-                   | None -> `Auto
-                   | Some "now" -> `Now
-                   | Some "never" -> `Never
-                   | Some "background" -> `Background
-                   | Some p -> Fail.invalid "unknown pull %S" p);
+               pull = pull_of j;
              })
     | "list_all" ->
         Request (List_all { after = str j "after"; limit = int j "limit" })
@@ -745,7 +750,7 @@ let decode j =
                new_secret_key = flag j "newSecretKey";
              })
     | "vault_delete" -> Request (Vault_delete (required j "confirm"))
-    | "vault_status" -> Request Vault_status
+    | "vault_status" -> Request (Vault_status (pull_of j))
     | "totp_add" -> (
         match (str j "uri", str j "secret") with
           | Some uri, None -> Request (Totp_add (`Uri uri))
@@ -759,7 +764,8 @@ let decode j =
                         account = Option.value ~default:"" (str j "account");
                       }))
           | _ -> Fail.invalid "totp_add takes a uri or a secret, not both")
-    | "totp_list" -> Request (Totp_list (str j "filter"))
+    | "totp_list" ->
+        Request (Totp_list { filter = str j "filter"; pull = pull_of j })
     | "totp_rename" ->
         Request
           (Totp_rename
@@ -1009,7 +1015,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           ]
     | Vault_passphrase _ -> (
         match reply with Some s -> ok (secret_fields s) | None -> ok [])
-    | Vault_status ->
+    | Vault_status _ ->
         let strings l = `List (List.map (fun s -> `String s) l) in
         ok
           ([
@@ -1303,7 +1309,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           | _ -> [])
     | Vault_passphrase _ ->
         if member j "secretKey" = None then None else Some (secret_of j)
-    | Vault_status ->
+    | Vault_status _ ->
         let strings k =
           match member j k with
             | Some (`List l) ->

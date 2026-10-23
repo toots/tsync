@@ -44,7 +44,6 @@ data class Registration(val credentialId: String, val attestationObject: String,
 class Passwords(private val client: Client) {
     private fun action(name: String) = JSONObject().put("action", "passwords_$name")
 
-    private fun JSONObject.pull(pull: Pull) = apply { pull.wire?.let { put("pull", it) } }
 
     /** [certs]: an app's signing certificates, so the owner offers its verified websites' logins (passwords §4.3). */
     fun list(site: String? = null, filter: String? = null, pull: Pull = Pull.DEFAULT, certs: List<String> = emptyList()): PasswordRecords {

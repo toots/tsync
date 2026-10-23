@@ -666,6 +666,21 @@ let () =
   timed "list, pull auto" [];
   wait_stale ();
   timed "list, pull background" [s "pull" "background"];
+  (* android-app §5.1: the vault screens' first read answers from the last
+     view at once. *)
+  let read label verb extra =
+    wait_stale ();
+    let started = Unix.gettimeofday () in
+    let r = action verb extra in
+    let took = Unix.gettimeofday () -. started in
+    p "  %-34s %s%s in %s" label (outcome r)
+      (if field r "outdated" = Some (`Bool true) then ", outdated" else "")
+      (if took < 1. then "under a second" else "a second or more")
+  in
+  read "vault status, pull auto" "vault_status" [];
+  read "vault status, pull background" "vault_status" [s "pull" "background"];
+  read "codes, pull auto" "totp_list" [];
+  read "codes, pull background" "totp_list" [s "pull" "background"];
   Atomic.set mode `Up;
   p "== a record whose body the phone lacks (extensions README §4.1)";
   (* The peer has no K: it writes a body that differs from every one the

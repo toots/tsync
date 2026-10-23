@@ -832,10 +832,10 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
         E.delete (Names.join appearance_folder f.name))
     (files engine appearance_folder)
 
-let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
+let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
   restore ~domain ~engine t;
-  read_current engine ~lazy_tree t;
+  read_current ?pull engine ~lazy_tree t;
   let found = read ~domain engine in
   let base =
     {
