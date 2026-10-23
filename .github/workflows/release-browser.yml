@@ -1,0 +1,61 @@
+name: release-browser
+
+# Builds the browser extension's Chrome Web Store zip on every pull request and
+# push to rewrite, publishing nothing (10 §1). On main it runs after the gate,
+# `test`, passes, and puts the zip on the nightly release; uploading it to the
+# store is done by hand (passwords/browser §2).
+on:
+  push:
+    branches: [rewrite]
+  pull_request:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-browser-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  zip:
+    # 10 §2: only a gate run for a push to this repository releases.
+    if: >-
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RUN_NUMBER: ${{ github.run_number }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Build and check the zip
+        run: ./scripts/browser_zip.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-browser-extension
+          path: dist/tsync-browser-extension.zip
+
+      - if: env.PUBLISH == 'true'
+        uses: ./.github/actions/publish-nightly
+        with:
+          files: dist/tsync-browser-extension.zip
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}

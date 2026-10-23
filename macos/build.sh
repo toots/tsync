@@ -193,11 +193,6 @@ check_profile() {
 
 # The AutoFill entitlement is restricted: a build without its profile would
 # carry an extension the system refuses, so it carries none (passwords/macos §1).
-# passwords/browser §2: the extension the user loads unpacked, sealed with the app.
-EXTENSION="$APP/Contents/Resources/browser-extension"
-rm -rf "$EXTENSION"
-mkdir -p "$EXTENSION"
-(cd "$MACOS_DIR/../browser" && tar cf - --exclude test .) | (cd "$EXTENSION" && tar xf -)
 CREDENTIALS_APPEX="$APP/Contents/PlugIns/TsyncCredentials.appex"
 if [[ -n "${PROFILE_CREDENTIALS:-}" ]]; then
     check_profile PROFILE_CREDENTIALS "$PROFILE_CREDENTIALS" \

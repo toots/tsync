@@ -25,7 +25,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 |---|---|---|---|
 | `test`, the gate (§3) | every push, every pull request, the merge queue | merging, every release | nothing |
 | `conformance` (§3.3) | manual dispatch | nothing automatically | nothing |
-| `release-deb`, `release-rpm`, `release-macos`, `release-android` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
+| `release-deb`, `release-rpm`, `release-macos`, `release-android`, `release-browser` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
 | `test-android-device` (§3.4) | manual dispatch; a pull request labelled `android-device` | nothing automatically | nothing |
 | `release-repo` | a package release publishing; manual dispatch on `main` | — | the apt and dnf repositories |
 
@@ -133,6 +133,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 | `.rpm` | the latest Fedora release, amd64 and arm64, in containers | as for `.deb` |
 | `tsync.pkg` | macOS, Apple silicon | check the package signature and that Gatekeeper accepts the notarized package |
 | `tsync-arm64-v8a.apk` | Linux, cross-compiled | check that the package holds the core library for its ABI, aligned for 16 KB pages, and that its signer is the tsync key (§5.4) |
+| `tsync-browser-extension.zip` | Linux | check that the manifest carries no `key` and the build's version, that no test is packed and that every script parses; uploaded to the Chrome Web Store by hand ([passwords/browser §2](extensions/passwords/browser.md#2-installing)) |
 
 ### 5.1 The nightly release
 
