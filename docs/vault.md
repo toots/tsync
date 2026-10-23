@@ -57,6 +57,18 @@ tsync vault lock --forget   # also forget the secret key: the next unlock asks f
 
 While a machine is unlocked, any program running as you on it can ask tsync for the vault's contents, as with any password manager's unlocked state. Lock the machines you leave unattended.
 
+**Locking on its own.** A domain can lock its vault without being asked, which is off unless you turn it on. Give the domain a `vaultLock` in the config with any of:
+
+```json
+"vaultLock": {"idleMinutes": 15, "onScreenLock": true, "maxHours": 12}
+```
+
+- `idleMinutes`: no code, password or passkey used for that long. A status or a listing that shows no secret does not count as use.
+- `onScreenLock`: the screen locks or the machine goes to sleep, once something on the machine reports it to tsync.
+- `maxHours`: that long after unlocking, however much the vault is used.
+
+The server can set one for everyone behind it, and the strictest of yours and the server's applies: you can make it lock sooner, never later. While a policy is on, the key is never kept in the system keychain, so a restart leaves the vault locked; the machine stays set up and asks only for the passphrase. `tsync vault status` shows the policy in force, and why the vault was locked last.
+
 ## Changing the passphrase
 
 ```bash

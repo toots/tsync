@@ -29,6 +29,20 @@ a larger entry             refused: F is configured with maxEntryCommands 4096, 
 another policy             refused: F is configured with symlinks keep and its main states follow
 another settle             refused: F is configured with projectSettle 500 s and its main states 420 s
 
+== the vault's auto-lock against what the main states (05 rule 7)
+none                           {} from 
+the domain's own               {"idleMinutes":30,"onScreenLock":true} from idleMinutes=config,onScreenLock=config
+the main's                     {"idleMinutes":10,"maxHours":12} from idleMinutes=main,maxHours=main
+stricter than the main         {"idleMinutes":5} from idleMinutes=config
+looser than the main           {"idleMinutes":10,"onScreenLock":true,"maxHours":12} from idleMinutes=main,onScreenLock=config,maxHours=main
+an empty policy                {} from 
+idle of 0                      refused: domains[0].vaultLock: idleMinutes: expected 1 to 1440
+idle over a day                refused: domains[0].vaultLock: idleMinutes: expected 1 to 1440
+hours as text                  refused: domains[0].vaultLock: maxHours: expected 1 to 720
+screen as 1                    refused: domains[0].vaultLock: onScreenLock: expected a bool
+not an object                  refused: domains[0].vaultLock: expected an object
+an ill-formed stated policy    true
+
 == behind a server, a timing left out is the server's
 a lease above the default quarantine accepted
 two of them out of order           refused: domains[0]: the projection timings in force must satisfy projectLease < projectQuarantine < projectSettle, and are 400, 300 and 600

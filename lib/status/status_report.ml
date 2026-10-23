@@ -119,6 +119,11 @@ let sources_to_yojson, sources_of_yojson =
                l)
       | _ -> None)
 
+type vault_lock = Vault_lock.t
+
+let vault_lock_to_yojson = Vault_lock.to_json
+let vault_lock_of_yojson = Vault_lock.of_json
+
 type settings = {
   versioning : bool;
   symlinks : symlinks;
@@ -137,6 +142,7 @@ type settings = {
   project_width : int; [@key "projectWidth"] [@default 8]
   projector : string option; [@default None]
   extensions : string list; [@default []]
+  vault_lock : vault_lock option; [@key "vaultLock"] [@default None]
   domain_wide : sources; [@key "domainWide"] [@default []]
 }
 [@@deriving yojson { strict = false }]

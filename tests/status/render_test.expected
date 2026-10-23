@@ -43,6 +43,7 @@ Domain Files
   settings         versioning on, symlinks follow, chunk 4.0 MiB, cache chunk 16.0 MiB
   advanced         settle 420 s (from the main), entry 1024, batch delay 2 s
   extensions       totp
+  vault lock       10 min idle, screen lock (from the main)
   projection       by the main's server (71bdd2de)
   concurrency      1 upload, 1 chunk buffer, 1 download
   cache            1088 chunks, 9.5 GiB of 200.0 GiB, 316.4 MiB pinned

@@ -97,7 +97,7 @@ let lock_cmd =
   verb "lock" ~doc:"Forget the domain's vault key on this machine."
     Term.(
       const (fun forget dom ->
-          ask dom (P.Vault_lock forget);
+          ask dom (P.Vault_lock (if forget then `Forget else `Lock));
           say "locked";
           0)
       $ forget)
@@ -164,6 +164,40 @@ let status_cmd =
              (if s.enrolled then "enrolled"
               else "not enrolled (needs the secret key)");
          Option.iter (say "keystore not used: %s") s.keystore_error;
+         Option.iter
+           (fun (a : P.auto_lock) ->
+             let from part =
+               match List.assoc_opt part a.from with
+                 | Some "main" -> " (from the main)"
+                 | _ -> ""
+             in
+             let parts =
+               List.filter_map Fun.id
+                 [
+                   Option.map
+                     (fun n ->
+                       Printf.sprintf "after %d min idle%s" n
+                         (from "idleMinutes"))
+                     a.policy.idle_minutes;
+                   (if a.policy.on_screen_lock then
+                      Some ("on screen lock" ^ from "onScreenLock")
+                    else None);
+                   Option.map
+                     (fun n ->
+                       Printf.sprintf "%d h after unlock%s" n (from "maxHours"))
+                     a.policy.max_hours;
+                 ]
+             in
+             say "auto-lock: %s" (String.concat ", " parts))
+           s.auto_lock;
+         Option.iter
+           (fun r ->
+             say "locked by auto-lock: %s"
+               (match r with
+                 | `Idle -> "idle"
+                 | `Screen -> "screen locked"
+                 | `Age -> "unlocked too long"))
+           s.locked_by;
          List.iter (fun (kind, n) -> say "slots: %d %s" n kind) s.slots;
          List.iter
            (say "unusable slot: %s (past the readers' limits)")

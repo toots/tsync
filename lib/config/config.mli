@@ -45,6 +45,7 @@ type domain = {
   project_lease : float option;
   project_quarantine : float option;
   project_settle : float option;
+  vault_lock : Vault_lock.t option;
 }
 
 val default_symlinks : [ `Keep | `Follow | `Skip ]
@@ -67,6 +68,16 @@ val sources :
     configured list. Unknown names are dropped. *)
 val extensions_in_force :
   domain -> Tsync_store.Store.domain_settings option -> string list
+
+(** The vault's auto-lock in force (05 §2.1 rule 7): the strictest of the
+    configured policy and the main's. *)
+val vault_lock_in_force :
+  domain -> Tsync_store.Store.domain_settings option -> Vault_lock.t
+
+(** For each part of {!vault_lock_in_force}: ["config"] when the domain's own
+    value is in force, else ["main"]. *)
+val vault_lock_sources :
+  domain -> Tsync_store.Store.domain_settings option -> (string * string) list
 
 (** The advanced settings and the symlink policy in force given what the main
     states: the main's values where it states them. INVALID naming both values

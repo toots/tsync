@@ -170,3 +170,30 @@
  (alias runtest)
  (action
   (diff vault_test.expected vault_test.output)))
+
+(executable
+ (name autolock_test)
+ (modules autolock_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  autolock_test.output
+  (run ./autolock_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff autolock_test.expected autolock_test.output)))
+
+(rule
+ (alias runtest-serial)
+ (action
+  (diff autolock_test.expected autolock_test.output)))

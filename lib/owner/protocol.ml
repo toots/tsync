@@ -117,6 +117,10 @@ type appearance_change = {
   set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
 }
 
+(** vault §6.2: the auto-lock policy in force, and where each of its parts comes
+    from ([config] or [main]), by member name. *)
+type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -130,6 +134,8 @@ type vault_status = {
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
   pulled_at : float option;  (** of that view *)
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
+  auto_lock : auto_lock option;  (** none without a policy *)
+  locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -230,7 +236,9 @@ type _ request =
       secret_key : string option;
     }
       -> unit request
-  | Vault_lock : bool -> unit request  (** [true] also forgets the secret key *)
+  | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
+      (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
+          a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
   | Vault_passphrase : {
       passphrase : string;
@@ -376,7 +384,9 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Vault_unlock r ->
       ("passphrase", `String r.passphrase)
       :: opt "secretKey" (fun k -> `String k) r.secret_key
-  | Vault_lock forget -> if forget then [("forget", `Bool true)] else []
+  | Vault_lock `Lock -> []
+  | Vault_lock `Forget -> [("forget", `Bool true)]
+  | Vault_lock `Screen -> [("reason", `String "screen")]
   | Vault_appearance c ->
       let field k encode = function
         | `Keep -> []
@@ -577,7 +587,12 @@ let decode j =
                passphrase = required j "passphrase";
                secret_key = str j "secretKey";
              })
-    | "vault_lock" -> Request (Vault_lock (flag j "forget"))
+    | "vault_lock" ->
+        Request
+          (Vault_lock
+             (if str j "reason" = Some "screen" then `Screen
+              else if flag j "forget" then `Forget
+              else `Lock))
     | "vault_appearance" ->
         (* §8.1: an absent member is kept, null clears it. *)
         let change k decode =
@@ -783,6 +798,28 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ opt "cached" (fun c -> `String c) reply.cached
           @ opt "keystoreError" (fun e -> `String e) reply.keystore_error
           @ [("enrolled", `Bool reply.enrolled)]
+          @ opt "autoLock"
+              (fun (a : auto_lock) ->
+                match Vault_lock.to_json a.policy with
+                  | `Assoc l ->
+                      `Assoc
+                        (l
+                        @ [
+                            ( "from",
+                              `Assoc
+                                (List.map (fun (k, v) -> (k, `String v)) a.from)
+                            );
+                          ])
+                  | j -> j)
+              reply.auto_lock
+          @ opt "lockedBy"
+              (fun r ->
+                `String
+                  (match r with
+                    | `Idle -> "idle"
+                    | `Screen -> "screen"
+                    | `Age -> "age"))
+              reply.locked_by
           @ (if reply.outdated then [("outdated", `Bool true)] else [])
           @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at
           @ opt "appearance"
@@ -973,6 +1010,29 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           copies = strings "copies";
           keystore_error = str j "keystoreError";
           enrolled = flag j "enrolled";
+          auto_lock =
+            Option.bind (member j "autoLock") (fun a ->
+                match Vault_lock.of_json a with
+                  | Ok policy ->
+                      Some
+                        {
+                          policy;
+                          from =
+                            (match member a "from" with
+                              | Some (`Assoc l) ->
+                                  List.filter_map
+                                    (function
+                                      | k, `String v -> Some (k, v) | _ -> None)
+                                    l
+                              | _ -> []);
+                        }
+                  | Error _ -> None);
+          locked_by =
+            (match str j "lockedBy" with
+              | Some "idle" -> Some `Idle
+              | Some "screen" -> Some `Screen
+              | Some "age" -> Some `Age
+              | _ -> None);
           outdated = flag j "outdated";
           pulled_at = Option.map float_of_int (int j "pulledAt");
           appearance =

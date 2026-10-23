@@ -262,6 +262,7 @@ let () =
                   entry_commands = 256;
                   projector = Some projector;
                   extensions = [];
+                  vault_lock = Tsync_core.Vault_lock.none;
                 }
               root "A"
           in
@@ -298,6 +299,7 @@ let () =
               entry_commands = 256;
               projector = None;
               extensions = ["passwords"];
+              vault_lock = Tsync_core.Vault_lock.none;
             }
           in
           let extensions (module E : Engine.S) =
@@ -890,6 +892,7 @@ let () =
                   entry_commands = 256;
                   projector = Some (String.make 32 'f');
                   extensions = [];
+                  vault_lock = Tsync_core.Vault_lock.none;
                 }
               root "A"
           in
@@ -978,6 +981,7 @@ let () =
                   entry_commands = 256;
                   projector = Some (String.make 32 'f');
                   extensions = [];
+                  vault_lock = Tsync_core.Vault_lock.none;
                 }
               root "A"
           in

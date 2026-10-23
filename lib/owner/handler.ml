@@ -806,7 +806,9 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_init passphrase -> vault Vault.init passphrase
     | Vault_unlock r ->
         vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase
-    | Vault_lock forget -> vault (Vault.lock ~forget_secret_key:forget)
+    | Vault_lock `Screen -> vault Vault.screen_locked
+    | Vault_lock ((`Lock | `Forget) as how) ->
+        vault (Vault.lock ~forget_secret_key:(how = `Forget))
     | Vault_appearance c ->
         vault (Vault.set_appearance ~color:c.set_color ~icon:c.set_icon)
     | Vault_passphrase r ->
