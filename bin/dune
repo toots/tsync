@@ -28,5 +28,5 @@
   (select
    platform.ml
    from
-   (tsync_secret_service tsync_logind -> platform.linux.ml)
+   (tsync_secret_service tsync_logind tsync_polkit -> platform.linux.ml)
    (-> platform.none.ml))))

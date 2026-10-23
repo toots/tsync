@@ -514,6 +514,12 @@ CAMLprim value tsync_dbus_close(value _connection) {
   return Val_unit;
 }
 
+CAMLprim value tsync_dbus_unique_name(value _connection) {
+  CAMLparam1(_connection);
+  const char *name = dbus_bus_get_unique_name(open_connection(_connection));
+  CAMLreturn(caml_copy_string(name ? name : ""));
+}
+
 CAMLprim value tsync_dbus_descriptor(value _connection) {
   int descriptor = -1;
   if (!dbus_connection_get_unix_fd(open_connection(_connection), &descriptor))

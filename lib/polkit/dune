@@ -1,0 +1,7 @@
+; Linked by the tsync binary alone, as the Secret Service and logind are.
+
+(library
+ (name tsync_polkit)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_owner tsync_dbus_dl unix))

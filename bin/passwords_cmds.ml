@@ -681,6 +681,7 @@ let browser_host_cmd =
           set_binary_mode_in stdin true;
           set_binary_mode_out stdout true;
           Cli.run @@ fun () ->
+          Platform.register_verifier ();
           let config = Cli.config () in
           let session = { verified = false } in
           let rec serve () =

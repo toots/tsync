@@ -9,11 +9,6 @@ let retry = 60.
 
 exception Broken of string
 
-let address () =
-  match Sys.getenv_opt "DBUS_SYSTEM_BUS_ADDRESS" with
-    | Some a when a <> "" -> a
-    | _ -> "unix:path=/run/dbus/system_bus_socket"
-
 let rule ~interface ~member =
   Printf.sprintf "type='signal',sender='%s',interface='%s',member='%s'" login1
     interface member
@@ -81,7 +76,7 @@ let locks bus ~pending m =
 
 let serve ~on_lock =
   let bus =
-    try Dbus.connect (address ())
+    try Dbus.connect (Dbus.system_address ())
     with Dbus.Error reason -> raise (Broken reason)
   in
   Fun.protect ~finally:(fun () -> Dbus.close bus) @@ fun () ->

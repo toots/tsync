@@ -5,7 +5,9 @@
 type t = {
   name : string;  (** what a refusal names, as [LocalAuthentication] *)
   verify : reason:string -> (unit, string) result;
-      (** blocks until the user answered; [Error] says why it did not verify *)
+      (** blocks until the user answered; [Error] says why it did not verify,
+          and [Fail.E] [Unreachable] that it could not ask now, which the
+          extension answers with the passphrase *)
 }
 
 (** At module initialisation, by the host's library. *)

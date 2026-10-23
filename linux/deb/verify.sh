@@ -43,6 +43,7 @@ done
 test "$(dpkg-deb --ctrl-tarfile "$deb" | tar xO ./postinst ./prerm \
   | grep -c "'tsync@\*\.service'")" = 2
 dpkg -L tsync | grep -q '/usr/lib/systemd/system/tsync@.service'
+dpkg -L tsync | grep -q '/usr/share/polkit-1/actions/org.feverdreamtv.tsync.policy'
 # The desktop packages run nothing at install or removal.
 for p in tsync-tray tsync-dolphin; do
   test -z "$(dpkg-deb --ctrl-tarfile dist/"$p"_*.deb | tar t | grep -E 'postinst|prerm|postrm|preinst' || true)"

@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 
 #define TSYNC_DBUS_FUNCTIONS(X) \
+  X(dbus_bus_get_unique_name) \
   X(dbus_bus_register) \
   X(dbus_connection_close) \
   X(dbus_connection_get_unix_fd) \
@@ -53,6 +54,7 @@
 #define TSYNC_DBUS_POINTER(name) static __typeof__(name) *tsync_dl_##name;
 TSYNC_DBUS_FUNCTIONS(TSYNC_DBUS_POINTER)
 
+#define dbus_bus_get_unique_name (*tsync_dl_dbus_bus_get_unique_name)
 #define dbus_bus_register (*tsync_dl_dbus_bus_register)
 #define dbus_connection_close (*tsync_dl_dbus_connection_close)
 #define dbus_connection_get_unix_fd (*tsync_dl_dbus_connection_get_unix_fd)
