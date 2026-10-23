@@ -1,0 +1,31 @@
+== a-init
+machines, named                      machine A (this)
+status                               unlocked enrolled
+owner exit status 0
+== b-enroll
+status                               locked not-enrolled
+unlock, the secret key given         ok
+machines, named                      machine A; machine B (this)
+status                               unlocked enrolled
+owner exit status 0
+== a-rekey
+status                               unlocked enrolled new: machine B
+machines                             machine A (this); machine B
+status, after the list               unlocked enrolled
+rekey, wrong passphrase              denied: wrong passphrase
+rekey                                secret key 5-5-5-5-6, a new one: true, pending: none
+machines                             machine A (this)
+status                               unlocked enrolled
+owner exit status 0
+== b-after
+unlock, the old secret key           denied: wrong secret key: it is not this vault's
+status                               locked not-enrolled secret-key-replaced
+unlock, the new secret key           ok
+status                               unlocked enrolled
+machines, named again                machine A; machine B (this)
+lock --forget                        ok
+owner exit status 0
+== a-last
+status                               unlocked enrolled
+machines                             machine A (this)
+owner exit status 0

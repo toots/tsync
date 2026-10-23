@@ -134,6 +134,16 @@ type appearance_change = {
     from ([config] or [main]), by member name. *)
 type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
 
+(** vault §6.3: a machine's entry as [vault_machines] lists it; [entry] is
+    [None] for one that does not open under K. *)
+type machine_entry = { name : string; enrolled : int; last_unlock : int }
+
+type machine = { uuid : string; this : bool; entry : machine_entry option }
+
+(** vault §7.2: the new secret key, and why re-encrypting the records stopped,
+    when it did; the next unlock resumes it. *)
+type rekeyed = { secret : secret; pending : string option }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -149,6 +159,8 @@ type vault_status = {
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
   auto_lock : auto_lock option;  (** none without a policy *)
   locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
+  new_machines : string list;  (** §6.3: names enrolled since the last list *)
+  secret_key_replaced : bool;  (** §7.2: the held secret key opens no slot *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -256,6 +268,13 @@ type _ request =
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_machines : string option -> machine list request
+      (** vault §6.3; [Some name] renames this machine's entry *)
+  | Vault_rekey : {
+      passphrase : string;
+      new_passphrase : string option;
+    }
+      -> rekeyed request  (** vault §7.2 *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;

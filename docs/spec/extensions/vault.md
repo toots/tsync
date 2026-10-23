@@ -317,18 +317,19 @@ and notices a new one.
 
 - The entry is `/.tsync-ext/vault/machines/<client uuid>`
   ([03](../03-journal-sync.md)), sealed under K like a record (§5, extension name `vault`):
-  `{"name", "enrolled", "lastUnlock", "modified"}`, epoch seconds but for `name`, which is the
-  host's name until the user gives another (`tsync vault machines --name NAME`, action
-  `vault_machines` with `name`).
+  `{"name", "enrolled", "lastUnlock", "seen", "modified"}`, epoch seconds but for `name`, which
+  is the host's name (1 to 256 bytes) until the user gives another (`tsync vault machines --name
+  NAME`, action `vault_machines` with `name`). `seen` lists the client uuids of the entries this
+  machine has acknowledged; a reader takes it as empty when absent.
 - A machine writes its entry at init, at a re-key, and at an unlock that enrolls it, and refreshes
   `lastUnlock` at an unlock when it is a day old. `lock --forget` removes it.
 - `tsync vault machines` (action `vault_machines`, needs K) lists the entries by name, with when
-  each enrolled and last unlocked, this machine marked. Entries that do not open are listed by
-  id.
-- **A new machine.** An owner remembers the entries it has seen, from its own enrollment on. One
-  it has not seen, found while the vault is unlocked, is reported once: status lists it under
-  `newMachines` until the next listing, and the tray or app says that the machine joined the
-  domain's vault.
+  each enrolled and last unlocked, this machine marked (`machines`: `id`, `this`, and `name`,
+  `enrolled`, `lastUnlock` for an entry that opens). Entries that do not open are listed by id.
+- **A new machine.** An entry whose id is not in this machine's own `seen` is new to it. While the
+  vault is unlocked, status lists the new ones' names under `newMachines`, and the tray or app
+  says that the machine joined the domain's vault. Enrolling acknowledges the entries already
+  there, and listing the machines acknowledges every one it shows: no clock decides what is new.
 - The list is informative, not a control: any machine holding K can write an entry, and removing
   one revokes nothing. Revoking is a re-key (§7.2).
 
@@ -381,15 +382,18 @@ change alone leaves both valid (§7).
   (`newPassphrase`, §2.2) or keeps the current one; a CLI or app SHOULD suggest a new one when a
   machine was lost.
 - It draws a new K, key id and secret key, writes a keyring holding one `secret-key` slot for
-  them, keeps the new K and secret key on this machine (§6), and shows the new secret key once,
-  offering the kit (§3.1).
+  them, and keeps the new secret key on this machine before anything else, so whatever follows
+  fails, this machine can still unlock.
 - It then re-encrypts every record under the old key id as §4.3 does for a copy's K, in every
-  extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done. A
-  re-encryption that fails is resumed at this machine's next unlock. The appearance (§8.1),
-  unsealed, stays.
+  extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done;
+  then it keeps the new K (§6). A re-encryption that fails leaves the old K held, and is resumed
+  at this machine's next unlock, with the new secret key; the reply then says why (`pending`).
+  Either way the reply carries the new secret key, shown once and offering the kit (§3.1). The
+  appearance (§8.1), unsealed, stays.
 - It rewrites the machine list (§6.3) with this machine alone.
 - Every other machine is locked when it sees the new keyring (§6) and is no longer enrolled: its
-  unlock asks for the new secret key, and status says the vault was re-keyed. A machine that
+  unlock asks for the new secret key, and status says its secret key was replaced
+  (`secretKeyReplaced`). A machine that
   wrote records under the old K before it saw the new keyring re-encrypts them at its next unlock
   (§4.3).
 - **What it protects:** every record from then on, and the current body of every record. The

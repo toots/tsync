@@ -78,6 +78,19 @@ tsync vault passphrase --new-secret-key   # also a new secret key, printed once
 
 With `--new-secret-key`, every other machine needs the new secret key at its next unlock. Neither change revokes old secrets from someone who copied the storage earlier: a versioned domain keeps the previous keyring among its versions.
 
+## Machines, and shutting one out
+
+```bash
+tsync vault machines                  # the machines that joined, and when each last unlocked
+tsync vault machines --name "laptop"  # rename this one in the list
+tsync vault rekey                     # a new key and secret key: shuts out every machine but this one
+tsync vault rekey --new-passphrase    # the same, with a new passphrase
+```
+
+Each machine that joins the vault adds itself to the list, and `tsync vault status` on the others says so until they list the machines. The list only informs: it cannot keep a machine out.
+
+A lost or stolen machine still holds the secret key, and the key that reads every record, so changing the passphrase is not enough. `tsync vault rekey` asks for the passphrase, draws a new key and secret key, re-encrypts every record, and prints the new secret key once. Every other machine is locked until you unlock it with the new secret key, and the list starts again with this machine alone. If the machine was lost, choose a new passphrase too. Earlier versions of the records, kept by a versioned domain, stay under the old key until retention removes them.
+
 ## Telling vaults apart
 
 With several domains, tsync's pickers show each vault in its own colour: the tsync icon, tinted. Every vault gets a colour from its key, the same on every machine. You can choose another, or give the vault an icon of its own, which then replaces the tsync icon:
