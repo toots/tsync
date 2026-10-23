@@ -143,7 +143,7 @@ let adopt ~domain ~engine t entry =
           match Stop.sleep (Float.min 10. (Atomic.get minute /. 4.)) with
             | exception Stop.Stopping -> Atomic.set t.watching false
             | () ->
-                expire ~domain ~engine t;
+                Format_merge.locked folder (fun () -> expire ~domain ~engine t);
                 if Atomic.get t.key <> None then loop ()
                 else (
                   Atomic.set t.watching false;

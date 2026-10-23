@@ -79,9 +79,9 @@ let settled ctx =
 
 (* README §4.1: a read answers the last view of the vault's folders and this
    one; a write proceeds on it, pushed later. *)
-let context ?(writing = false) ~domain ~engine ~lazy_tree t =
+let context ?(writing = false) ?use ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
-  let keyring, key = Vault.held ~domain ~engine ~lazy_tree t in
+  let keyring, key = Vault.held ?use ~domain ~engine ~lazy_tree t in
   if lazy_tree then (
     let (module E : Tsync_sync.Engine.S) = engine in
     if not writing then
@@ -255,7 +255,7 @@ let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
 (* README §4.2: the fold that waited for the key. *)
 let fold ~domain ~engine ~lazy_tree t =
   if List.mem name (Vault.extensions ~domain ~engine) then
-    ignore (records (context ~domain ~engine ~lazy_tree t))
+    ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
 
 let export ~domain ~engine ~lazy_tree t passphrase =
   let ctx = context ~domain ~engine ~lazy_tree t in
