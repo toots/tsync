@@ -920,7 +920,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_machines name ->
         on_vault (fun () -> vault (Vault.list_machines ?name))
     | Vault_rekey r ->
-        on_records (fun () ->
+        (* vault §7.2 re-encrypts every extension's records. *)
+        on_passwords (fun () ->
             vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase)
     | Totp_add source -> on_records (fun () -> vault Totp_verbs.add source)
     | Totp_list filter -> on_records (fun () -> vault Totp_verbs.list filter)
