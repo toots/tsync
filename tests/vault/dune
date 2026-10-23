@@ -126,3 +126,32 @@
   (= %{system} linux))
  (action
   (diff secret_service_test.expected secret_service_test.output)))
+
+(executable
+ (name logind_double)
+ (modules logind_double)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus tsync_tray_lib unix))
+
+(executable
+ (name logind_test)
+ (modules logind_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_logind unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   logind_test.output
+   (run ./logind_test.exe %{exe:logind_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff logind_test.expected logind_test.output)))

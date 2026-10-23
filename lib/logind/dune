@@ -1,0 +1,7 @@
+; Linked by the tsync binary alone, with the Secret Service, for the same reason.
+
+(library
+ (name tsync_logind)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus_dl unix))

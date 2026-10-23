@@ -141,3 +141,7 @@ val register_host : string -> host -> unit
 
 (** The host of the first frontend of these domains that registered one. *)
 val host_for : Tsync_config.Config.domain list -> host option
+
+(** vault §6.2: a screen lock the host reported outside any request, sent as
+    [vault_lock] with [reason: "screen"] to every domain this process serves. *)
+val screen_locked : unit -> unit

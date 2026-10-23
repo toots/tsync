@@ -284,6 +284,18 @@ let shared_router served reports action req =
         Some (Ipc.Reply (Ipc.ok [("paused", `Bool paused)]))
     | _ -> None
 
+(* vault §6.2: the handlers {!serve} answers for, for a host's screen-lock
+   report that arrives from outside any request. *)
+let serving : Handler.t list Atomic.t = Atomic.make []
+
+let screen_locked () =
+  List.iter
+    (fun h ->
+      try Handler.call h (Vault_lock `Screen)
+      with Fail.E f ->
+        Log.warn "vault: a screen lock not acted on: %s" f.reason)
+    (Atomic.get serving)
+
 let serve ?present ?(shared = false) ?roots ~socket config domains =
   let draining = Atomic.make false in
   let server = ref None in
@@ -303,6 +315,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
      stop or on a failure to start the rest. *)
   let started = ref [] in
   Fun.protect ~finally:(fun () ->
+      Atomic.set serving [];
       Atomic.set draining true;
       Rt.iter_concurrently
         (fun engine ->
@@ -363,6 +376,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
     (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
   List.iter (fun s -> s.go ()) !served;
+  Atomic.set serving (List.map (fun s -> s.handler) !served);
   Stop.wait ()
 
 let run ?present ?shared ?roots ?socket config (domains : Config.domain list) =
