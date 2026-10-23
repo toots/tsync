@@ -189,3 +189,10 @@ base32 secret alone, with the account named beside it.
 - On a lazy tree with the store down after a list: `list` answers every record with its current
   code, `outdated`; `add` is answered, the record listed at once and pushed when the store returns.
 - `export` with no passphrase, a wrong one or another domain's is refused and returns no URI.
+
+## 7. Later
+
+- **Google Authenticator's export** (`otpauth-migration://`, a protobuf of several seeds in one QR
+  code), read by `import` and by the apps' scanners.
+- **HOTP**, once counters can be kept consistent across machines (§5.1 refuses it), and **Steam
+  Guard** codes (5 characters from Steam's alphabet).
