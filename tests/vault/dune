@@ -155,3 +155,32 @@
   (= %{system} linux))
  (action
   (diff logind_test.expected logind_test.output)))
+
+(executable
+ (name polkit_double)
+ (modules polkit_double)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus tsync_tray_lib unix))
+
+(executable
+ (name polkit_test)
+ (modules polkit_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_polkit unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   polkit_test.output
+   (run ./polkit_test.exe %{exe:polkit_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff polkit_test.expected polkit_test.output)))

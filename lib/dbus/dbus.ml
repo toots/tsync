@@ -47,6 +47,7 @@ external available : unit -> bool = "tsync_dbus_available"
 external connect : string -> t = "tsync_dbus_connect"
 external close : t -> unit = "tsync_dbus_close"
 external descriptor : t -> Unix.file_descr = "tsync_dbus_descriptor"
+external unique_name : t -> string = "tsync_dbus_unique_name"
 external send : t -> message -> int = "tsync_dbus_send"
 external read_write : t -> bool = "tsync_dbus_read_write"
 external pop : t -> message option = "tsync_dbus_pop"
@@ -103,6 +104,11 @@ let string_of_bytes values =
     (Seq.filter_map
        (function Byte b -> Some (Char.chr b) | _ -> None)
        (List.to_seq values))
+
+let system_address () =
+  match Sys.getenv_opt "DBUS_SYSTEM_BUS_ADDRESS" with
+    | Some address when address <> "" -> address
+    | _ -> "unix:path=/run/dbus/system_bus_socket"
 
 let session_address () =
   match Sys.getenv_opt "DBUS_SESSION_BUS_ADDRESS" with
