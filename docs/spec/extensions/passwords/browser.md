@@ -257,4 +257,5 @@ With the extension installed, the native host installed, and the vault unlocked:
 
 - **Firefox**: the same extension, its native-messaging manifest (`allowed_extensions`), and a
   Mozilla-signed package.
-- **Publishing from CI**: uploading the zip with the Chrome Web Store API.
+- **Publishing from CI**: uploading the zip with the Chrome Web Store API when a change merges to
+  `main`, so the store follows the nightly release.
