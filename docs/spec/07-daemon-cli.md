@@ -697,8 +697,8 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   (reports under 1 s apart reuse it; the first is the lifetime average);
 - a domain body from its owner: `name`, `settings {versioning, symlinks, chunkSize, cacheChunkSize,
   maxUploads, maxChunkBuffers, maxDownloads, readOnly, projectLease, projectQuarantine,
-  projectSettle, maxEntryCommands, batchDelay, projectWidth, projector?, extensions, domainWide {<key>: "config" | "main" | "default"}}` (`domainWide` says where each
-  domain-wide setting in force comes from, `extensions` included; `extensions` is the list in
+  projectSettle, maxEntryCommands, batchDelay, projectWidth, projector?, extensions, vaultLock?, domainWide {<key>: "config" | "main" | "default"}}` (`domainWide` says where each
+  domain-wide setting in force comes from, `extensions` and `vaultLock` included; `extensions` is the list in
   force ([05 §2.1](05-ops-config.md#21-schema-and-validation) rule 5), which the text form shows
   in an `extensions` row, `none` when empty, with `(from the main)` when the main's list is used;
   `projector` is the client uuid the main states for the

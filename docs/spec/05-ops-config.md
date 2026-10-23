@@ -89,6 +89,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
 | `extensions` | array | no: the main's (below), else `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
+| `vaultLock` | object | no | `{"idleMinutes"?, "onScreenLock"?, "maxHours"?}`, the vault's auto-lock ([vault §6.2](extensions/vault.md#62-auto-lock)); *domain-wide* by rule 7 (below); unset: the main's, else none |
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
@@ -138,6 +139,10 @@ it unasked. The config editor asks about it only in its advanced mode
    ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
    client: a client names it in the entries it creates and leaves their projection to it
    ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
+7. **The vault's auto-lock** (`vaultLock`) is stated like the extensions, by rules 1, 2 and 4, and
+   never refused: the policy in force is the strictest of the domain's and the main's
+   ([vault §6.2](extensions/vault.md#62-auto-lock)), so a client may tighten its main's and
+   never loosen it.
 
 **Backend object**
 
