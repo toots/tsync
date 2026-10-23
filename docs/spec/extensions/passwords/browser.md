@@ -117,10 +117,11 @@ logins (title, username, *Fill*, and *Copy code* for one linking a code), each d
 web has no sensitivity marker, so the popup says the code stays on the clipboard until replaced.
 The popup lists no other site's logins and no password.
 
-It also offers **Turn off the browser's own password manager**, unchecked until the user checks
-it: the browser's saving and filling of passwords (`chrome.privacy.services.passwordSavingEnabled`
-set to false), which otherwise offers alongside tsync's. Unchecking it gives the setting back to
-the browser. The extension never changes it by itself.
+It also offers **Turn off the browser's own password manager**: the browser's saving and filling
+of passwords (`chrome.privacy.services.passwordSavingEnabled` set to false), which otherwise offers
+alongside tsync's and keeps what a user meant for tsync. The extension turns it off once, when it
+is installed, so the box starts checked; unchecking it gives the setting back to the browser, and
+the extension never turns it off again by itself.
 
 ## 4. Saving
 
@@ -155,23 +156,28 @@ the browser. The extension never changes it by itself.
   wrapper, and builds the client data itself (`type`, `challenge`, `origin`, `crossOrigin`), so the
   owner signs `SHA-256(clientDataJSON)` over an origin the page cannot choose; the owner checks the
   RP ID against it (passwords §7.3).
-- **Frames.** A request from a frame whose origin is not the top page's goes to the browser's own
-  WebAuthn, which knows the embedder's permissions policy; tsync answers top-level pages, and
-  builds `crossOrigin: false`.
-- **Nothing goes to the browser behind the user's back.** A request the content script cannot
-  pass to the service worker (an extension reloaded under an open page cuts it off) is rejected
-  `NotAllowedError`, *tsync did not answer: reload the page*; a request goes to the browser's own
-  WebAuthn only by the rules below or the user's *Use another passkey or device*.
+- **Nothing goes to the browser behind the user's back.** A request goes to the browser's own
+  WebAuthn only when the user picks **Use a phone or security key** in a sign-in's sheet, and a
+  creation never does: the browser's dialog would keep the passkey in its own manager, which a
+  user cannot tell from tsync. A request the content script cannot pass to the service worker
+  (an extension reloaded under an open page cuts it off) is rejected `NotAllowedError`, *tsync
+  did not answer: reload the page*; an owner's refusal rejects the page's promise.
+- **Frames.** tsync answers top-level pages, and builds `crossOrigin: false`. A request from a
+  frame whose origin is not the top page's would need the embedder's permissions policy, which only
+  the browser knows: the sheet says tsync cannot use passkeys inside that page, with **Cancel**,
+  and for a sign-in **Use a phone or security key**.
 - **Every sheet names the origin the browser gave**, never the RP ID or the names the page sent.
 - **Assertion.** It asks `passkey_match`. With answers, it opens the extension's sheet listing them
-  by user name, with **Use another passkey or device**; a pick sends `passkey_assert` and the
-  wrapper resolves the page's promise with the assertion. With none, or on *another device*, the
-  request goes on to the browser's own WebAuthn, unchanged. With none and a locked domain, the
-  sheet says tsync is locked, offering *another device*.
+  by user name, with **Use a phone or security key** and **Cancel**; a pick sends
+  `passkey_assert` and the wrapper resolves the page's promise with the assertion. With none, the
+  sheet says *tsync has no passkey for `<origin>`*, with the same two choices; with none and a
+  locked domain, it says tsync is locked. *Phone or security key* passes the request on to the
+  browser's own WebAuthn, unchanged; *Cancel* rejects it `NotAllowedError`. A sheet answers even
+  when tsync has nothing, so a page cannot tell that from a cancel.
 - **Creation.** It first asks `passkey_match` with the request's RP ID, so the owner refuses an RP ID
   the origin does not own before any sheet names it (a page's `SecurityError`). Then the sheet:
-  *Save a passkey for `<user>` on `<origin>` in tsync?*, with **Save** and **Use another passkey or
-  device**. **Save** sends `passkey_create`, with the request's exclude list; `exists` rejects the
+  *Save a passkey for `<user>` on `<origin>` in tsync?*, with **Save in tsync** and **Cancel**.
+  **Save in tsync** sends `passkey_create`, with the request's exclude list; `exists` rejects the
   page's promise with `InvalidStateError`.
 - **One session, refusal ends it.** A verification and the request it covers go in one bridge
   session; a cancelled or failed verification ends it, and the request is never sent.
@@ -185,10 +191,11 @@ the browser. The extension never changes it by itself.
     and is never kept.
   A cancelled or failed verification cancels the request. With `discouraged`, nothing is verified
   and UV is clear.
-- A locked vault: the sheet says so and offers only *Use another passkey or device*.
+- A locked vault: the sheet says so, with **Cancel**, and for a sign-in *Use a phone or security
+  key*.
 - **Conditional mediation** (`mediation: "conditional"`, passkeys in the autofill menu): tsync holds
-  the request only when it has passkeys for the RP ID; otherwise it goes to the browser's own
-  conditional UI at once. A held request adds *Sign in with a passkey* to the field's menu, whose
+  the request only when it has passkeys for the RP ID; otherwise it leaves it unanswered, until
+  the page aborts it, and never gives it to the browser's own conditional UI. A held request adds *Sign in with a passkey* to the field's menu, whose
   pick opens the sheet as an assertion does.
 
 ## 6. What a page can and cannot do
@@ -232,8 +239,8 @@ With the extension installed, the native host installed, and the vault unlocked:
 - Signing in with a new login offers *Save*; saving adds it (`tsync passwords list` shows it);
   another password for it offers *Update*.
 - `https://webauthn.io`: creating a passkey with tsync saves it, after Touch ID on macOS or the
-  passphrase on Linux; signing in with it succeeds, the site seeing UV set. *Use another passkey or device* hands the request to the
-  browser.
+  passphrase on Linux; signing in with it succeeds, the site seeing UV set. *Use a phone or security key* hands a sign-in to the
+  browser; a creation offers only *Save in tsync* and *Cancel*.
 - With the vault locked, every menu and sheet says so and fills nothing.
 - A page script calling `navigator.credentials.get` with a forged `origin` in its options gets an
   assertion over the real origin, or none.

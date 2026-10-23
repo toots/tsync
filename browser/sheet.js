@@ -40,7 +40,19 @@ function render(item) {
     case "locked":
       main.append(el("h1", { textContent: `tsync is locked` }),
         el("p", { className: "detail", textContent: `Unlock ${item.domains.join(", ")} in tsync to use your passkeys on ${site}.` }));
-      actions.append(button("Use another passkey or device", () => answer({ action: "fallback" })), button("Cancel", () => answer({ action: "cancel" }), true));
+      if (item.device) actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })));
+      actions.append(button("Cancel", () => answer({ action: "cancel" }), true));
+      break;
+    case "passkey-none":
+      main.append(el("h1", { textContent: `tsync has no passkey for ${site}` }),
+        el("p", { className: "detail", textContent: "Sign in another way, or with a passkey on a phone or security key." }));
+      actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })), button("Cancel", () => answer({ action: "cancel" }), true));
+      break;
+    case "frame":
+      main.append(el("h1", { textContent: `tsync cannot use passkeys inside ${new URL(item.top).host}` }),
+        el("p", { className: "detail", textContent: `${site} asked from a frame embedded in that page.` }));
+      if (item.device) actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })));
+      actions.append(button("Cancel", () => answer({ action: "cancel" }), true));
       break;
     case "fill-suffix":
       main.append(el("h1", { textContent: `Fill ${item.title} on ${site}?` }),
@@ -55,11 +67,11 @@ function render(item) {
           TsyncMark.element(look, 20),
           el("span", {}, el("strong", { textContent: key.userDisplayName || key.userName }), el("small", { textContent: key.userName }))));
       }
-      actions.append(button("Use another passkey or device", () => answer({ action: "fallback" })));
+      actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })), button("Cancel", () => answer({ action: "cancel" })));
       break;
     case "passkey-create":
       main.append(el("h1", { textContent: `Save a passkey for ${item.user} on ${site} in tsync?` }));
-      actions.append(button("Use another passkey or device", () => answer({ action: "fallback" })), button("Save", () => answer({ action: "ok" }), true));
+      actions.append(button("Cancel", () => answer({ action: "cancel" })), button("Save in tsync", () => answer({ action: "ok" }), true));
       break;
     case "passphrase": {
       // §5, Linux: verifies the user; it unlocks nothing and is never kept.
