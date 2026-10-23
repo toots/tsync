@@ -162,7 +162,7 @@ tsync passwords add --title Bank --url https://bank.example --username me --gene
 tsync passwords add --title GitHub --url https://github.com --username me --otpauth -
 ```
 
-`--password -` reads the password from standard input; with neither `--password` nor `--generate` it is asked without echo. `--generate LENGTH` draws one (8 to 128 characters; `--no-symbols` for letters and digits only). `--url` repeats for a login used on several sites; a site is `https://host` (a port if any, no path), or `android://package` for an Android app. A login for `example.com` also serves `login.example.com`.
+`--password -` reads the password from standard input; with neither `--password` nor `--generate` it is asked without echo. `--generate LENGTH` draws one (8 to 128 characters; `--no-symbols` for letters and digits only), and `--words N` one of N words (4 to 12), easier to read out and type. `tsync passwords generate` prints one without saving it, with the same options. `--url` repeats for a login used on several sites; a site is `https://host` (a port if any, no path), or `android://package` for an Android app. A login for `example.com` also serves `login.example.com`.
 
 `--otpauth` adds a two-factor code and links it to the login; `--totp ID` links one already in the vault (`tsync totp list` gives its id), and `--totp ""` unlinks it.
 

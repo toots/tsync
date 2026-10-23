@@ -270,6 +270,52 @@ let logins () =
   answer "remove the linked TOTP record"
     (ask [("action", s "totp_remove"); ("id", s (Option.get (field l "totp")))]);
   listing "list, a link now dangling";
+  (* §5: words, characters, and what is refused; a password saved nowhere. *)
+  let generate label g =
+    let r = ask [("action", s "passwords_generate"); ("generate", `Assoc g)] in
+    match field r "password" with
+      | Some pw -> pw
+      | None ->
+          answer label r;
+          ""
+  in
+  let words =
+    String.split_on_char '-' (generate "generate, words" [("words", `Int 6)])
+  in
+  p "%-40s %d words of letters: %b" "generate, 6 words" (List.length words)
+    (List.for_all
+       (fun w ->
+         w <> ""
+         && String.for_all (function 'a' .. 'z' -> true | _ -> false) w)
+       words);
+  let chars =
+    generate "generate, 8 characters"
+      [("length", `Int 8); ("symbols", `Bool false)]
+  in
+  p "%-40s %d letters and digits: %b" "generate, 8 without symbols"
+    (String.length chars)
+    (String.for_all
+       (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true | _ -> false)
+       chars);
+  ignore (generate "generate, 3 words" [("words", `Int 3)]);
+  ignore
+    (generate "generate, words and a length"
+       [("words", `Int 6); ("length", `Int 20)]);
+  let worded =
+    ask
+      [
+        ("action", s "passwords_add");
+        ("title", s "Words");
+        ("generate", `Assoc [("words", `Int 5)]);
+      ]
+  in
+  let worded_id = Option.value ~default:"" (field worded "id") in
+  let w = ask [("action", s "passwords_get"); ("id", s worded_id)] in
+  p "%-40s %d words" "add with 5 words, then get"
+    (List.length
+       (String.split_on_char '-'
+          (Option.value ~default:"" (field w "password"))));
+  ignore (ask [("action", s "passwords_remove"); ("id", s worded_id)]);
   linked
 
 let import_export () =

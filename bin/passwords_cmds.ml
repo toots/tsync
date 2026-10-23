@@ -57,11 +57,20 @@ let password_arg =
        neither this nor --generate is given."
 
 let generate_arg =
-  Arg.(
-    value
-    & opt (some int) None
-    & info ["generate"] ~docv:"LENGTH"
-        ~doc:"Generate a password of LENGTH (§5).")
+  let length =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["generate"] ~docv:"LENGTH"
+          ~doc:"Generate a password of LENGTH characters (§5).")
+  and words =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["words"] ~docv:"N"
+          ~doc:"Generate a password of N words, 4 to 12 (§5).")
+  in
+  Term.(const (fun length words -> (length, words)) $ length $ words)
 
 let no_symbols =
   Arg.(
@@ -70,20 +79,22 @@ let no_symbols =
 (* §5: a password typed, given or generated, one of them or none. *)
 let secret_of ~password ~generate =
   match (password, generate) with
-    | Some p, None -> Some (`Password p)
-    | None, Some length -> Some (`Generate length)
-    | None, None -> None
-    | Some _, Some _ -> Fail.invalid "give --password or --generate, not both"
+    | Some p, (None, None) -> Some (`Password p)
+    | None, (Some length, None) -> Some (`Generate (`Length length))
+    | None, (None, Some words) -> Some (`Generate (`Words words))
+    | None, (None, None) -> None
+    | _, (Some _, Some _) -> Fail.invalid "give --generate or --words, not both"
+    | Some _, _ -> Fail.invalid "give --password or a generated one, not both"
+
+let generate_json ~no_symbols = function
+  | `Length length ->
+      `Assoc [("length", `Int length); ("symbols", `Bool (not no_symbols))]
+  | `Words words -> `Assoc [("words", `Int words)]
 
 let secret_args ~no_symbols ~ask_if_absent secret =
   match secret with
     | Some (`Password p) -> [("password", s (from_stdin p))]
-    | Some (`Generate length) ->
-        [
-          ( "generate",
-            `Assoc
-              [("length", `Int length); ("symbols", `Bool (not no_symbols))] );
-        ]
+    | Some (`Generate how) -> [("generate", generate_json ~no_symbols how)]
     | None when ask_if_absent ->
         [
           ( "password",
@@ -193,6 +204,30 @@ let get_cmd =
               ["rpId"; "userName"; "userDisplayName"; "credentialId"; "login"];
           0)
       $ id_arg)
+
+let generate_cmd =
+  verb "generate"
+    ~doc:"Print a generated password, 20 characters unless told otherwise (§5)."
+    Term.(
+      const (fun (length, words) no_symbols ?name config ->
+          let d = write_domain ?name config in
+          let how =
+            match (length, words) with
+              | Some _, Some _ ->
+                  Fail.invalid "give --generate or --words, not both"
+              | _, Some n -> `Words n
+              | Some n, None -> `Length n
+              | None, None -> `Length 20
+          in
+          say "%s"
+            (Option.value ~default:""
+               (field
+                  (`Assoc
+                     (call d "generate"
+                        [("generate", generate_json ~no_symbols how)]))
+                  "password"));
+          0)
+      $ generate_arg $ no_symbols)
 
 let edit_cmd =
   verb "edit" ~doc:"Change a login's fields, or a passkey's login."
@@ -576,6 +611,7 @@ let cmds =
         list_cmd;
         get_cmd;
         edit_cmd;
+        generate_cmd;
         remove_cmd;
         import_cmd;
         export_cmd;
