@@ -316,6 +316,103 @@ let logins () =
        (String.split_on_char '-'
           (Option.value ~default:"" (field w "password"))));
   ignore (ask [("action", s "passwords_remove"); ("id", s worded_id)]);
+  (* §2.1, §2.2: a note, fields, and what is refused. *)
+  let entry name value secret =
+    `Assoc [("name", s name); ("value", s value); ("secret", `Bool secret)]
+  in
+  let note =
+    ask
+      [
+        ("action", s "passwords_add");
+        ("kind", s "note");
+        ("title", s "Wi-Fi");
+        ("notes", s "the guest network");
+        ("fields", `List [entry "SSID" "home" false; entry "key" "s3cret" true]);
+      ]
+  in
+  let note_id = Option.value ~default:"" (field note "id") in
+  let got = ask [("action", s "passwords_get"); ("id", s note_id)] in
+  p "%-40s kind %s, notes %b, fields %s" "a note, then get"
+    (Option.value ~default:"?" (field got "kind"))
+    (field got "notes" = Some "the guest network")
+    (match member got "fields" with
+      | Some (`List l) ->
+          String.concat ","
+            (List.map
+               (fun j ->
+                 Option.value ~default:"?" (field j "name")
+                 ^
+                   match member j "secret" with
+                   | Some (`Bool true) -> "*"
+                   | _ -> "")
+               l)
+      | _ -> "none");
+  let rows k =
+    match member (ask (("action", s "passwords_list") :: k)) "records" with
+      | Some (`List l) -> l
+      | _ -> []
+  in
+  let noted = List.filter (fun r -> field r "kind" = Some "note") (rows []) in
+  p "%-40s %d, its title %s, a field shown %b" "list, the notes"
+    (List.length noted)
+    (match noted with
+      | r :: _ -> Option.value ~default:"?" (field r "title")
+      | [] -> "-")
+    (List.exists (fun r -> member r "fields" <> None) noted);
+  p "%-40s %b" "a site's listing offers no note"
+    (List.for_all
+       (fun r -> field r "kind" <> Some "note")
+       (rows [("site", s "https://github.com")]));
+  answer "a note with a password"
+    (ask
+       [
+         ("action", s "passwords_add");
+         ("kind", s "note");
+         ("title", s "X");
+         ("password", s "x");
+       ]);
+  answer "a field with no name"
+    (ask
+       [
+         ("action", s "passwords_add");
+         ("kind", s "note");
+         ("title", s "X");
+         ("fields", `List [entry "" "v" false]);
+       ]);
+  answer "33 fields"
+    (ask
+       [
+         ("action", s "passwords_add");
+         ("kind", s "note");
+         ("title", s "X");
+         ( "fields",
+           `List (List.init 33 (fun i -> entry (string_of_int i) "v" false)) );
+       ]);
+  answer "edit a note's fields"
+    (ask
+       [
+         ("action", s "passwords_edit");
+         ("id", s note_id);
+         ("fields", `List [entry "PIN" "1234" true]);
+       ]);
+  let got = ask [("action", s "passwords_get"); ("id", s note_id)] in
+  p "%-40s %d" "  its fields now"
+    (match member got "fields" with Some (`List l) -> List.length l | _ -> -1);
+  ignore (ask [("action", s "passwords_remove"); ("id", s note_id)]);
+  let fielded =
+    ask
+      [
+        ("action", s "passwords_add");
+        ("title", s "Bank fields");
+        ("password", s "bank pass");
+        ("fields", `List [entry "account" "12-34" false]);
+      ]
+  in
+  let fielded_id = Option.value ~default:"" (field fielded "id") in
+  let got = ask [("action", s "passwords_get"); ("id", s fielded_id)] in
+  p "%-40s %d" "a login's fields, through get"
+    (match member got "fields" with Some (`List l) -> List.length l | _ -> -1);
+  ignore (ask [("action", s "passwords_remove"); ("id", s fielded_id)]);
   linked
 
 let import_export () =
