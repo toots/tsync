@@ -22,6 +22,9 @@ type item = {
   indent : int;
   action : action;
   submenu : bool;
+  vault : string option;
+      (** the domain whose vault a header row names, which a client marks with
+          the vault's appearance (vault §8.1) *)
 }
 
 type entry = Separator | Item of item

@@ -340,8 +340,9 @@ and its action makes the client ask the owner for the current code when it is cl
 is never drawn stale and never travels in a menu.
 
 - **Placeholder**, shown until the replies arrive: one row `Reading…`.
-- **Per domain**, a header row `<domain>` (informational) when there is more than one code
-  domain, then, first match:
+- **Per domain**, a header row `<domain>` (informational, `vault` naming the domain, which a
+  client marks with the vault's appearance, [vault §8.1](../extensions/vault.md#81-appearance)) when
+  there is more than one code domain, then, first match:
   - a reply refused `locked`: a row `Locked — unlock…`, action `Unlock(domain)`;
   - a reply refused `not_found` (no vault): a row `No vault — run tsync vault init` (informational);
   - another failure or no reply: a row `not answering` (informational);
