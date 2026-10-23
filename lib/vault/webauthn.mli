@@ -41,5 +41,14 @@ val sign :
     [Error] says why, naming no secret. *)
 val rp_id_allowed : origin:string -> rp_id:string -> (unit, string) result
 
+(** §7.3: whether [rp_id] is a domain name whose related origins are worth
+    fetching, at [https://<rp_id>/.well-known/webauthn]. *)
+val related_host : string -> bool
+
+(** §7.3: whether that document's body lists [origin], counting at most five
+    distinct registrable labels as WebAuthn's related origin requests do. A body
+    that does not parse lists nothing. *)
+val related_allows : origin:string -> string -> bool
+
 (** Whether a host or suffix is a public suffix, by the bundled list. *)
 val is_public_suffix : string -> bool
