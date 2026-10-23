@@ -85,12 +85,19 @@ fun PasswordsTab(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
         val current = records ?: return@Column Loading()
         if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
-            if (current.logins.isEmpty() && current.passkeys.isEmpty()) item { Text(stringResource(R.string.passwords_empty), Modifier.padding(16.dp)) }
+            if (current.logins.isEmpty() && current.passkeys.isEmpty() && current.notes.isEmpty()) item { Text(stringResource(R.string.passwords_empty), Modifier.padding(16.dp)) }
             items(current.logins, key = { it.id }) { login ->
                 ListItem(
                     headlineContent = { Text(login.title) },
                     supportingContent = { Text(login.username) },
                     modifier = Modifier.combinedClickable(onClick = { acting = Acting(login.id, login.title, login = true, hasCode = login.hasCode) }),
+                )
+            }
+            items(current.notes, key = { it.id }) { note ->
+                ListItem(
+                    headlineContent = { Text(note.title) },
+                    supportingContent = { Text(stringResource(R.string.passwords_note)) },
+                    modifier = Modifier.combinedClickable(onClick = { acting = Acting(note.id, note.title, login = false, hasCode = false, note = true) }),
                 )
             }
             items(current.passkeys, key = { it.id }) { passkey ->
@@ -111,7 +118,7 @@ fun PasswordsTab(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
     acting?.let { RecordActions(tsync, it, onDone = { acting = null }) }
 }
 
-private data class Acting(val id: String, val name: String, val login: Boolean, val hasCode: Boolean)
+private data class Acting(val id: String, val name: String, val login: Boolean, val hasCode: Boolean, val note: Boolean = false)
 
 private fun openAutofillSetting(context: Context) {
     val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).setData(Uri.parse("package:${context.packageName}"))
@@ -133,6 +140,23 @@ private fun RecordActions(tsync: Tsync, record: Acting, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     var removing by remember { mutableStateOf(false) }
     var removeSent by remember { mutableStateOf(false) }
+    // passwords §2.2: the names of the record's fields; a value is read only when copied.
+    var fields by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(record.id) {
+        if (record.login || record.note) attempt { tsync.passwords.get(record.id).optJSONArray("fields") }
+            .onSuccess { list -> fields = (0 until (list?.length() ?: 0)).mapNotNull { list?.optJSONObject(it)?.optString("name") } }
+    }
+    fun copyField(name: String) {
+        scope.launch {
+            attempt {
+                val list = tsync.passwords.get(record.id).optJSONArray("fields")
+                (0 until (list?.length() ?: 0)).mapNotNull { list?.optJSONObject(it) }.first { it.optString("name") == name }.optString("value")
+            }
+                .onSuccess { copySecret(context, tsync, name, it, R.string.passwords_field_copied) }
+                .onFailure { tsync.report(it.message.orEmpty(), failed = true) }
+            onDone()
+        }
+    }
     fun copy(field: String, copied: Int) {
         scope.launch {
             attempt { tsync.passwords.get(record.id).optString(field) }
@@ -162,6 +186,10 @@ private fun RecordActions(tsync: Tsync, record: Acting, onDone: () -> Unit) {
                 ListItem(headlineContent = { Text(stringResource(R.string.passwords_copy_username)) }, modifier = Modifier.combinedClickable(onClick = { copy("username", R.string.passwords_username_copied) }))
                 ListItem(headlineContent = { Text(stringResource(R.string.passwords_copy_password)) }, modifier = Modifier.combinedClickable(onClick = { copy("password", R.string.passwords_password_copied) }))
                 if (record.hasCode) ListItem(headlineContent = { Text(stringResource(R.string.passwords_copy_code)) }, modifier = Modifier.combinedClickable(onClick = { copy("code", R.string.code_copied) }))
+            }
+            if (record.note) ListItem(headlineContent = { Text(stringResource(R.string.passwords_copy_notes)) }, modifier = Modifier.combinedClickable(onClick = { copy("notes", R.string.passwords_notes_copied) }))
+            fields.forEach { name ->
+                ListItem(headlineContent = { Text(stringResource(R.string.passwords_copy_field, name)) }, modifier = Modifier.combinedClickable(onClick = { copyField(name) }))
             }
             ListItem(headlineContent = { Text(stringResource(R.string.code_remove)) }, modifier = Modifier.combinedClickable(onClick = { removing = true }))
         }
