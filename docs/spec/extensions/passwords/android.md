@@ -70,6 +70,12 @@ platform vouches for:
   authentication intent, so the platform has nothing to fill until the user picks. The pick
   starts a transparent activity that asks `passwords_fill` (passwords §8) and returns the dataset with the
   username and password.
+- **An app's websites** (passwords §4.3). For an app, the request carries the SHA-256 of each
+  certificate the package manager reports for the package the framework names
+  (`GET_SIGNING_CERTIFICATES`), and the datasets add the logins of the sites the owner found the
+  app verified for. A last dataset, *Other logins…*, opens the app's search over every login
+  (§8); the pick there asks *Use `<title>` for `<app label>`?*, and yes sends `passwords_edit`
+  adding `android://<package>` to the login's sites before it fills.
 - **Inline suggestions** (Android 11, in the keyboard) are planned: this version answers the
   dropdown only.
 - **Nothing to offer**: no dataset, and no save info unless §5 applies. A fill request never
@@ -97,6 +103,16 @@ platform vouches for:
   tap. The new password waits in that button's pending intent, which the system holds for this
   app alone and drops when the notification is dismissed; it is never written to disk.
 - A locked vault refuses the save, and a notification says it was not saved and why.
+
+### 5.1 Suggesting a password
+
+- **Suggest** (`suggest`, `confirm`). A request with a new-password field (passwords §5.1:
+  `AUTOFILL_HINT_NEW_PASSWORD`, the page's `new-password`, or the second of two password fields)
+  gets one more dataset, *Use a strong password*, gated as §3. The pick sends
+  `passwords_suggest` with the site and the username field's value, and returns a dataset filling
+  the new-password field and its confirmation with the answer.
+- The save info of that response carries the record's id: the platform's save after the submit
+  sends `passwords_save` with `suggested`, setting the username without a prompt of tsync's own.
 
 ## 6. Passkeys
 
@@ -162,6 +178,7 @@ The Vault screen ([android-app §10.8](../../frontends/android-app.md#108-vault)
 | `fill` | `confirm` | §3, the autofill service | declared |
 | `fill` with codes | `confirm` | §4 | declared |
 | `save` | `confirm` | §5, the platform's save prompt | declared |
+| `suggest` | `confirm` | §5.1 | declared |
 | `passkey` | `confirm`, `authenticate` when verification is asked | §6, §7, Android 14, browsers of the list | declared |
 
 ## 10. Conformance
