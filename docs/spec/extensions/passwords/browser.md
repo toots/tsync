@@ -31,25 +31,15 @@ capability. What has been seen working is recorded in §10.
   its profile root on macOS and Linux), naming the bridge's absolute path and the extension's id in
   `allowed_origins`. `--extension-id ID` adds one; `tsync passwords browser uninstall` removes what
   install wrote. Nothing else in the browser's directories is touched.
-- **The extension id is fixed**: the manifest carries the extension's public key (`key`), so an
-  unpacked copy and a packaged one have the same id, the one install names.
-- **No store.** The extension is never published to a browser's store; tsync's own install adds it:
-  - **Linux:** the packages install the packed extension (`/usr/share/tsync/browser-extension.crx`,
-    signed with the extension's key; until the packaging carries it, the unpacked
-    `/usr/share/tsync/browser-extension` is loaded as on macOS) and an external-extension file for
-    each Chromium-family browser
-    (`/usr/share/google-chrome/extensions/<id>.json`, and Chromium's, Brave's and Edge's own
-    directories), naming the `.crx` and its version. The browser offers to enable it at its next
-    start; a package upgrade updates it.
-  - **macOS:** Chrome accepts an external extension there only from its store. The app bundle
-    carries the unpacked extension (`TsyncApp.app/Contents/Resources/browser-extension`). A
-    browser's folder picker cannot open a folder inside an app bundle, so
-    `tsync passwords browser install` copies it to
-    `~/Library/Application Support/tsync/browser-extension`, replacing an older copy, and prints
-    that path and the steps; the user adds it once with *Load unpacked* in developer mode, and
-    after an upgrade installs again and reloads the extension. A configuration profile that installs it by policy is left for
-    later (§11).
-  - Firefox needs its extensions signed by Mozilla, and comes with Firefox support (§11).
+- **The extension id is fixed**: the manifest carries the public key of the extension's Chrome Web
+  Store item (`key`), so a copy loaded unpacked has the store's id, the one install names.
+- **From the Chrome Web Store**, on every host: Chrome accepts an extension from outside its store
+  only by policy on macOS and Windows, and tsync's packages carry none on Linux.
+  `release-browser` builds the store's zip from `browser/`, without its tests, with the `key` the
+  store refuses removed and the version `1.<year>.<MMDD>.<run>`, which rises with every build
+  ([10 §5](../../10-delivery.md#5-releases)); it is uploaded to the store by hand. The store
+  updates the extension; loading `browser/` unpacked in developer mode is for development only.
+- Firefox needs its extensions signed by Mozilla, and comes with Firefox support (§11).
 - **Incognito.** The extension works in incognito windows when the user allows it in the browser
   (*Allow in Incognito*, off by default for every extension). It then fills, saves, suggests and
   makes passkeys there as in a regular window, each the user's own act, and stores nothing of its
@@ -273,5 +263,4 @@ With the extension installed, the native host installed, and the vault unlocked:
 
 - **Firefox**: the same extension, its native-messaging manifest (`allowed_extensions`), and a
   Mozilla-signed package.
-- **macOS without developer mode**: a configuration profile installing the extension by Chrome
-  policy, or a store listing, if loading it unpacked proves a burden.
+- **Publishing from CI**: uploading the zip with the Chrome Web Store API.
