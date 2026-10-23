@@ -29,7 +29,7 @@ class FillActivity : Activity() {
         tsync.scope.launch {
             val dataset = try {
                 if (tsync.boot() != Boot.Ready) null
-                else dataset(tsync.passwords.fill(site, id, pull = Pull.BACKGROUND))
+                else dataset(tsync.passwords.fill(site, id, pull = Pull.BACKGROUND, certs = Browsers.certificatesOf(this@FillActivity, site)))
             } catch (e: Exception) {
                 null
             }
