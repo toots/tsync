@@ -560,12 +560,48 @@ let export ~domain ~engine ~lazy_tree t args =
     ("passkeys", `Int (List.length (passkeys ok)));
   ]
 
-(* §7.3: the RP ID belongs to the origin. *)
+(* rp ID to its related origins document and until when; a failed fetch keeps
+   nothing, so the next request asks again. *)
+let related : (string, string * float) Hashtbl.t = Hashtbl.create 8
+let related_lock = Mutex.create ()
+
+let related_document rp_id =
+  let cached =
+    Mutex.protect related_lock (fun () ->
+        match Hashtbl.find_opt related rp_id with
+          | Some (body, until) when until > Unix.gettimeofday () -> Some body
+          | _ -> None)
+  in
+  match cached with
+    | Some body -> Some body
+    | None ->
+        let body =
+          (Atomic.get Well_known.fetch) rp_id "/.well-known/webauthn"
+        in
+        Option.iter
+          (fun body ->
+            Mutex.protect related_lock (fun () ->
+                Hashtbl.replace related rp_id
+                  (body, Unix.gettimeofday () +. 86400.)))
+          body;
+        body
+
+let reset_related () =
+  Mutex.protect related_lock (fun () -> Hashtbl.reset related)
+
+(* §7.3: the RP ID belongs to the origin, or lists it as related. *)
 let check_rp args =
   let origin = required args "origin" and rp_id = required args "rpId" in
   (match Webauthn.rp_id_allowed ~origin ~rp_id with
     | Ok () -> ()
-    | Error reason -> Fail.invalid "%s" reason);
+    | Error reason ->
+        let listed () =
+          Webauthn.related_host rp_id
+          && Option.fold ~none:false
+               ~some:(Webauthn.related_allows ~origin)
+               (related_document (String.lowercase_ascii rp_id))
+        in
+        if not (listed ()) then Fail.invalid "%s" reason);
   rp_id
 
 (* §7.4: verified only on the passphrase, checked, or a host's word. *)

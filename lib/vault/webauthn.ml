@@ -267,3 +267,58 @@ let rp_id_allowed ~origin ~rp_id =
   else if rp_id = "localhost" then Ok ()
   else if is_public_suffix rp_id then Error "the RP ID is a public suffix"
   else Ok ()
+
+(* The shortest suffix of [host] that is not a public suffix. *)
+let registrable host =
+  List.fold_left
+    (fun found d -> if is_public_suffix d then found else Some d)
+    None (suffixes host)
+
+let related_host rp_id =
+  let rp_id = String.lowercase_ascii rp_id in
+  List.for_all valid_label (String.split_on_char '.' rp_id)
+  && registrable rp_id <> None
+
+let max_labels = 5
+
+let trim_slash s =
+  if String.ends_with ~suffix:"/" s then String.sub s 0 (String.length s - 1)
+  else s
+
+let same_origin a b =
+  String.lowercase_ascii (trim_slash a) = String.lowercase_ascii (trim_slash b)
+
+(* WebAuthn L3 §5.11.1: an origin past the fifth distinct registrable label is
+   skipped, so one RP cannot vouch for any number of sites. *)
+let related_allows ~origin body =
+  let origins =
+    match Yojson.Safe.from_string body with
+      | `Assoc l -> (
+          match List.assoc_opt "origins" l with
+            | Some (`List l) ->
+                List.filter_map (function `String s -> Some s | _ -> None) l
+            | _ -> [])
+      | _ -> []
+      | exception Yojson.Json_error _ -> []
+  in
+  let label item =
+    match origin_host (trim_slash item) with
+      | Error _ -> None
+      | Ok host -> (
+          match registrable host with
+            | Some d -> Some (List.hd (String.split_on_char '.' d))
+            | None -> None)
+  in
+  let rec walk seen = function
+    | [] -> false
+    | item :: rest -> (
+        match label item with
+          | None -> walk seen rest
+          | Some l when List.length seen >= max_labels && not (List.mem l seen)
+            ->
+              walk seen rest
+          | Some l ->
+              same_origin item origin
+              || walk (if List.mem l seen then seen else l :: seen) rest)
+  in
+  Result.is_ok (origin_host origin) && walk [] origins

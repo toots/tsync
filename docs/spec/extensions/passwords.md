@@ -264,8 +264,13 @@ every domain:
   that is not a public suffix, by the [Public Suffix List](https://publicsuffix.org/) snapshot
   each release carries: `login.example.com` may name `example.com`, `evil.github.io` may not
   name `github.io`. A browser checks this for its own authenticators; a browser extension that
-  stands in for them is not trusted to, so the owner checks it on every request. Anything else
-  is refused `invalid`.
+  stands in for them is not trusted to, so the owner checks it on every request.
+- **Related origins** (WebAuthn's related origin requests): an RP ID that is a domain name and not
+  a public suffix may also vouch for other origins, as `accounts.meta.com` does for
+  `https://www.facebook.com`. The owner fetches `https://<RP ID>/.well-known/webauthn` (a 200 of
+  at most 256 KiB within 5 s, no redirect), and accepts the origin when its `origins` list names
+  it among the first five distinct registrable labels, as browsers count them. A document is
+  kept 24 hours; a failed fetch keeps nothing. Anything else is refused `invalid`.
 - **Matching.** A passkey answers a request whose RP ID equals its `rpId`. An assertion with an
   allow-list answers only the passkeys whose `credentialId` it lists. An empty allow-list is
   none, as WebAuthn's empty `allowCredentials` is: a discoverable request.
