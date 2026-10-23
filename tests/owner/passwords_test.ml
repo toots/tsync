@@ -920,6 +920,46 @@ let () =
         | _ -> p "  passkey_match: no reply");
       fill "https://github.com" gh;
       fill "https://evil.example" gh;
+      (* §5.1 through the bridge: the suggestion names its domain, the submit
+         names the login and sends no password. *)
+        (match
+           bridge_session
+             [
+               `Assoc
+                 [
+                   ("type", s "suggest");
+                   ("domain", s "pw");
+                   ("origin", s "https://join.example");
+                   ("username", s "");
+                 ];
+             ]
+         with
+        | [r] -> (
+            p "  suggest: a password %b, domain %s"
+              (Option.value ~default:"" (field r "password") <> "")
+              (Option.value ~default:"?" (field r "domain"));
+            let id = Option.value ~default:"" (field r "id") in
+            match
+              bridge_session
+                [
+                  `Assoc
+                    [
+                      ("type", s "save");
+                      ("domain", s "pw");
+                      ("origin", s "https://join.example");
+                      ("username", s "joiner");
+                      ("suggested", s id);
+                    ];
+                ]
+            with
+              | [r] ->
+                  p "  save, suggested: saved %s"
+                    (match member r "saved" with
+                      | Some (`Bool b) -> string_of_bool b
+                      | _ -> Option.value ~default:"?" (field r "error"));
+                  ignore (ask [("action", s "passwords_remove"); ("id", s id)])
+              | _ -> p "  save, suggested: no reply")
+        | _ -> p "  suggest: no reply");
       p "== the store";
       List.iter
         (fun needle -> p "%-40s %b" ("holds " ^ needle) (store_holds needle))
