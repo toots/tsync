@@ -228,9 +228,14 @@ let shared_router served reports action req =
               ( name,
                 Menu.codes_of_json
                   (Some
-                     (match Handler.call s.handler (Totp_list None) with
+                     (match
+                        Handler.call s.handler
+                          (Totp_list { filter = None; pull = `Auto })
+                      with
                        | listing ->
-                           Protocol.encode_reply (Totp_list None) listing
+                           Protocol.encode_reply
+                             (Totp_list { filter = None; pull = `Auto })
+                             listing
                        | exception e -> Ipc.failure (Fail.classify e))) ))
             (code_domains served)
         in

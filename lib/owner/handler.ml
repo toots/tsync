@@ -920,7 +920,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         on_vault (fun () ->
             Vault.delete ~domain:t.domain ~engine:t.engine
               ~lazy_tree:t.domain.lazy_tree ~confirm t.vault)
-    | Vault_status -> on_vault (fun () -> vault Vault.status)
+    | Vault_status pull -> on_vault (fun () -> vault (Vault.status ~pull))
     | Vault_kit passphrase -> on_vault (fun () -> vault Vault.kit passphrase)
     | Vault_machines name ->
         on_vault (fun () -> vault (Vault.list_machines ?name))
@@ -929,7 +929,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         on_passwords (fun () ->
             vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase)
     | Totp_add source -> on_records (fun () -> vault Totp_verbs.add source)
-    | Totp_list filter -> on_records (fun () -> vault Totp_verbs.list filter)
+    | Totp_list { filter; pull } ->
+        on_records (fun () -> vault (Totp_verbs.list ~pull) filter)
     | Totp_code id ->
         on_records (fun () -> vault (Totp_verbs.code ?pull:None) id)
     | Totp_rename r ->

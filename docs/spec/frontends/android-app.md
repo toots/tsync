@@ -125,6 +125,12 @@ follows this rule rather than failing as a whole when the store is silent; the c
   "Offline: codes as of <time>"; a code added is listed at once and pushed later; unlocking with
   the passphrase works from the cached keyring. Each vault screen asks again when the app comes
   to the foreground, on the `recovered` notice, and when a code expires.
+- **Nothing waits for the server before showing what the phone has.** The Vault destination is
+  shown at launch from whether the domain had a vault when the app last asked, kept in the app's
+  preferences, then settled by `vault_status`. Each vault read (the status, the codes, the
+  passwords) is asked first with `pull: "background"`, which answers from the last view at once,
+  then as usual, whose answer replaces it; the offline banner shows only when that second answer
+  is still `outdated`. A screen shows *Loading* only on a phone that never had the vault.
 
 
 ### 6.1 The config the app writes
@@ -749,6 +755,9 @@ checked.
 - A scanned `otpauth://hotp/` code, and a file with a refused line, show the owner's refusal; the
   file's other lines are added.
 - The Codes and passphrase screens are absent from screenshots and the recent-apps thumbnail.
+- With the vault listed once, the store down and the app killed, opening the app shows the Vault
+  destination at once, and its codes and passwords within a second, with the offline banner once
+  the server's silence is known.
 - After an unlock, killing the app and opening it again shows the codes without a passphrase
   (the keystore, [android.md §4.1](android.md#41-what-the-host-provides)); after a lock it asks.
 
