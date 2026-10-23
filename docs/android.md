@@ -30,6 +30,7 @@ The app connects to one domain on one tsync server.
 - **A strong password.** Signing up, or changing a password, a new-password field also offers *Use a strong password*: picking it fills a generated password, and the field confirming it, and saves the login in tsync at once. Submitting the form then adds the username to that login.
 - **Passkeys** (Android 14 and later) work in the browsers Google lists for passkeys, Chrome, Firefox, Brave, Edge, Samsung Internet and Vanadium among them: create one with tsync, and sign in with it, after the fingerprint or screen lock when the site asks. Apps' own passkeys are not supported yet.
 - **Which site.** A page's address is believed only from a browser on that list, checked by its signature. Any other app is offered only the logins saved for that app, whatever it claims to show.
+- **The Passwords tab** lists your logins, notes and passkeys. Tap one to copy its username, password, code, notes or any of its custom fields; every copy is marked sensitive.
 - **A locked vault** shows *tsync is locked*; tapping it opens the Vault screen, where you unlock. Autofill never asks for your passphrase.
 - Suggestions come from what the phone already holds, so they appear quickly and offline; logins added elsewhere a moment ago show at the next tap.
 

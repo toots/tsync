@@ -8,10 +8,14 @@ data class LoginRow(val id: String, val title: String, val username: String, val
 
 data class PasskeyRow(val id: String, val rpId: String, val userName: String)
 
+/** passwords §2.1: a note, listed by title. */
+data class NoteRow(val id: String, val title: String)
+
 data class PasswordRecords(
     val logins: List<LoginRow>,
     val passkeys: List<PasskeyRow>,
     val corrupt: Int,
+    val notes: List<NoteRow> = emptyList(),
     val outdated: Boolean = false,
     val pulledAt: Long? = null,
 )
@@ -52,6 +56,7 @@ class Passwords(private val client: Client) {
             logins = rows.filter { it.optString("kind") == "login" }.map {
                 LoginRow(it.getString("id"), it.optString("title"), it.optString("username"), strings(it.optJSONArray("urls")), it.optBoolean("code"))
             },
+            notes = rows.filter { it.optString("kind") == "note" }.map { NoteRow(it.getString("id"), it.optString("title")) },
             passkeys = rows.filter { it.optString("kind") == "passkey" }.map {
                 PasskeyRow(it.getString("id"), it.optString("rpId"), it.optString("userName"))
             },
