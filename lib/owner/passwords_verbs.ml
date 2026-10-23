@@ -91,19 +91,29 @@ let sites args =
         | Error reason -> Fail.invalid "%s" reason)
     (Option.value ~default:[] (strings args "urls"))
 
-(* §5: the password given, else one generated. *)
-let password_of args =
-  match (str args "password", arg args "generate") with
-    | Some p, None -> Some p
-    | None, Some g -> (
-        let g = match g with `Assoc l -> l | _ -> [] in
-        let length = match arg g "length" with Some (`Int n) -> n | _ -> 20
+(* §5: [length] and [symbols], or [words]. *)
+let generated g =
+  let g = match g with `Assoc l -> l | _ -> [] in
+  match (arg g "words", arg g "length") with
+    | Some (`Int n), None ->
+        if n < 4 || n > 12 then Fail.invalid "words is 4 to 12"
+        else Tsync_vault.Words.passphrase n
+    | Some _, None -> Fail.invalid "words is a number, 4 to 12"
+    | Some _, Some _ -> Fail.invalid "give words or length, not both"
+    | None, length -> (
+        let length = match length with Some (`Int n) -> n | _ -> 20
         and symbols =
           match arg g "symbols" with Some (`Bool b) -> b | _ -> true
         in
         match Passwords.generate ~length ~symbols with
-          | Ok p -> Some p
+          | Ok p -> p
           | Error reason -> Fail.invalid "%s" reason)
+
+(* §5: the password given, else one generated. *)
+let password_of args =
+  match (str args "password", arg args "generate") with
+    | Some p, None -> Some p
+    | None, Some g -> Some (generated g)
     | None, None -> None
     | Some _, Some _ -> Fail.invalid "give a password or generate, not both"
 
@@ -589,6 +599,14 @@ let remove_record ~domain ~engine ~lazy_tree t args =
   remove ~domain ~engine ~lazy_tree t (required args "id");
   []
 
+(* §5: a password saved nowhere; it needs no K. *)
+let generate_password ~domain:_ ~engine:_ ~lazy_tree:_ _ args =
+  [
+    ( "password",
+      `String
+        (generated (Option.value ~default:(`Assoc []) (arg args "generate"))) );
+  ]
+
 let act ~domain ~engine ~lazy_tree t ~action args =
   let verb =
     match action with
@@ -599,6 +617,7 @@ let act ~domain ~engine ~lazy_tree t ~action args =
       | "passwords_remove" -> remove_record
       | "passwords_import" -> import
       | "passwords_export" -> export
+      | "passwords_generate" -> generate_password
       | "passwords_passkey_create" -> passkey_create
       | "passwords_passkey_match" -> passkey_match
       | "passwords_passkey_assert" -> passkey_assert
