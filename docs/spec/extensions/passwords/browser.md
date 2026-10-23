@@ -66,8 +66,8 @@ capability. What has been seen working is recorded in §10.
   `one-time-code`), then `type="password"`, then the name, id and label against Chromium's
   patterns (`otp|verification.code|2fa|six.digit` for a code), as the Android service does
   ([android §4](android.md#4-one-time-codes)).
-- It marks each username, password and code field it found with tsync's icon (its mark on the
-  blue square, 22 px) at the right end inside the field, from the page's load and on every field
+- It marks each username, password and code field it found with tsync's icon (its mark in a blue
+  circle, 20 px) at the right end inside the field, from the page's load and on every field
   drawn, not only the focused one, so tsync is seen to be there before a click. The icons are
   drawn in a closed shadow root the page cannot reach into, follow their fields on scroll and
   resize, and leave a field too small to carry one.
@@ -156,6 +156,10 @@ the browser. The extension never changes it by itself.
 - **Frames.** A request from a frame whose origin is not the top page's goes to the browser's own
   WebAuthn, which knows the embedder's permissions policy; tsync answers top-level pages, and
   builds `crossOrigin: false`.
+- **Nothing goes to the browser behind the user's back.** A request the content script cannot
+  pass to the service worker (an extension reloaded under an open page cuts it off) is rejected
+  `NotAllowedError`, *tsync did not answer: reload the page*; a request goes to the browser's own
+  WebAuthn only by the rules below or the user's *Use another passkey or device*.
 - **Every sheet names the origin the browser gave**, never the RP ID or the names the page sent.
 - **Assertion.** It asks `passkey_match`. With answers, it opens the extension's sheet listing them
   by user name, with **Use another passkey or device**; a pick sends `passkey_assert` and the

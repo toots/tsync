@@ -18,10 +18,10 @@
   const shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `<style>
     :host { all: initial; }
-    .icon { position: fixed; width: 22px; height: 22px; cursor: pointer; z-index: 2147483646;
-            background: url("${ICON}") center / 22px no-repeat; border: 0; padding: 0; border-radius: 6px;
-            box-shadow: 0 1px 3px #0004; }
-    .icon:hover { box-shadow: 0 0 0 2px #2563eb55, 0 1px 3px #0004; }
+    .icon { position: fixed; width: 20px; height: 20px; cursor: pointer; z-index: 2147483646;
+            background: url("${ICON}") center / 20px no-repeat; border: 0; padding: 0; border-radius: 50%;
+            opacity: .9; }
+    .icon:hover { opacity: 1; box-shadow: 0 0 0 3px #2563eb33; }
     .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px;
             background: Canvas; color: CanvasText; border: 1px solid #8884; border-radius: 8px;
             box-shadow: 0 4px 16px #0003; font: 13px system-ui, sans-serif; padding: 4px; }
@@ -51,7 +51,7 @@
       node.style.top = `${r.bottom + 2}px`;
     } else {
       node.style.left = `${r.right - 28}px`;
-      node.style.top = `${r.top + (r.height - 22) / 2}px`;
+      node.style.top = `${r.top + (r.height - 20) / 2}px`;
     }
   }
 
@@ -309,14 +309,17 @@
 
   // --- passkeys (§5) ---------------------------------------------------------
 
+  const unreachable = { name: "NotAllowedError", message: "tsync did not answer: reload the page" };
   const answerPage = (id, body) => window.postMessage({ tsync: "webauthn-reply", id, ...body }, window.location.origin);
 
   window.addEventListener("message", async (event) => {
     const m = event.data;
     if (event.source !== window || !m || m.tsync !== "webauthn") return;
-    const ask = (message) => chrome.runtime.sendMessage(message).catch(() => ({ fallback: true }));
+    // §5: tsync out of reach is said to the page; only the user's choice in a sheet hands a
+    // request to the browser.
+    const ask = (message) => chrome.runtime.sendMessage(message).catch(() => ({ error: unreachable }));
     if (m.kind === "get" && m.mediation === "conditional") {
-      const held = await ask({ type: "passkey-conditional", publicKey: m.publicKey });
+      const held = await chrome.runtime.sendMessage({ type: "passkey-conditional", publicKey: m.publicKey }).catch(() => ({}));
       if (held.hold) conditional = { id: m.id, publicKey: m.publicKey };
       else answerPage(m.id, { fallback: true });
       return;
@@ -329,7 +332,7 @@
     menu.hidden = true;
     const request = conditional;
     conditional = null;
-    const reply = await chrome.runtime.sendMessage({ type: "webauthn", kind: "get", publicKey: request.publicKey }).catch(() => ({ fallback: true }));
+    const reply = await chrome.runtime.sendMessage({ type: "webauthn", kind: "get", publicKey: request.publicKey }).catch(() => ({ error: unreachable }));
     answerPage(request.id, reply);
   }
 })();
