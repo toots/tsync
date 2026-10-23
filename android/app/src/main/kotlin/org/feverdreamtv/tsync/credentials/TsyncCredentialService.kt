@@ -80,7 +80,7 @@ class TsyncCredentialService : CredentialProviderService() {
             return BeginGetCredentialResponse()
         }
         if (tsync.boot() != Boot.Ready) return BeginGetCredentialResponse()
-        val mark = org.feverdreamtv.tsync.autofill.VaultIcon.of(this, tsync)
+        val mark = org.feverdreamtv.tsync.autofill.TsyncIcon.of(this)
         val entries = mutableListOf<CredentialEntry>()
         for (option in request.beginGetCredentialOptions) {
             when (option) {
