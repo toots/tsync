@@ -181,7 +181,8 @@ On a form that creates an account or changes a password, a host or the browser e
   password never has a password nobody kept.
 - **On the form's submit** the host sends `passwords_save` with `suggested` naming that id, and
   no password: the owner sets the record's username to the one submitted, when the record is a
-  login for that site that has not been edited since, and adds nothing. A form abandoned leaves the login, which the user removes.
+  login with that site among its sites, and adds nothing; any other record is refused
+  `invalid`. A form abandoned leaves the login, which the user removes.
 - The suggestion is offered only on a gesture, as a fill is, and only for a site (an app's
   `android://` site included); a locked vault refuses it `locked`.
 

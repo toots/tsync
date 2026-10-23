@@ -482,6 +482,47 @@ let logins () =
   p "%-40s %d" "a login's fields, through get"
     (match member got "fields" with Some (`List l) -> List.length l | _ -> -1);
   ignore (ask [("action", s "passwords_remove"); ("id", s fielded_id)]);
+  (* §5.1: the pick saves the login, the submit sets its username. *)
+  let count () =
+    match member (ask [("action", s "passwords_list")]) "records" with
+      | Some (`List l) -> List.length l
+      | _ -> -1
+  in
+  let before = count () in
+  let sg =
+    ask
+      [
+        ("action", s "passwords_suggest");
+        ("site", s "https://signup.example/register");
+        ("username", s "");
+      ]
+  in
+  let sg_id = Option.value ~default:"" (field sg "id") in
+  let got = ask [("action", s "passwords_get"); ("id", s sg_id)] in
+  p "%-40s saved at once %b, its password the one answered %b" "suggest"
+    (count () = before + 1)
+    (field got "password" = field sg "password" && field sg "password" <> None);
+  answer "save, suggested, the username"
+    (ask
+       [
+         ("action", s "passwords_save");
+         ("site", s "https://signup.example");
+         ("username", s "new@example.com");
+         ("suggested", s sg_id);
+       ]);
+  let got = ask [("action", s "passwords_get"); ("id", s sg_id)] in
+  p "%-40s username %s, still one login %b" "  after the submit"
+    (Option.value ~default:"?" (field got "username"))
+    (count () = before + 1);
+  answer "save, suggested, another site"
+    (ask
+       [
+         ("action", s "passwords_save");
+         ("site", s "https://other.example");
+         ("username", s "x");
+         ("suggested", s sg_id);
+       ]);
+  ignore (ask [("action", s "passwords_remove"); ("id", s sg_id)]);
   linked
 
 let import_export () =
