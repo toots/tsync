@@ -26,6 +26,9 @@ type t = {
   locked_by : [ `Idle | `Screen | `Age ] option Atomic.t;
       (** §6.2: why the policy locked it, until the next unlock *)
   watching : bool Atomic.t;  (** §6.2: a watcher runs while K is held *)
+  announced : string list Atomic.t;
+      (** §6.3: the new machines' names, as last read, for the domain's status
+      *)
   secret_key : (string * string) option Atomic.t;
   cached : [ `Keystore | `Memory ] Atomic.t;
   restored : bool Atomic.t;  (** the keystore was read for this owner *)
@@ -40,6 +43,7 @@ let create ?pulls () =
     since = Atomic.make None;
     locked_by = Atomic.make None;
     watching = Atomic.make false;
+    announced = Atomic.make [];
     secret_key = Atomic.make None;
     cached = Atomic.make `Memory;
     restored = Atomic.make false;
@@ -70,7 +74,8 @@ let forget ~domain ~secret_key t =
   let key_failure = deleted (key_entry domain) in
   if key_failure = None then (
     Atomic.set t.key None;
-    Atomic.set t.since None);
+    Atomic.set t.since None;
+    Atomic.set t.announced []);
   let secret_key_failure =
     if secret_key then deleted (secret_key_entry domain) else None
   in
@@ -429,6 +434,37 @@ let note_machine ?(enrolls = false) ~(domain : Tsync_domain.Domain.t) ~engine
     with Fail.E f ->
       Log.warn "vault: this machine's entry is left: %s" f.reason)
 
+(* §6.3: the entries this machine has not acknowledged, read again at an unlock,
+   a listing, a status and when the folder changes; the domain's status reports
+   what was last read, so a menu that polls it reads no file. *)
+let announce ~domain ~engine t =
+  restore ~domain ~engine t;
+  let names =
+    match (read ~domain engine).keyring with
+      | `Ok k -> (
+          match Atomic.get t.key with
+            | Some (id, key) when id = k.Keyring.key_id -> (
+                let entries = machines engine ~key_id:id ~key in
+                let me = Tsync_domain.Domain.client_uuid domain in
+                match Option.join (List.assoc_opt me entries) with
+                  | None -> []
+                  | Some own ->
+                      List.filter_map
+                        (fun (id, m) ->
+                          match m with
+                            | Some (m : Tsync_vault.Machine.t)
+                              when id <> me && not (List.mem id own.seen) ->
+                                Some m.name
+                            | _ -> None)
+                        entries)
+            | _ -> [])
+      | _ -> []
+  in
+  Atomic.set t.announced names;
+  names
+
+let announced t = Atomic.get t.announced
+
 let init ~domain ~engine ~lazy_tree t typed =
   check_uses ~domain ~engine;
   let passphrase = chosen typed in
@@ -539,7 +575,8 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
         reencrypt ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key) t
     | _ -> ());
   store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key;
-  note_machine ~enrolls ~domain ~engine ~lazy_tree t ~key_id:keyring.key_id ~key
+  note_machine ~enrolls ~domain ~engine ~lazy_tree t ~key_id:keyring.key_id ~key;
+  ignore (announce ~domain ~engine t)
 
 (* totp §5: the user's own request, told apart by the passphrase. *)
 let confirm ~domain ~engine ~lazy_tree t typed =
@@ -644,6 +681,7 @@ let list_machines ?name ~domain ~engine ~lazy_tree t : Protocol.machine list =
               modified = now ();
             }
     | _ -> ());
+  Atomic.set t.announced [];
   List.map
     (fun (id, m) ->
       let m =
@@ -725,6 +763,7 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
                 modified = now;
               })
     with Fail.E f -> Log.warn "vault: the machine list is left: %s" f.reason);
+  Atomic.set t.announced [];
   { secret = secret ~key_id:next.key_id secret_key; pending }
 
 (* vault §7.1: the whole extension folder, and this machine's entries. *)
@@ -868,21 +907,5 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
             (match Atomic.get t.secret_key with
               | Some (id, _) -> not (Keyring.enrolls k ~secret_key_id:id)
               | None -> false);
-          new_machines =
-            (match key t k with
-              | None -> []
-              | Some key -> (
-                  let entries = machines engine ~key_id:k.key_id ~key in
-                  let me = Tsync_domain.Domain.client_uuid domain in
-                  match Option.join (List.assoc_opt me entries) with
-                    | None -> []
-                    | Some own ->
-                        List.filter_map
-                          (fun (id, m) ->
-                            match m with
-                              | Some (m : Tsync_vault.Machine.t)
-                                when id <> me && not (List.mem id own.seen) ->
-                                  Some m.name
-                              | _ -> None)
-                          entries));
+          new_machines = announce ~domain ~engine t;
         }

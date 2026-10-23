@@ -327,8 +327,10 @@ and notices a new one.
   each enrolled and last unlocked, this machine marked (`machines`: `id`, `this`, and `name`,
   `enrolled`, `lastUnlock` for an entry that opens). Entries that do not open are listed by id.
 - **A new machine.** An entry whose id is not in this machine's own `seen` is new to it. While the
-  vault is unlocked, status lists the new ones' names under `newMachines`, and the tray or app
-  says that the machine joined the domain's vault. Enrolling acknowledges the entries already
+  vault is unlocked, status lists the new ones' names under `newMachines`, and so does the
+  domain's `status` ([08](../08-frontends.md)), from what the owner last read: at an unlock, a
+  listing, a vault status, and when an entry arrives. The menu model shows a row for each
+  ([menu-model §5](../frontends/menu-model.md#5-rows)), and an app's vault screen says it. Enrolling acknowledges the entries already
   there, and listing the machines acknowledges every one it shows: no clock decides what is new.
 - The list is informative, not a control: any machine holding K can write an entry, and removing
   one revokes nothing. Revoking is a re-key (§7.2).

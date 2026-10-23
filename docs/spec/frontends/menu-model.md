@@ -52,6 +52,7 @@ the model reads:
 | `pendingBytes` | `pendingBytes` (integer) | unknown |
 | `sentBytes` | `traffic.upBytes` (integer) | unknown |
 | `sendRate` | `traffic.upRate` (number) | unknown |
+| `newMachines` | `newMachines`: list of strings, the machines that joined the domain's vault ([vault §6.3](../extensions/vault.md#63-machines)) | empty |
 
 - A transfer is kept only when both `name` and `rel` are non-empty strings. `bytes` is what has
   moved, `size` the total, `rate` bytes per second; each may be absent.
@@ -165,6 +166,9 @@ In order:
      `not answering` (unreachable); `Paused` (paused, nothing moving); `Idle` (nothing moving);
      else `Uploading U`, `Downloading D` or `Uploading U · Downloading D` from this domain's own
      counts, followed by ` · paused` when the domain is paused;
+   - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
+     icon `computer`, action `Nothing`: it says so until the machines are listed
+     (`tsync vault machines`);
    - its upload file rows, then its download file rows (below).
 3. **Traffic**, when shown: a separator, the traffic line, then the rate line when there is one.
    - The section, separator included, is absent when it has neither line.

@@ -174,6 +174,7 @@ type status = {
   unnamed : int;
   traffic : R.traffic;
   mount : string option;
+  new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
 }
 
 type _ request =
@@ -997,7 +998,14 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
              ("traffic", R.traffic_to_yojson reply.traffic);
            ]
           @ (if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else [])
-          @ opt "mount" (fun m -> `String m) reply.mount)
+          @ opt "mount" (fun m -> `String m) reply.mount
+          @
+          if reply.new_machines = [] then []
+          else
+            [
+              ( "newMachines",
+                `List (List.map (fun n -> `String n) reply.new_machines) );
+            ])
     | Pause _ -> ok [("paused", `Bool reply)]
     | Stats _ -> (
         match R.answer_to_yojson reply with `Assoc l -> ok l | j -> j)
@@ -1241,6 +1249,11 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           unnamed = count "unnamed" j;
           traffic;
           mount = str j "mount";
+          new_machines =
+            (match member j "newMachines" with
+              | Some (`List l) ->
+                  List.filter_map (function `String s -> Some s | _ -> None) l
+              | _ -> []);
         }
     | Pause _ -> flag j "paused"
     | Stats _ -> (

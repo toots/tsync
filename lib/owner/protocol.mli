@@ -187,6 +187,7 @@ type status = {
   unnamed : int;
   traffic : R.traffic;
   mount : string option;
+  new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
 }
 
 type _ request =

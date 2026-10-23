@@ -9,9 +9,12 @@ machines, named                      machine A; machine B (this)
 status                               unlocked enrolled
 owner exit status 0
 == a-rekey
+domain status, before any vault verb newMachines [machine B]
 status                               unlocked enrolled new: machine B
+domain status                        newMachines [machine B]
 machines                             machine A (this); machine B
 status, after the list               unlocked enrolled
+domain status, after the list        newMachines []
 rekey, wrong passphrase              denied: wrong passphrase
 rekey                                secret key 5-5-5-5-6, a new one: true, pending: none
 machines                             machine A (this)

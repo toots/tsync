@@ -77,6 +77,29 @@ let status label =
       | _ -> "")
     (match names "newMachines" with "" -> "" | n -> " new: " ^ n)
 
+(* 08: what the menu reads, from the domain's own status. *)
+let domain_status label =
+  let r = ask [("action", "status")] in
+  p "%-36s newMachines [%s]" label
+    (match member r "newMachines" with
+      | Some (`List l) ->
+          String.concat ", "
+            (List.filter_map (function `String s -> Some s | _ -> None) l)
+      | _ -> "")
+
+(* The owner reads the list in the background at start: polls for it. *)
+let announced_within seconds =
+  let deadline = Unix.gettimeofday () +. seconds in
+  let rec go () =
+    match member (ask [("action", "status")]) "newMachines" with
+      | Some (`List (_ :: _)) -> ()
+      | _ when Unix.gettimeofday () < deadline ->
+          Rt.sleep 0.1;
+          go ()
+      | _ -> ()
+  in
+  go ()
+
 let machines ?name label =
   let r =
     ask
@@ -169,9 +192,13 @@ let run = function
           status "status")
   | "a-rekey" ->
       as_machine uuid_a (fun () ->
+          announced_within 10.;
+          domain_status "domain status, before any vault verb";
           status "status";
+          domain_status "domain status";
           machines "machines";
           status "status, after the list";
+          domain_status "domain status, after the list";
           answer "rekey, wrong passphrase"
             (ask [("action", "vault_rekey"); ("passphrase", second)]);
           let r =
