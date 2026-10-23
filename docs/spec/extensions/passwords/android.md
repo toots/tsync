@@ -24,9 +24,9 @@ never on the main thread.
 - Neither holds a secret beyond the request it answers, nor writes one to disk, nor logs a
   password, code, passphrase, seed or key.
 - The phone serves one domain (android-app §2); there is no domain merge.
-- **The vault's mark** ([vault §8.1](../vault.md#81-appearance)), its icon or the tsync glyph in
-  its colour, heads every autofill suggestion's row and is the icon of every Credential Manager
-  entry.
+- **tsync's icon** heads every autofill suggestion's row and is the icon of every Credential
+  Manager entry, saying where the suggestion comes from. The phone serving one vault, its mark
+  ([vault §8.1](../vault.md#81-appearance)) is drawn on the Vault screen only.
 - **Neither unlocks** ([README §5](../README.md#5-host-adapters)). A request on a locked vault is
   answered with one entry, "tsync is locked", whose tap opens the app's Vault screen
   ([android-app §10.8](../../frontends/android-app.md#108-vault)), where the user unlocks; nothing is
