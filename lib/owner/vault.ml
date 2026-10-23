@@ -15,11 +15,11 @@ let appearance_path = Names.join appearance_folder "appearance"
 (* §6.3: a folder of its own, like the appearance's. *)
 let machines_folder = Names.join folder "machines"
 
-(* vault §6: K under its key id and the secret key under its id, in the owner's
-   memory and, where the host has one, its keystore (§6.1). *)
 (* §6.2: when K was adopted, and last used for the user. *)
 type since = { unlocked_at : float; last_use : float }
 
+(* vault §6: K under its key id and the secret key under its id, in the owner's
+   memory and, where the host has one, its keystore (§6.1). *)
 type t = {
   key : (string * string) option Atomic.t;
   since : since option Atomic.t;  (** set with [key], §6.2's clocks *)
