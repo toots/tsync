@@ -249,12 +249,20 @@ These general rules are realised by the hosts, which link here: the vault keysto
 ### 10.6 Vault keys and passphrases
 
 - **The passphrase** is chosen by the user ([vault §2.2](../extensions/vault.md#22-passphrase)). tsync writes it nowhere: not to the config, local state, the store, a keystore or a log, and never shows it back. It is read from a terminal without echo, from standard input, or from an action's request; never from a command-line argument, which other processes can list.
-- **The secret key** is generated ([vault §2](../extensions/vault.md#2-keys)) and is what makes a chosen passphrase safe against whoever reads the store. It never reaches the store. It is shown once, by the command that made it; it lives in each enrolled machine's keystore, or in the owner's memory, under the same rules as K; it is read like the passphrase.
+- **The secret key** is generated ([vault §2](../extensions/vault.md#2-keys)) and is what makes a chosen passphrase safe against whoever reads the store. It never reaches the store. It is shown by the command that made it, and again only by the emergency kit, to an enrolled machine given the passphrase ([vault §3.1](../extensions/vault.md#31-emergency-kit)); it lives in each enrolled machine's keystore, or in the owner's memory, under the same rules as K; it is read like the passphrase.
 - **K** lives only in the host's keystore or in the owner's memory. It is never written to the config, a local file, the store unwrapped, a log or an IPC reply. Where a host keeps it:
   - macOS: a generic-password item of the login keychain, service `org.feverdreamtv.tsync.vault`, account the domain, whose access list trusts the daemon's code signature alone. Every call refuses rather than prompts (`kSecUseAuthenticationUIFail`): a read the keychain would guard with a dialog fails, and K stays in memory. The daemon is a bare executable, and the data-protection keychain needs an entitlement only a provisioning profile can grant, which a bare executable cannot carry. The login keychain never syncs; it is in a Time Machine backup encrypted under the user's login password. A build whose signature changes identity (an ad-hoc local build) cannot read an item an earlier build wrote.
   - Android: encrypted with AES-GCM under a non-exportable Android Keystore key; the encrypted K is kept in the app's no-backup storage.
   - Linux: a Secret Service item with attributes `application = tsync-vault`, `domain` and `keyId`. With no Secret Service reachable from the owner (no session bus, no provider), K stays in memory.
   - Any other host: memory. No host falls back to a file.
+- **K while an auto-lock policy is in force** lives in the owner's memory only, on every host
+  ([vault §6.2](../extensions/vault.md#62-auto-lock)). The screen lock that policy may watch is
+  reported to the owner as `vault_lock` with `reason: "screen"`:
+  - Linux: by the owner itself, from logind on the system bus: the `Lock` signal of each of the
+    user's sessions, and the manager's `PrepareForSleep` with `true`.
+  - macOS: by the app, on the `com.apple.screenIsLocked` distributed notification and on
+    `NSWorkspace.willSleepNotification`.
+  - Android: by the app, on `ACTION_SCREEN_OFF`.
 - K leaves a machine only wrapped in the keyring. A keystore that would copy it to another device or into a backup is not used that way.
 - **Plaintext records** exist only in the owner's memory. Only envelopes reach staged bodies, the chunk cache and the store.
 - **Codes and passphrases in a UI.** A client copies a one-time code only on the user's gesture,
@@ -269,7 +277,7 @@ These general rules are realised by the hosts, which link here: the vault keysto
   each time the field is shown, and is never remembered. Turning it on changes nothing else: the
   value is not copied, logged or sent by it, and the screen stays out of screenshots as before.
 - Implementations SHOULD overwrite the passphrase, the KEK, K and decrypted records once they are no longer needed, where the runtime allows.
-- The replies of `vault_init` and `vault_passphrase`, and the `passphrase` and `secretKey` members of any vault request, are never logged; a log of IPC traffic masks them (§10.3).
+- The replies of `vault_init`, `vault_rekey`, `vault_kit` and `vault_passphrase`, and the `passphrase` and `secretKey` members of any vault request, are never logged; a log of IPC traffic masks them (§10.3).
 
 ---
 

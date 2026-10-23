@@ -61,6 +61,16 @@ it, and the secret key, in the OS keystore.
   ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). A
   terminal or an app asks for a new one twice and refuses a mismatch before sending it.
 
+### 2.3 Generated passphrases
+
+A CLI or app that asks for a new passphrase (§3, §7) SHOULD offer to generate one: words are
+what a user can remember and type on every machine.
+
+- `n` words, each drawn uniformly from the CSPRNG by rejection sampling from the EFF large word
+  list (7776 words, bundled with tsync), joined by `-`, in lower case: about 12.9 bits a word.
+- A passphrase suggestion is 6 words (about 77 bits), which §2.2's length always admits.
+- It is shown once, for the user to write down, and is then a passphrase like any other.
+
 ## 3. Initialising
 
 `tsync vault init` (action `vault_init`) creates the domain's vault.
@@ -76,13 +86,30 @@ it, and the secret key, in the OS keystore.
    secret key on this machine (§6).
 4. It shows the secret key once: on the terminal for the CLI, in the reply of `vault_init` for an
    app, which SHOULD offer it as text and as a QR code, and MUST ask the user to confirm it was
-   saved before leaving the screen. tsync never shows it again
+   saved before leaving the screen, offering the emergency kit (§3.1). Afterwards only the kit
+   shows it again
    ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)).
 
 The secret key and the passphrase together are the user's way into the vault from a new machine:
 the secret key is what 1Password calls the Emergency Kit. A user who forgets the passphrase, or
 loses the secret key with every machine that kept it, has lost the records. Nothing recovers
 them.
+
+### 3.1 Emergency kit
+
+The kit is a page the user prints or keeps offline: what a new machine needs besides the
+passphrase.
+
+- `tsync vault kit` (action `vault_kit`) needs an enrolled machine and the passphrase
+  (`passphrase`), checked against the keyring as an unlock is, and answers the secret key. Init
+  and a re-key (§7.2) offer it with the secret key they show.
+- The page holds the domain's name, the date, the secret key in its spelling (§2.1) and as a QR
+  code of exactly that spelling, an empty box for the user to write the passphrase in by hand,
+  and the steps to unlock on a new machine. It holds no passphrase and no K.
+- The CLI writes it as one self-contained HTML file (`--output FILE`, created with mode 0600 and
+  never replaced) for the browser to print; an app opens the platform's print dialog on it. The
+  file is the secret key in plain text: the CLI says to print it and delete it.
+- A wrong passphrase is DENIED and shows nothing; a machine not enrolled is refused `locked`.
 
 ## 4. The keyring
 
@@ -252,6 +279,59 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
 - Removing a domain from the config does not delete its entry; `tsync vault lock` before
   removing it does.
 
+### 6.2 Auto-lock
+
+A domain MAY have its vault lock on its own (`vaultLock`,
+[05 §2.1](../05-ops-config.md#21-schema-and-validation)). It is off unless configured: on a
+user's own machines `vault lock` is the control (§6), and an organisation that wants unattended
+machines locked states a policy from its server.
+
+- **Triggers**, each optional:
+  - `idleMinutes` (1 to 1440): no request that needs K for that long. Folds, arrivals and other
+    background work are not use.
+  - `onScreenLock`: the user's session locks or the machine sleeps. The host reports it by
+    sending `vault_lock` with `reason: "screen"` to every domain it serves; the owner locks only
+    a domain whose policy in force sets `onScreenLock`, and answers the others without locking.
+    Who reports it on each host:
+    [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases).
+  - `maxHours` (1 to 720): that long since the unlock, whatever the use.
+- **The policy in force** is the strictest of the domain's own and the one its main states: the
+  smaller of each limit, and `onScreenLock` when either sets it. A client tightens what its main
+  states and never loosens it. It is learned and kept like the extensions
+  ([05 §2.1](../05-ops-config.md#21-schema-and-validation) rule 4); until a main's is learned, the
+  domain's own applies.
+- **Locking** is §6's lock without `forget`: the machine stays enrolled, and the next unlock asks
+  for the passphrase. Status says why the vault was locked (`lockedBy`: `idle`, `screen` or
+  `age`) until the next unlock, and an app or the tray says it when it next shows the vault.
+- **No keystore.** While a policy is in force, an unlock keeps K in the owner's memory only
+  (`cached: memory`), and the domain's K entry is deleted at owner start and when a policy is
+  learned. A restart of the owner or of the machine therefore leaves the vault locked. The secret
+  key entry stays.
+- A policy learned while the vault is unlocked applies at once, counting from the last use and
+  from the unlock as they were.
+
+### 6.3 Machines
+
+Each enrolled machine has an entry naming it, so the user sees which machines can read the vault
+and notices a new one.
+
+- The entry is `/.tsync-ext/vault/machines/<client uuid>`
+  ([03](../03-journal-sync.md)), sealed under K like a record (§5, extension name `vault`):
+  `{"name", "enrolled", "lastUnlock", "modified"}`, epoch seconds but for `name`, which is the
+  host's name until the user gives another (`tsync vault machines --name NAME`, action
+  `vault_machines` with `name`).
+- A machine writes its entry at init, at a re-key, and at an unlock that enrolls it, and refreshes
+  `lastUnlock` at an unlock when it is a day old. `lock --forget` removes it.
+- `tsync vault machines` (action `vault_machines`, needs K) lists the entries by name, with when
+  each enrolled and last unlocked, this machine marked. Entries that do not open are listed by
+  id.
+- **A new machine.** An owner remembers the entries it has seen, from its own enrollment on. One
+  it has not seen, found while the vault is unlocked, is reported once: status lists it under
+  `newMachines` until the next listing, and the tray or app says that the machine joined the
+  domain's vault.
+- The list is informative, not a control: any machine holding K can write an entry, and removing
+  one revokes nothing. Revoking is a re-key (§7.2).
+
 ## 7. Rotation
 
 - **Passphrase change.** `tsync vault passphrase` (action `vault_passphrase`) needs an unlocked,
@@ -291,10 +371,32 @@ entries.
 - A client that does not use an extension of the domain is refused, as for every vault verb
   (README §3).
 
-### 7.2 New K
+### 7.2 Re-key
 
-- **New K.** Not specified in this version. The key id in every envelope is there so a later
-  version can re-key with no format change.
+`tsync vault rekey` (action `vault_rekey`) replaces K, the key id and the secret key. It is how a
+lost or stolen machine is revoked: that machine holds the secret key and K, and a passphrase
+change alone leaves both valid (§7).
+
+- It needs an unlocked, enrolled vault and the passphrase (`passphrase`). It takes a new one
+  (`newPassphrase`, §2.2) or keeps the current one; a CLI or app SHOULD suggest a new one when a
+  machine was lost.
+- It draws a new K, key id and secret key, writes a keyring holding one `secret-key` slot for
+  them, keeps the new K and secret key on this machine (§6), and shows the new secret key once,
+  offering the kit (§3.1).
+- It then re-encrypts every record under the old key id as §4.3 does for a copy's K, in every
+  extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done. A
+  re-encryption that fails is resumed at this machine's next unlock. The appearance (§8.1),
+  unsealed, stays.
+- It rewrites the machine list (§6.3) with this machine alone.
+- Every other machine is locked when it sees the new keyring (§6) and is no longer enrolled: its
+  unlock asks for the new secret key, and status says the vault was re-keyed. A machine that
+  wrote records under the old K before it saw the new keyring re-encrypts them at its next unlock
+  (§4.3).
+- **What it protects:** every record from then on, and the current body of every record. The
+  domain's versions keep earlier bodies under the old K
+  ([05 §4.8](../05-ops-config.md#48-deleted-files-and-retention)): whoever kept the old K reads
+  those until retention removes them.
+- Two re-keys racing leave two keyrings of different key ids, which §4.3 settles.
 
 ## 8. Commands
 
@@ -309,19 +411,22 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 |---|---|---|
 | `init` / `vault_init` | — | §3 |
 | `unlock` / `vault_unlock` | — | §6 |
-| `lock` / `vault_lock` | — | §6 |
+| `lock` / `vault_lock` | — | §6; with `reason: "screen"`, §6.2 |
 | `passphrase` / `vault_passphrase` | yes | §7 |
 | `delete` / `vault_delete` | — | §7.1 |
-| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); slot count by kind; unusable slots; keyring copies; the appearance (§8.1). Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
+| `rekey` / `vault_rekey` | yes | §7.2 |
+| `kit` / `vault_kit` | — | §3.1 |
+| `machines` / `vault_machines` | yes | §6.3 |
+| `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); the auto-lock policy in force and where each part comes from (§6.2), and `lockedBy`; slot count by kind; unusable slots; keyring copies; the appearance (§8.1). Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
 | `appearance` / `vault_appearance` | yes | §8.1 |
 
-`vault_init`, and `vault_passphrase` with a new secret key, are the only replies that carry a
-secret: the secret key.
+`vault_init`, `vault_rekey`, `vault_kit`, and `vault_passphrase` with a new secret key, are the
+only replies that carry a secret: the secret key.
 
-- `init`, `unlock` and `passphrase` derive keys at up to the limits of §4.2 and init resyncs the
+- `init`, `unlock`, `passphrase`, `rekey` and `kit` derive keys at up to the limits of §4.2 and init resyncs the
   domain first, so each is a bulk action
   ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)): a reply that timed out while the work went on would lose the
-  secret key init shows once.
+  secret key init and a re-key show once.
 - The keyring's fold (§4.3) runs where this client may write the domain. On a read-only domain
   status and unlock read the keyring as it is, copies and all.
 
@@ -408,6 +513,25 @@ lets the user tell them apart at a glance.
 - An envelope with a flipped bit, another magic, or moved into another extension's folder does
   not open, is reported CORRUPT and is never overwritten. Two writes of one plaintext give two
   bodies.
+- With `idleMinutes: 1`, the vault locks a minute after the last code was read and not before;
+  a listing that needs no K does not keep it unlocked. With `maxHours: 1`, it locks an hour after
+  the unlock while codes are read every minute. Status then says `lockedBy` `idle` or `age`.
+- A `vault_lock` with `reason: "screen"` locks a domain whose policy sets `onScreenLock` and
+  leaves one without a policy unlocked.
+- A main stating `idleMinutes: 10` and a domain configuring 30 lock after 10; configuring 5
+  locks after 5. A domain configuring `onScreenLock` behind a main that states nothing locks on
+  the screen lock.
+- With a policy in force, unlock leaves no K entry in the keystore, and an owner restart finds
+  the vault locked; a policy learned after an unlock deletes the entry.
+- `kit` with the passphrase answers the secret key the machine is enrolled with, and with another
+  passphrase is DENIED and answers nothing; the CLI's file has mode 0600 and holds the spelling
+  and a QR code that decodes to it.
+- A second machine's unlock that enrolls it is listed by `machines` on the first, which reports it
+  once in `newMachines`; `lock --forget` on the second removes its entry.
+- After `rekey`, every record opens under the new key id and none under the old; another machine
+  is refused "wrong secret key" with the old secret key and unlocks with the new one; `machines`
+  lists the re-keying machine alone; a record the other machine wrote under the old K before it
+  saw the new keyring opens under the new key id after its unlock.
 - A keyring replaced by one with another key id locks the machine; it writes no record until it
   is unlocked with that keyring's secrets.
 - After a passphrase change, only the new passphrase unlocks the current keyring, with the same
@@ -423,3 +547,12 @@ lets the user tell them apart at a glance.
   key id it is reported CORRUPT, not under another key.
 - Two machines holding a losing keyring's K both unlock with the domain's secrets: every record
   ends under the domain's K, one file per record, after the folds.
+
+## 11. Later
+
+- **Quick unlock**: Touch ID, Android biometrics or fprintd unlocking a vault that auto-lock
+  (§6.2) locked, from a keystore entry the platform releases only after the user's biometric.
+  Such an entry needs the user present, so the owner cannot read it at start (§6.1).
+- **Per-machine slots**: a key each machine keeps, wrapping K in a slot of its own, so the machine
+  list (§6.3) is a control and a re-key reaches the remaining machines without the new secret key
+  being typed on each.
