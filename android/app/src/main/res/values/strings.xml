@@ -211,6 +211,8 @@
     <string name="vault_secret_key_replaced">This vault\'s secret key was replaced on another machine: enter the new one</string>
     <string name="vault_machine_joined">%1$s joined this vault</string>
     <string name="vault_machines_seen">Seen</string>
+    <string name="autofill_suggest">Use a strong password</string>
+    <string name="autofill_suggest_detail">Saved in tsync as you pick it</string>
     <string name="vault_unlock">Unlock</string>
     <string name="vault_lock">Lock</string>
     <string name="vault_lock_confirm">Lock the vault? Codes need the passphrase again afterwards.</string>
