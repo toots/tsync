@@ -34,6 +34,7 @@ let () =
               entry_commands = 64;
               projector = Some "0123456789abcdef0123456789abcdef";
               extensions = ["totp"];
+              vault_lock = Tsync_core.Vault_lock.none;
             };
           store;
           share = None;

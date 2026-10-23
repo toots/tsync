@@ -14,8 +14,15 @@ let appearance_path = Names.join appearance_folder "appearance"
 
 (* vault §6: K under its key id and the secret key under its id, in the owner's
    memory and, where the host has one, its keystore (§6.1). *)
+(* §6.2: when K was adopted, and last used for the user. *)
+type since = { unlocked_at : float; last_use : float }
+
 type t = {
   key : (string * string) option Atomic.t;
+  since : since option Atomic.t;  (** set with [key], §6.2's clocks *)
+  locked_by : [ `Idle | `Screen | `Age ] option Atomic.t;
+      (** §6.2: why the policy locked it, until the next unlock *)
+  watching : bool Atomic.t;  (** §6.2: a watcher runs while K is held *)
   secret_key : (string * string) option Atomic.t;
   cached : [ `Keystore | `Memory ] Atomic.t;
   restored : bool Atomic.t;  (** the keystore was read for this owner *)
@@ -27,6 +34,9 @@ type t = {
 let create ?pulls () =
   {
     key = Atomic.make None;
+    since = Atomic.make None;
+    locked_by = Atomic.make None;
+    watching = Atomic.make false;
     secret_key = Atomic.make None;
     cached = Atomic.make `Memory;
     restored = Atomic.make false;
@@ -44,9 +54,104 @@ let key_entry (domain : Tsync_domain.Domain.t) =
 
 let secret_key_entry domain = key_entry domain ^ "/secret-key"
 
+(* §6.1: a lock whose delete failed did not happen. *)
+let forget ~domain ~secret_key t =
+  let deleted entry =
+    match Keystore.registered () with
+      | None -> None
+      | Some ks -> (
+          match ks.delete ~domain:entry with
+            | () -> None
+            | exception Fail.E f -> Some (ks.name, f.reason))
+  in
+  let key_failure = deleted (key_entry domain) in
+  if key_failure = None then (
+    Atomic.set t.key None;
+    Atomic.set t.since None);
+  let secret_key_failure =
+    if secret_key then deleted (secret_key_entry domain) else None
+  in
+  if secret_key && secret_key_failure = None then Atomic.set t.secret_key None;
+  match (key_failure, secret_key_failure) with
+    | Some (name, reason), _ | None, Some (name, reason) ->
+        Fail.raise_ Unexplained "%s could not forget the key: %s" name reason
+    | None, None -> ()
+
+(* §6.2: what the main last stated, never waiting to ask it. *)
+let policy ~(domain : Tsync_domain.Domain.t) ~engine =
+  let (module E : Engine.S) = engine in
+  Tsync_config.Config.vault_lock_in_force domain.domain
+    (try E.stated_settings () with Fail.E _ -> None)
+
+let auto_locks ~domain ~engine =
+  not (Vault_lock.is_none (policy ~domain ~engine))
+
+(* §6.2: while a policy is in force no K entry stays in the keystore. *)
+let clear_keystore_key ~domain t =
+  Option.iter
+    (fun (ks : Keystore.t) ->
+      match ks.delete ~domain:(key_entry domain) with
+        | () -> Atomic.set t.cached `Memory
+        | exception Fail.E f ->
+            Log.warn "vault: %s keeps a key auto-lock should drop: %s" ks.name
+              f.reason)
+    (Keystore.registered ())
+
+let lock_for ~domain t reason =
+  match forget ~domain ~secret_key:false t with
+    | () -> Atomic.set t.locked_by (Some reason)
+    | exception Fail.E f ->
+        Log.warn "vault: %s could not lock: %s" (key_entry domain) f.reason
+
+(* §6.2: seconds in a policy's minute; a test shortens it. *)
+let minute = Atomic.make 60.
+
+(* §6.2: the idle and age limits, checked before K is used and by {!adopt}'s
+   watcher, which also enforces a policy learned while K is held. *)
+let expire ~domain ~engine t =
+  let p = policy ~domain ~engine in
+  if not (Vault_lock.is_none p) then (
+    if Atomic.get t.cached = `Keystore then clear_keystore_key ~domain t;
+    match (Atomic.get t.since, Atomic.get t.key) with
+      | Some since, Some _ ->
+          let now = Rt.now () and m = Atomic.get minute in
+          let past limit from scale =
+            match limit with
+              | Some n -> now -. from >= float_of_int n *. scale
+              | None -> false
+          in
+          if past p.idle_minutes since.last_use m then lock_for ~domain t `Idle
+          else if past p.max_hours since.unlocked_at (60. *. m) then
+            lock_for ~domain t `Age
+      | _ -> ())
+
+let adopt ~domain ~engine t entry =
+  let now = Rt.now () in
+  Atomic.set t.key (Some entry);
+  Atomic.set t.since (Some { unlocked_at = now; last_use = now });
+  if Atomic.compare_and_set t.watching false true then
+    Rt.spawn ~name:"vault auto-lock" (fun () ->
+        let rec loop () =
+          match Stop.sleep (Float.min 10. (Atomic.get minute /. 4.)) with
+            | exception Stop.Stopping -> Atomic.set t.watching false
+            | () ->
+                expire ~domain ~engine t;
+                if Atomic.get t.key <> None then loop ()
+                else (
+                  Atomic.set t.watching false;
+                  (* An unlock between the check and the flag found it set. *)
+                  if
+                    Atomic.get t.key <> None
+                    && Atomic.compare_and_set t.watching false true
+                  then loop ())
+        in
+        loop ())
+
 (* §6.1 owner start: read once, before the first use of either secret. *)
-let restore ~domain t =
-  if not (Atomic.exchange t.restored true) then
+let restore ~domain ~engine t =
+  let auto_locks = auto_locks ~domain ~engine in
+  if not (Atomic.exchange t.restored true) then (
+    if auto_locks then clear_keystore_key ~domain t;
     Option.iter
       (fun (ks : Keystore.t) ->
         match
@@ -55,32 +160,37 @@ let restore ~domain t =
         with
           | key, secret_key ->
               (* §6: a read never replaces a K the owner already holds. *)
-              Option.iter
-                (fun entry ->
-                  if Atomic.compare_and_set t.key None (Some entry) then
-                    Atomic.set t.cached `Keystore)
-                key;
+              if not auto_locks then
+                Option.iter
+                  (fun entry ->
+                    if Atomic.get t.key = None then (
+                      adopt ~domain ~engine t entry;
+                      Atomic.set t.cached `Keystore))
+                  key;
               Option.iter
                 (fun entry ->
                   ignore (Atomic.compare_and_set t.secret_key None (Some entry)))
                 secret_key
           | exception Fail.E f -> Atomic.set t.keystore_error (Some f.reason))
-      (Keystore.registered ())
+      (Keystore.registered ()))
 
 (* §6.1 unlock: a keystore that refuses leaves both in memory. *)
-let store ~domain t ~key:(key_id, key) ~secret_key =
-  Atomic.set t.key (Some (key_id, key));
+let store ~domain ~engine t ~key:(key_id, key) ~secret_key =
+  let auto_locks = auto_locks ~domain ~engine in
+  adopt ~domain ~engine t (key_id, key);
+  Atomic.set t.locked_by None;
   Atomic.set t.secret_key (Some (Secret_key.id secret_key, secret_key));
   Atomic.set t.cached `Memory;
   Option.iter
     (fun (ks : Keystore.t) ->
       match
-        ks.put ~domain:(key_entry domain) ~key_id ~key;
+        if not auto_locks then ks.put ~domain:(key_entry domain) ~key_id ~key;
         ks.put ~domain:(secret_key_entry domain)
           ~key_id:(Secret_key.id secret_key) ~key:secret_key
       with
         | () ->
-            Atomic.set t.cached `Keystore;
+            if auto_locks then clear_keystore_key ~domain t
+            else Atomic.set t.cached `Keystore;
             Atomic.set t.keystore_error None
         | exception Fail.E f ->
             Atomic.set t.keystore_error (Some f.reason);
@@ -257,7 +367,7 @@ let init ~domain ~engine ~lazy_tree t typed =
   let secret_key = Secret_key.generate () in
   let key, keyring = Keyring.create ~now:(now ()) ~secret_key passphrase in
   write engine ~exclusive:true keyring;
-  store ~domain t ~key:(keyring.key_id, key) ~secret_key;
+  store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key;
   secret ~key_id:keyring.key_id secret_key
 
 (* §7.1: a machine that finds the vault gone forgets the K it held. *)
@@ -341,7 +451,7 @@ let rekey ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
 
 let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
   check_uses ~domain ~engine;
-  restore ~domain t;
+  restore ~domain ~engine t;
   let keyring, key, secret_key =
     unwrap ?secret_key ~domain ~engine ~lazy_tree t typed
   in
@@ -351,39 +461,23 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
     | Some ((old_id, _) as old) when old_id <> keyring.key_id ->
         rekey ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key) t
     | _ -> ());
-  store ~domain t ~key:(keyring.key_id, key) ~secret_key
+  store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key
 
 (* totp §5: the user's own request, told apart by the passphrase. *)
 let confirm ~domain ~engine ~lazy_tree t typed =
   check_uses ~domain ~engine;
-  restore ~domain t;
+  restore ~domain ~engine t;
   ignore (unwrap ~domain ~engine ~lazy_tree t typed)
-
-(* §6.1: a lock whose delete failed did not happen. *)
-let forget ~domain ~secret_key t =
-  let deleted entry =
-    match Keystore.registered () with
-      | None -> None
-      | Some ks -> (
-          match ks.delete ~domain:entry with
-            | () -> None
-            | exception Fail.E f -> Some (ks.name, f.reason))
-  in
-  let key_failure = deleted (key_entry domain) in
-  if key_failure = None then Atomic.set t.key None;
-  let secret_key_failure =
-    if secret_key then deleted (secret_key_entry domain) else None
-  in
-  if secret_key && secret_key_failure = None then Atomic.set t.secret_key None;
-  match (key_failure, secret_key_failure) with
-    | Some (name, reason), _ | None, Some (name, reason) ->
-        Fail.raise_ Unexplained "%s could not forget the key: %s" name reason
-    | None, None -> ()
 
 let lock ?(forget_secret_key = false) ~domain ~engine ~lazy_tree:_ t =
   check_uses ~domain ~engine;
-  restore ~domain t;
+  restore ~domain ~engine t;
   forget ~domain ~secret_key:forget_secret_key t
+
+(* §6.2: a host's report, acted on only under a policy that asks for it. *)
+let screen_locked ~domain ~engine ~lazy_tree:_ t =
+  if (policy ~domain ~engine).on_screen_lock && Atomic.get t.key <> None then
+    lock_for ~domain t `Screen
 
 (* The K held for the keyring's key id: one for another id is not adopted
    (vault §6). *)
@@ -392,12 +486,19 @@ let key t keyring =
     | Some (id, key) when id = keyring.Keyring.key_id -> Some key
     | _ -> None
 
-let held ?strict ~domain ~engine ~lazy_tree t =
+let held ?(use = true) ?strict ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
-  restore ~domain t;
+  restore ~domain ~engine t;
+  expire ~domain ~engine t;
   let keyring = current ?strict ~domain engine ~lazy_tree t in
   match key t keyring with
-    | Some k -> (keyring, k)
+    | Some k ->
+        if use then (
+          match Atomic.get t.since with
+            | Some since ->
+                Atomic.set t.since (Some { since with last_use = Rt.now () })
+            | None -> ());
+        (keyring, k)
     | None -> Fail.raise_ Locked "the vault is locked: run tsync vault unlock"
 
 (* vault §7: a new slot replaces every [secret-key] slot; others are kept. *)
@@ -425,7 +526,7 @@ let passphrase ?(new_secret_key = false) ~domain ~engine ~lazy_tree t typed =
   in
   write engine ~exclusive:false { keyring with slots = slot :: others };
   if new_secret_key then (
-    store ~domain t ~key:(keyring.key_id, key) ~secret_key;
+    store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key;
     Some (secret ~key_id:keyring.key_id secret_key))
   else None
 
@@ -492,7 +593,7 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
 
 let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
-  restore ~domain t;
+  restore ~domain ~engine t;
   read_current engine ~lazy_tree t;
   let found = read ~domain engine in
   let base =
@@ -508,6 +609,19 @@ let status ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       outdated = (Atomic.get t.view).outdated;
       pulled_at = (Atomic.get t.view).pulled_at;
       appearance = None;
+      auto_lock =
+        (let policy = policy ~domain ~engine in
+         if Vault_lock.is_none policy then None
+         else (
+           let (module E : Engine.S) = engine in
+           Some
+             {
+               Protocol.policy;
+               from =
+                 Tsync_config.Config.vault_lock_sources domain.domain
+                   (try E.stated_settings () with Fail.E _ -> None);
+             }));
+      locked_by = Atomic.get t.locked_by;
     }
   in
   match found.keyring with

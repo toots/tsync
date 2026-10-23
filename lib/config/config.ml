@@ -41,6 +41,7 @@ type domain = {
   project_lease : float option;
   project_quarantine : float option;
   project_settle : float option;
+  vault_lock : Vault_lock.t option;
 }
 
 let default_symlinks = `Keep
@@ -397,6 +398,7 @@ let parse_domain path j =
       "projectLease";
       "projectQuarantine";
       "projectSettle";
+      "vaultLock";
     ]
     l;
   let raw_name =
@@ -528,6 +530,14 @@ let parse_domain path j =
       ->
         fail (sub path "chunkSize") "must lie between 256 KiB and 256 MiB"
     | _ -> ());
+  let vault_lock =
+    Option.map
+      (fun j ->
+        match Vault_lock.of_json j with
+          | Ok v -> v
+          | Error e -> fail (sub path "vaultLock") "%s" e)
+      (get l "vaultLock")
+  in
   let d =
     {
       name;
@@ -554,6 +564,7 @@ let parse_domain path j =
       project_lease;
       project_quarantine;
       project_settle;
+      vault_lock;
     }
   in
   (* 05 §2.1: behind a main that states its settings a timing left out is the
@@ -592,6 +603,7 @@ let stated (d : domain) : Tsync_store.Store.domain_settings =
     entry_commands = t.max_entry_commands;
     projector = None;
     extensions = Option.value ~default:[] d.extensions;
+    vault_lock = Option.value ~default:Vault_lock.none d.vault_lock;
   }
 
 (* 05 §2.1 rule 5: the main's list, narrowed by a configured one; the
@@ -660,6 +672,29 @@ let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
           },
           m.symlinks )
 
+(* 05 §2.1 rule 7: never refused, the strictest of both. *)
+let vault_lock_in_force (d : domain)
+    (main : Tsync_store.Store.domain_settings option) =
+  Vault_lock.strictest
+    (Option.value ~default:Vault_lock.none d.vault_lock)
+    (match main with Some m -> m.vault_lock | None -> Vault_lock.none)
+
+(* vault §6.2: for each part of the policy in force, [config] when the domain's
+   own value is the one in force, else [main]. *)
+let vault_lock_sources (d : domain)
+    (main : Tsync_store.Store.domain_settings option) =
+  let own = Option.value ~default:Vault_lock.none d.vault_lock in
+  let p = vault_lock_in_force d main in
+  let source name in_force mine =
+    if in_force = None then []
+    else [(name, if mine = in_force then "config" else "main")]
+  in
+  source "idleMinutes" p.idle_minutes own.idle_minutes
+  @ (if p.on_screen_lock then
+       [("onScreenLock", if own.on_screen_lock then "config" else "main")]
+     else [])
+  @ source "maxHours" p.max_hours own.max_hours
+
 (* 05 §2.1: where each domain-wide setting in force comes from. *)
 let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
   let from configured =
@@ -674,6 +709,10 @@ let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
     ("maxEntryCommands", from (d.max_entry_commands <> None));
     (* rule 5: the main's list, narrowed or not, wherever the main states one. *)
     ("extensions", if main <> None then "main" else from (d.extensions <> None));
+    ( "vaultLock",
+      match main with
+        | Some m when not (Vault_lock.is_none m.vault_lock) -> "main"
+        | _ -> from (d.vault_lock <> None) );
   ]
 
 let hostname () = try Unix.gethostname () with _ -> "tsync"

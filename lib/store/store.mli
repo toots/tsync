@@ -28,6 +28,7 @@ type domain_settings = {
   entry_commands : int;
   projector : string option;
   extensions : string list;  (** 05 §2.1 rule 5: the domain's, stated *)
+  vault_lock : Vault_lock.t;  (** rule 7: the domain's, stated *)
 }
 
 val policies : (string * [ `Keep | `Follow | `Skip ]) list

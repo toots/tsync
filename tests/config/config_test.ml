@@ -129,6 +129,7 @@ let () =
         entry_commands = 1024;
         projector = None;
         extensions = ["totp"];
+        vault_lock = Tsync_core.Vault_lock.none;
       }
     in
     let wire =
@@ -161,6 +162,68 @@ let () =
   against "a larger entry" {|,"maxEntryCommands":4096|};
   against "another policy" {|,"symlinks":"keep"|};
   against "another settle" {|,"projectSettle":500|};
+  p "\n== the vault's auto-lock against what the main states (05 rule 7)\n";
+  let auto what ~main extra =
+    let stated : Tsync_store.Store.domain_settings option =
+      Option.map
+        (fun j : Tsync_store.Store.domain_settings ->
+          {
+            chunk = 8 lsl 20;
+            symlinks = `Keep;
+            lease = 30.;
+            quarantine = 300.;
+            settle = 600.;
+            entry_commands = 256;
+            projector = None;
+            extensions = ["totp"];
+            vault_lock =
+              Result.get_ok
+                (Tsync_core.Vault_lock.of_json (Yojson.Safe.from_string j));
+          })
+        main
+    in
+    let wire =
+      Option.bind stated (fun m ->
+          Tsync_store.Store.(
+            domain_settings_of_json (domain_settings_to_json m)))
+    in
+    match
+      Config.of_string
+        (Printf.sprintf
+           {|{"domains":[{"name":"F","versioning":true,"backends":[{"type":"local","name":"d","role":"main","path":"/srv/d"}],"frontends":["android"]%s}]}|}
+           extra)
+    with
+      | { domains = [d]; _ } ->
+          p "%-30s %s from %s\n" what
+            (Yojson.Safe.to_string
+               (Tsync_core.Vault_lock.to_json
+                  (Config.vault_lock_in_force d wire)))
+            (String.concat ","
+               (List.map
+                  (fun (k, v) -> k ^ "=" ^ v)
+                  (Config.vault_lock_sources d wire)))
+      | _ -> p "%-30s not one domain\n" what
+      | exception Config.Invalid e -> p "%-30s refused: %s\n" what e
+  in
+  auto "none" ~main:None "";
+  auto "the domain's own" ~main:None
+    {|,"vaultLock":{"idleMinutes":30,"onScreenLock":true}|};
+  auto "the main's" ~main:(Some {|{"idleMinutes":10,"maxHours":12}|}) "";
+  auto "stricter than the main" ~main:(Some {|{"idleMinutes":10}|})
+    {|,"vaultLock":{"idleMinutes":5}|};
+  auto "looser than the main" ~main:(Some {|{"idleMinutes":10,"maxHours":12}|})
+    {|,"vaultLock":{"idleMinutes":30,"onScreenLock":true}|};
+  auto "an empty policy" ~main:None {|,"vaultLock":{}|};
+  auto "idle of 0" ~main:None {|,"vaultLock":{"idleMinutes":0}|};
+  auto "idle over a day" ~main:None {|,"vaultLock":{"idleMinutes":1441}|};
+  auto "hours as text" ~main:None {|,"vaultLock":{"maxHours":"12"}|};
+  auto "screen as 1" ~main:None {|,"vaultLock":{"onScreenLock":1}|};
+  auto "not an object" ~main:None {|,"vaultLock":true|};
+  p "%-30s %b\n" "an ill-formed stated policy"
+    (Tsync_store.Store.domain_settings_of_json
+       (Yojson.Safe.from_string
+          {|{"chunkSize":8388608,"symlinks":"keep","projectLease":30,"projectQuarantine":300,"projectSettle":600,"maxEntryCommands":256,"vaultLock":{"idleMinutes":0}}|})
+    = None);
   p "\n== behind a server, a timing left out is the server's\n";
   let behind what extra =
     match
@@ -443,6 +506,7 @@ let () =
       entry_commands = 64;
       projector = None;
       extensions;
+      vault_lock = Tsync_core.Vault_lock.none;
     }
   in
   let one extensions =

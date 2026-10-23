@@ -130,6 +130,10 @@ type appearance_change = {
   set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
 }
 
+(** vault §6.2: the auto-lock policy in force, and where each of its parts comes
+    from ([config] or [main]), by member name. *)
+type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -143,6 +147,8 @@ type vault_status = {
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
   pulled_at : float option;  (** of that view *)
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
+  auto_lock : auto_lock option;  (** none without a policy *)
+  locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
 }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -246,7 +252,9 @@ type _ request =
       secret_key : string option;
     }
       -> unit request
-  | Vault_lock : bool -> unit request  (** [true] also forgets the secret key *)
+  | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
+      (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
+          a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
   | Vault_passphrase : {
       passphrase : string;

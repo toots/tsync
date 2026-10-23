@@ -1,0 +1,34 @@
+== the keystore under a policy
+idle                                     unlocked cached=memory autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
+free                                     unlocked cached=keystore
+keystore entries                         [aged#secret-key free free#secret-key idle#secret-key]
+== idle, a minute of 2 s
+unlock                                   ok
+used every 0.5 s for 3 s                 true
+locked within 8 s of statuses alone      true
+idle                                     locked lockedBy=idle autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
+a use                                    locked: the vault is locked: run tsync vault unlock
+== the screen
+unlock                                   ok
+unlock free                              ok
+screen report, idle                      ok
+screen report, free                      ok
+idle                                     locked lockedBy=screen autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
+free                                     unlocked cached=keystore
+unlock                                   ok
+idle, after the unlock                   unlocked cached=memory autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
+lock                                     ok
+== age, a minute of 0.05 s: an hour of 3 s
+unlock                                   ok
+locked while used, after 3 s or more     true
+aged                                     locked lockedBy=age autoLock={"maxHours":1,"from":{"maxHours":"config"}}
+lock free                                ok
+unlock                                   ok
+unlock free                              ok
+keystore entries                         [aged#secret-key free free#secret-key idle#secret-key]
+owner exit status 0
+== after a restart
+idle                                     locked autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
+free                                     unlocked cached=keystore
+unlock, the passphrase alone             ok
+owner exit status 0
