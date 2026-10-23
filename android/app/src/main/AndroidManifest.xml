@@ -104,6 +104,11 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
+            android:name=".autofill.LinkActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
+
+        <activity
             android:name=".credentials.PasskeyActivity"
             android:exported="false"
             android:excludeFromRecents="true"
