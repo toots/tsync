@@ -776,45 +776,82 @@ let fill ~domain ~engine ~lazy_tree t args =
             (code ~pull:(pull_of args) ~domain ~engine ~lazy_tree t l.totp)
     | _ -> Fail.invalid "the login does not match %s" site
 
+let site_arg args =
+  match Passwords.site_of_string (required args "site") with
+    | Ok site -> site
+    | Error reason -> Fail.invalid "%s" reason
+
+(* §5.1: the submit after a suggestion names the login the pick saved, which
+   takes the username submitted when it is a login of exactly that site. *)
+let save_suggested ~domain ~engine ~lazy_tree t ~site ~id args =
+  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
+  match find ctx id with
+    | Login l when List.mem site l.urls ->
+        let username = required args "username" in
+        if username <> l.username then
+          ignore
+            (edit ~domain ~engine ~lazy_tree t
+               [("id", `String id); ("username", `String username)]);
+        [("saved", `Bool true); ("id", `String id)]
+    | _ -> Fail.invalid "the suggested login is no login of %s" site
+
 (* §8 save: an equal login adds nothing; one login of the site and username
    with another password is updated only on [update] naming it; anything else
    is added. *)
 let save ~domain ~engine ~lazy_tree t args =
-  let site =
-    match Passwords.site_of_string (required args "site") with
-      | Ok site -> site
-      | Error reason -> Fail.invalid "%s" reason
-  in
-  let username = required args "username"
-  and password = required args "password" in
-  let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
-  let ok, _ = records ctx in
-  let same =
-    List.filter
-      (fun (_, (l : Passwords.login)) ->
-        l.username = username
-        && List.exists (fun s -> Passwords.matches ~site:s ~origin:site) l.urls)
-      (logins ok)
-  in
-  if List.exists (fun (_, (l : Passwords.login)) -> l.password = password) same
-  then [("saved", `Bool false)]
-  else (
-    match (same, str args "update") with
-      | [(id, _)], Some update when update = id ->
-          ignore
-            (edit ~domain ~engine ~lazy_tree t
-               [("id", `String id); ("password", `String password)]);
-          [("saved", `Bool true); ("id", `String id)]
-      | [(id, _)], _ -> [("saved", `Bool false); ("update", `String id)]
-      | _ ->
-          add ~domain ~engine ~lazy_tree t
-            [
-              ("title", `String site);
-              ("urls", `List [`String site]);
-              ("username", `String username);
-              ("password", `String password);
-            ]
-          |> List.cons ("saved", `Bool true))
+  let site = site_arg args in
+  match str args "suggested" with
+    | Some id -> save_suggested ~domain ~engine ~lazy_tree t ~site ~id args
+    | None ->
+        let username = required args "username"
+        and password = required args "password" in
+        let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
+        let ok, _ = records ctx in
+        let same =
+          List.filter
+            (fun (_, (l : Passwords.login)) ->
+              l.username = username
+              && List.exists
+                   (fun s -> Passwords.matches ~site:s ~origin:site)
+                   l.urls)
+            (logins ok)
+        in
+        if
+          List.exists
+            (fun (_, (l : Passwords.login)) -> l.password = password)
+            same
+        then [("saved", `Bool false)]
+        else (
+          match (same, str args "update") with
+            | [(id, _)], Some update when update = id ->
+                ignore
+                  (edit ~domain ~engine ~lazy_tree t
+                     [("id", `String id); ("password", `String password)]);
+                [("saved", `Bool true); ("id", `String id)]
+            | [(id, _)], _ -> [("saved", `Bool false); ("update", `String id)]
+            | _ ->
+                add ~domain ~engine ~lazy_tree t
+                  [
+                    ("title", `String site);
+                    ("urls", `List [`String site]);
+                    ("username", `String username);
+                    ("password", `String password);
+                  ]
+                |> List.cons ("saved", `Bool true))
+
+(* §5.1: the pick is the approval, so the login is saved before the form is
+   submitted; the submit then only sets its username. *)
+let suggest ~domain ~engine ~lazy_tree t args =
+  let site = site_arg args in
+  let password = generated (`Assoc []) in
+  ("password", `String password)
+  :: add ~domain ~engine ~lazy_tree t
+       [
+         ("title", `String site);
+         ("urls", `List [`String site]);
+         ("username", `String (Option.value ~default:"" (str args "username")));
+         ("password", `String password);
+       ]
 
 let remove_record ~domain ~engine ~lazy_tree t args =
   remove ~domain ~engine ~lazy_tree t (required args "id");
@@ -836,6 +873,7 @@ let act ~domain ~engine ~lazy_tree t ~action args =
       | "passwords_get" -> get
       | "passwords_fill" -> fill
       | "passwords_save" -> save
+      | "passwords_suggest" -> suggest
       | "passwords_edit" -> edit
       | "passwords_remove" -> remove_record
       | "passwords_import" -> import
