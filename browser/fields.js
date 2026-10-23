@@ -4,8 +4,8 @@
 
 const TsyncFields = (() => {
   // Chromium's ONE_TIME_CODE pattern (form_parsing legacy_regex_patterns.json),
-  // plus mfa and one-time.
-  const CODE_NAME = /otp|verification.code|2fa|six.digit|mfa|one.time/i;
+  // plus mfa, one-time and the login or authentication code (a "security code" is a card's CVC).
+  const CODE_NAME = /otp|verification.code|2fa|six.digit|mfa|one.time|(login|auth\w*).code/i;
   const USERNAME_NAME = /user.?name|login|e.?mail|account|identifier/i;
 
   // A field is described by plain data, so the rule can be tested without a DOM.

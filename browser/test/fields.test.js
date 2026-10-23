@@ -25,6 +25,14 @@ test("Chromium's code pattern over name, id and label", () => {
   assert.equal(kind({ type: "text", placeholder: "Six digit code" }), "code");
 });
 
+test("a login or authentication code by its label, never a bare Code", () => {
+  assert.deepEqual(classify([{ type: "text", id: "_r_h_", label: "Code", autocomplete: "off" }, { type: "submit" }]), [null, null]);
+  assert.equal(kind({ type: "text", label: "Promo code" }), null);
+  assert.equal(kind({ type: "text", label: "Login code" }), "code");
+  assert.equal(kind({ type: "tel", placeholder: "Authentication code" }), "code");
+  assert.equal(kind({ type: "text", label: "Security code" }), null, "a card's CVC");
+});
+
 test("a lone text field before a password is its username", () => {
   assert.deepEqual(classify([{ type: "text", name: "q1" }, { type: "password" }]), ["username", "password"]);
   assert.deepEqual(classify([{ type: "text", hidden: true }, { type: "password" }]), [null, "password"]);
