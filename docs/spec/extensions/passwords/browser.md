@@ -50,6 +50,10 @@ capability. What has been seen working is recorded in §10.
     after an upgrade installs again and reloads the extension. A configuration profile that installs it by policy is left for
     later (§11).
   - Firefox needs its extensions signed by Mozilla, and comes with Firefox support (§11).
+- **Incognito.** The extension works in incognito windows when the user allows it in the browser
+  (*Allow in Incognito*, off by default for every extension). It then fills, saves, suggests and
+  makes passkeys there as in a regular window, each the user's own act, and stores nothing of its
+  own from an incognito tab: the save sheet offers no *Never for this site* there.
 - The popup says what is missing when it cannot reach the bridge: the native host not installed
   (*Run `tsync passwords browser install`*), the owner not running, or no domain using passwords.
 

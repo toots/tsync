@@ -177,7 +177,9 @@ async function webauthnCreate(publicKey, origin) {
 
 // Only after a password the user typed (the content script checks), and with no
 // comparison against what tsync holds: the sheet's appearance tells a page nothing.
-async function offerSave(origin, username, password) {
+// §2: an incognito tab leaves nothing in the extension's storage, so its sheet
+// has no "Never for this site".
+async function offerSave(origin, username, password, incognito) {
   const never = (await chrome.storage.local.get("never")).never || [];
   if (never.includes(origin)) return;
   const match = await one({ type: "match", origin });
@@ -187,7 +189,7 @@ async function offerSave(origin, username, password) {
     return;
   }
   const same = match.logins.filter((l) => l.exact && l.username === username);
-  const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title });
+  const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title, incognito });
   if (answer.action === "never") return chrome.storage.local.set({ never: [...never, origin] });
   if (answer.action !== "ok") return;
   const first = await one({ type: "save", origin, username, password });
@@ -240,7 +242,7 @@ const handlers = {
   },
   async "offer-save"(m, sender) {
     const origin = originOf(sender);
-    if (origin) offerSave(origin, m.username, m.password);
+    if (origin) offerSave(origin, m.username, m.password, sender.tab?.incognito === true);
     return {};
   },
   // A conditional request is held only when tsync has passkeys for it; otherwise

@@ -29,7 +29,7 @@ function render(item) {
         el("h1", { textContent: item.kind === "save" ? `Save this login in tsync?` : `Update the password for ${item.title}?` }),
         el("p", { textContent: site }), el("p", { className: "detail", textContent: item.username || "(no username)" }),
       );
-      if (item.kind === "save") actions.append(button("Never for this site", () => answer({ action: "never" })));
+      if (item.kind === "save" && !item.incognito) actions.append(button("Never for this site", () => answer({ action: "never" })));
       actions.append(button("Not now", () => answer({ action: "cancel" })), button(item.kind === "save" ? "Save" : "Update", () => answer({ action: "ok" }), true));
       break;
     case "save-locked":
