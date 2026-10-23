@@ -191,7 +191,15 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             current.state == "corrupt" -> Message(stringResource(R.string.vault_corrupt), padding)
             current.state == "locked" -> Column(Modifier.padding(padding)) {
                 if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+                if (current.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
                 Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
+            }
+            current.newMachines.isNotEmpty() -> Column(Modifier.padding(padding)) {
+                current.newMachines.forEach { Banner(stringResource(R.string.vault_machine_joined, it)) }
+                TextButton(onClick = {
+                    scope.launch { attempt { tsync.vault.acknowledgeMachines() }; reload() }
+                }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.vault_machines_seen)) }
+                CodesList(tsync, PaddingValues(0.dp), onLocked = ::reload)
             }
             else -> CodesList(tsync, padding, onLocked = ::reload)
         }
