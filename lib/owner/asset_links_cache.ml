@@ -1,21 +1,6 @@
 open Tsync_core
 
 let ttl = 86400.
-let max_body = 256 * 1024
-
-let fetch_https host =
-  try
-    let endpoint = Tsync_http.Client.endpoint ("https://" ^ host) in
-    let r =
-      Tsync_http.Client.request ~stall:5. endpoint ~meth:"GET"
-        "/.well-known/assetlinks.json"
-    in
-    if r.status = 200 && Bigstring.length r.body <= max_body then
-      Some (Bigstring.to_string r.body)
-    else None
-  with Fail.E _ -> None
-
-let fetch = Atomic.make fetch_https
 
 (* (host, package, certs) to whether it grants, and until when. *)
 let verdicts : (string * string * string, bool * float) Hashtbl.t =
@@ -56,7 +41,10 @@ let verified ~package ~certs hosts =
             if start then
               Rt.spawn ~name:"asset links" (fun () ->
                   let granted =
-                    match (Atomic.get fetch) host with
+                    match
+                      (Atomic.get Well_known.fetch)
+                        host "/.well-known/assetlinks.json"
+                    with
                       | Some body ->
                           Some
                             (Tsync_vault.Asset_links.grants ~package ~certs body)

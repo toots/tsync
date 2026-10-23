@@ -524,8 +524,8 @@ let logins () =
        ]);
   ignore (ask [("action", s "passwords_remove"); ("id", s sg_id)]);
   (* §4.3: an app's verified website, from a stand-in for the statement fetch. *)
-  Atomic.set Tsync_owner.Asset_links_cache.fetch (fun host ->
-      if host = "example.com" then
+  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+      if host = "example.com" && path = "/.well-known/assetlinks.json" then
         Some
           {|[{"relation":["delegate_permission/common.get_login_creds"],
               "target":{"namespace":"android_app","package_name":"com.example.app",
