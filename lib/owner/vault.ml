@@ -707,6 +707,19 @@ let list_machines ?name ~domain ~engine ~lazy_tree t : Protocol.machine list =
       })
     (List.sort compare entries)
 
+(* §3.1: the secret key this machine is enrolled with, to the passphrase. *)
+let kit ~domain ~engine ~lazy_tree t typed =
+  check_uses ~domain ~engine;
+  restore ~domain ~engine t;
+  let keyring = current ~domain engine ~lazy_tree t in
+  match Atomic.get t.secret_key with
+    | Some (id, secret_key) when Keyring.enrolls keyring ~secret_key_id:id ->
+        ignore (unwrap ~domain ~engine ~lazy_tree t typed);
+        secret ~key_id:keyring.key_id secret_key
+    | _ ->
+        Fail.raise_ Locked
+          "this machine is not enrolled: unlock it with the secret key"
+
 (* §7.2: a new K, key id and secret key; the old K is kept until every record
    is re-encrypted, and a failure there is resumed at the next unlock. *)
 let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed

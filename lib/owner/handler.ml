@@ -831,6 +831,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         Vault.delete ~domain:t.domain ~engine:t.engine
           ~lazy_tree:t.domain.lazy_tree ~confirm t.vault
     | Vault_status -> vault Vault.status
+    | Vault_kit passphrase -> vault Vault.kit passphrase
     | Vault_machines name -> vault (Vault.list_machines ?name)
     | Vault_rekey r ->
         vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase

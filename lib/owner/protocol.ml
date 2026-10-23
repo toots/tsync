@@ -253,6 +253,8 @@ type _ request =
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_kit : string -> secret request
+      (** vault §3.1: the passphrase as typed; the secret key it answers *)
   | Vault_machines : string option -> machine list request
       (** vault §6.3; [Some name] renames this machine's entry *)
   | Vault_rekey : {
@@ -315,6 +317,7 @@ let action : type a. a request -> string = function
   | Vault_passphrase _ -> "vault_passphrase"
   | Vault_delete _ -> "vault_delete"
   | Vault_status -> "vault_status"
+  | Vault_kit _ -> "vault_kit"
   | Vault_machines _ -> "vault_machines"
   | Vault_rekey _ -> "vault_rekey"
 
@@ -328,7 +331,7 @@ let mutates : type a. a request -> bool = function
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
   | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ | Vault_rekey _
-    ->
+  | Vault_kit _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
@@ -422,6 +425,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       ("passphrase", `String r.passphrase)
       :: (if r.new_secret_key then [("newSecretKey", `Bool true)] else [])
   | Vault_delete confirm -> [("confirm", `String confirm)]
+  | Vault_kit p -> [("passphrase", `String p)]
   | Vault_machines name -> opt "name" (fun n -> `String n) name
   | Vault_rekey r ->
       ("passphrase", `String r.passphrase)
@@ -614,6 +618,7 @@ let decode j =
                passphrase = required j "passphrase";
                secret_key = str j "secretKey";
              })
+    | "vault_kit" -> Request (Vault_kit (required j "passphrase"))
     | "vault_machines" -> Request (Vault_machines (str j "name"))
     | "vault_rekey" ->
         Request
@@ -809,6 +814,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
         ok []
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Vault_init _ -> ok (secret_fields reply)
+    | Vault_kit _ -> ok (secret_fields reply)
     | Vault_rekey _ ->
         ok
           (secret_fields reply.secret
@@ -1052,6 +1058,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Vault_appearance _ -> ()
     | Vault_delete _ -> str j "keystoreLeft"
     | Vault_init _ -> secret_of j
+    | Vault_kit _ -> secret_of j
     | Vault_rekey _ -> { secret = secret_of j; pending = str j "pending" }
     | Vault_machines _ -> (
         match member j "machines" with

@@ -102,7 +102,8 @@ passphrase.
 
 - `tsync vault kit` (action `vault_kit`) needs an enrolled machine and the passphrase
   (`passphrase`), checked against the keyring as an unlock is, and answers the secret key. Init
-  and a re-key (§7.2) offer it with the secret key they show.
+  and a re-key (§7.2) offer it with the secret key they show: the CLI's `--kit FILE` writes the
+  page from that secret key, with no second passphrase.
 - The page holds the domain's name, the date, the secret key in its spelling (§2.1) and as a QR
   code of exactly that spelling, an empty box for the user to write the passphrase in by hand,
   and the steps to unlock on a new machine. It holds no passphrase and no K.

@@ -213,7 +213,7 @@
 (rule
  (with-stdout-to
   rekey_test.output
-  (run ./rekey_test.exe)))
+  (run ./rekey_test.exe %{dep:../../bin/tsync.exe})))
 
 (rule
  (alias runtest)

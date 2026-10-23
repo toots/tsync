@@ -1,9 +1,14 @@
 == a-init
+kit, wrong passphrase                denied: wrong passphrase
+cli kit                              exit 0
+the kit                              mode 600, the secret key true, a QR code true
+cli kit, the same path again         exit 1, unchanged true
 machines, named                      machine A (this)
 status                               unlocked enrolled
 owner exit status 0
 == b-enroll
 status                               locked not-enrolled
+kit, not enrolled                    locked: this machine is not enrolled: unlock it with the secret key
 unlock, the secret key given         ok
 machines, named                      machine A; machine B (this)
 status                               unlocked enrolled

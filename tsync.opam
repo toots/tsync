@@ -18,6 +18,7 @@ depends: [
   "mirage-crypto-pk"
   "ppx_deriving_yojson"
   "ptime"
+  "qrc"
   "re"
   "x509"
   "yojson"

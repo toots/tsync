@@ -20,13 +20,30 @@ let verb name ~doc term =
           run (fun () -> f (domain ?name (config ()))))
       $ term $ domain_arg $ verbose)
 
-(* vault §3 step 4: shown once. *)
+(* vault §3 step 4: shown once; afterwards only the kit shows it. *)
 let show_secret (s : P.secret) =
   say "%s" s.secret_key;
   prerr_endline
     ("this is the secret key of vault " ^ s.key_id
-   ^ ": keep it with your passphrase; tsync never shows it again, and a new \
-      machine needs both")
+   ^ ": keep it with your passphrase, which a new machine needs too; only \
+      tsync vault kit shows it again")
+
+let kit_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info ["kit"] ~docv:"FILE"
+        ~doc:
+          "Also write the emergency kit, a page to print, at $(docv); it holds \
+           the secret key, so print it and delete the file.")
+
+(* vault §3.1: a page that holds the secret key in plain text. *)
+let write_kit dom path (s : P.secret) =
+  Vault_kit.write ~path
+    ~domain:(Domain_name.to_string dom.Tsync_config.Config.name)
+    ~secret_key:s.secret_key;
+  prerr_endline
+    ("wrote " ^ path ^ ": print it, keep the paper, and delete the file")
 
 let read_passphrase ?(prompt = "passphrase") ~stdin () =
   if stdin || not (Unix.isatty Unix.stdin) then
@@ -63,9 +80,12 @@ let init_cmd =
       "Create the domain's vault under your passphrase, and show its secret \
        key once."
     Term.(
-      const (fun stdin dom ->
-          show_secret (ask dom (P.Vault_init (new_passphrase ~stdin ())));
+      const (fun kit stdin dom ->
+          let s = ask dom (P.Vault_init (new_passphrase ~stdin ())) in
+          show_secret s;
+          Option.iter (fun path -> write_kit dom path s) kit;
           0)
+      $ kit_arg
       $ stdin_flag "the passphrase")
 
 let unlock_cmd =
@@ -138,13 +158,14 @@ let rekey_cmd =
        a lost machine is shut out. Every other machine then needs the new \
        secret key."
     Term.(
-      const (fun change stdin dom ->
+      const (fun change kit stdin dom ->
           let passphrase = read_passphrase ~stdin () in
           let new_passphrase =
             if change then Some (new_passphrase ~stdin ()) else None
           in
           let r = ask dom (P.Vault_rekey { passphrase; new_passphrase }) in
           show_secret r.secret;
+          Option.iter (fun path -> write_kit dom path r.secret) kit;
           Option.iter
             (fun reason ->
               prerr_endline
@@ -152,8 +173,27 @@ let rekey_cmd =
                ^ "): unlock this machine again to finish"))
             r.pending;
           0)
-      $ change
+      $ change $ kit_arg
       $ stdin_flag "the passphrase, then the new one")
+
+let kit_cmd =
+  let output =
+    Arg.(
+      required
+      & opt (some string) None
+      & info ["output"] ~docv:"FILE" ~doc:"Where to write the page.")
+  in
+  verb "kit"
+    ~doc:
+      "Write the vault's emergency kit, a page to print with the secret key as \
+       text and as a QR code; asks for the passphrase."
+    Term.(
+      const (fun output stdin dom ->
+          write_kit dom output
+            (ask dom (P.Vault_kit (read_passphrase ~stdin ())));
+          0)
+      $ output
+      $ stdin_flag "the passphrase")
 
 let machines_cmd =
   let name =
@@ -372,6 +412,7 @@ let cmds =
         passphrase_cmd;
         rekey_cmd;
         machines_cmd;
+        kit_cmd;
         delete_cmd;
         status_cmd;
         appearance_cmd;

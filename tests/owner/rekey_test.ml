@@ -1,7 +1,7 @@
-(* vault §6.3 and §7.2 through a real owner: two machines, told apart by the
-   client uuid each phase writes before its owner starts, enrolling, being
-   listed and announced, and a re-key shutting out the one that has not the
-   new secret key.
+(* vault §3.1, §6.3 and §7.2 through a real owner and the CLI given as argv 1:
+   two machines, told apart by the client uuid each phase writes before its
+   owner starts, the kit, enrolling, being listed and announced, and a re-key
+   shutting out the one that has not the new secret key.
 
    Each phase is a fresh owner with that machine's own keystore, kept in files
    of ROOT as a host's would outlive the owner. *)
@@ -28,15 +28,58 @@ let () =
   Unix.putenv "XDG_DATA_HOME" (Filename.concat root "data");
   Unix.putenv "XDG_CACHE_HOME" (Filename.concat root "cache")
 
-let socket = Filename.concat root "data/tsync/test.sock"
+(* Where the CLI looks for the owner of [docs]. *)
+let socket = Tsync_config.Paths.owner_socket (Domain_name.v "docs")
 
-let config =
-  Tsync_config.Config.of_string
-    (Printf.sprintf
-       {|{"name":"test","domains":[
+let config_text =
+  Printf.sprintf
+    {|{"name":"test","domains":[
   {"name":"docs","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
-       root)
+    root
+
+let config = Tsync_config.Config.of_string config_text
+let () = Unix.putenv "TSYNC_CONFIG_JSON" config_text
+
+let tsync_bin =
+  match phase with
+    | None ->
+        let bin = Sys.argv.(1) in
+        Unix.putenv "TSYNC_BIN" bin;
+        bin
+    | Some _ -> Sys.getenv "TSYNC_BIN"
+
+(* The CLI's [vault kit], the passphrase on its standard input; its exit code. *)
+let cli_kit path passphrase =
+  let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
+  let devnull = Unix.openfile "/dev/null" [O_WRONLY] 0 in
+  let pid =
+    Unix.create_process tsync_bin
+      [|
+        tsync_bin;
+        "vault";
+        "kit";
+        "--domain";
+        "docs";
+        "--stdin";
+        "--output";
+        path;
+      |]
+      stdin_read devnull devnull
+  in
+  Unix.close stdin_read;
+  Unix.close devnull;
+  let line = passphrase ^ "\n" in
+  ignore (Unix.write_substring stdin_write line 0 (String.length line));
+  Unix.close stdin_write;
+  match Unix.waitpid [] pid with _, WEXITED n -> n | _ -> -1
+
+let contains ~sub s =
+  let n = String.length sub in
+  let rec at i =
+    i + n <= String.length s && (String.sub s i n = sub || at (i + 1))
+  in
+  at 0
 
 let uuid_a = String.make 32 'a'
 let uuid_b = String.make 32 'b'
@@ -179,13 +222,27 @@ let run = function
   | "a-init" ->
       as_machine uuid_a (fun () ->
           let r = ask [("action", "vault_init"); ("passphrase", passphrase)] in
-          Fs.write_file_for_test (file "secret-key")
-            (Option.get (field r "secretKey"));
+          let secret_key = Option.get (field r "secretKey") in
+          Fs.write_file_for_test (file "secret-key") secret_key;
+          answer "kit, wrong passphrase"
+            (ask [("action", "vault_kit"); ("passphrase", second)]);
+          let kit = file "kit.html" in
+          p "%-36s exit %d" "cli kit" (cli_kit kit passphrase);
+          let body = Fs.read_file kit in
+          p "%-36s mode %o, the secret key %b, a QR code %b" "the kit"
+            ((Unix.stat kit).st_perm land 0o777)
+            (contains ~sub:secret_key body)
+            (contains ~sub:"<svg" body);
+          p "%-36s exit %d, unchanged %b" "cli kit, the same path again"
+            (cli_kit kit passphrase)
+            (Fs.read_file kit = body);
           machines ~name:"machine A" "machines, named";
           status "status")
   | "b-enroll" ->
       as_machine uuid_b (fun () ->
           status "status";
+          answer "kit, not enrolled"
+            (ask [("action", "vault_kit"); ("passphrase", passphrase)]);
           answer "unlock, the secret key given"
             (unlock ~secret_key:(Fs.read_file (file "secret-key")) passphrase);
           machines ~name:"machine B" "machines, named";
