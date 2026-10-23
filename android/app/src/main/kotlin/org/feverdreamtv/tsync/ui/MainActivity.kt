@@ -77,6 +77,7 @@ import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.Parameters
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.ServerConfig
 
 class MainActivity : ComponentActivity() {
@@ -236,26 +237,24 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
         // Outcomes are shown here only while the screen is; otherwise they become notifications.
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { tsync.outcomes.collect { snackbar.showSnackbar(it) } }
     }
-    // android-app §10.2: shown while the domain uses an extension, asked again at each foreground.
-    var vaultShown by rememberSaveable { mutableStateOf(false) }
+    // android-app §5.1, §10.2: shown at once from what the phone last knew, then from the
+    // vault's last view, then from the server, each answer settling it.
+    val context = LocalContext.current
+    val known = remember { context.getSharedPreferences("vault", android.content.Context.MODE_PRIVATE) }
+    var vaultShown by rememberSaveable { mutableStateOf(known.getBoolean("shown", false)) }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            // A first status may wait on the vault's first pull, which can fail at launch: ask
-            // again a few times rather than keep the Vault entry hidden until the next foreground.
-            for (attempt in 1..5) {
+            for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
                 val shown = withContext(Dispatchers.IO) {
                     try {
-                        tsync.vault.status() != null
+                        tsync.vault.status(pull) != null
                     } catch (e: CoreException) {
                         android.util.Log.w(Tsync.TAG, "vault status: ${e.code.wire}: ${e.message}")
                         null
                     }
-                }
-                if (shown != null) {
-                    vaultShown = shown
-                    break
-                }
-                kotlinx.coroutines.delay(attempt * 2000L)
+                } ?: continue
+                vaultShown = shown
+                known.edit().putBoolean("shown", shown).apply()
             }
             // After the status: the warm-up holds the vault's folders while it fetches.
             if (vaultShown) tsync.warmPasswords()

@@ -90,6 +90,7 @@ import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Codes
 import org.feverdreamtv.tsync.core.OneTimeCode
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.VaultStatus
 
 /** android-app §10.8: no screenshot or recent-apps thumbnail while a secret can be on screen. */
@@ -140,6 +141,8 @@ fun VaultMark(appearance: org.feverdreamtv.tsync.core.Appearance, modifier: Modi
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     SecureWindow()
     var status by remember { mutableStateOf<VaultStatus?>(null) }
+    // android-app §5.1: whether the status that asked the server has answered.
+    var settled by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var generation by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
@@ -154,9 +157,12 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     fun reload() = generation++
     LaunchedEffect(generation, changes) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            attempt { tsync.vault.status() }
-                .onSuccess { status = it; failure = null }
-                .onFailure { failure = it.message }
+            // android-app §5.1: the last view at once, then the server's answer over it.
+            for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
+                attempt { tsync.vault.status(pull) }
+                    .onSuccess { status = it; failure = null; if (pull == Pull.DEFAULT) settled = true }
+                    .onFailure { if (status == null) failure = it.message }
+            }
             // passwords/android §1.1: after an unlock, once the status is shown.
             if (status?.state == "unlocked") tsync.warmPasswords()
             attempt { tsync.ask { stats() }.extensions }.onSuccess { extensions = it }
@@ -200,7 +206,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             current.state == "absent" -> Message(stringResource(R.string.vault_absent), padding)
             current.state == "corrupt" -> Message(stringResource(R.string.vault_corrupt), padding)
             current.state == "locked" -> Column(Modifier.padding(padding)) {
-                if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+                if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
                 if (current.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
                 Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
             }
@@ -302,6 +308,9 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
     var codes by remember { mutableStateOf<Codes?>(null) }
+    // android-app §5.1: whether a read that waited for the server has answered, before which an
+    // outdated list is the last view shown at once, not yet a sign of being offline.
+    var settled by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }
     var acting by remember { mutableStateOf<OneTimeCode?>(null) }
@@ -311,9 +320,10 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
     // at each return to the foreground, and after each change it makes (pitfall B-8.18).
     LaunchedEffect(filter, changes) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (codes == null) attempt { tsync.vault.codes(filter, Pull.BACKGROUND) }.onSuccess { codes = it }
             while (true) {
                 val result = attempt { tsync.vault.codes(filter) }
-                result.onSuccess { codes = it; failure = null; elapsed = 0 }.onFailure { failure = it.message }
+                result.onSuccess { codes = it; settled = true; failure = null; elapsed = 0 }.onFailure { failure = it.message }
                 if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
                     onLocked()
                     return@repeatOnLifecycle
@@ -332,7 +342,7 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
         )
         failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         val current = codes ?: return@Column if (failure == null) Loading() else Unit
-        if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+        if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
             if (current.records.isEmpty()) item { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
             items(current.records, key = { it.id }) { record ->

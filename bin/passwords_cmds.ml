@@ -510,7 +510,7 @@ let bridge_request config j =
                                    | None -> [])) );
                            ]
                        | _ -> []))
-                 (all (fun d -> Vault_cmds.ask d P.Vault_status))) );
+                 (all (fun d -> Vault_cmds.ask d (P.Vault_status `Auto)))) );
         ]
     | Some "match" ->
         let origin = required j "origin" in

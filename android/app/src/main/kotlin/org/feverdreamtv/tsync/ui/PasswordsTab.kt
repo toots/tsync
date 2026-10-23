@@ -48,6 +48,7 @@ import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.PasswordRecords
+import org.feverdreamtv.tsync.core.Pull
 
 /** passwords/android §8: list, copy, remove. No password is shown; a copy is marked sensitive. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -56,6 +57,8 @@ fun PasswordsTab(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
     var records by remember { mutableStateOf<PasswordRecords?>(null) }
+    // android-app §5.1: as in the codes list, the banner waits for a read that asked the server.
+    var settled by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var acting by remember { mutableStateOf<Acting?>(null) }
     var autofillOff by remember { mutableStateOf(false) }
@@ -64,9 +67,16 @@ fun PasswordsTab(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
     LaunchedEffect(filter, changes) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             autofillOff = context.getSystemService(AutofillManager::class.java)?.hasEnabledAutofillServices() != true
-            val result = attempt { tsync.passwords.list(filter = filter) }
-            result.onSuccess { records = it; failure = null }.onFailure { failure = it.message }
-            if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) onLocked()
+            for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
+                if (pull == Pull.BACKGROUND && records != null) continue
+                val result = attempt { tsync.passwords.list(filter = filter, pull = pull) }
+                result.onSuccess { records = it; failure = null; if (pull == Pull.DEFAULT) settled = true }
+                    .onFailure { if (pull == Pull.DEFAULT) failure = it.message }
+                if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
+                    onLocked()
+                    return@repeatOnLifecycle
+                }
+            }
         }
     }
     Column(Modifier.padding(padding)) {
@@ -83,7 +93,7 @@ fun PasswordsTab(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
         )
         failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         val current = records ?: return@Column Loading()
-        if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+        if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
             if (current.logins.isEmpty() && current.passkeys.isEmpty() && current.notes.isEmpty()) item { Text(stringResource(R.string.passwords_empty), Modifier.padding(16.dp)) }
             items(current.logins, key = { it.id }) { login ->

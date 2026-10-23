@@ -318,11 +318,11 @@ type _ request =
       (** the new secret key, when one was asked for *)
   | Vault_delete : string -> string option request
       (** the domain's name, to confirm; why a keystore entry was left *)
-  | Vault_status : vault_status request
+  | Vault_status : pull -> vault_status request
   | Totp_add : [ `Uri of string | `Secret of totp_secret ] -> string request
       (** a URI, or a secret with its issuer and account (totp §5.3); the new
           record's id *)
-  | Totp_list : string option -> totp_listing request
+  | Totp_list : { filter : string option; pull : pull } -> totp_listing request
   | Totp_code : string -> totp_code request  (** a record id *)
   | Totp_rename : {
       id : string;
