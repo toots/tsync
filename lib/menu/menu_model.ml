@@ -18,6 +18,7 @@ type item = {
   indent : int;
   action : action;
   submenu : bool;
+  vault : string option;
 }
 
 type entry = Separator | Item of item
@@ -27,8 +28,8 @@ let file_rows = 5
 let label_max = 64
 
 let row ?(enabled = true) ?icon ?checked ?(indent = 0) ?(submenu = false)
-    ?(action = Nothing) label =
-  Item { label; enabled; icon; checked; indent; action; submenu }
+    ?(action = Nothing) ?vault label =
+  Item { label; enabled; icon; checked; indent; action; submenu; vault }
 
 let join = String.concat " · "
 let size = Tsync_core.Narrate.size
@@ -630,7 +631,8 @@ let codes = function
   | [one] -> domain_codes ~indent:0 one
   | several ->
       List.concat_map
-        (fun ((domain, _) as one) -> row domain :: domain_codes ~indent:1 one)
+        (fun ((domain, _) as one) ->
+          row ~vault:domain domain :: domain_codes ~indent:1 one)
         several
 
 let action_to_yojson = function
@@ -657,6 +659,7 @@ type wire_item = {
   action : action;
   checked : bool option; [@default None]
   submenu : bool; [@default false]
+  vault : string option; [@default None]
 }
 [@@deriving to_yojson]
 
@@ -664,8 +667,10 @@ type separator = { separator : bool } [@@deriving to_yojson]
 
 let entry_to_json = function
   | Separator -> separator_to_yojson { separator = true }
-  | Item { label; enabled; indent; action; checked; submenu; icon = _ } ->
-      wire_item_to_yojson { label; enabled; indent; action; checked; submenu }
+  | Item { label; enabled; indent; action; checked; submenu; vault; icon = _ }
+    ->
+      wire_item_to_yojson
+        { label; enabled; indent; action; checked; submenu; vault }
 
 type json = Yojson.Safe.t
 

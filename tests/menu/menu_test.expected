@@ -414,7 +414,7 @@ tooltip tsync — Idle
         No codes
 
 == codes: the JSON form, and no code in any row
-[{"label":"work","enabled":true,"indent":0,"action":{}},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"Add a code…","enabled":true,"indent":1,"action":{"addCode":"work"}},{"label":"home","enabled":true,"indent":0,"action":{}},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
+[{"label":"work","enabled":true,"indent":0,"action":{},"vault":"work"},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"Add a code…","enabled":true,"indent":1,"action":{"addCode":"work"}},{"label":"home","enabled":true,"indent":0,"action":{},"vault":"home"},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
 the reply carries 123456: true
 carries 123456: false
 carries 654321: false
