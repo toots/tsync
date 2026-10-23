@@ -60,13 +60,31 @@ let read_passphrase ?(prompt = "passphrase") ~stdin () =
       (fun () ->
         Option.value ~default:"" (In_channel.input_line In_channel.stdin)))
 
+(* vault §2.3: six words, shown once for the user to write down. *)
+let generated () =
+  let passphrase = Tsync_vault.Words.passphrase 6 in
+  say "%s" passphrase;
+  prerr_endline
+    "this is the vault's new passphrase: write it down; tsync never shows it \
+     again";
+  passphrase
+
+let generate_arg =
+  Arg.(
+    value & flag
+    & info ["generate"]
+        ~doc:
+          "Generate the new passphrase, six words, instead of asking for one.")
+
 (* vault §2.2: a new passphrase is asked twice on a terminal. *)
-let new_passphrase ~stdin () =
-  let first = read_passphrase ~prompt:"new passphrase" ~stdin () in
-  if (not stdin) && Unix.isatty Unix.stdin then (
-    let again = read_passphrase ~prompt:"new passphrase, again" ~stdin () in
-    if again <> first then Fail.invalid "the two passphrases differ");
-  first
+let new_passphrase ?(generate = false) ~stdin () =
+  if generate then generated ()
+  else (
+    let first = read_passphrase ~prompt:"new passphrase" ~stdin () in
+    if (not stdin) && Unix.isatty Unix.stdin then (
+      let again = read_passphrase ~prompt:"new passphrase, again" ~stdin () in
+      if again <> first then Fail.invalid "the two passphrases differ");
+    first)
 
 let stdin_flag what =
   Arg.(
@@ -80,12 +98,12 @@ let init_cmd =
       "Create the domain's vault under your passphrase, and show its secret \
        key once."
     Term.(
-      const (fun kit stdin dom ->
-          let s = ask dom (P.Vault_init (new_passphrase ~stdin ())) in
+      const (fun generate kit stdin dom ->
+          let s = ask dom (P.Vault_init (new_passphrase ~generate ~stdin ())) in
           show_secret s;
           Option.iter (fun path -> write_kit dom path s) kit;
           0)
-      $ kit_arg
+      $ generate_arg $ kit_arg
       $ stdin_flag "the passphrase")
 
 let unlock_cmd =
@@ -134,15 +152,15 @@ let passphrase_cmd =
   verb "passphrase"
     ~doc:"Replace the vault's passphrase with a new one you choose."
     Term.(
-      const (fun new_secret_key stdin dom ->
-          let passphrase = new_passphrase ~stdin () in
+      const (fun new_secret_key generate stdin dom ->
+          let passphrase = new_passphrase ~generate ~stdin () in
           (match
              ask dom (P.Vault_passphrase { passphrase; new_secret_key })
            with
             | Some s -> show_secret s
             | None -> say "passphrase changed");
           0)
-      $ new_secret_key
+      $ new_secret_key $ generate_arg
       $ stdin_flag "the new passphrase")
 
 let rekey_cmd =
@@ -158,10 +176,11 @@ let rekey_cmd =
        a lost machine is shut out. Every other machine then needs the new \
        secret key."
     Term.(
-      const (fun change kit stdin dom ->
+      const (fun change generate kit stdin dom ->
           let passphrase = read_passphrase ~stdin () in
           let new_passphrase =
-            if change then Some (new_passphrase ~stdin ()) else None
+            if change || generate then Some (new_passphrase ~generate ~stdin ())
+            else None
           in
           let r = ask dom (P.Vault_rekey { passphrase; new_passphrase }) in
           show_secret r.secret;
@@ -173,7 +192,7 @@ let rekey_cmd =
                ^ "): unlock this machine again to finish"))
             r.pending;
           0)
-      $ change $ kit_arg
+      $ change $ generate_arg $ kit_arg
       $ stdin_flag "the passphrase, then the new one")
 
 let kit_cmd =

@@ -74,6 +74,21 @@ let cli_kit path passphrase =
   Unix.close stdin_write;
   match Unix.waitpid [] pid with _, WEXITED n -> n | _ -> -1
 
+(* The CLI's standard output for [args], its standard error discarded. *)
+let cli args =
+  let out_read, out_write = Unix.pipe ~cloexec:true () in
+  let devnull = Unix.openfile "/dev/null" [O_RDWR] 0 in
+  let pid =
+    Unix.create_process tsync_bin
+      (Array.of_list (tsync_bin :: args))
+      devnull out_write devnull
+  in
+  Unix.close out_write;
+  Unix.close devnull;
+  let out = In_channel.input_all (Unix.in_channel_of_descr out_read) in
+  ignore (Unix.waitpid [] pid);
+  out
+
 let contains ~sub s =
   let n = String.length sub in
   let rec at i =
@@ -296,7 +311,24 @@ let run = function
   | "a-last" ->
       as_machine uuid_a (fun () ->
           status "status";
-          machines "machines")
+          machines "machines";
+          let generated =
+            List.hd
+              (String.split_on_char '\n'
+                 (cli ["vault"; "passphrase"; "--generate"; "--domain"; "docs"]))
+          in
+          let words = String.split_on_char '-' generated in
+          p "%-36s %d words of letters: %b" "passphrase --generate"
+            (List.length words)
+            (List.for_all
+               (fun w ->
+                 w <> ""
+                 && String.for_all
+                      (function 'a' .. 'z' -> true | _ -> false)
+                      w)
+               words);
+          answer "lock" (ask [("action", "vault_lock")]);
+          answer "unlock, the generated passphrase" (unlock generated))
   | other -> failwith other
 
 let child phase =

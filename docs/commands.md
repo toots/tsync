@@ -78,12 +78,12 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 
 | Command | Does |
 |---|---|
-| `tsync vault init [--kit FILE] [--stdin]` | Create the domain's vault; prints the secret key once, and with `--kit` writes the emergency kit |
+| `tsync vault init [--generate] [--kit FILE] [--stdin]` | Create the domain's vault; prints the secret key once, and with `--kit` writes the emergency kit |
 | `tsync vault unlock [--stdin]` | Unlock it on this machine; the first time also asks for the secret key |
 | `tsync vault lock [--forget]` | Forget the vault's key here; `--forget` also forgets the secret key |
-| `tsync vault passphrase [--new-secret-key] [--stdin]` | Change the passphrase, and optionally the secret key |
+| `tsync vault passphrase [--generate] [--new-secret-key] [--stdin]` | Change the passphrase, and optionally the secret key |
 | `tsync vault kit --output FILE [--stdin]` | The emergency kit, a page to print with the secret key and its QR code; asks for the passphrase |
-| `tsync vault rekey [--new-passphrase] [--kit FILE] [--stdin]` | A new key and secret key, every record re-encrypted: shuts out every other machine until it has the new secret key |
+| `tsync vault rekey [--new-passphrase] [--generate] [--kit FILE] [--stdin]` | A new key and secret key, every record re-encrypted: shuts out every other machine until it has the new secret key |
 | `tsync vault machines [--name NAME]` | The machines that joined the vault; `--name` renames this one |
 | `tsync vault status` | Whether it exists, is unlocked here, and this machine is enrolled |
 | `tsync vault delete` | Remove the vault and every record in it, after confirming the domain's name |

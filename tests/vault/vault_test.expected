@@ -1,3 +1,7 @@
+== generated passphrases
+six words: 6, each of letters only: true
+a draw of 7772 words: 7772
+distinct words drawn: 7772, none drawn more than 160 times: true
 == argon2id
 RFC 9106 5.3: 0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659
 libsodium 64MiB t=3: 64238e3e58814f30f3e39a08c684eff99323911c33f0af78e91e933a7f792bc9

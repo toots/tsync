@@ -311,7 +311,37 @@ let envelope () =
   in
   show "sealed under another K, same id" (opens ~extension:"totp" foreign)
 
+(* vault §2.3: the list as bundled, and a draw that favours no word. *)
+let words () =
+  p "== generated passphrases\n";
+  let list =
+    String.split_on_char '-'
+      (Tsync_vault.Words.passphrase Tsync_vault.Words.count)
+  in
+  let six = String.split_on_char '-' (Tsync_vault.Words.passphrase 6) in
+  p "six words: %d, each of letters only: %b\n" (List.length six)
+    (List.for_all
+       (fun w ->
+         w <> ""
+         && String.for_all (function 'a' .. 'z' -> true | _ -> false) w)
+       six);
+  p "a draw of %d words: %d\n" Tsync_vault.Words.count (List.length list);
+  (* 777200 draws, 100 a word on average: every word drawn, none above 160. *)
+  let seen = Hashtbl.create 7776 in
+  for _ = 1 to 100 do
+    List.iter
+      (fun w ->
+        Hashtbl.replace seen w
+          (1 + Option.value ~default:0 (Hashtbl.find_opt seen w)))
+      (String.split_on_char '-'
+         (Tsync_vault.Words.passphrase Tsync_vault.Words.count))
+  done;
+  let most = Hashtbl.fold (fun _ n acc -> max n acc) seen 0 in
+  p "distinct words drawn: %d, none drawn more than 160 times: %b\n"
+    (Hashtbl.length seen) (most <= 160)
+
 let () =
+  words ();
   argon2 ();
   xchacha ();
   secret_key ();
