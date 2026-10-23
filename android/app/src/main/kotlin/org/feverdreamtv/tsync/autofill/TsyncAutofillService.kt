@@ -58,6 +58,8 @@ class TsyncAutofillService : AutofillService() {
         val offered = if (form.username.isEmpty() && form.password.isEmpty()) logins.filter { it.hasCode } else logins
         val response = FillResponse.Builder()
         offered.forEach { response.addDataset(dataset(form, it, mark)) }
+        // passwords §5.1: a new-password field is also offered a generated password.
+        if (form.newPassword) response.addDataset(suggestion(form, mark))
         val save = form.password.isNotEmpty()
         if (save) {
             val type = SaveInfo.SAVE_DATA_TYPE_PASSWORD or (if (form.username.isNotEmpty()) SaveInfo.SAVE_DATA_TYPE_USERNAME else 0)
@@ -67,7 +69,7 @@ class TsyncAutofillService : AutofillService() {
                 }.build(),
             )
         }
-        return if (offered.isEmpty() && !save) null else response.build()
+        return if (offered.isEmpty() && !save && !form.newPassword) null else response.build()
     }
 
     /** §3: no value until the pick, which [FillActivity] answers. */
@@ -86,6 +88,24 @@ class TsyncAutofillService : AutofillService() {
         ).intentSender
         val builder = Dataset.Builder(presentation)
         form.ids.forEach { builder.setValue(it, null) }
+        return builder.setAuthentication(sender).build()
+    }
+
+    /** §5.1: gated like a login; [FillActivity] asks for the password at the pick. */
+    @Suppress("DEPRECATION")
+    private fun suggestion(form: Form, mark: android.graphics.drawable.Icon?): Dataset {
+        val presentation = row(this, getString(R.string.autofill_suggest), getString(R.string.autofill_suggest_detail), mark)
+        val pick = Intent(this, FillActivity::class.java)
+            .putExtra(FillActivity.EXTRA_SITE, form.site)
+            .putExtra(FillActivity.EXTRA_SUGGEST, true)
+            .putExtra(FillActivity.EXTRA_TYPED_USERNAME, form.typedUsername.orEmpty())
+            .putParcelableArrayListExtra(FillActivity.EXTRA_PASSWORD, ArrayList(form.password))
+        val sender = PendingIntent.getActivity(
+            this, "suggest:${form.site}".hashCode(), pick,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
+        ).intentSender
+        val builder = Dataset.Builder(presentation)
+        form.password.forEach { builder.setValue(it, null) }
         return builder.setAuthentication(sender).build()
     }
 

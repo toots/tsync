@@ -22,14 +22,35 @@ import org.feverdreamtv.tsync.core.Pull
 class FillActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val site = intent.getStringExtra(EXTRA_SITE)
-        val id = intent.getStringExtra(EXTRA_ID)
-        if (site == null || id == null) return done(null)
+        val site = intent.getStringExtra(EXTRA_SITE) ?: return done(null)
         val tsync = Tsync.get(this)
+        if (intent.getBooleanExtra(EXTRA_SUGGEST, false)) return suggest(tsync, site)
+        val id = intent.getStringExtra(EXTRA_ID) ?: return done(null)
         tsync.scope.launch {
             val dataset = try {
                 if (tsync.boot() != Boot.Ready) null
                 else dataset(tsync.passwords.fill(site, id, pull = Pull.BACKGROUND))
+            } catch (e: Exception) {
+                null
+            }
+            withContext(Dispatchers.Main) { done(dataset) }
+        }
+    }
+
+    /** passwords §5.1: the login is saved now; the submit only sets its username. */
+    @Suppress("DEPRECATION")
+    private fun suggest(tsync: Tsync, site: String) {
+        tsync.scope.launch {
+            val dataset = try {
+                if (tsync.boot() != Boot.Ready) null
+                else {
+                    val suggestion = tsync.passwords.suggest(site, intent.getStringExtra(EXTRA_TYPED_USERNAME).orEmpty())
+                    Saving.suggested(site, suggestion.id, suggestion.password)
+                    tsync.vaultChanges.value++
+                    val builder = Dataset.Builder()
+                    ids(EXTRA_PASSWORD).forEach { builder.setValue(it, AutofillValue.forText(suggestion.password)) }
+                    if (ids(EXTRA_PASSWORD).isEmpty()) null else builder.build()
+                }
             } catch (e: Exception) {
                 null
             }
@@ -69,5 +90,7 @@ class FillActivity : Activity() {
         const val EXTRA_USERNAME = "org.feverdreamtv.tsync.autofill.USERNAME"
         const val EXTRA_PASSWORD = "org.feverdreamtv.tsync.autofill.PASSWORD"
         const val EXTRA_CODE = "org.feverdreamtv.tsync.autofill.CODE"
+        const val EXTRA_SUGGEST = "org.feverdreamtv.tsync.autofill.SUGGEST"
+        const val EXTRA_TYPED_USERNAME = "org.feverdreamtv.tsync.autofill.TYPED_USERNAME"
     }
 }

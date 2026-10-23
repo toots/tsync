@@ -27,6 +27,7 @@ The app connects to one domain on one tsync server.
 - **Chrome** fills from its own password manager unless told otherwise: in Chrome, *Settings → Autofill services → Autofill using another service*, then restart Chrome. Vanadium and Firefox use tsync directly.
 - **Filling.** Tap a username or password field: tsync's suggestions name each login by title and username, and the password is fetched only when you pick one. A code field offers the code of the site's login that links one.
 - **Saving.** Signing in with a login tsync does not have offers *Save to tsync?*. A changed password asks, in a notification, whether to update the one tsync has.
+- **A strong password.** Signing up, or changing a password, a new-password field also offers *Use a strong password*: picking it fills a generated password, and the field confirming it, and saves the login in tsync at once. Submitting the form then adds the username to that login.
 - **Passkeys** (Android 14 and later) work in the browsers Google lists for passkeys, Chrome, Firefox, Brave, Edge, Samsung Internet and Vanadium among them: create one with tsync, and sign in with it, after the fingerprint or screen lock when the site asks. Apps' own passkeys are not supported yet.
 - **Which site.** A page's address is believed only from a browser on that list, checked by its signature. Any other app is offered only the logins saved for that app, whatever it claims to show.
 - **A locked vault** shows *tsync is locked*; tapping it opens the Vault screen, where you unlock. Autofill never asks for your passphrase.
