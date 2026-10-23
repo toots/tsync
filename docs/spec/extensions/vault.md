@@ -67,9 +67,11 @@ A CLI or app that asks for a new passphrase (§3, §7) SHOULD offer to generate 
 what a user can remember and type on every machine.
 
 - `n` words, each drawn uniformly from the CSPRNG by rejection sampling from the EFF large word
-  list (7776 words, bundled with tsync), joined by `-`, in lower case: about 12.9 bits a word.
+  list (eff.org/dice, CC BY 3.0 US) less its four hyphenated words, 7772 words bundled with
+  tsync, joined by `-`, in lower case: about 12.9 bits a word.
 - A passphrase suggestion is 6 words (about 77 bits), which §2.2's length always admits.
-- It is shown once, for the user to write down, and is then a passphrase like any other.
+- It is shown once, for the user to write down, and is then a passphrase like any other. The
+  CLI's `init`, `passphrase` and `rekey` take `--generate` for it.
 
 ## 3. Initialising
 

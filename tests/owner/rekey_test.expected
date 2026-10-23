@@ -36,4 +36,7 @@ owner exit status 0
 == a-last
 status                               unlocked enrolled
 machines                             machine A (this)
+passphrase --generate                6 words of letters: true
+lock                                 ok
+unlock, the generated passphrase     ok
 owner exit status 0

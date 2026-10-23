@@ -28,7 +28,7 @@ Once per domain, on any one machine:
 tsync vault init
 ```
 
-It asks for a **passphrase**, at least 16 characters, which you choose and remember. It then prints a **secret key**, 26 characters in groups like `abcde-fghij-klmno-pqrst-uvwxyz`, once. Write the secret key down, or keep it in another password manager.
+It asks for a **passphrase**, at least 16 characters, which you choose and remember; with `--generate` tsync makes one of six words for you instead, and prints it once to write down. It then prints a **secret key**, 26 characters in groups like `abcde-fghij-klmno-pqrst-uvwxyz`, once. Write the secret key down, or keep it in another password manager.
 
 **The emergency kit** is a page to print and keep with your important papers: the secret key as text and as a QR code, and a box to write the passphrase in by hand. `tsync vault init --kit kit.html` writes it with the secret key it just made; later, on a machine that has joined the vault, `tsync vault kit --output kit.html` writes it again after asking for the passphrase. The file holds the secret key in plain text: print it, then delete it. tsync never replaces an existing file with a kit.
 

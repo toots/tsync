@@ -1,3 +1,18 @@
+; vault §2.3: the EFF large word list, eff.org/dice, by the Electronic Frontier
+; Foundation under CC BY 3.0 US; SHA-256 addd3553…996b903e as fetched.
+
+(rule
+ (targets eff_large_wordlist.ml)
+ (deps
+  (:list eff_large_wordlist.txt))
+ (action
+  (with-stdout-to
+   eff_large_wordlist.ml
+   (progn
+    (echo "let text = {tsync_asset|")
+    (cat %{list})
+    (echo "|tsync_asset}\n")))))
+
 (library
  (name tsync_vault)
  (libraries tsync_core yojson base64 digestif)
