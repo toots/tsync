@@ -26,7 +26,7 @@
   unix
   yojson
   (select
-   platform_keystore.ml
+   platform.ml
    from
-   (tsync_secret_service -> platform_keystore.linux.ml)
-   (-> platform_keystore.none.ml))))
+   (tsync_secret_service tsync_logind -> platform.linux.ml)
+   (-> platform.none.ml))))
