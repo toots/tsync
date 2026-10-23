@@ -52,8 +52,7 @@ class TsyncAutofillService : AutofillService() {
                 else -> null
             }
         }
-        // vault §8.1: the mark the response's rows show.
-        val mark = VaultIcon.of(this, tsync)
+        val mark = TsyncIcon.of(this)
         // §4: a form asking only for a code is offered the logins that link one.
         val offered = if (form.username.isEmpty() && form.password.isEmpty()) logins.filter { it.hasCode } else logins
         val response = FillResponse.Builder()
