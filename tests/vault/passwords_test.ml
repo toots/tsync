@@ -109,6 +109,7 @@ let login : Passwords.login =
     password = "correct horse battery staple";
     notes = "line one\nline \"two\", with a comma";
     totp = id;
+    fields = [];
     modified = 1760500000;
     unknown = [("future", `List [`Int 1; `String "x"])];
   }
@@ -259,6 +260,7 @@ let csv () =
       title = "Bank, \"main\"";
       urls = [];
       totp = "";
+      fields = [];
       notes = "";
       unknown = [];
     }

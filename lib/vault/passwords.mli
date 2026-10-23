@@ -19,6 +19,10 @@ val host_of : site -> string
 (** §4.2: whether a record's site matches a request's origin or app site. *)
 val matches : site:site -> origin:string -> bool
 
+(** §2.2: a field beyond a record's fixed keys; a [secret] one is masked where
+    shown and copied like a password. *)
+type field = { name : string; value : string; secret : bool }
+
 type login = {
   title : string;
   urls : site list;
@@ -26,8 +30,18 @@ type login = {
   password : string;
   notes : string;
   totp : string;  (** a TOTP record id or empty *)
+  fields : field list;
   modified : int;
   unknown : (string * Yojson.Safe.t) list;  (** kept through a rewrite *)
+}
+
+(** §2.1: a record with no site. *)
+type note = {
+  title : string;
+  notes : string;
+  fields : field list;
+  modified : int;
+  unknown : (string * Yojson.Safe.t) list;
 }
 
 type passkey = {
@@ -44,7 +58,7 @@ type passkey = {
   unknown : (string * Yojson.Safe.t) list;
 }
 
-type t = Login of login | Passkey of passkey
+type t = Login of login | Note of note | Passkey of passkey
 
 (** [Error] is why the plaintext is CORRUPT (§2, §7.1). *)
 val of_string : string -> (t, string) result
@@ -52,11 +66,11 @@ val of_string : string -> (t, string) result
 (** Canonical JSON padded with spaces to a multiple of 256 bytes (§2). *)
 val to_string : t -> string
 
-(** The grouped fold's key (§3): the kind with [password], or with
-    [credentialId] and [privateKey]. *)
+(** The grouped fold's key (§3): the kind with [password], with [title] and
+    [notes], or with [credentialId] and [privateKey]. *)
 val key_fields : t -> string
 
-(** [modified] of either kind. *)
+(** [modified] of any kind. *)
 val modified : t -> int
 
 (** §5: [length] 8 to 128; [Error] when outside. *)

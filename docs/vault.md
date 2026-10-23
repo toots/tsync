@@ -172,7 +172,10 @@ tsync passwords add --title GitHub --url https://github.com --username me --otpa
 tsync passwords list                          # titles, usernames and passkeys; never a password
 tsync passwords list --site https://github.com
 tsync passwords get ID                        # the password alone, on one line
+tsync passwords get ID --field PIN            # one custom field's value
 ```
+
+**Notes and custom fields.** A note keeps what is not a login, a door code or a recovery phrase: `tsync passwords add --note --title "Wi-Fi" --notes "…"`. Logins and notes take extra fields, `--field NAME=VALUE`, or `--secret-field NAME` to type the value without echo; on `edit`, the fields given replace the list. `get` of a note prints its notes, and `--field` one field. Notes are never offered to fill a form, and `list` shows titles, never a field.
 
 `list` marks a login with a linked code `(code)`. `tsync passwords edit ID` changes any field (the same options as `add`), and `tsync passwords remove ID` removes a login or a passkey.
 
