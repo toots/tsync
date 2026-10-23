@@ -30,11 +30,35 @@ object Saving {
     private const val EXTRA_PASSWORD = "password"
     private const val EXTRA_UPDATE = "update"
 
+    /** passwords §5.1: the suggestion awaiting its submit, in memory only, its password kept as a SHA-256. */
+    private class Pending(val site: String, val id: String, val digest: ByteArray)
+
+    @Volatile
+    private var pending: Pending? = null
+
+    private fun digest(password: String): ByteArray =
+        java.security.MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
+
+    fun suggested(site: String, id: String, password: String) {
+        pending = Pending(site, id, digest(password))
+    }
+
     fun save(tsync: Tsync, site: String, username: String, password: String, update: String?) {
         val context = tsync.context
         val identity = "save:$site:$username"
         try {
             if (tsync.boot() != Boot.Ready) throw CoreException(Code.UNREACHABLE, context.getString(R.string.save_login_not_ready))
+            // §5.1: the submit of a suggested password names the login the pick saved.
+            val suggestion = pending
+            if (update == null && suggestion != null && suggestion.site == site &&
+                java.security.MessageDigest.isEqual(suggestion.digest, digest(password))
+            ) {
+                pending = null
+                tsync.passwords.saveSuggested(site, username, suggestion.id)
+                tsync.vaultChanges.value++
+                Notifications.outcome(tsync, identity, context.getString(R.string.save_login_done, site), username)
+                return
+            }
             when (val saved = tsync.passwords.save(site, username, password, update)) {
                 is Saved.Done -> {
                     tsync.vaultChanges.value++

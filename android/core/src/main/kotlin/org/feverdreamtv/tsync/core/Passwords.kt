@@ -19,6 +19,9 @@ data class PasswordRecords(
 /** What a fill hands the form: passwords §8 `passwords_fill`. */
 data class Filled(val username: String, val password: String, val code: String?)
 
+/** passwords §5.1: the generated password, and the login saved with it. */
+data class Suggestion(val id: String, val password: String)
+
 /** passwords §8 `passwords_save`: added or updated, nothing, or the record to update. */
 sealed interface Saved {
     data class Done(val id: String?) : Saved
@@ -66,6 +69,17 @@ class Passwords(private val client: Client) {
 
     /** The one reply with a password, for the Passwords tab's copy (android §8). */
     fun get(id: String): JSONObject = client.call(action("get").put("id", id))
+
+    /** passwords §5.1: the login is saved at the pick. */
+    fun suggest(site: String, username: String): Suggestion {
+        val reply = client.call(action("suggest").put("site", site).put("username", username))
+        return Suggestion(reply.getString("id"), reply.getString("password"))
+    }
+
+    /** passwords §5.1: the submit after a suggestion sets the saved login's username. */
+    fun saveSuggested(site: String, username: String, id: String) {
+        client.call(action("save").put("site", site).put("username", username).put("suggested", id))
+    }
 
     fun save(site: String, username: String, password: String, update: String? = null): Saved {
         val request = action("save").put("site", site).put("username", username).put("password", password)

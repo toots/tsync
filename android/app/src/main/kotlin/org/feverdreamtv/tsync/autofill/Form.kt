@@ -16,6 +16,8 @@ class Form(
     /** What the user typed, for a save request. */
     val typedUsername: String?,
     val typedPassword: String?,
+    /** passwords §5.1: a form that creates an account or changes a password. */
+    val newPassword: Boolean = false,
 ) {
     val ids: List<AutofillId> get() = username + password + code
 
@@ -26,6 +28,7 @@ class Form(
         private val PASSWORD_HINTS = setOf(
             "password", "current-password", "new-password", "account_creation_password", "new_password", "confirmation_password",
         )
+        private val NEW_PASSWORD_HINTS = setOf("new-password", "new_password", "account_creation_password", "confirmation_password")
         private val CODE_HINTS = setOf("one-time-code", "one_time_code", "2faappotpcode", "smsotpcode")
         private val USERNAME_HINTS = setOf(
             "username", "email", "emailaddress", "username_and_email_single_field", "single_username", "email_address",
@@ -46,7 +49,10 @@ class Form(
             } else {
                 "android://$packageName"
             }
-            return Form(site, walk.username, walk.password, walk.code, walk.typedUsername, walk.typedPassword)
+            return Form(
+                site, walk.username, walk.password, walk.code, walk.typedUsername, walk.typedPassword,
+                newPassword = walk.newPassword || walk.password.size >= 2,
+            )
         }
     }
 
@@ -58,6 +64,7 @@ class Form(
         var webScheme: String? = null
         var typedUsername: String? = null
         var typedPassword: String? = null
+        var newPassword = false
 
         fun visit(node: AssistStructure.ViewNode) {
             node.webDomain?.takeIf { it.isNotBlank() && webDomain == null }?.let {
@@ -68,6 +75,11 @@ class Form(
                 when (kind(node)) {
                     Kind.USERNAME -> { username += id; if (typedUsername == null) typedUsername = typed(node) }
                     Kind.PASSWORD -> { password += id; if (typedPassword == null) typedPassword = typed(node) }
+                    Kind.NEW_PASSWORD -> {
+                        password += id
+                        newPassword = true
+                        if (typedPassword == null) typedPassword = typed(node)
+                    }
                     Kind.CODE -> code += id
                     null -> {}
                 }
@@ -101,6 +113,7 @@ class Form(
             // Names and hints only, never a value: what to look at when a field is missed.
             Log.d(TAG, "field hints=$hints names=$names inputType=${node.inputType} html=${node.htmlInfo?.attributes?.map { it.first }}")
             return when {
+                hints.any { it in NEW_PASSWORD_HINTS } -> Kind.NEW_PASSWORD
                 hints.any { it in PASSWORD_HINTS } -> Kind.PASSWORD
                 hints.any { it in CODE_HINTS || it.startsWith("smsotpcode") } -> Kind.CODE
                 names.any { CODE_NAME.containsMatchIn(it) } -> Kind.CODE
@@ -120,5 +133,5 @@ class Form(
         }
     }
 
-    private enum class Kind { USERNAME, PASSWORD, CODE }
+    private enum class Kind { USERNAME, PASSWORD, NEW_PASSWORD, CODE }
 }
