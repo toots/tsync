@@ -64,8 +64,10 @@ capability. What has been seen working is recorded in §10.
 - The content script classifies the fields of each frame as Chromium does for its own autofill:
   the `autocomplete` attribute first (`username`, `email`, `current-password`, `new-password`,
   `one-time-code`), then `type="password"`, then the name, id and label against Chromium's
-  patterns (`otp|verification.code|2fa|six.digit` for a code), as the Android service does
-  ([android §4](android.md#4-one-time-codes)).
+  patterns (`otp|verification.code|2fa|six.digit`, and `mfa`, `one-time`, a login or
+  authentication code, for a code), as the Android service does
+  ([android §4](android.md#4-one-time-codes)). A field named only *Code* is not one (a promo or
+  postal code as often), nor a *security code* (a card's CVC); its code is in the popup.
 - It marks each username, password and code field it found with tsync's icon (its mark in a blue
   circle, 20 px) at the right end inside the field, from the page's load and on every field
   drawn, not only the focused one, so tsync is seen to be there before a click. The icons are
