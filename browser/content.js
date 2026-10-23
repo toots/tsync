@@ -68,6 +68,9 @@
     };
   }
 
+  // passwords §5.1: the fields that offer a suggested password.
+  const newPassword = new WeakSet();
+
   function scan() {
     const groups = new Map();
     for (const input of document.querySelectorAll("input")) {
@@ -76,8 +79,15 @@
       groups.get(key).push(input);
     }
     for (const inputs of groups.values()) {
-      const found = TsyncFields.classify(inputs.map(describe));
-      inputs.forEach((input, i) => (found[i] ? kinds.set(input, found[i]) : kinds.delete(input)));
+      const described = inputs.map(describe);
+      const found = TsyncFields.classify(described);
+      const fresh = TsyncFields.newPasswords(described, found);
+      inputs.forEach((input, i) => {
+        if (found[i]) kinds.set(input, found[i]);
+        else kinds.delete(input);
+        if (fresh[i]) newPassword.add(input);
+        else newPassword.delete(input);
+      });
     }
   }
 
@@ -153,6 +163,7 @@
       answer = { error: "tsync did not answer" };
     }
     menu.replaceChildren();
+    if (newPassword.has(el)) menu.appendChild(row("Use a strong password", "saved in tsync as you pick it", () => suggest(el)));
     if (answer.error) menu.appendChild(note(answer.error));
     for (const login of answer.logins || []) {
       const title = answer.domains > 1 ? `${login.title} · ${login.domain}` : login.title;
@@ -163,6 +174,25 @@
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
     for (const domain of answer.locked || []) menu.appendChild(note(`${domain}: tsync is locked — unlock it in tsync`));
     if (!menu.children.length) menu.appendChild(note("Nothing in tsync for this site"));
+  }
+
+  // §5.1: every password field of the form gets the suggestion, its confirmation
+  // included; the form remembers the login it went to, for its submit.
+  const suggested = new WeakMap();
+  async function suggest(el) {
+    menu.hidden = true;
+    const scope = el.form || document;
+    let username = "";
+    for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "username" && input.value) username = input.value;
+    let answer;
+    try {
+      answer = await chrome.runtime.sendMessage({ type: "suggest", username });
+    } catch (_) {
+      return;
+    }
+    if (!answer || answer.error || !answer.password) return;
+    for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "password") set(input, answer.password);
+    suggested.set(scope, { id: answer.id, domain: answer.domain });
   }
 
   async function pick(el, login, kind) {
@@ -220,6 +250,15 @@
   function offer(form) {
     if (offered) return;
     const scope = form || document;
+    // §5.1: no sheet; the password itself is not sent again.
+    const pick = suggested.get(scope);
+    if (pick) {
+      offered = true;
+      let username = "";
+      for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "username" && input.value) username = input.value;
+      chrome.runtime.sendMessage({ type: "save-suggested", id: pick.id, domain: pick.domain, username }).catch(() => {});
+      return;
+    }
     let username = "", password = "";
     for (const input of scope.querySelectorAll("input")) {
       const kind = kinds.get(input);

@@ -41,7 +41,22 @@ const TsyncFields = (() => {
     return kinds;
   }
 
-  return { kind, classify };
+  // passwords §5.1: the password fields that ask for a new password: one marked
+  // so, one named so, or every password field of a form that has two.
+  const NEW_NAME = /new|confirm|repeat|retype|again|sign.?up|regist|creat/i;
+  function newPasswords(fields, kinds) {
+    const passwords = kinds.filter((k) => k === "password").length;
+    return fields.map((field, i) => {
+      if (kinds[i] !== "password") return false;
+      const autocomplete = (field.autocomplete || "").toLowerCase().split(/\s+/);
+      if (autocomplete.includes("new-password")) return true;
+      if (autocomplete.includes("current-password")) return false;
+      if (passwords >= 2) return true;
+      return NEW_NAME.test([field.name, field.id, field.label, field.placeholder].filter(Boolean).join(" "));
+    });
+  }
+
+  return { kind, classify, newPasswords };
 })();
 
 if (typeof module !== "undefined") module.exports = TsyncFields;
