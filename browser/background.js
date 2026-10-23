@@ -129,11 +129,12 @@ async function webauthnGet(publicKey, origin) {
   const rpId = publicKey.rpId || new URL(origin).hostname;
   const allow = (publicKey.allowCredentials || []).map((c) => unwrap(c.id));
   const found = await one({ type: "passkey_match", origin, rpId, allow });
-  if (!found.ok) return { fallback: true };
+  if (!found.ok) return refused(found);
   if (!found.passkeys.length) {
-    if (!found.locked.length) return { fallback: true };
-    const answer = await sheet({ kind: "locked", origin, domains: found.locked });
-    return answer.action === "fallback" ? { fallback: true } : refused({ error: "tsync is locked" });
+    const answer = await sheet(found.locked.length
+      ? { kind: "locked", origin, domains: found.locked, device: true }
+      : { kind: "passkey-none", origin });
+    return answer.action === "fallback" ? { fallback: true } : refused({ error: found.locked.length ? "tsync is locked" : "cancelled" });
   }
   const answer = await sheet({ kind: "passkey-get", origin, passkeys: found.passkeys, looks: await looks() });
   if (answer.action === "fallback") return { fallback: true };
@@ -152,12 +153,12 @@ async function webauthnCreate(publicKey, origin) {
   const check = await one({ type: "passkey_match", origin, rpId, allow: [] });
   if (!check.ok) return { error: { name: "SecurityError", message: check.error } };
   if (check.locked.length) {
-    const answer = await sheet({ kind: "locked", origin, domains: check.locked });
-    return answer.action === "fallback" ? { fallback: true } : refused({ error: "tsync is locked" });
+    await sheet({ kind: "locked", origin, domains: check.locked, device: false });
+    return refused({ error: "tsync is locked" });
   }
   const user = publicKey.user || {};
+  // §5: a creation never goes to the browser, whose own manager would keep the passkey.
   const answer = await sheet({ kind: "passkey-create", origin, user: user.name || "" });
-  if (answer.action === "fallback") return { fallback: true };
   if (answer.action !== "ok") return refused({ error: "cancelled" });
   const { clientDataJSON, clientDataHash } = await clientData("webauthn.create", publicKey, origin);
   const reply = await verified(origin, publicKey.authenticatorSelection?.userVerification, {
@@ -245,8 +246,8 @@ const handlers = {
     if (origin) offerSave(origin, m.username, m.password, sender.tab?.incognito === true);
     return {};
   },
-  // A conditional request is held only when tsync has passkeys for it; otherwise
-  // the browser's own conditional UI answers it (§5).
+  // A conditional request is held only when tsync has passkeys for it; otherwise it
+  // is left unanswered, never given to the browser's own conditional UI (§5).
   async "passkey-conditional"(m, sender) {
     const origin = originOf(sender);
     if (!origin || origin !== (await topOrigin(sender))) return { hold: false };
@@ -256,8 +257,14 @@ const handlers = {
   },
   async webauthn(m, sender) {
     const origin = originOf(sender);
-    // A cross-origin frame goes to the browser, which knows its embedder's policy (§5).
-    if (!origin || origin !== (await topOrigin(sender))) return { fallback: true };
+    if (!origin) return refused({ error: "no origin" });
+    // §5: tsync cannot honour a cross-origin frame's permissions policy; the user may
+    // take a sign-in to a phone or security key, never a creation to the browser.
+    const top = await topOrigin(sender);
+    if (origin !== top) {
+      const answer = await sheet({ kind: "frame", origin, top, device: m.kind !== "create" });
+      return answer.action === "fallback" ? { fallback: true } : refused({ error: "cancelled" });
+    }
     try {
       return m.kind === "create" ? await webauthnCreate(m.publicKey, origin) : await webauthnGet(m.publicKey, origin);
     } catch (e) {
@@ -313,4 +320,12 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "fill") return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab) chrome.tabs.sendMessage(tab.id, { type: "open-menu" }).catch(() => {});
+});
+
+// §3.3: once installed, the extension turns off the browser's own password saving, so
+// nothing lands there by default; the popup gives it back on the user's choice.
+const BROWSER_OWN = ["passwordSavingEnabled"];
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason !== "install") return;
+  for (const name of BROWSER_OWN) chrome.privacy?.services?.[name]?.set({ value: false }).catch(() => {});
 });

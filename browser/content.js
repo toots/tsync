@@ -321,7 +321,6 @@
     if (m.kind === "get" && m.mediation === "conditional") {
       const held = await chrome.runtime.sendMessage({ type: "passkey-conditional", publicKey: m.publicKey }).catch(() => ({}));
       if (held.hold) conditional = { id: m.id, publicKey: m.publicKey };
-      else answerPage(m.id, { fallback: true });
       return;
     }
     answerPage(m.id, await ask({ type: "webauthn", kind: m.kind, publicKey: m.publicKey }));
