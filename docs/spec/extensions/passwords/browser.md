@@ -66,8 +66,11 @@ capability. What has been seen working is recorded in §10.
   `one-time-code`), then `type="password"`, then the name, id and label against Chromium's
   patterns (`otp|verification.code|2fa|six.digit` for a code), as the Android service does
   ([android §4](android.md#4-one-time-codes)).
-- It marks each username, password and code field it found with a small tsync icon inside the
-  field, drawn in a closed shadow root the page cannot reach into.
+- It marks each username, password and code field it found with tsync's icon (its mark on the
+  blue square, 22 px) at the right end inside the field, from the page's load and on every field
+  drawn, not only the focused one, so tsync is seen to be there before a click. The icons are
+  drawn in a closed shadow root the page cannot reach into, follow their fields on scroll and
+  resize, and leave a field too small to carry one.
 - **Finding asks nothing.** Classifying and marking fields sends no request: a page that draws a
   form learns nothing, and the bridge is not asked about it.
 
