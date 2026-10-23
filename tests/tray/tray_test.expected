@@ -162,7 +162,9 @@ one warning per distinct reason: 3
 a code domain on Wayland with wl-copy has the codes row: yes
 an opening fills the codes row: yes
 the codes row holds: work |     ACME Co — john |     GitHub — me | home |     Locked — unlock…
-each record row carries a PNG mark: yes
+a record row carries no mark: yes
+the work header carries its vault's PNG mark: yes
+a header whose vault did not answer carries none: yes
 a domain whose status lists no totp has no codes: yes
 no row is Add a code: yes
 a click runs wl-copy: yes

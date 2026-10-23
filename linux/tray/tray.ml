@@ -90,12 +90,12 @@ let row_properties : M.entry -> (string * Dbus.value) list = function
       @ (match i.icon with
         | Some n -> [("icon-name", Dbus.String n)]
         | None -> [])
-      @ (match i.action with
-        | Copy_code { domain; _ } -> (
+      @ (match i.vault with
+        | Some domain -> (
             match List.assoc_opt domain (Atomic.get marks) with
               | Some png -> [("icon-data", Dbus.byte_array png)]
               | None -> [])
-        | _ -> [])
+        | None -> [])
       @ (match i.checked with
         | Some c ->
             [
