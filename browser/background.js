@@ -194,6 +194,13 @@ async function offerSave(origin, username, password) {
   if (first.ok && first.update) await one({ type: "save", origin, username, password, update: first.update });
 }
 
+// passwords §5.1: the pick is the approval; the login is saved before the form is.
+async function suggestFor(origin, username) {
+  const reply = await one({ type: "suggest", origin, username });
+  if (!reply.ok) return { error: reply.error || "tsync could not suggest a password" };
+  return { password: reply.password, id: reply.id, domain: reply.domain };
+}
+
 // --- messages ---------------------------------------------------------------------
 
 async function fillFor(origin, m) {
@@ -219,6 +226,17 @@ const handlers = {
   async fill(m, sender) {
     const origin = originOf(sender);
     return origin ? fillFor(origin, m) : { error: "not a web page" };
+  },
+  async suggest(m, sender) {
+    const origin = originOf(sender);
+    if (!origin) return { error: "no origin" };
+    return suggestFor(origin, m.username || "");
+  },
+  // §5.1: the submit after a suggestion sets the username of the login it saved.
+  async "save-suggested"(m, sender) {
+    const origin = originOf(sender);
+    if (origin) await one({ type: "save", origin, username: m.username, suggested: m.id, domain: m.domain });
+    return {};
   },
   async "offer-save"(m, sender) {
     const origin = originOf(sender);

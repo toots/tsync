@@ -587,12 +587,24 @@ let bridge_request config session j =
           ([
              ("site", s (required j "origin"));
              ("username", s (required j "username"));
-             ("password", s (required j "password"));
            ]
+          @ (match str j "suggested" with
+            | Some id -> [("suggested", s id)]
+            | None -> [("password", s (required j "password"))])
           @
             match str j "update" with
             | Some id -> [("update", s id)]
             | None -> [])
+    (* passwords §5.1: the reply names the domain the login went to, which the
+       submit's save names again. *)
+    | Some "suggest" ->
+        let d = pick j in
+        ("domain", s (dname d))
+        :: call d "suggest"
+             [
+               ("site", s (required j "origin"));
+               ("username", s (Option.value ~default:"" (str j "username")));
+             ]
     | Some "passkey_match" ->
         let answers =
           all (fun d ->
