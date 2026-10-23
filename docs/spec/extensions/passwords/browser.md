@@ -222,11 +222,12 @@ user before a passkey request (§5).
 
 ## 8. Several domains
 
-A machine may use passwords in several domains (README §6.1): every list merges them, each row
-showing its vault's mark ([vault §8.1](../vault.md#81-appearance), from the bridge's `status`:
-the vault's icon, or the tsync glyph in its colour, the glyph also where a page's policy blocks the
-icon) and naming its domain when there is more than one; a new login or passkey goes to the first domain
-using passwords.
+A machine may use passwords in several domains (README §6.1): every list merges them. With more
+than one domain in a list, its rows are grouped by domain under a header naming the domain with its
+vault's mark ([vault §8.1](../vault.md#81-appearance), from the bridge's `status`: the vault's
+icon, or the tsync glyph in its colour, the glyph also where a page's policy blocks the icon); a
+row carries no mark. The popup's state lines carry each domain's mark. A new login or passkey goes
+to the first domain using passwords.
 
 ## 9. Conformance
 
