@@ -28,7 +28,8 @@ jobs:
 
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.5"
+          # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+          ocaml-compiler: "5.5.1"
 
       # 10 §4.1: setup-ocaml caches the compiler only; the switch is cached
       # here and saved right after the install, so a failed job neither loses
@@ -95,7 +96,8 @@ jobs:
 
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.5"
+          # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+          ocaml-compiler: "5.5.1"
 
       - name: Restore the opam switch
         id: opam-switch
@@ -162,7 +164,8 @@ jobs:
 
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.5"
+          # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+          ocaml-compiler: "5.5.1"
 
       - name: Restore the opam switch
         id: opam-switch
@@ -265,7 +268,8 @@ jobs:
 
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.5"
+          # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+          ocaml-compiler: "5.5.1"
 
       - name: Install tsync alone
         run: opam pin -ny . && opam install -y tsync
