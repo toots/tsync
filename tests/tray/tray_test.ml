@@ -1131,11 +1131,18 @@ let codes w =
         List.mem (String.trim (label n)) ["ACME Co — john"; "GitHub — me"])
       (Option.get (codes_row w)).children
   in
-  check w "each record row carries a PNG mark"
-    (records <> []
-    && List.for_all
-         (fun n -> String.starts_with ~prefix:png_signature (icon_data n))
-         records);
+  let header name =
+    List.find_opt
+      (fun n -> String.trim (label n) = name)
+      (Option.get (codes_row w)).children
+  in
+  let marked n = String.starts_with ~prefix:png_signature (icon_data n) in
+  check w "a record row carries no mark"
+    (records <> [] && not (List.exists marked records));
+  check w "the work header carries its vault's PNG mark"
+    (Option.fold ~none:false ~some:marked (header "work"));
+  check w "a header whose vault did not answer carries none"
+    (Option.fold ~none:false ~some:(fun n -> not (marked n)) (header "home"));
   check w "a domain whose status lists no totp has no codes"
     (not (List.mem "plain" (codes_children w)));
   check w "no row is Add a code"

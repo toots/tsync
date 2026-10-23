@@ -162,7 +162,7 @@ A separator has `type` = `separator`. An item has:
 | `enabled` | `b` | the model's |
 | `visible` | `b` | true, always sent |
 | `icon-name` | `s` | only when the model gives an icon |
-| `icon-data` | `ay` | a PNG, only on a code row with a vault mark (§6.5) |
+| `icon-data` | `ay` | a PNG, only on a codes header row with a vault mark (§6.5) |
 | `toggle-type` | `s` | `checkmark`, only for a checkmark row |
 | `toggle-state` | `i` | 1 or 0, only for a checkmark row |
 | `children-display` | `s` | `submenu`, only for a submenu row |
@@ -357,10 +357,10 @@ helper ever receives a secret in its arguments, which other processes can list.
   `TRAY_STATS_DEADLINE`, and sets the rows of [menu-model.md §7](menu-model.md#7-codes-submenu)
   as the row's children (§4.3). Rows from an earlier opening are never shown again: a record
   added on another machine shows at the next opening.
-- **The mark.** Each record's row carries its vault's mark
-  ([vault §8.1](../extensions/vault.md#81-appearance)) as `icon-data` (`ay`, a PNG): the vault's
-  icon as stored, or the tsync glyph in the vault's colour. A domain whose `vault_status` did not
-  answer gets none.
+- **The mark.** With several code domains, each domain's header row (the model's `vault`) carries
+  its vault's mark ([vault §8.1](../extensions/vault.md#81-appearance)) as `icon-data` (`ay`, a
+  PNG): the vault's icon as stored, or the tsync glyph in the vault's colour. A record's row
+  carries none, and neither does a domain whose `vault_status` did not answer.
 - **`CopyCode(domain, id)`** asks the owner `totp_code`, then runs
   `wl-copy --sensitive --type text/plain` with the code on its standard input, which offers
   `x-kde-passwordManagerHint` = `secret` beside the text so Klipper keeps no history of it. The

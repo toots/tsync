@@ -31,8 +31,8 @@ keystore at the first look after that.
 
 ## 3. The tray
 
-- **Codes.** The tray's `One-time codes` submenu lists each code domain's records with its
-  vault's mark, and copies a record's current code on the user's click, marked sensitive for
+- **Codes.** The tray's `One-time codes` submenu lists each code domain's records, under a
+  header with its vault's mark when there are several, and copies a record's current code on the user's click, marked sensitive for
   clipboard managers ([linux-tray §6.5](../../frontends/linux-tray.md#65-one-time-codes)).
 - **Unlock.** A locked domain's row asks for the passphrase in KDE's password dialog, and for the
   secret key on a machine not enrolled. The tray is tsync's own tool: this is not a host adapter
