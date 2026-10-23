@@ -313,7 +313,44 @@ let csv () =
   show_rows
     (Passwords.import_csv "Name,URL,Password\r\nA,https://a.com,pw\r\nB,,pw2")
 
+(* §4.3: the candidate rule and what a statement grants. *)
+let asset_links () =
+  p "\n== an app's websites (Digital Asset Links)\n";
+  let module A = Tsync_vault.Asset_links in
+  List.iter
+    (fun (package, host) ->
+      p "%-44s %b\n" (package ^ " / " ^ host) (A.candidate ~package host))
+    [
+      ("com.github.android", "github.com");
+      ("com.amazon.mShop.android.shopping", "amazon.com");
+      ("com.github.android", "gitlab.com");
+      ("com.example", "example");
+      ("org.example.app", "com.example.org");
+    ];
+  let statement ?(relation = "delegate_permission/common.get_login_creds")
+      ?(namespace = "android_app") ?(package = "com.example.app")
+      ?(cert = "AB:CD:EF") () =
+    Printf.sprintf
+      {|[{"relation":["delegate_permission/common.handle_all_urls","%s"],
+          "target":{"namespace":"%s","package_name":"%s","sha256_cert_fingerprints":["%s"]}}]|}
+      relation namespace package cert
+  in
+  let grants label body =
+    p "%-44s %b\n" label
+      (A.grants ~package:"com.example.app" ~certs:["abcdef"] body)
+  in
+  grants "a matching statement" (statement ());
+  grants "its fingerprint in lower case, no colons"
+    (statement ~cert:"abcdef" ());
+  grants "another certificate" (statement ~cert:"AB:CD:00" ());
+  grants "another package" (statement ~package:"com.example.other" ());
+  grants "handle_all_urls alone"
+    (statement ~relation:"delegate_permission/common.handle_all_urls" ());
+  grants "a web target" (statement ~namespace:"web" ());
+  grants "not JSON" "<html>"
+
 let () =
+  asset_links ();
   sites ();
   matching ();
   generation ();

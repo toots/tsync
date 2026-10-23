@@ -274,6 +274,37 @@ let dangling ids totp =
 
 (* §10 list: logins, then passkeys, each ordered by title then username then
    id. *)
+(* §4.3: for an app's site and the certificates its platform reported, the
+   https sites of these logins the app is verified for. *)
+let app_sites args site logins =
+  match (Passwords.site_of_string site, arg args "certs") with
+    | Ok s, Some (`List certs) when String.starts_with ~prefix:"android://" s ->
+        let certs =
+          List.filter_map (function `String c -> Some c | _ -> None) certs
+        in
+        let hosts =
+          List.sort_uniq compare
+            (List.concat_map
+               (fun (_, (l : Passwords.login)) ->
+                 List.filter_map
+                   (fun u ->
+                     if String.starts_with ~prefix:"https://" u then
+                       Some (Passwords.host_of u)
+                     else None)
+                   l.urls)
+               logins)
+        in
+        List.map
+          (fun h -> "https://" ^ h)
+          (Asset_links_cache.verified ~package:(Passwords.host_of s) ~certs
+             hosts)
+    | _ -> []
+
+let matches_site ~verified ~origin (l : Passwords.login) =
+  List.exists
+    (fun s -> Passwords.matches ~site:s ~origin || List.mem s verified)
+    l.urls
+
 let list ~domain ~engine ~lazy_tree t args =
   (* vault §6.2: a host's refresh in the background is no use of the vault. *)
   let use = arg args "use" <> Some (`Bool false) in
@@ -282,6 +313,9 @@ let list ~domain ~engine ~lazy_tree t args =
   (* The rows' code lookups read the TOTP folder, which sets the view again. *)
   let records_view = Atomic.get t.Vault.view in
   let filter = str args "filter" and site = str args "site" in
+  let verified =
+    match site with Some site -> app_sites args site (logins ok) | None -> []
+  in
   let shown_login (l : Passwords.login) =
     (match filter with
       | Some sub ->
@@ -290,8 +324,7 @@ let list ~domain ~engine ~lazy_tree t args =
       | None -> true)
     &&
       match site with
-      | Some origin ->
-          List.exists (fun s -> Passwords.matches ~site:s ~origin) l.urls
+      | Some origin -> matches_site ~verified ~origin l
       | None -> true
   in
   let rp_of_site origin =
@@ -768,10 +801,9 @@ let passkey_assert ~domain ~engine ~lazy_tree t args =
 let fill ~domain ~engine ~lazy_tree t args =
   let ctx = context ~pull:(pull_of args) ~domain ~engine ~lazy_tree t in
   let site = required args "site" and id = required args "id" in
+  let verified = app_sites args site (logins (fst (records ctx))) in
   match find ctx id with
-    | Login l
-      when List.exists (fun s -> Passwords.matches ~site:s ~origin:site) l.urls
-      ->
+    | Login l when matches_site ~verified ~origin:site l ->
         [("username", `String l.username); ("password", `String l.password)]
         @ List.filter
             (fun (k, _) -> k = "code" || k = "secondsLeft")
