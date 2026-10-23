@@ -157,6 +157,7 @@ the extension never caches the unlocked state.
 | `fill` with codes | `confirm` | §3, §3.1, macOS 15 | declared |
 | `passkey` | `confirm`, `authenticate` when verification is asked | §4, §5, macOS 14 | declared |
 | `save` | — | not offered (§3) | — |
+| `suggest` | — | not offered: AutoFill asks a credential provider for credentials to fill, never for a new password; Safari's own suggestion goes to the system's keychain | — |
 
 ## 8. Conformance
 
