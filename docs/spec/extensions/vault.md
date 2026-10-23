@@ -449,7 +449,7 @@ a passphrase change on a locked or not enrolled vault `locked`.
 
 A machine may show several domains' vaults side by side: every picker that lists codes, logins or
 passkeys names each row's domain ([README §6.1](README.md#61-several-domains)). The appearance
-lets the user tell them apart at a glance.
+lets the user tell the vaults apart at a glance; it marks a vault, never a record.
 
 - **A colour, always.** Without a choice, it is the key id's: `palette[k mod 10]`, `k` the key
   id's first byte, from the palette `#2563eb #dc2626 #16a34a #9333ea #ea580c #0d9488 #db2777
@@ -464,8 +464,13 @@ lets the user tell them apart at a glance.
   matrix asks), its centre square scaled to 256 pixels, halved until its PNG fits 64 KiB. A build
   without FFmpeg takes only the stored form, and says so. An app converts with its platform's
   image API.
-- **What a picker draws:** the icon when there is one, in place of tsync's; otherwise tsync's icon
-  in the vault's colour. Everything else about a row stays as it is.
+- **The mark** is the icon when there is one; otherwise tsync's icon in the vault's colour.
+- **Where it is drawn:** beside a vault's name, at the level that names the vault, never on a
+  record's row. A picker listing one domain's records draws no mark; one listing several groups
+  the rows by domain under a header naming it, and the header carries the mark. A sheet that
+  names the domain an item is saved to or read from draws the mark beside that name when the
+  machine has several. A screen about the vault itself (its settings, its status) draws it as
+  its own. Everything else about a row stays as it is.
 - **Where it lives:** `/.tsync-ext/vault/appearance/appearance`, a JSON object `{"color"?,
   "icon"? (base64), "modified"}`, in a folder of its own so the keyring's fold (§4.3) never takes
   it for a copy. It is **not sealed**: a locked vault's rows need it, and it holds nothing secret.
