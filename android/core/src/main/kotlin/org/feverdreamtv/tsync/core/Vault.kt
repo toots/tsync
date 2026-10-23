@@ -12,6 +12,10 @@ data class VaultStatus(
     val outdated: Boolean = false,
     val pulledAt: Long? = null,
     val appearance: Appearance? = null,
+    /** vault §6.3: the machines that joined since this phone last acknowledged them. */
+    val newMachines: List<String> = emptyList(),
+    /** vault §7.2: the secret key this phone holds opens no slot any more. */
+    val secretKeyReplaced: Boolean = false,
 )
 
 /** vault §8.1: the colour in force (`#rrggbb`), and the icon's PNG bytes when there is one. */
@@ -51,7 +55,16 @@ class Vault(private val client: Client) {
                     icon = text(it, "icon")?.let { b64 -> java.util.Base64.getDecoder().decode(b64) },
                 )
             },
+            newMachines = reply.optJSONArray("newMachines")?.let { names ->
+                (0 until names.length()).mapNotNull { names.opt(it) as? String }
+            } ?: emptyList(),
+            secretKeyReplaced = reply.optBoolean("secretKeyReplaced", false),
         )
+    }
+
+    /** vault §6.3: listing the machines acknowledges them, so the phone stops announcing them. */
+    fun acknowledgeMachines() {
+        client.call(action("vault_machines"))
     }
 
     fun unlock(passphrase: String, secretKey: String?) {

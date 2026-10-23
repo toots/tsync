@@ -208,6 +208,9 @@
     <string name="vault_passphrase">Passphrase</string>
     <string name="vault_secret_key">Secret key</string>
     <string name="vault_secret_key_hint">Needed once on this phone, as tsync vault init showed it</string>
+    <string name="vault_secret_key_replaced">This vault\'s secret key was replaced on another machine: enter the new one</string>
+    <string name="vault_machine_joined">%1$s joined this vault</string>
+    <string name="vault_machines_seen">Seen</string>
     <string name="vault_unlock">Unlock</string>
     <string name="vault_lock">Lock</string>
     <string name="vault_lock_confirm">Lock the vault? Codes need the passphrase again afterwards.</string>
