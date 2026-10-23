@@ -130,9 +130,9 @@ holds a label: false
   pause                              ok
   owner changes the passphrase       ok
   resume                             ok
-  before the fold: keyring keyring (conflicted copy from test)
+  before the fold: keyring keyring (conflicted copy from test) machines
   status unlocked slots={"secret-key":2,"unknown":1} copies=[]
-  after: keyring
+  after: keyring machines
 == two inits race; the owner's loses
   the owner adds under its K         <id10>
   status                             locked copies=1
@@ -140,5 +140,5 @@ holds a label: false
   unlock with the winner's passphrase ok
   list: "Race" "a"
   status                             unlocked copies=0
-  the vault folder: keyring
+  the vault folder: keyring machines
 owner exit status 0
