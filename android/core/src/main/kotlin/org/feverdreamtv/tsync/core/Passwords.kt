@@ -46,9 +46,11 @@ class Passwords(private val client: Client) {
 
     private fun JSONObject.pull(pull: Pull) = apply { pull.wire?.let { put("pull", it) } }
 
-    fun list(site: String? = null, filter: String? = null, pull: Pull = Pull.DEFAULT): PasswordRecords {
+    /** [certs]: an app's signing certificates, so the owner offers its verified websites' logins (passwords §4.3). */
+    fun list(site: String? = null, filter: String? = null, pull: Pull = Pull.DEFAULT, certs: List<String> = emptyList()): PasswordRecords {
         val request = action("list").pull(pull)
         site?.let { request.put("site", it) }
+        if (certs.isNotEmpty()) request.put("certs", JSONArray(certs))
         filter?.takeIf { it.isNotBlank() }?.let { request.put("filter", it) }
         val reply = client.call(request)
         val rows = objects(reply.optJSONArray("records"))
@@ -67,8 +69,10 @@ class Passwords(private val client: Client) {
     }
 
     /** android §3: refused `invalid` when the login does not match [site]. */
-    fun fill(site: String, id: String, pull: Pull = Pull.DEFAULT): Filled {
-        val reply = client.call(action("fill").pull(pull).put("site", site).put("id", id))
+    fun fill(site: String, id: String, pull: Pull = Pull.DEFAULT, certs: List<String> = emptyList()): Filled {
+        val request = action("fill").pull(pull).put("site", site).put("id", id)
+        if (certs.isNotEmpty()) request.put("certs", JSONArray(certs))
+        val reply = client.call(request)
         return Filled(reply.optString("username"), reply.optString("password"), text(reply, "code"))
     }
 

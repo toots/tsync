@@ -38,6 +38,10 @@ object Browsers {
         return certificates(context, packageName).any { it in allowed }
     }
 
+    /** passwords §4.3: an app's signing certificates as the package manager reports them, for its `android://` site. */
+    fun certificatesOf(context: Context, site: String): List<String> =
+        if (site.startsWith("android://")) certificates(context, site.removePrefix("android://")) else emptyList()
+
     @Suppress("DEPRECATION")
     private fun certificates(context: Context, packageName: String): List<String> = try {
         val manager = context.packageManager

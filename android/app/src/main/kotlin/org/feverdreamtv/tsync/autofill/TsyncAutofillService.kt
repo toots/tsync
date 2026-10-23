@@ -45,7 +45,7 @@ class TsyncAutofillService : AutofillService() {
         if (tsync.boot() != Boot.Ready) return null
         val logins = try {
             // §3: what the phone holds, at once; the pull goes on for the next request.
-            tsync.passwords.list(site = form.site, pull = Pull.BACKGROUND).logins
+            tsync.passwords.list(site = form.site, pull = Pull.BACKGROUND, certs = Browsers.certificatesOf(this, form.site)).logins
         } catch (e: CoreException) {
             return when (e.code) {
                 Code.LOCKED -> FillResponse.Builder().addDataset(locked(form)).build()
