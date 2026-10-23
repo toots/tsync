@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let reconciler = Reconciler()
     private lazy var relay = Relay(reconciler: reconciler)
     private var menu: StatusMenu?
+    /// The domains of the last pass, read on the main queue.
+    private var served: [String] = []
 
     static func main() {
         let app = NSApplication.shared
@@ -32,9 +34,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reconciler.onPass = { [relay] domains, report in
             relay.update(domains)
             menu.update(domains: domains, report: report)
+            let names = domains.map { $0.displayName }
+            DispatchQueue.main.async { self.served = names }
         }
         reconciler.request()
         relay.start()
+        watchScreenLock()
+    }
+
+    /// vault §6.2, security-model §10.6: a screen lock or sleep goes to every
+    /// domain; the owner locks only one whose auto-lock policy asks for it.
+    private func watchScreenLock() {
+        let report: (Notification) -> Void = { [weak self] _ in
+            let names = self?.served ?? []
+            Thread.detachNewThread {
+                for name in names {
+                    _ = try? OwnerClient.call(
+                        ["action": "vault_lock", "domain": name, "reason": "screen"])
+                }
+            }
+        }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main,
+            using: report)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main, using: report)
     }
 
     /// An accessory app shows no menu bar, but ⌘V and its siblings still reach

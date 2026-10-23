@@ -70,7 +70,7 @@ While a machine is unlocked, any program running as you on it can ask tsync for 
 ```
 
 - `idleMinutes`: no code, password or passkey used for that long. A status or a listing that shows no secret does not count as use.
-- `onScreenLock`: the screen locks or the machine goes to sleep, once something on the machine reports it to tsync.
+- `onScreenLock`: the screen locks or the machine goes to sleep: on a Mac the menu bar app reports it.
 - `maxHours`: that long after unlocking, however much the vault is used.
 
 The server can set one for everyone behind it, and the strictest of yours and the server's applies: you can make it lock sooner, never later. While a policy is on, the key is never kept in the system keychain, so a restart leaves the vault locked; the machine stays set up and asks only for the passphrase. `tsync vault status` shows the policy in force, and why the vault was locked last.
