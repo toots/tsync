@@ -387,7 +387,8 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 | `status` | — | per domain: locked or unlocked, whether it uses `totp`, and its `appearance` (`color`, and `icon` in base64 when it has one; vault §8.1); `verifier`, the platform's verifier `verify` uses, or null |
 | `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, whether a code is linked, and `exact`, whether one of its sites is `origin` itself rather than a suffix match; no password |
 | `fill` | `origin`, `domain`, `id` | `passwords_fill` (§8), with `origin` as the site |
-| `save` | `origin`, `username`, `password`, `domain?`, `update?` | `passwords_save` (§8), with `origin` as the site |
+| `save` | `origin`, `username`, `password` (absent with `suggested`), `domain?`, `update?`, `suggested?` | `passwords_save` (§8), with `origin` as the site |
+| `suggest` | `origin`, `username`, `domain?` | `passwords_suggest` (§8), with `origin` as the site |
 | `passkey_match`, `passkey_create`, `passkey_assert` | as §7.5, `origin` the frame's | as §7.5; `passkey_match` also names the locked domains, as `match` does |
 | `verify` | `origin` | verifies the user by the platform's own means before a passkey request ([browser §5](passwords/browser.md#5-passkeys)): on macOS LocalAuthentication, answering `verified`; elsewhere refused `invalid` (the extension then asks the passphrase) |
 
