@@ -64,6 +64,11 @@ class Vault(private val client: Client) {
         client.call(action("vault_lock").put("forget", forget))
     }
 
+    /** vault §6.2: the screen went off; the owner locks only under a policy that asks for it. */
+    fun screenLocked() {
+        client.call(action("vault_lock").put("reason", "screen"))
+    }
+
     fun codes(filter: String? = null): Codes {
         val request = action("totp_list")
         filter?.takeIf { it.isNotBlank() }?.let { request.put("filter", it) }
