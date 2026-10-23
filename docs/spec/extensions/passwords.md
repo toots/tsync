@@ -268,7 +268,8 @@ every domain:
 - **Related origins** (WebAuthn's related origin requests): an RP ID that is a domain name and not
   a public suffix may also vouch for other origins, as `accounts.meta.com` does for
   `https://www.facebook.com`. The owner fetches `https://<RP ID>/.well-known/webauthn` (a 200 of
-  at most 256 KiB within 5 s, no redirect), and accepts the origin when its `origins` list names
+  at most 256 KiB within 5 s, no redirect, asked with a `User-Agent`, without which Meta's
+  server redirects), and accepts the origin when its `origins` list names
   it among the first five distinct registrable labels, as browsers count them. A document is
   kept 24 hours; a failed fetch keeps nothing. Anything else is refused `invalid`.
 - **Matching.** A passkey answers a request whose RP ID equals its `rpId`. An assertion with an
