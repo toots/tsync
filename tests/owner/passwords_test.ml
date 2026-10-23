@@ -523,6 +523,74 @@ let logins () =
          ("suggested", s sg_id);
        ]);
   ignore (ask [("action", s "passwords_remove"); ("id", s sg_id)]);
+  (* §4.3: an app's verified website, from a stand-in for the statement fetch. *)
+  Atomic.set Tsync_owner.Asset_links_cache.fetch (fun host ->
+      if host = "example.com" then
+        Some
+          {|[{"relation":["delegate_permission/common.get_login_creds"],
+              "target":{"namespace":"android_app","package_name":"com.example.app",
+                        "sha256_cert_fingerprints":["AB:CD:EF"]}}]|}
+      else None);
+  let web =
+    ask
+      [
+        ("action", s "passwords_add");
+        ("title", s "Example");
+        ("urls", `List [s "https://example.com"; s "https://other.com"]);
+        ("username", s "app user");
+        ("password", s "app pass");
+      ]
+  in
+  let web_id = Option.value ~default:"" (field web "id") in
+  let for_app certs =
+    match
+      member
+        (ask
+           [
+             ("action", s "passwords_list");
+             ("site", s "android://com.example.app");
+             ("certs", `List (List.map s certs));
+           ])
+        "records"
+    with
+      | Some (`List l) -> List.exists (fun r -> field r "id" = Some web_id) l
+      | _ -> false
+  in
+  p "%-40s %b" "an app, the first request" (for_app ["abcdef"]);
+  let rec until n =
+    for_app ["abcdef"]
+    || n > 0
+       &&
+       (Rt.sleep 0.1;
+        until (n - 1))
+  in
+  p "%-40s %b" "  a later request" (until 50);
+  let filled =
+    ask
+      [
+        ("action", s "passwords_fill");
+        ("site", s "android://com.example.app");
+        ("id", s web_id);
+        ("certs", `List [s "abcdef"]);
+      ]
+  in
+  p "%-40s %b" "  fill, for the app" (field filled "password" = Some "app pass");
+  Rt.sleep 0.3;
+  p "%-40s %b" "another certificate, later"
+    (for_app ["000000"]
+    ||
+    (Rt.sleep 0.3;
+     for_app ["000000"]));
+  answer "fill, another certificate"
+    (ask
+       [
+         ("action", s "passwords_fill");
+         ("site", s "android://com.example.app");
+         ("id", s web_id);
+         ("certs", `List [s "000000"]);
+       ]);
+  ignore (ask [("action", s "passwords_remove"); ("id", s web_id)]);
+  Tsync_owner.Asset_links_cache.reset ();
   linked
 
 let import_export () =
