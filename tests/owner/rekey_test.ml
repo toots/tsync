@@ -1,7 +1,8 @@
 (* vault §3.1, §6.3 and §7.2 through a real owner and the CLI given as argv 1:
    two machines, told apart by the client uuid each phase writes before its
    owner starts, the kit, enrolling, being listed and announced, and a re-key
-   shutting out the one that has not the new secret key.
+   shutting out the one that has not the new secret key, whose records open
+   under the new key.
 
    Each phase is a fresh owner with that machine's own keystore, kept in files
    of ROOT as a host's would outlive the owner. *)
@@ -228,6 +229,24 @@ let as_machine uuid f =
       ignore (ask [("action", "stop")]);
       p "owner exit status %d" (Rt.Promise.await owner))
 
+(* totp §5: the records, by label, and those that do not open. *)
+let codes label =
+  let r = ask [("action", "totp_list")] in
+  match member r "records" with
+    | Some (`List rows) ->
+        p "%-36s [%s] corrupt %s" label
+          (String.concat "; "
+             (List.map
+                (fun row ->
+                  Option.value ~default:"" (field row "issuer")
+                  ^ " / "
+                  ^ Option.value ~default:"" (field row "account"))
+                rows))
+          (match member r "corrupt" with
+            | Some (`List l) -> string_of_int (List.length l)
+            | _ -> "?")
+    | _ -> answer label r
+
 let unlock ?secret_key passphrase =
   ask
     (("action", "vault_unlock") :: ("passphrase", passphrase)
@@ -252,6 +271,12 @@ let run = function
             (cli_kit kit passphrase)
             (Fs.read_file kit = body);
           machines ~name:"machine A" "machines, named";
+          answer "a code"
+            (ask
+               [
+                 ("action", "totp_add");
+                 ("uri", "otpauth://totp/ACME:john?secret=JBSWY3DPEHPK3PXP");
+               ]);
           status "status")
   | "b-enroll" ->
       as_machine uuid_b (fun () ->
@@ -289,6 +314,7 @@ let run = function
                   (Option.value ~default:"none" (field r "pending"));
                 Fs.write_file_for_test (file "new-secret-key") k
             | None -> answer "rekey" r);
+          codes "codes, under the new key";
           machines "machines";
           status "status")
   | "b-after" ->
@@ -299,6 +325,7 @@ let run = function
           answer "unlock, the new secret key"
             (unlock ~secret_key:(Fs.read_file (file "new-secret-key")) second);
           status "status";
+          codes "codes, under the new key";
           machines ~name:"machine B" "machines, named again";
           answer "lock --forget"
             (Ipc.call socket
