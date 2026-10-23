@@ -175,6 +175,17 @@ let () =
          ("music", silent);
        ]);
 
+  case "a machine joined one vault, while an upload runs";
+  show
+    (menu
+       [
+         ( "docs",
+           {|{"ok":true,"pendingUploads":1,"uploading":[{"name":"a.txt","rel":"a.txt"}],
+              "newMachines":["laptop",3,"booky"]}|}
+         );
+         ("music", idle);
+       ]);
+
   case "two reachable domains, one paused";
   show (menu [("photos", {|{"ok":true,"paused":true}|}); ("music", idle)]);
 

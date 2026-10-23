@@ -87,7 +87,7 @@ tsync vault rekey                     # a new key and secret key: shuts out ever
 tsync vault rekey --new-passphrase    # the same, with a new passphrase
 ```
 
-Each machine that joins the vault adds itself to the list, and `tsync vault status` on the others says so until they list the machines. The list only informs: it cannot keep a machine out.
+Each machine that joins the vault adds itself to the list, and the others say so until they list the machines: in `tsync vault status`, and as a row under the domain in the menu bar and the tray. The list only informs: it cannot keep a machine out.
 
 A lost or stolen machine still holds the secret key, and the key that reads every record, so changing the passphrase is not enough. `tsync vault rekey` asks for the passphrase, draws a new key and secret key, re-encrypts every record, and prints the new secret key once. Every other machine is locked until you unlock it with the new secret key, and the list starts again with this machine alone. If the machine was lost, choose a new passphrase too. Earlier versions of the records, kept by a versioned domain, stay under the old key until retention removes them.
 

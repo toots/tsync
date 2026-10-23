@@ -104,25 +104,33 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
            ())
     else None
   in
-  {
-    pulls;
-    subscribers;
-    traffic;
-    unnamed = Atomic.make 0;
-    owed = Atomic.make None;
-    domain;
-    engine;
-    hooks;
-    background;
-    publish;
-    stats;
-    stop;
-    dest_roots;
-    staging_roots;
-    answered_unreachable = Atomic.make false;
-    running = Atomic.make None;
-    vault = Vault.create ?pulls ();
-  }
+  let t =
+    {
+      pulls;
+      subscribers;
+      traffic;
+      unnamed = Atomic.make 0;
+      owed = Atomic.make None;
+      domain;
+      engine;
+      hooks;
+      background;
+      publish;
+      stats;
+      stop;
+      dest_roots;
+      staging_roots;
+      answered_unreachable = Atomic.make false;
+      running = Atomic.make None;
+      vault = Vault.create ?pulls ();
+    }
+  in
+  (* vault §6.3: the domain's status reports new machines from the start, the
+     keystore's K included. *)
+  Rt.spawn ~name:"vault machines" (fun () ->
+      try ignore (Vault.announce ~domain ~engine t.vault)
+      with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason);
+  t
 
 let domain_name t = Domain_name.to_string t.domain.name
 
@@ -131,7 +139,13 @@ let notify_folders t dirs =
     folders_changed ~domain:(domain_name t) ~engine:t.engine ~publish:t.publish
       dirs
 
-let keys_changed t keys = notify_folders t (List.map Names.parent_of keys)
+(* vault §6.3: an entry arriving in the machine list is announced at once. *)
+let keys_changed t keys =
+  notify_folders t (List.map Names.parent_of keys);
+  if List.exists (fun k -> Names.parent_of k = Vault.machines_folder) keys then
+    Rt.spawn ~name:"vault machines" (fun () ->
+        try ignore (Vault.announce ~domain:t.domain ~engine:t.engine t.vault)
+        with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
 
 let event t name fields =
   `Assoc
@@ -858,6 +872,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           unnamed = Atomic.get t.unnamed;
           traffic = t.traffic ();
           mount = Option.bind (t.hooks.frontend ()) (fun f -> f.mount);
+          new_machines = Vault.announced t.vault;
         }
     | Stats args -> t.stats args
     | Stop -> t.stop ()

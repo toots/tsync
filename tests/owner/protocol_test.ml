@@ -236,6 +236,7 @@ let cases =
           traffic =
             { up_bytes = 10; up_rate = 1.5; down_bytes = 4; down_rate = 2. };
           mount = Some "/m";
+          new_machines = ["laptop"];
         } );
     Case (Pause false, false);
     Case (Stop, ());

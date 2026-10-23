@@ -120,6 +120,20 @@ tooltip tsync — Uploading 2 · paused
         ---
         Quit tsync tray -> quit
 
+== a machine joined one vault, while an upload runs
+icon    tsync-sync-symbolic
+tooltip tsync — Uploading 1
+        docs — Uploading 1 -> open docs
+            laptop joined the vault (computer)
+            booky joined the vault (computer)
+            a.txt (text-x-generic) -> reveal docs:a.txt
+        music — Idle -> open music
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
 == two reachable domains, one paused
 icon    tsync-idle-symbolic
 tooltip tsync — Idle
@@ -367,4 +381,4 @@ tooltip tsync — Downloading 1
         d
             ? (?)
 
-29 cases
+30 cases
