@@ -21,5 +21,6 @@
   tsync_http
   tsync_http_proxy
   tsync_vault
+  qrc
   unix
   yojson))

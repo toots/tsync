@@ -269,6 +269,8 @@ type _ request =
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)
   | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_kit : string -> secret request
+      (** vault §3.1: the passphrase as typed; the secret key it answers *)
   | Vault_machines : string option -> machine list request
       (** vault §6.3; [Some name] renames this machine's entry *)
   | Vault_rekey : {
