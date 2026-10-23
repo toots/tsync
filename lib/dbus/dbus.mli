@@ -74,6 +74,9 @@ type t
     {!Error} without it. *)
 val available : unit -> bool
 
+(** The system bus: [DBUS_SYSTEM_BUS_ADDRESS], else its well-known socket. *)
+val system_address : unit -> string
+
 (** The session bus of this environment: [DBUS_SESSION_BUS_ADDRESS], else
     [$XDG_RUNTIME_DIR/bus] when that socket exists. Never one started for the
     caller (linux-tray §2). *)
@@ -88,6 +91,9 @@ val connect : string -> t
 val close : t -> unit
 
 val descriptor : t -> Unix.file_descr
+
+(** The name the bus gave this connection at registration, as [":1.42"]. *)
+val unique_name : t -> string
 
 (** Queues the message; its serial. *)
 val send : t -> message -> int

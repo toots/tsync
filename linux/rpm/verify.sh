@@ -43,6 +43,7 @@ for s in postinstall preuninstall; do
 done
 test "$(echo "$scripts" | grep -c "'tsync@\*\.service'")" = 2
 rpm -ql tsync | grep -q 'tsync@.service'
+rpm -ql tsync | grep -q '/usr/share/polkit-1/actions/org.feverdreamtv.tsync.policy'
 # The desktop packages run nothing at install or removal.
 for p in tsync-tray tsync-dolphin; do
   test -z "$(rpm -qp --scripts dist/"$p"_*.rpm)"
