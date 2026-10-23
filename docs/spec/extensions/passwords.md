@@ -35,7 +35,7 @@ apps and browsers is where most of the work of this extension lies.
 One record per login or passkey, at `/.tsync-ext/passwords/<record id>`, the id drawn from the
 CSPRNG ([README §4.1](README.md#41-where-they-live)): a site may hold several of each, so no field
 names a record. Its plaintext is one JSON object, UTF-8, whose `kind` says which: `login`, below,
-or `passkey` (§7.1). Every rule of this section but the table holds for both.
+`note` (§2.1) or `passkey` (§7.1). Every rule of this section but the table holds for all three.
 
 ```json
 {"kind":"login","title":"GitHub","urls":["https://github.com"],"username":"me@example.com",
@@ -51,16 +51,42 @@ or `passkey` (§7.1). Every rule of this section but the table holds for both.
 | `password` | string | 1 to 1024 bytes |
 | `notes` | string | may be empty; at most 64 KiB |
 | `totp` | string | a TOTP record id (§6), or empty |
+| `fields` | array of objects | optional, absent read as `[]`: 0 to 32 custom fields (§2.2) |
 | `modified` | int | epoch seconds of the last change a user made |
 
-- Every key is required. A plaintext that breaks a rule is CORRUPT: reported by record id, never
+- Every key is required but `fields`. A plaintext that breaks a rule is CORRUPT: reported by record id, never
   offered, never folded away.
 - Readers ignore unknown members, and a rewrite keeps them.
 - A writer appends spaces to the JSON until its length is a multiple of 256 bytes. An envelope's
   length is its plaintext's ([vault §5](vault.md#5-record-envelope)); the padding keeps the store
   from reading a password's length from it.
+- A client that does not know a `kind` reports the record CORRUPT and leaves it as it is.
 - A previous password is not kept in the record. The domain's versions keep every previous body
   ([05 §4.8](../05-ops-config.md#48-deleted-files-and-retention)), readable with K.
+
+### 2.1 Notes
+
+A note is a record with no site: something to keep secret that is not a login (a door code, a
+recovery phrase, a licence key).
+
+```json
+{"kind":"note","title":"Wi-Fi","notes":"…","fields":[],"modified":1760500000}
+```
+
+`title` (1 to 256 bytes), `notes` (at most 64 KiB) and `modified` as a login's, and `fields`
+(§2.2). A note matches no request (§4.2): it is never offered to fill, and is read with `list`
+and `get`.
+
+### 2.2 Custom fields
+
+`fields` holds what a login or a note carries beyond its fixed keys: a PIN, a security answer,
+an account number.
+
+- Each is `{"name", "value", "secret"}`: `name` 1 to 64 bytes, `value` at most 4 KiB, `secret` a
+  bool. Names need not be unique; the order is the user's.
+- A `secret` field is masked wherever it is shown and is copied like a password; it is never
+  filled into a form by this version.
+- `get` answers the fields; `list` names neither fields nor their values.
 
 ## 3. Fold
 
@@ -94,22 +120,68 @@ A record matches a request when one of its `urls` matches it:
   (each scheme's default when absent), and whose host equals the request's host or, when the
   site's host contains a `.`, is a suffix of it at a label boundary (`example.com` matches
   `login.example.com`, not `badexample.com`). An `https` site does not match an `http` request.
-- An app request matches the `android://` site of its package, and nothing else. An app's
-  associated websites are not followed.
+- An app request matches the `android://` site of its package, and the `https` sites the app is
+  verified for (§4.3).
 
 The suffix rule has no public-suffix list: a site written as `co.uk` matches every host under
 it. The user wrote it.
 
+### 4.3 An app's websites
+
+An app and its website usually share one login. An Android app is verified for an `https` site
+when the site's Digital Asset Links statements (`https://<host>/.well-known/assetlinks.json`)
+grant `delegate_permission/common.get_login_creds` to the app's package with the SHA-256 of a
+certificate the app is signed with, as the platform reports it.
+
+- **Which sites are checked:** only the `https` sites of the domain's logins whose host, its
+  labels reversed, is a prefix of the package name's labels (`github.com` for
+  `com.github.android`, `amazon.com` for `com.amazon.mShop.android.shopping`). The owner never
+  fetches statements for every saved site.
+- **Fetching:** the owner fetches each over `https`, following no redirect to another host, at
+  most 256 KiB, within 5 s. A verdict, granted or not, is kept per host and package for
+  24 hours; a fetch that fails keeps nothing and is tried again at the next
+  request. A request answers from what is kept and fetches what is missing behind it, so a newly
+  verified site is offered from the next request on.
+- **The certificate** comes from the host's platform, never from the app: on Android the autofill
+  service reads it from the package manager for the package the framework names.
+- **A login the user links.** Picking, for an app, a login no rule matches (the host's own
+  search) asks once whether to use it for that app; yes adds the app's `android://` site to the
+  login's `urls`. The user's choice needs no statement.
+
 ## 5. Generating a password
 
-`add` and `edit` take `generate` instead of `password`:
+`add` and `edit` take `generate` instead of `password`, either of:
 
-- `length`: 8 to 128, default 20.
-- `symbols`: bool, default true.
+- **Characters:** `length` 8 to 128, default 20, and `symbols`, bool, default true. Each character
+  is drawn uniformly from the CSPRNG ([01 §2.10](../01-core.md#210-random-identifiers)) by
+  rejection sampling, from `A`–`Z`, `a`–`z`, `0`–`9` and, with `symbols`, from `!#%+-.=?@_~`.
+- **Words:** `words` 4 to 12, as [vault §2.3](vault.md#23-generated-passphrases) draws them: a
+  password the user can read out and type.
 
-Each character is drawn uniformly from the CSPRNG ([01 §2.10](../01-core.md#210-random-identifiers))
-by rejection sampling, from `A`–`Z`, `a`–`z`, `0`–`9` and, with `symbols`, from
-`!#%+-.=?@_~`. A site with other rules is served by `edit` with a password the user types.
+A site with other rules is served by `edit` with a password the user types.
+`passwords_generate` (`generate` as above) answers a password without saving it, for a CLI that
+prints one (`tsync passwords generate`).
+
+### 5.1 Suggesting a password
+
+On a form that creates an account or changes a password, a host or the browser extension offers
+*Use a strong password*. The pick fills a generated password, and the login is saved at once.
+
+- **A new-password field** is one the page marks so (`autocomplete="new-password"`, Android's
+  `AUTOFILL_HINT_NEW_PASSWORD`), or the second of two password fields in one form, or one whose
+  name, id or label reads as a new or confirmed password. Its confirmation field, when the form
+  has one, is filled with the same password.
+- **On the pick** the host asks `passwords_suggest` with the site and the username the form holds,
+  possibly empty: the owner draws a password (characters, the defaults of §5), adds a login for
+  the site with it, and answers the password and the record's id. The pick is the approval; no
+  save sheet follows. Saving before the form is submitted means an account created with that
+  password never has a password nobody kept.
+- **On the form's submit** the host sends `passwords_save` with `suggested` naming that id, and
+  no password: the owner sets the record's username to the one submitted, when the record is a
+  login for that site that has not been edited since, and adds nothing. A form abandoned leaves the login, which the user removes.
+- The suggestion is offered only on a gesture, as a fill is, and only for a site (an app's
+  `android://` site included); a locked vault refuses it `locked`.
+
 
 ## 6. One-time passwords
 
@@ -238,6 +310,7 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 | `fill` | the host's autofill asks for the logins matching a site or app (§4.2) and fills the one the user picks | the user finds the login with `list` and copies its password from `get` |
 | `fill` with codes | the host's autofill also asks for a site's one-time code, and fills the current code of the login the user picks (§6) | the user reads the code from `get` |
 | `save` | the host's autofill hands over a username and password the user just typed, and the user approves saving them | the user runs `add` |
+| `suggest` | the host's autofill offers a generated password on a new-password field, fills it and saves the login (§5.1) | the user runs `add --generate` and pastes the password |
 | `passkey` | the host's credential API asks to create a passkey or to sign with one, and the user approves the creation or picks the passkey (§7) | none: a passkey is used only through a host or a browser extension |
 
 - Each is `confirm` or `authenticate` on every host: the user picks the login, or approves the
@@ -303,7 +376,8 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
   loads, so a page cannot collect logins by drawing forms the user never touches.
 - It sends the origin of the frame holding the form, not the top-level page's. A login is filled
   into a cross-origin frame only when it matches that frame's origin.
-- It asks the user before every `save`.
+- It asks the user before every `save`, but for the username a suggested password's submit sets
+  (§5.1): the pick of the suggestion was the approval.
 - It never stores a password, a code or a match result beyond the fill that asked for it.
 
 ## 10. Commands
@@ -313,10 +387,11 @@ Every verb is of access class **owner**
 
 | verb / action | request | does |
 |---|---|---|
-| `add` / `passwords_add` | `title`, `urls?`, `username?`, `password` or `generate`, `notes?`, `otpauth` or `totp`? | adds a record; replies with its id. The CLI asks for the password without echo unless `--generate` |
+| `add` / `passwords_add` | `kind?` (`login`, else `note`), `title`, `urls?`, `username?`, `password` or `generate`, `notes?`, `fields?`, `otpauth` or `totp`? | adds a record; replies with its id. The CLI asks for the password without echo unless `--generate`; `--note` adds a note (§2.1), with no site or password; `--field NAME=VALUE` adds a field, and `--secret-field NAME` one whose value it asks without echo |
 | `list` / `passwords_list` | `filter?`, `site?` | every login whose title, username or urls contain `filter` (case-insensitive), or that matches `site` (§4.2): id, title, username, urls, whether a code is linked or its link dangles, and the ids of its passkeys; then every passkey whose RP ID or user name contains `filter`, or whose RP ID is `site`'s host or a suffix of it: id, RP ID, user name, `credentialId` and `userHandle` (base64url, public as a relying party holds them), and its login; ordered by title (a passkey's: its RP ID), then username, then id |
-| `get` / `passwords_get` | `id` | the record's password and notes, and the linked TOTP record's current code and seconds left. The CLI prints the password alone, newline-terminated, for a pipe to a clipboard tool |
-| `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `otpauth` or `totp` | replaces those fields and sets `modified` |
+| `get` / `passwords_get` | `id` | the record's password, notes and fields, and the linked TOTP record's current code and seconds left. The CLI prints the password alone, newline-terminated, for a pipe to a clipboard tool |
+| `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `fields`, `otpauth` or `totp` | replaces those fields and sets `modified`; `fields` replaces the whole list |
+| `generate` / `passwords_generate` | `generate` | prints a password (§5) and saves nothing; `--words N` for words |
 | `remove` / `passwords_remove` | `id` | removes the record, a login or a passkey; removing a login leaves its passkeys, whose link then dangles |
 | `import` (CLI only) | a CSV file | §10.1 |
 | `export` (CLI only) | the passphrase, asked as `tsync totp export` asks it | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per login, its first site in `url`; passkeys are not exported (§1.1), and their count is said on stderr |
@@ -358,6 +433,19 @@ password manager, and adds one record per row.
 The file is plaintext. tsync neither copies nor removes it.
 
 ## 11. Conformance
+
+- A note is listed by its title, answers its notes and fields to `get`, and is offered for no site.
+  A login with a `secret` field answers it to `get` and names no field in `list`; a client that
+  does not know `kind: "note"` reports it CORRUPT and leaves it unchanged.
+- `--words 6` answers six words of the list joined by `-`; `--length 8` without symbols answers
+  eight letters and digits.
+- A suggestion on a sign-up form fills the password and its confirmation, and `list` shows the new
+  login before the form is submitted; the submit sets its username and adds no second login.
+- An app `com.example.app` signed with certificate C, and a login for `https://example.com` whose
+  `assetlinks.json` grants C: the first request offers only the app's own logins and fetches the
+  statement; the next offers the site's login too. A statement granting another certificate, a
+  redirect to another host, or a login for `https://other.com` is never offered. Linking a login
+  to the app by hand adds `android://com.example.app` to its sites.
 
 - The store holds no title, username, site or password in plaintext after `add`. Two records
   whose plaintexts differ in length by less than 256 bytes before padding may have envelopes of
@@ -402,3 +490,15 @@ The file is plaintext. tsync neither copies nor removes it.
 - No reply holds a private key; the store holds no RP ID, user name or key in plaintext.
 - Two machines' passkeys for one RP ID stay two records; a rename of one passkey's user name on
   two machines leaves one record.
+
+## 12. Later
+
+- **More hosts and clients**: an iOS host; a git credential helper (`git-credential-tsync`) and an
+  SSH agent holding keys in the vault.
+- **Imports** of Bitwarden's JSON, KeePass `.kdbx` and 1Password's `.1pux`, which carry seeds and
+  notes a CSV drops.
+- **Password health**: reused and short passwords listed locally, and an opt-in breach check
+  (Have I Been Pwned's range API).
+- **History**: earlier passwords of a login, read from the domain's versions.
+- **Filling custom fields** (§2.2), and records for cards and identities.
+- **Re-authentication on read** (§1.1).
