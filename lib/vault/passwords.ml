@@ -219,6 +219,83 @@ let render = function
 let site_of_string s = Result.map render (parse s)
 let is_site s = site_of_string s = Ok s
 
+(* §7.3: the list's U-labels in the A-label form hosts arrive in; a label that is no
+   host label ([*], [!name]) is kept as written. *)
+let rule_label label = match a_label label with Ok a -> a | Error _ -> label
+
+type rules = {
+  normal : (string, unit) Hashtbl.t;
+  wildcard : (string, unit) Hashtbl.t;  (** keyed by the part after [*.] *)
+  exception_ : (string, unit) Hashtbl.t;  (** keyed by the part after [!] *)
+}
+
+let rules =
+  lazy
+    (let rules =
+       {
+         normal = Hashtbl.create 16384;
+         wildcard = Hashtbl.create 64;
+         exception_ = Hashtbl.create 16;
+       }
+     in
+     List.iter
+       (fun line ->
+         match String.split_on_char ' ' (String.trim line) with
+           | rule :: _
+             when rule <> "" && not (String.starts_with ~prefix:"//" rule) ->
+               let rule =
+                 String.concat "."
+                   (List.map rule_label (String.split_on_char '.' rule))
+               in
+               let after prefix =
+                 let p = String.length prefix in
+                 String.sub rule p (String.length rule - p)
+               in
+               if String.starts_with ~prefix:"!" rule then
+                 Hashtbl.replace rules.exception_ (after "!") ()
+               else if String.starts_with ~prefix:"*." rule then
+                 Hashtbl.replace rules.wildcard (after "*.") ()
+               else Hashtbl.replace rules.normal rule ()
+           | _ -> ())
+       (String.split_on_char '\n' Psl_data.text);
+     rules)
+
+(* [d] and each suffix of it at a label boundary, longest first. *)
+let rec suffixes d =
+  match String.index_opt d '.' with
+    | None -> [d]
+    | Some i -> d :: suffixes (String.sub d (i + 1) (String.length d - i - 1))
+
+(* The PSL algorithm: a matching exception rule prevails and makes the public
+   suffix shorter than [d]; otherwise [d] is a public suffix when a rule names
+   it exactly, a wildcard rule names its parent, or it is a single label (the
+   implicit [*]). *)
+let is_public_suffix d =
+  let d = String.lowercase_ascii d in
+  let rules = Lazy.force rules in
+  let parent =
+    match suffixes d with _ :: parent :: _ -> Some parent | _ -> None
+  in
+  (not (List.exists (Hashtbl.mem rules.exception_) (suffixes d)))
+  && (Hashtbl.mem rules.normal d
+     || Option.fold ~none:true ~some:(Hashtbl.mem rules.wildcard) parent)
+
+(* The shortest suffix of [host] that is not a public suffix. *)
+let registrable host =
+  List.fold_left
+    (fun found d -> if is_public_suffix d then found else Some d)
+    None (suffixes host)
+
+(* An IP address has no registrable domain, though the PSL walk would name its
+   last two numbers. *)
+let domain host =
+  let last = List.hd (List.rev (String.split_on_char '.' host)) in
+  if
+    String.contains host ':'
+    || String.for_all (fun c -> c >= '0' && c <= '9') last
+  then None
+  else registrable host
+
 (* §4.2 *)
 let matches ~site ~origin =
   match (parse site, parse origin) with
@@ -226,8 +303,10 @@ let matches ~site ~origin =
         s.port = o.port
         && (not (s.scheme = "https" && o.scheme = "http"))
         && (s.host = o.host
-           || String.contains s.host '.'
-              && String.ends_with ~suffix:("." ^ s.host) o.host)
+           ||
+             match domain s.host with
+             | Some d -> domain o.host = Some d
+             | None -> false)
     | Ok (Android a), Ok (Android b) -> a = b
     | _ -> false
 

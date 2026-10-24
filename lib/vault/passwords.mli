@@ -16,7 +16,17 @@ val a_label : string -> (string, string) result
 (** A site's host, or an [android://] site's package. *)
 val host_of : site -> string
 
-(** §4.2: whether a record's site matches a request's origin or app site. *)
+(** [d] and each suffix of it at a label boundary, longest first. *)
+val suffixes : string -> string list
+
+(** Whether a host or suffix is a public suffix, by the bundled list (§7.3). *)
+val is_public_suffix : string -> bool
+
+(** The shortest suffix of a host that is not a public suffix. *)
+val registrable : string -> string option
+
+(** §4.2: whether a record's site matches a request's origin or app site: the
+    same host, or for a domain name the same registrable domain. *)
 val matches : site:site -> origin:string -> bool
 
 (** §2.2: a field beyond a record's fixed keys; a [secret] one is masked where

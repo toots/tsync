@@ -152,68 +152,6 @@ let sign ~private_key ~authenticator_data ~client_data_hash =
   let body = der_integer r ^ der_integer s in
   Printf.sprintf "\x30%c%s" (Char.chr (String.length body)) body
 
-(* The list's U-labels in the A-label form RP IDs arrive in; a label that is no
-   host label ([*], [!name]) is kept as written. *)
-let a_label label =
-  match Passwords.a_label label with Ok a -> a | Error _ -> label
-
-type rules = {
-  normal : (string, unit) Hashtbl.t;
-  wildcard : (string, unit) Hashtbl.t;  (** keyed by the part after [*.] *)
-  exception_ : (string, unit) Hashtbl.t;  (** keyed by the part after [!] *)
-}
-
-let rules =
-  lazy
-    (let rules =
-       {
-         normal = Hashtbl.create 16384;
-         wildcard = Hashtbl.create 64;
-         exception_ = Hashtbl.create 16;
-       }
-     in
-     List.iter
-       (fun line ->
-         match String.split_on_char ' ' (String.trim line) with
-           | rule :: _
-             when rule <> "" && not (String.starts_with ~prefix:"//" rule) ->
-               let rule =
-                 String.concat "."
-                   (List.map a_label (String.split_on_char '.' rule))
-               in
-               let after prefix =
-                 let p = String.length prefix in
-                 String.sub rule p (String.length rule - p)
-               in
-               if String.starts_with ~prefix:"!" rule then
-                 Hashtbl.replace rules.exception_ (after "!") ()
-               else if String.starts_with ~prefix:"*." rule then
-                 Hashtbl.replace rules.wildcard (after "*.") ()
-               else Hashtbl.replace rules.normal rule ()
-           | _ -> ())
-       (String.split_on_char '\n' Psl_data.text);
-     rules)
-
-(* [d] and each suffix of it at a label boundary, longest first. *)
-let rec suffixes d =
-  match String.index_opt d '.' with
-    | None -> [d]
-    | Some i -> d :: suffixes (String.sub d (i + 1) (String.length d - i - 1))
-
-(* The PSL algorithm: a matching exception rule prevails and makes the public
-   suffix shorter than [d]; otherwise [d] is a public suffix when a rule names
-   it exactly, a wildcard rule names its parent, or it is a single label (the
-   implicit [*]). *)
-let is_public_suffix d =
-  let d = String.lowercase_ascii d in
-  let rules = Lazy.force rules in
-  let parent =
-    match suffixes d with _ :: parent :: _ -> Some parent | _ -> None
-  in
-  (not (List.exists (Hashtbl.mem rules.exception_) (suffixes d)))
-  && (Hashtbl.mem rules.normal d
-     || Option.fold ~none:true ~some:(Hashtbl.mem rules.wildcard) parent)
-
 let valid_label label =
   label <> ""
   && String.for_all
@@ -261,23 +199,18 @@ let origin_host origin =
 
 let rp_id_allowed ~origin ~rp_id =
   let* host = origin_host origin in
-  if not (List.mem rp_id (suffixes host)) then
+  if not (List.mem rp_id (Passwords.suffixes host)) then
     Error "the RP ID is neither the origin's host nor a suffix of it"
     (* The implicit [*] rule makes [localhost] a public suffix. *)
   else if rp_id = "localhost" then Ok ()
-  else if is_public_suffix rp_id then Error "the RP ID is a public suffix"
+  else if Passwords.is_public_suffix rp_id then
+    Error "the RP ID is a public suffix"
   else Ok ()
-
-(* The shortest suffix of [host] that is not a public suffix. *)
-let registrable host =
-  List.fold_left
-    (fun found d -> if is_public_suffix d then found else Some d)
-    None (suffixes host)
 
 let related_host rp_id =
   let rp_id = String.lowercase_ascii rp_id in
   List.for_all valid_label (String.split_on_char '.' rp_id)
-  && registrable rp_id <> None
+  && Passwords.registrable rp_id <> None
 
 let max_labels = 5
 
@@ -305,7 +238,7 @@ let related_allows ~origin body =
     match origin_host (trim_slash item) with
       | Error _ -> None
       | Ok host -> (
-          match registrable host with
+          match Passwords.registrable host with
             | Some d -> Some (List.hd (String.split_on_char '.' d))
             | None -> None)
   in

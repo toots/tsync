@@ -320,11 +320,21 @@ let list ~domain ~engine ~lazy_tree t args =
               ("title", `String title);
             ])
   in
+  (* §4.2: the request's own host first. *)
+  let on_host (l : Passwords.login) =
+    match site with
+      | Some origin ->
+          let host = rp_of_site origin in
+          List.exists (fun u -> Passwords.host_of u = host) l.urls
+      | None -> false
+  in
   let login_rows =
     logins ok
     |> List.filter (fun (_, l) -> shown_login l)
     |> List.sort (fun (a, (x : Passwords.login)) (b, (y : Passwords.login)) ->
-        compare (x.title, x.username, a) (y.title, y.username, b))
+        compare
+          (not (on_host x), x.title, x.username, a)
+          (not (on_host y), y.title, y.username, b))
     |> List.map (fun (id, (l : Passwords.login)) ->
         `Assoc
           [

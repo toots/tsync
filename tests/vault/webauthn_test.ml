@@ -175,7 +175,7 @@ let rp_ids () =
     ];
   p "\n== public suffixes\n";
   List.iter
-    (fun d -> p "%-20s %b\n" d (Webauthn.is_public_suffix d))
+    (fun d -> p "%-20s %b\n" d (Passwords.is_public_suffix d))
     [
       "com";
       "example.com";
