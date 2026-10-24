@@ -218,6 +218,26 @@ let served video root =
        (C.store.get_opt (Option.get (Key.share_preview token))));
   Server.close server
 
+(* vault §8.1: a vault's icon from any image, as the CLI makes it. *)
+let icon label source =
+  let module A = Tsync_vault.Appearance in
+  let convert = Option.get (Atomic.get Icon_image.converter) in
+  let png =
+    convert ~max_side:A.icon_max_side ~max_bytes:A.icon_max_bytes
+      ~deadline:(Rt.now () +. 30.)
+      source
+  in
+  let be32 i =
+    (Char.code png.[i] lsl 24)
+    lor (Char.code png.[i + 1] lsl 16)
+    lor (Char.code png.[i + 2] lsl 8)
+    lor Char.code png.[i + 3]
+  in
+  Printf.printf "%-40s %dx%d, within 64 KiB %b, stored as given %b\n%!"
+    ("icon from " ^ label) (be32 16) (be32 20)
+    (String.length png <= A.icon_max_bytes)
+    (Result.is_ok (A.check_icon png))
+
 let () =
   Rt.run_sync @@ fun () ->
   Printf.printf "available: %b\n" (Share_preview.available ());
@@ -237,6 +257,8 @@ let () =
   show "wide video filmed sideways" sideways `Video;
   show "wide video cropped to 800x1080" narrowed `Video;
   show "missing" (Filename.concat dir "missing.mkv") `Video;
+  icon "the 800x420 card" (Sys.getenv "CARD");
+  icon "a tall video's first frame" tall;
   fade_in dir;
   served wide (Filename.concat dir "store");
   Sys.remove wide;

@@ -33,6 +33,8 @@ let () =
               settle = 420.;
               entry_commands = 64;
               projector = Some "0123456789abcdef0123456789abcdef";
+              extensions = ["totp"];
+              vault_lock = Tsync_core.Vault_lock.none;
             };
           store;
           share = None;
@@ -117,6 +119,9 @@ let () =
               ^ Option.fold ~none:", no projector"
                   ~some:(fun p -> ", projector " ^ p)
                   s.projector
+              ^ ", extensions ["
+              ^ String.concat "," s.extensions
+              ^ "]"
           | None -> "none");
       let body = Bigstring.of_string in
       ignore (s.put_if_absent (Key.takeover d 1 ~generation:1) (body "x"));

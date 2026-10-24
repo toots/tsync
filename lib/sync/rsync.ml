@@ -9,6 +9,10 @@ module Make (C : Engine_ctx.S) = struct
   let rsync ?(narrate = Narrate.none) ?(cancelled = Fun.const false)
       ?(move = false) ?(dry_run = false) ~(src : Rsync_plan.endpoint)
       ~(dst : Rsync_plan.endpoint) () : Rsync_plan.report =
+    List.iter
+      (fun (e : Rsync_plan.endpoint) ->
+        if e.side = Domain then Names.check_unreserved ~op:"rsync" e.path)
+      [src; dst];
     let run = Bulk.run () in
     ignore (run_cycle ~push_now:false ());
     let in_domain rel =
@@ -107,6 +111,12 @@ module Make (C : Engine_ctx.S) = struct
               | `File m -> Key_at m
               | `Missing -> Absent Domain)
     in
+    (* 01 §2.3: a local source would create the reserved root folder. *)
+    if dst.side = Domain then
+      List.iter
+        (fun (rel, _) ->
+          Names.check_unreserved ~op:"rsync" (domain_path dst.path rel))
+        entries;
     let total = List.length entries in
     let under dirs rel =
       List.exists (fun dir -> Names.is_under ~dir rel) dirs

@@ -5,6 +5,8 @@ tall video, scaled up: 450x800, within 307200 bytes: true
 wide video filmed sideways: 450x800, within 307200 bytes: true
 wide video cropped to 800x1080: 592x800, within 307200 bytes: true
 missing: none
+icon from the 800x420 card               256x256, within 64 KiB true, stored as given true
+icon from a tall video's first frame     256x256, within 64 KiB true, stored as given true
 fade-in video: picked a lit frame: true
 video: image/jpeg, 800x450, made so far 1
 video again: image/jpeg, 800x450, made so far 1

@@ -120,3 +120,102 @@
  (alias runtest)
  (action
   (diff supervisor_test.expected supervisor_test.output)))
+
+(executable
+ (name reserved_test)
+ (modules reserved_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  reserved_test.output
+  (run ./reserved_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff reserved_test.expected reserved_test.output)))
+
+(executable
+ (name vault_test)
+ (modules vault_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_vault
+  unix
+  base64
+  yojson))
+
+(rule
+ (with-stdout-to
+  vault_test.output
+  (run ./vault_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff vault_test.expected vault_test.output)))
+
+(executable
+ (name autolock_test)
+ (modules autolock_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  autolock_test.output
+  (run ./autolock_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff autolock_test.expected autolock_test.output)))
+
+(rule
+ (alias runtest-serial)
+ (action
+  (diff autolock_test.expected autolock_test.output)))
+
+(executable
+ (name rekey_test)
+ (modules rekey_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  rekey_test.output
+  (run ./rekey_test.exe %{dep:../../bin/tsync.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rekey_test.expected rekey_test.output)))

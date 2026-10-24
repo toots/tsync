@@ -19,6 +19,7 @@ The idea is the one behind iCloud Drive or Dropbox Smart Sync, pointed at your o
 - **Only what you open takes space.** The whole tree is listed; content is cached as it is read, and the cache can be capped.
 - **Several machines share it.** Each one publishes its changes and picks up the others'. Work done in two places at once ends as two files, never as a lost one.
 - **History is kept.** With versioning on, every change, rename and delete of a file leaves the previous version behind, and a deleted file can be put back.
+- **It can keep secrets too.** A domain's [vault](docs/vault.md) holds secrets encrypted under your passphrase, synced to your machines like the files.
 
 ## Two ways to set it up
 
@@ -89,6 +90,7 @@ A config is a list of domains. A domain is one folder: a name, where its data li
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": ["fuse"],
       "backends": [
         { "type": "s3", "name": "cloud", "role": "main", "bucket": "my-bucket",
@@ -121,6 +123,7 @@ On the machine that has the storage, add an `http-proxy` frontend to the domain:
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": [
         { "type": "http-proxy", "port": 8443, "secret": "<at least 32 characters>",
           "ssl_certificate": "/etc/letsencrypt/live/nas.example/fullchain.pem",
@@ -143,6 +146,7 @@ On every other machine, the backend is that server:
       "name": "photos",
       "versioning": true,
       "symlinks": "keep",
+      "extensions": [],
       "frontends": ["fuse"],
       "backends": [
         { "type": "http-proxy", "name": "nas", "role": "main",
@@ -177,7 +181,7 @@ A path can name its domain, the same way in every command: `media:photos/2024`. 
 
 - **Conflicts make copies.** When two machines want one name, the change published second is kept as `report (conflicted copy from laptop).pdf`, next to the first. Nothing is merged and nothing is dropped.
 - **Nothing is fetched ahead of time.** A file downloads when it is first read. Run `tsync cache --fetch` on what you need before you lose the network.
-- **tsync does not encrypt what it stores.** Use the bucket's or the disk's own encryption at rest. Transport is HTTPS.
+- **tsync does not encrypt your files.** Use the bucket's or the disk's own encryption at rest. Transport is HTTPS. Only the [vault](docs/vault.md)'s records are encrypted by tsync.
 - **Destructive commands ask twice.** `tsync gc` and `tsync expire` only report what they would do until you add `--apply`.
 - **The config is checked strictly.** A misspelled key is an error naming its place in the file, not a setting silently left at its default.
 
@@ -208,3 +212,5 @@ Signing, notarizing and releasing: [macos/RELEASING.md](macos/RELEASING.md).
 ## License
 
 GNU General Public License v3.0. See [LICENSE](LICENSE).
+
+Generated passphrases draw from the [EFF large word list](https://www.eff.org/dice) by the Electronic Frontier Foundation, under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/), less its four hyphenated words (`lib/vault/eff_large_wordlist.txt`).

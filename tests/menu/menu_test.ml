@@ -175,6 +175,17 @@ let () =
          ("music", silent);
        ]);
 
+  case "a machine joined one vault, while an upload runs";
+  show
+    (menu
+       [
+         ( "docs",
+           {|{"ok":true,"pendingUploads":1,"uploading":[{"name":"a.txt","rel":"a.txt"}],
+              "newMachines":["laptop",3,"booky"]}|}
+         );
+         ("music", idle);
+       ]);
+
   case "two reachable domains, one paused";
   show (menu [("photos", {|{"ok":true,"paused":true}|}); ("music", idle)]);
 
@@ -293,7 +304,7 @@ let () =
                  "process":{"cpuPercentAvg":1.0,"rssBytes":775788953,"heapBytes":88394957},
                  "traffic":{"upBytes":0,"upRate":0,"downBytes":12455405158,"downRate":1572864}},
          "domains":[{"name":"Media",
-           "settings":{"readOnly":true,"versioning":true},
+           "settings":{"readOnly":true,"versioning":true,"extensions":["totp"]},
            "cache":{"chunks":1216,"bytes":10737418240,"maxCache":10737418240,"pinnedBytes":2147483648},
            "queues":{"pendingFiles":0,"bytesOwed":0,"parked":1},
            "sync":{"position":402,"pending":3,"treeHead":402},

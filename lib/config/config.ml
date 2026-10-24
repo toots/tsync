@@ -28,6 +28,7 @@ type domain = {
   name : Domain_name.t;
   backends : backend list;
   frontends : frontend list;
+  extensions : string list option;
   symlinks : [ `Keep | `Follow | `Skip ] option;
   versioning : bool;
   read_only : bool;
@@ -40,6 +41,7 @@ type domain = {
   project_lease : float option;
   project_quarantine : float option;
   project_settle : float option;
+  vault_lock : Vault_lock.t option;
 }
 
 let default_symlinks = `Keep
@@ -318,6 +320,23 @@ let parse_frontend path j =
   let options = fields_of path specs l in
   { ftype; options }
 
+(* extensions README §2: no extension has options yet. *)
+let extension_names = ["totp"; "passwords"]
+
+let parse_extension path j =
+  let name, l =
+    match j with
+      | `String t -> (t, [])
+      | `Assoc l ->
+          (required (sub path "type") "string" (string_field path l "type"), l)
+      | _ -> fail path "expected an extension name or object"
+  in
+  if not (List.mem name extension_names) then
+    fail path "extension %S is unknown (known: %s)" name
+      (String.concat ", " extension_names);
+  check_keys path ["type"] l;
+  name
+
 let parse_link path j =
   let l = assoc path j in
   check_keys path
@@ -366,6 +385,7 @@ let parse_domain path j =
       "name";
       "backends";
       "frontends";
+      "extensions";
       "symlinks";
       "versioning";
       "readOnly";
@@ -378,6 +398,7 @@ let parse_domain path j =
       "projectLease";
       "projectQuarantine";
       "projectSettle";
+      "vaultLock";
     ]
     l;
   let raw_name =
@@ -409,6 +430,26 @@ let parse_domain path j =
       | Some _ -> fail (sub path "frontends") "expected a non-empty array"
       | None -> fail (sub path "frontends") "required array is missing"
   in
+  (* 05 §2.1 rule 5: absent follows the main's stated list; [[]] is none. *)
+  let extensions =
+    match get l "extensions" with
+      | Some (`List es) ->
+          Some
+            (List.mapi
+               (fun i e ->
+                 parse_extension (Printf.sprintf "%s.extensions[%d]" path i) e)
+               es)
+      | Some _ -> fail (sub path "extensions") "expected an array"
+      | None -> None
+  in
+  Option.iter
+    (fun listed ->
+      List.iter
+        (fun e ->
+          if List.length (List.filter (( = ) e) listed) > 1 then
+            fail (sub path "extensions") "%s is listed twice" e)
+        listed)
+    extensions;
   let types = List.map (fun f -> f.ftype) frontends in
   List.iter
     (fun t ->
@@ -489,6 +530,14 @@ let parse_domain path j =
       ->
         fail (sub path "chunkSize") "must lie between 256 KiB and 256 MiB"
     | _ -> ());
+  let vault_lock =
+    Option.map
+      (fun j ->
+        match Vault_lock.of_json j with
+          | Ok v -> v
+          | Error e -> fail (sub path "vaultLock") "%s" e)
+      (get l "vaultLock")
+  in
   let d =
     {
       name;
@@ -500,6 +549,7 @@ let parse_domain path j =
               (Tsync_store.Composite.read_rank b.role))
           backends;
       frontends;
+      extensions;
       symlinks;
       versioning;
       read_only =
@@ -514,6 +564,7 @@ let parse_domain path j =
       project_lease;
       project_quarantine;
       project_settle;
+      vault_lock;
     }
   in
   (* 05 §2.1: behind a main that states its settings a timing left out is the
@@ -551,7 +602,22 @@ let stated (d : domain) : Tsync_store.Store.domain_settings =
     settle = t.project_settle;
     entry_commands = t.max_entry_commands;
     projector = None;
+    extensions = Option.value ~default:[] d.extensions;
+    vault_lock = Option.value ~default:Vault_lock.none d.vault_lock;
   }
+
+(* 05 §2.1 rule 5: the main's list, narrowed by a configured one; the
+   configured list behind a main that states nothing. Names this release does
+   not know are dropped. *)
+let extensions_in_force (d : domain)
+    (main : Tsync_store.Store.domain_settings option) =
+  match (d.extensions, main) with
+    | Some listed, Some stated ->
+        List.filter (fun e -> List.mem e stated.extensions) listed
+    | None, Some stated ->
+        List.filter (fun e -> List.mem e extension_names) stated.extensions
+    | Some listed, None -> listed
+    | None, None -> []
 
 (* 05 §2.1, domain-wide settings: the main's where it states them, and a
    configured value that differs from the main's refused. The chunk size is
@@ -570,6 +636,16 @@ let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
                   what (show c) (show stated)
             | _ -> ()
         in
+        (* rule 5: behind a main that states its list, a client only narrows it. *)
+        Option.iter
+          (fun listed ->
+            if not (List.for_all (fun e -> List.mem e m.extensions) listed) then
+              Fail.invalid
+                "%s is configured with extensions [%s] and its main states [%s]"
+                (Domain_name.to_string d.name)
+                (String.concat ", " listed)
+                (String.concat ", " m.extensions))
+          d.extensions;
         let seconds = Printf.sprintf "%g s" in
         differs "symlinks" d.symlinks m.symlinks (fun p ->
             fst (List.find (fun (_, q) -> q = p) Tsync_store.Store.policies));
@@ -596,6 +672,29 @@ let in_force (d : domain) (main : Tsync_store.Store.domain_settings option) =
           },
           m.symlinks )
 
+(* 05 §2.1 rule 7: never refused, the strictest of both. *)
+let vault_lock_in_force (d : domain)
+    (main : Tsync_store.Store.domain_settings option) =
+  Vault_lock.strictest
+    (Option.value ~default:Vault_lock.none d.vault_lock)
+    (match main with Some m -> m.vault_lock | None -> Vault_lock.none)
+
+(* vault §6.2: for each part of the policy in force, [config] when the domain's
+   own value is the one in force, else [main]. *)
+let vault_lock_sources (d : domain)
+    (main : Tsync_store.Store.domain_settings option) =
+  let own = Option.value ~default:Vault_lock.none d.vault_lock in
+  let p = vault_lock_in_force d main in
+  let source name in_force mine =
+    if in_force = None then []
+    else [(name, if mine = in_force then "config" else "main")]
+  in
+  source "idleMinutes" p.idle_minutes own.idle_minutes
+  @ (if p.on_screen_lock then
+       [("onScreenLock", if own.on_screen_lock then "config" else "main")]
+     else [])
+  @ source "maxHours" p.max_hours own.max_hours
+
 (* 05 §2.1: where each domain-wide setting in force comes from. *)
 let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
   let from configured =
@@ -608,6 +707,12 @@ let sources (d : domain) (main : Tsync_store.Store.domain_settings option) =
     ("projectQuarantine", from (d.project_quarantine <> None));
     ("projectSettle", from (d.project_settle <> None));
     ("maxEntryCommands", from (d.max_entry_commands <> None));
+    (* rule 5: the main's list, narrowed or not, wherever the main states one. *)
+    ("extensions", if main <> None then "main" else from (d.extensions <> None));
+    ( "vaultLock",
+      match main with
+        | Some m when not (Vault_lock.is_none m.vault_lock) -> "main"
+        | _ -> from (d.vault_lock <> None) );
   ]
 
 let hostname () = try Unix.gethostname () with _ -> "tsync"

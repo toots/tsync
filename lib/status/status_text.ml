@@ -69,6 +69,29 @@ let settings b (s : settings) =
       ]
   in
   if advanced <> [] then row b "  " "advanced" (String.concat ", " advanced);
+  (* 07 §5.5: the extensions in force, and where they come from. *)
+  row b "  " "extensions"
+    ((if s.extensions = [] then "none" else String.concat ", " s.extensions)
+    ^
+    if List.assoc_opt "extensions" s.domain_wide = Some "main" then
+      " (from the main)"
+    else "");
+  (* vault §6.2: the auto-lock in force, when there is one. *)
+  Option.iter
+    (fun (v : Tsync_core.Vault_lock.t) ->
+      row b "  " "vault lock"
+        (String.concat ", "
+           (List.filter_map Fun.id
+              [
+                Option.map (Printf.sprintf "%d min idle") v.idle_minutes;
+                (if v.on_screen_lock then Some "screen lock" else None);
+                Option.map (Printf.sprintf "%d h after unlock") v.max_hours;
+              ])
+        ^
+        if List.assoc_opt "vaultLock" s.domain_wide = Some "main" then
+          " (from the main)"
+        else ""))
+    s.vault_lock;
   (* publication §4.6: who projects the entries this machine commits. *)
   row b "  " "projection"
     (match s.projector with

@@ -49,7 +49,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "frontends":["android"],
+          "extensions":[],"frontends":["android"],
           "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
        root);
   p "open before the runtime is announced  %d" (open_before_start ());

@@ -54,11 +54,12 @@ The config is one JSON object (location: [07 §2.7](07-daemon-cli.md)). Validati
 every tool that reads or writes a config (the daemon, every command, the Android app, the wizard):
 
 - **Unknown keys are refused at every level**: top level, each domain, `uplink`, each `links`
-  entry, each backend object, and each frontend object. The known set of a backend object is the
-  common keys plus its driver's declared fields; of a frontend object, `type` plus its frontend's
-  option spec ([08 §2.1](08-frontends.md)).
-- **Known types are part of the schema**, whatever this build compiles: every backend type and every
-  frontend type of this release, with their fields and options, is known to the parser. An unknown
+  entry, each backend object, each frontend object and each extension object. The known set of a
+  backend object is the common keys plus its driver's declared fields; of a frontend object, `type`
+  plus its frontend's option spec ([08 §2.1](08-frontends.md)); of an extension object, `type` plus
+  its extension's option spec.
+- **Known types are part of the schema**, whatever this build compiles: every backend type, every
+  frontend type and every extension of this release, with their fields and options, is known to the parser. An unknown
   type is refused at parse. A known type this build does not include is refused when something tries
   to use it ("configured but not compiled into this binary").
 - **Every value has a declared type**, and a value of another JSON type is refused. `null` stands for
@@ -87,6 +88,8 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)) |
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
+| `extensions` | array | no: the main's (below), else `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
+| `vaultLock` | object | no | `{"idleMinutes"?, "onScreenLock"?, "maxHours"?}`, the vault's auto-lock ([vault §6.2](extensions/vault.md#62-auto-lock)); *domain-wide* by rule 7 (below); unset: the main's, else none |
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
@@ -118,15 +121,28 @@ it unasked. The config editor asks about it only in its advanced mode
    and is refused only for more.
 4. The values are learned in the background from owner start on, and asked again every `SWEEP`
    ([publication §7](algorithms/publication.md#7-parameters)): a change on the main reaches a
-   running client within that time, the projector it states included. Until then a local operation never waits on a
+   running client within that time, the projector it states included. **What a client learned is
+   kept** on its disk, per domain, and stands after a restart, offline included, until the main
+   answers again; a main that answers stating nothing removes it. A client that never learned
+   anything has nothing to keep. Until then a local operation never waits on a
    store: the chunk size and the symlink policy are the configured one, else the default, and what
    was written under them stays ([01 §3.5](01-core.md#35-chunk-size)). The timings are different: a
    client neither projects nor takes an entry over before it has learned them
    ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
-5. A main that states its values MAY state a projector with them
+5. **Extensions** are stated like the domain-wide settings, by rules 1, 2 and 4. The main decides
+   them, and a client may only narrow them: a domain that leaves `extensions` out uses the list
+   its main states, and one that lists `extensions` behind a main that states a list is refused
+   by rule 3 unless its list is a subset of the main's, naming both. A domain whose main states
+   nothing (a plain store) uses its own list, else none. Until the main's list is learned, kept
+   from an earlier run included (rule 4), a domain that leaves `extensions` out uses none.
+6. A main that states its values MAY state a projector with them
    ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
    client: a client names it in the entries it creates and leaves their projection to it
    ([publication §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
+7. **The vault's auto-lock** (`vaultLock`) is stated like the extensions, by rules 1, 2 and 4, and
+   never refused: the policy in force is the strictest of the domain's and the main's
+   ([vault §6.2](extensions/vault.md#62-auto-lock)), so a client may tighten its main's and
+   never loosen it.
 
 **Backend object**
 
@@ -178,6 +194,7 @@ Example:
     "name": "Files",
     "symlinks": "keep", "versioning": true, "chunkSize": "8M", "maxCache": "50G",
     "frontends": ["fuse", {"type": "http-proxy", "port": 8080, "secret": "…", "shares": true}],
+    "extensions": ["totp", "passwords"],
     "backends": [
       {"type": "s3", "name": "cloud", "role": "main", "bucket": "…", "accessKeyId": "…",
        "secretAccessKey": "…", "shareUrl": "https://…"},
@@ -770,7 +787,10 @@ Token, expiry, overwrite and revocation rules are
   included; a known but
   not compiled type refused at use, an unknown type at parse; wrong JSON types refused with the JSON
   path in the message; duplicate domain names and backend names (ignoring case) refused; a domain
-  name outside the grammar refused; two presenting frontends or a duplicate frontend refused; role
+  name outside the grammar refused; two presenting frontends or a duplicate frontend refused; a domain with
+  an unknown or duplicate extension, or with an unknown key in an extension object refused; a domain
+  without `extensions` uses the list its main states, one with `[]` none, one with a subset of the
+  main's list that subset, one with a list the main does not state refused naming both; role
   validation as §2.1; `link` default and refusal on `local`; `links` merged over `uplink` and an
   unused link refused; sizes parsed as §2.1; `maxChunkBuffers` follows `maxUploads`; zero means the
   default; a lone `readOnly` backend forces read-only; the wizard cannot write a config the parser

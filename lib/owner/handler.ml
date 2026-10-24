@@ -30,6 +30,7 @@ type t = {
   unnamed : int Atomic.t;  (** the last listing's or feed page's count *)
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
   pulls : Pulls.t option;  (** on a pulled tree *)
+  vault : Vault.t;
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -44,8 +45,10 @@ let no_traffic : Tsync_status.Status_report.traffic =
 (* android §4.2: a pulled tree's [changed] event names the folders concerned. *)
 let folders_changed ~domain ~(engine : (module Engine.S)) ~publish dirs =
   let (module E) = engine in
+  (* 01 §2.3: no notice names the reserved folder or anything in it. *)
   let ref_of dir =
     if dir = "" then Some "root"
+    else if Names.is_reserved dir then None
     else
       Option.map
         (fun id -> Names.ref_to_string (Names.dir_ref (Folder_id.to_string id)))
@@ -84,39 +87,50 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish ~stats ~stop
     ~dest_roots ~staging_roots () =
   let name = Domain_name.to_string domain.name in
-  {
-    pulls =
-      (if domain.lazy_tree then
-         Some
-           (Pulls.create ?params:pull_params ~engine ~silent:(silent domain)
-              ~changed:(folders_changed ~domain:name ~engine ~publish)
-              ~recovered:(fun () ->
-                ignore
-                  (publish
-                     (`Assoc
-                        [
-                          ("event", `String "recovered");
-                          ("domain", `String name);
-                          ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
-                        ])))
-              ())
-       else None);
-    subscribers;
-    traffic;
-    unnamed = Atomic.make 0;
-    owed = Atomic.make None;
-    domain;
-    engine;
-    hooks;
-    background;
-    publish;
-    stats;
-    stop;
-    dest_roots;
-    staging_roots;
-    answered_unreachable = Atomic.make false;
-    running = Atomic.make None;
-  }
+  let pulls =
+    if domain.lazy_tree then
+      Some
+        (Pulls.create ?params:pull_params ~engine ~silent:(silent domain)
+           ~changed:(folders_changed ~domain:name ~engine ~publish)
+           ~recovered:(fun () ->
+             ignore
+               (publish
+                  (`Assoc
+                     [
+                       ("event", `String "recovered");
+                       ("domain", `String name);
+                       ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
+                     ])))
+           ())
+    else None
+  in
+  let t =
+    {
+      pulls;
+      subscribers;
+      traffic;
+      unnamed = Atomic.make 0;
+      owed = Atomic.make None;
+      domain;
+      engine;
+      hooks;
+      background;
+      publish;
+      stats;
+      stop;
+      dest_roots;
+      staging_roots;
+      answered_unreachable = Atomic.make false;
+      running = Atomic.make None;
+      vault = Vault.create ?pulls ();
+    }
+  in
+  (* vault §6.3: the domain's status reports new machines from the start, the
+     keystore's K included. *)
+  Rt.spawn ~name:"vault machines" (fun () ->
+      try ignore (Vault.announce ~domain ~engine t.vault)
+      with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason);
+  t
 
 let domain_name t = Domain_name.to_string t.domain.name
 
@@ -125,7 +139,13 @@ let notify_folders t dirs =
     folders_changed ~domain:(domain_name t) ~engine:t.engine ~publish:t.publish
       dirs
 
-let keys_changed t keys = notify_folders t (List.map Names.parent_of keys)
+(* vault §6.3: an entry arriving in the machine list is announced at once. *)
+let keys_changed t keys =
+  notify_folders t (List.map Names.parent_of keys);
+  if List.exists (fun k -> Names.parent_of k = Vault.machines_folder) keys then
+    Rt.spawn ~name:"vault machines" (fun () ->
+        try ignore (Vault.announce ~domain:t.domain ~engine:t.engine t.vault)
+        with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
 
 let event t name fields =
   `Assoc
@@ -219,10 +239,17 @@ let row_or_unnamed t path =
     | None ->
         Fail.raise_ Fail.Unprepared "%s cannot be named on this client" path
 
+(* 01 §2.3: no reference names the reserved root folder or anything in it. *)
+let unreserved path =
+  Names.check_unreserved path;
+  path
+
 (* 08 §2.2: resolution mints nothing, and an f: reference never answers for a
    folder. *)
 let resolve_ref (module E : Engine.S) s =
-  match Names.parse_ref s with
+  unreserved
+  @@
+    match Names.parse_ref s with
     | Error () -> invalid "malformed item reference %S" s
     | Ok Root -> ""
     | Ok (Dir id) -> (
@@ -244,6 +271,7 @@ let resolve_rel (module E : Engine.S) rel =
   let parts = String.split_on_char '/' rel in
   if rel <> "" && List.exists (fun c -> c = "" || c = "." || c = "..") parts
   then invalid "malformed relative path %S" rel;
+  Names.check_unreserved rel;
   if E.kind rel = `Absent then Fail.absent "%s: not found" rel;
   rel
 
@@ -253,7 +281,7 @@ let destination t (d : Protocol.destination) =
   let parent = resolve_ref t.engine d.parent_ref in
   if E.kind parent <> `Dir then invalid "parentRef does not name a folder";
   if not (Names.valid_leaf d.name) then invalid "invalid name %S" d.name;
-  Names.join parent d.name
+  unreserved (Names.join parent d.name)
 
 let target t : Protocol.target -> string = function
   | Ref r -> resolve_ref t.engine r
@@ -497,7 +525,10 @@ let changes t ~anchor ~limit : Protocol.changes =
   match E.changes_since anchor ~limit with
     | `Stale -> Stale
     | `Page (cursor, more, ops) ->
-        let rendered = List.map (feed_op t) ops in
+        let shown (o : Applied.op) =
+          not (List.exists Names.is_reserved (Op.paths o.op))
+        in
+        let rendered = List.map (feed_op t) (List.filter shown ops) in
         Changes
           {
             cursor;
@@ -781,8 +812,29 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   let refreshed path =
     Option.iter (fun p -> Pulls.before_open p path) t.pulls
   in
+  let vault f =
+    f ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree t.vault
+  in
   match req with
     | Ping -> ()
+    | Vault_init passphrase -> vault Vault.init passphrase
+    | Vault_unlock r ->
+        vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase
+    | Vault_lock `Screen -> vault Vault.screen_locked
+    | Vault_lock ((`Lock | `Forget) as how) ->
+        vault (Vault.lock ~forget_secret_key:(how = `Forget))
+    | Vault_appearance c ->
+        vault (Vault.set_appearance ~color:c.set_color ~icon:c.set_icon)
+    | Vault_passphrase r ->
+        vault (Vault.passphrase ~new_secret_key:r.new_secret_key) r.passphrase
+    | Vault_delete confirm ->
+        Vault.delete ~domain:t.domain ~engine:t.engine
+          ~lazy_tree:t.domain.lazy_tree ~confirm t.vault
+    | Vault_status -> vault Vault.status
+    | Vault_kit passphrase -> vault Vault.kit passphrase
+    | Vault_machines name -> vault (Vault.list_machines ?name)
+    | Vault_rekey r ->
+        vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
@@ -800,20 +852,28 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               (if seconds > 0. then float_of_int x.bytes /. seconds else 0.);
           }
         in
-        let downloading = List.map transfer (E.downloads ()) in
+        let named xs =
+          List.filter_map
+            (fun (x : Engine_intf.transfer) ->
+              if Names.is_reserved x.path then None else Some (transfer x))
+            xs
+        in
+        let downloading = named (E.downloads ()) in
+        let uploading = named (E.uploads ()) in
         {
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
           pending_uploads = max (E.pending_uploads ()) (E.pending_changes ());
           pending_downloads = List.length downloading;
-          uploading = List.map transfer (E.uploads ());
+          uploading;
           downloading;
           pending_bytes = pending_bytes t now;
           subscribers = t.subscribers ();
           unnamed = Atomic.get t.unnamed;
           traffic = t.traffic ();
           mount = Option.bind (t.hooks.frontend ()) (fun f -> f.mount);
+          new_machines = Vault.announced t.vault;
         }
     | Stats args -> t.stats args
     | Stop -> t.stop ()

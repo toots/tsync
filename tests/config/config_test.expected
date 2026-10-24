@@ -20,11 +20,28 @@ a settle without end   refused: domains[0].projectSettle: expected a number
 
 == domain-wide settings against what the main states
 nothing configured         symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+the main's extensions      symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+no extension               symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
+one the main lacks         refused: F is configured with extensions [totp, passwords] and its main states [totp]
 the same as the main       symlinks follow, entry 1024, lease 20, quarantine 200, settle 420, batch 10 s
 a smaller entry            symlinks follow, entry 64, lease 20, quarantine 200, settle 420, batch 1 s
 a larger entry             refused: F is configured with maxEntryCommands 4096, above the 1024 its main states
 another policy             refused: F is configured with symlinks keep and its main states follow
 another settle             refused: F is configured with projectSettle 500 s and its main states 420 s
+
+== the vault's auto-lock against what the main states (05 rule 7)
+none                           {} from 
+the domain's own               {"idleMinutes":30,"onScreenLock":true} from idleMinutes=config,onScreenLock=config
+the main's                     {"idleMinutes":10,"maxHours":12} from idleMinutes=main,maxHours=main
+stricter than the main         {"idleMinutes":5} from idleMinutes=config
+looser than the main           {"idleMinutes":10,"onScreenLock":true,"maxHours":12} from idleMinutes=main,onScreenLock=config,maxHours=main
+an empty policy                {} from 
+idle of 0                      refused: domains[0].vaultLock: idleMinutes: expected 1 to 1440
+idle over a day                refused: domains[0].vaultLock: idleMinutes: expected 1 to 1440
+hours as text                  refused: domains[0].vaultLock: maxHours: expected 1 to 720
+screen as 1                    refused: domains[0].vaultLock: onScreenLock: expected a bool
+not an object                  refused: domains[0].vaultLock: expected an object
+an ill-formed stated policy    true
 
 == behind a server, a timing left out is the server's
 a lease above the default quarantine accepted
@@ -59,6 +76,11 @@ fuse unknown user                        refused: domains[0].frontends[0].uid: n
 fuse uid out of range                    refused: domains[0].frontends[0].uid: a decimal id is at most 4294967294
 fuse unknown group                       refused: domains[0].frontends[0].gid: no such group
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
+no extensions                            ok: F ro=false backends=disk:main extensions follow the main
+unknown extension                        refused: domains[0].extensions[0]: extension "wifi" is unknown (known: totp, passwords)
+an extension twice                       refused: domains[0].extensions: totp is listed twice
+unknown key in an extension              refused: domains[0].extensions[0]: unknown key(s) "x"
+two extensions                           ok: F ro=false backends=disk:main extensions=totp,passwords
 unused link                              refused: links.slow: no backend uses this link
 maxRate below minRate                    refused: uplink.maxRate: is below minRate
 wrong JSON type                          refused: domains[0].readOnly: expected a boolean
@@ -103,3 +125,10 @@ a relative token in a domain: [a/b]
 --domain media with media: media
 --domain media with other: refused: the domain named in a path differs from --domain
 --domain - with media, other: refused: the paths name more than one domain
+
+== extensions in force (05 §2.1 rule 5)
+  none configured, nothing stated              []
+  none configured, totp stated                 [totp]
+  none configured, an unknown one stated too   [totp]
+  [] configured, totp stated                   []
+  passwords configured, totp stated            []

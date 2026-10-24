@@ -134,7 +134,93 @@ let jpeg frame =
   Avcodec.flush_encoder encoder add;
   Bigstring.of_string (Buffer.contents out)
 
+(* vault §8.1: the centre square of the frame as it is shown, at [side]. *)
+let square side frame =
+  let graph = Avfilter.init () in
+  let source =
+    Avfilter.attach ~name:"in"
+      ~args:
+        [
+          `Pair
+            ( "video_size",
+              `String
+                (Printf.sprintf "%dx%d"
+                   (Avutil.Video.frame_get_width frame)
+                   (Avutil.Video.frame_get_height frame)) );
+          `Pair
+            ( "pix_fmt",
+              `Int
+                (Avutil.Pixel_format.get_id
+                   (Avutil.Video.frame_get_pixel_format frame)) );
+          `Pair ("time_base", `Rational { Avutil.num = 1; den = 1 });
+        ]
+      Avfilter.buffer graph
+  in
+  let stage name args =
+    Avfilter.attach ~name ~args (Avfilter.find name) graph
+  in
+  let crop =
+    stage "crop"
+      [`Pair ("w", `String "min(iw,ih)"); `Pair ("h", `String "min(iw,ih)")]
+  in
+  let scale =
+    stage "scale"
+      [
+        `Pair ("w", `Int side);
+        `Pair ("h", `Int side);
+        `Pair ("flags", `String "lanczos");
+      ]
+  in
+  let format = stage "format" [`Pair ("pix_fmts", `String "rgba")] in
+  let sink = Avfilter.attach ~name:"out" Avfilter.buffersink graph in
+  let link a b =
+    Avfilter.link
+      (List.hd a.Avfilter.io.outputs.video)
+      (List.hd b.Avfilter.io.inputs.video)
+  in
+  link source crop;
+  link crop scale;
+  link scale format;
+  link format sink;
+  let graph = Avfilter.launch graph in
+  let push = List.assoc "in" graph.inputs.video in
+  Avutil.Frame.set_pts frame (Some 0L);
+  push (`Frame frame);
+  push `Flush;
+  (List.assoc "out" graph.outputs.video).handler ()
+
+let png frame =
+  let side = Avutil.Video.frame_get_width frame in
+  let encoder =
+    Avcodec.Video.create_encoder ~pixel_format:`Rgba ~width:side ~height:side
+      ~time_base:{ Avutil.num = 1; den = 1 }
+      (Avcodec.Video.find_encoder_by_name "png")
+  in
+  let out = Buffer.create 65536 in
+  let add packet = Buffer.add_string out (Avcodec.Packet.content packet) in
+  Avutil.Frame.set_pts frame (Some 0L);
+  Avcodec.encode encoder add frame;
+  Avcodec.flush_encoder encoder add;
+  Buffer.contents out
+
+(* The largest of the halvings of [max_side] whose PNG fits [max_bytes]. *)
+let icon ~max_side ~max_bytes ~deadline source =
+  let shown =
+    frame ~kind:`Image ~interrupt:(fun () -> Rt.now () > deadline) source
+  in
+  let rec fit side =
+    let encoded = png (square side shown) in
+    if String.length encoded <= max_bytes || side <= 16 then encoded
+    else fit (side / 2)
+  in
+  fit
+    (min max_side
+       (min
+          (Avutil.Video.frame_get_width shown)
+          (Avutil.Video.frame_get_height shown)))
+
 let () =
+  Atomic.set Icon_image.converter (Some icon);
   Avutil.Log.set_level `Quiet;
   Atomic.set Share_preview.thumbnailer
     (Some

@@ -57,7 +57,9 @@ let settings : settings =
     batch_delay = 10.;
     project_width = 8;
     projector = None;
-    domain_wide = [];
+    extensions = ["totp"];
+    vault_lock = None;
+    domain_wide = [("extensions", "main")];
   }
 
 let idle_sync =
@@ -280,7 +282,15 @@ let degraded : machine =
                     ("projectQuarantine", "default");
                     ("projectSettle", "main");
                     ("maxEntryCommands", "config");
+                    ("vaultLock", "main");
                   ];
+                vault_lock =
+                  Some
+                    {
+                      idle_minutes = Some 10;
+                      on_screen_lock = true;
+                      max_hours = None;
+                    };
                 symlinks = `Follow;
                 chunk_size = mib 4;
                 chunk_size_default = false;

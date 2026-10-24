@@ -6,6 +6,12 @@
   S: 1 entries merged, 0 committed, 0 pending
   S has: the tree head 1
 
+== the main's settings are kept for a start without it (05 2.1)
+  A, the main up: [passwords]
+  A again, the main down: [passwords]
+  B, which never reached the main, the main down: nothing
+  A after the main stated nothing, then down: nothing
+
 == a run of pushes projects each entry before the next
   paused at the second push: position 2, 3 pending; entries on the main: 2
   resumed: 0 entries merged, 2 committed, 0 pending
@@ -22,7 +28,7 @@
   A, the main down: dir/  f="made offline"; position none, 2 pending
   a cycle: failed: no main answered [unreachable]
   A after it: position none, 2 pending
-  the main back: position 1, 0 pending
+  the main back: 0 pending
   B: dir/  f="made offline"
 
 == an entry whose answer was lost reaches the copies

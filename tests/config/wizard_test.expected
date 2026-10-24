@@ -25,6 +25,8 @@
 ? Shared secret -> (secret)
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
   Domains:
     1. docs: 1 backends
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
@@ -84,6 +86,8 @@ new: would write
 ? Shared secret -> 
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
   Domains:
     1. docs: 3 backends
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
@@ -96,6 +100,7 @@ edit: would write
       "name": "docs",
       "symlinks": "keep",
       "versioning": true,
+      "extensions": [],
       "frontends": [ "http-proxy" ],
       "backends": [
         {
@@ -151,6 +156,8 @@ edit: would write
 ? Shared secret -> 
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
   Domains:
     1. docs: 2 backends
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
@@ -163,6 +170,7 @@ invalid: would write
       "name": "docs",
       "symlinks": "keep",
       "versioning": true,
+      "extensions": [],
       "frontends": [ "http-proxy" ],
       "backends": [
         {
@@ -204,6 +212,8 @@ macos: http-proxy
     1. main (local, main)
 ? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
 ? serve it to other machines over HTTPS (http-proxy) [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
   Domains:
     1. docs: 1 backends
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
@@ -214,6 +224,7 @@ kept: would write
       "name": "docs",
       "symlinks": "keep",
       "versioning": true,
+      "extensions": [],
       "frontends": [ "fuse" ],
       "backends": [
         {
@@ -258,6 +269,7 @@ advanced: would write
     {
       "name": "docs",
       "versioning": true,
+      "extensions": [],
       "frontends": [ "http-proxy" ],
       "backends": [
         {

@@ -6,6 +6,7 @@
   tsync_config
   tsync_catalog
   tsync_store
+  yojson
   tsync_http_proxy
   unix))
 

@@ -104,6 +104,52 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { secret_key : string; key_id : string }
+
+(** vault §8.1: the colour in force, whether the user chose it, and the icon
+    (PNG bytes). *)
+type appearance = { color : string; color_chosen : bool; icon : string option }
+
+(** What [vault_appearance] changes: each field kept, set or cleared. *)
+type appearance_change = {
+  set_color : [ `Keep | `Set of string | `Clear ];
+  set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
+}
+
+(** vault §6.2: the auto-lock policy in force, and where each of its parts comes
+    from ([config] or [main]), by member name. *)
+type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
+
+(** vault §6.3: a machine's entry as [vault_machines] lists it; [entry] is
+    [None] for one that does not open under K. *)
+type machine_entry = { name : string; enrolled : int; last_unlock : int }
+
+type machine = { uuid : string; this : bool; entry : machine_entry option }
+
+(** vault §7.2: the new secret key, and why re-encrypting the records stopped,
+    when it did; the next unlock resumes it. *)
+type rekeyed = { secret : secret; pending : string option }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
+  enrolled : bool;  (** this machine holds the secret key of a slot *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;  (** of that view *)
+  appearance : appearance option;  (** vault §8.1; none without a keyring *)
+  auto_lock : auto_lock option;  (** none without a policy *)
+  locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
+  new_machines : string list;  (** §6.3: names enrolled since the last list *)
+  secret_key_replaced : bool;  (** §7.2: the held secret key opens no slot *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -128,6 +174,7 @@ type status = {
   unnamed : int;
   traffic : R.traffic;
   mount : string option;
+  new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
 }
 
 type _ request =
@@ -196,6 +243,34 @@ type _ request =
   | Pause : bool -> bool request
   | Stats : string list -> R.answer request
   | Stop : unit request
+  | Vault_init : string -> secret request  (** the passphrase as typed *)
+  | Vault_unlock : {
+      passphrase : string;
+      secret_key : string option;
+    }
+      -> unit request
+  | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
+      (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
+          a screen lock (vault §6.2) *)
+  | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_kit : string -> secret request
+      (** vault §3.1: the passphrase as typed; the secret key it answers *)
+  | Vault_machines : string option -> machine list request
+      (** vault §6.3; [Some name] renames this machine's entry *)
+  | Vault_rekey : {
+      passphrase : string;
+      new_passphrase : string option;
+    }
+      -> rekeyed request  (** vault §7.2 *)
+  | Vault_passphrase : {
+      passphrase : string;
+      new_secret_key : bool;
+    }
+      -> secret option request
+      (** the new secret key, when one was asked for *)
+  | Vault_delete : string -> string option request
+      (** the domain's name, to confirm; why a keystore entry was left *)
+  | Vault_status : vault_status request
 
 type packed = Request : 'a request -> packed
 
@@ -235,16 +310,28 @@ let action : type a. a request -> string = function
   | Pause _ -> "pause"
   | Stats _ -> "stats"
   | Stop -> "stop"
+  | Vault_init _ -> "vault_init"
+  | Vault_unlock _ -> "vault_unlock"
+  | Vault_lock _ -> "vault_lock"
+  | Vault_appearance _ -> "vault_appearance"
+  | Vault_passphrase _ -> "vault_passphrase"
+  | Vault_delete _ -> "vault_delete"
+  | Vault_status -> "vault_status"
+  | Vault_kit _ -> "vault_kit"
+  | Vault_machines _ -> "vault_machines"
+  | Vault_rekey _ -> "vault_rekey"
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
-  | Revert _ ->
+  | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
+  | Vault_appearance _ | Vault_rekey _ ->
       true
   | _ -> false
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
-  | Job _ ->
+  | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ | Vault_rekey _
+  | Vault_kit _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
@@ -317,8 +404,32 @@ let destination_of j =
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
   | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
-  | Stop | Share_clear_cache ->
+  | Stop | Share_clear_cache | Vault_status ->
       []
+  | Vault_init p -> [("passphrase", `String p)]
+  | Vault_unlock r ->
+      ("passphrase", `String r.passphrase)
+      :: opt "secretKey" (fun k -> `String k) r.secret_key
+  | Vault_lock `Lock -> []
+  | Vault_lock `Forget -> [("forget", `Bool true)]
+  | Vault_lock `Screen -> [("reason", `String "screen")]
+  | Vault_appearance c ->
+      let field k encode = function
+        | `Keep -> []
+        | `Clear -> [(k, `Null)]
+        | `Set v -> [(k, `String (encode v))]
+      in
+      field "color" Fun.id c.set_color
+      @ field "icon" Base64.encode_string c.set_icon
+  | Vault_passphrase r ->
+      ("passphrase", `String r.passphrase)
+      :: (if r.new_secret_key then [("newSecretKey", `Bool true)] else [])
+  | Vault_delete confirm -> [("confirm", `String confirm)]
+  | Vault_kit p -> [("passphrase", `String p)]
+  | Vault_machines name -> opt "name" (fun n -> `String n) name
+  | Vault_rekey r ->
+      ("passphrase", `String r.passphrase)
+      :: opt "newPassphrase" (fun p -> `String p) r.new_passphrase
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
   | List_all r ->
@@ -499,6 +610,57 @@ let decode j =
                 (String.split_on_char ','
                    (Option.value ~default:"" (str j "arg")))))
     | "stop" -> Request Stop
+    | "vault_init" -> Request (Vault_init (required j "passphrase"))
+    | "vault_unlock" ->
+        Request
+          (Vault_unlock
+             {
+               passphrase = required j "passphrase";
+               secret_key = str j "secretKey";
+             })
+    | "vault_kit" -> Request (Vault_kit (required j "passphrase"))
+    | "vault_machines" -> Request (Vault_machines (str j "name"))
+    | "vault_rekey" ->
+        Request
+          (Vault_rekey
+             {
+               passphrase = required j "passphrase";
+               new_passphrase = str j "newPassphrase";
+             })
+    | "vault_lock" ->
+        Request
+          (Vault_lock
+             (if str j "reason" = Some "screen" then `Screen
+              else if flag j "forget" then `Forget
+              else `Lock))
+    | "vault_appearance" ->
+        (* §8.1: an absent member is kept, null clears it. *)
+        let change k decode =
+          match member j k with
+            | None -> `Keep
+            | Some `Null -> `Clear
+            | Some (`String v) -> `Set (decode v)
+            | Some _ -> Fail.invalid "%s is a string or null" k
+        in
+        Request
+          (Vault_appearance
+             {
+               set_color = change "color" Fun.id;
+               set_icon =
+                 change "icon" (fun b ->
+                     match Base64.decode b with
+                       | Ok png -> png
+                       | Error _ -> Fail.invalid "the icon is not base64");
+             })
+    | "vault_passphrase" ->
+        Request
+          (Vault_passphrase
+             {
+               passphrase = required j "passphrase";
+               new_secret_key = flag j "newSecretKey";
+             })
+    | "vault_delete" -> Request (Vault_delete (required j "confirm"))
+    | "vault_status" -> Request Vault_status
     | a -> Fail.invalid "unknown action: %s" a
 
 let kind_name = function
@@ -638,11 +800,109 @@ let page_fields (pg : page) =
   @ opt "pulledAt" (fun at -> `Int (int_of_float at)) pg.pulled_at
   @ if pg.outdated then [("outdated", `Bool true)] else []
 
+let secret_fields s =
+  [("secretKey", `String s.secret_key); ("keyId", `String s.key_id)]
+
+let secret_of j =
+  { secret_key = required j "secretKey"; key_id = required j "keyId" }
+
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _ ->
+    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _
+    | Vault_unlock _ | Vault_lock _ | Vault_appearance _ ->
         ok []
+    | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
+    | Vault_init _ -> ok (secret_fields reply)
+    | Vault_kit _ -> ok (secret_fields reply)
+    | Vault_rekey _ ->
+        ok
+          (secret_fields reply.secret
+          @ opt "pending" (fun r -> `String r) reply.pending)
+    | Vault_machines _ ->
+        ok
+          [
+            ( "machines",
+              `List
+                (List.map
+                   (fun (m : machine) ->
+                     `Assoc
+                       ([("id", `String m.uuid); ("this", `Bool m.this)]
+                       @
+                         match m.entry with
+                         | Some e ->
+                             [
+                               ("name", `String e.name);
+                               ("enrolled", `Int e.enrolled);
+                               ("lastUnlock", `Int e.last_unlock);
+                             ]
+                         | None -> []))
+                   reply) );
+          ]
+    | Vault_passphrase _ -> (
+        match reply with Some s -> ok (secret_fields s) | None -> ok [])
+    | Vault_status ->
+        let strings l = `List (List.map (fun s -> `String s) l) in
+        ok
+          ([
+             ( "vault",
+               `String
+                 (match reply.vault with
+                   | `Absent -> "absent"
+                   | `Corrupt _ -> "corrupt"
+                   | `Locked -> "locked"
+                   | `Unlocked -> "unlocked") );
+             ("slots", `Assoc (List.map (fun (k, n) -> (k, `Int n)) reply.slots));
+             ("unusable", strings reply.unusable);
+             ("copies", strings reply.copies);
+           ]
+          @ (match reply.vault with
+            | `Corrupt reason -> [("reason", `String reason)]
+            | _ -> [])
+          @ opt "keyId" (fun k -> `String k) reply.key_id
+          @ opt "cached" (fun c -> `String c) reply.cached
+          @ opt "keystoreError" (fun e -> `String e) reply.keystore_error
+          @ [("enrolled", `Bool reply.enrolled)]
+          @ (if reply.new_machines = [] then []
+             else [("newMachines", strings reply.new_machines)])
+          @ (if reply.secret_key_replaced then
+               [("secretKeyReplaced", `Bool true)]
+             else [])
+          @ opt "autoLock"
+              (fun (a : auto_lock) ->
+                match Vault_lock.to_json a.policy with
+                  | `Assoc l ->
+                      `Assoc
+                        (l
+                        @ [
+                            ( "from",
+                              `Assoc
+                                (List.map (fun (k, v) -> (k, `String v)) a.from)
+                            );
+                          ])
+                  | j -> j)
+              reply.auto_lock
+          @ opt "lockedBy"
+              (fun r ->
+                `String
+                  (match r with
+                    | `Idle -> "idle"
+                    | `Screen -> "screen"
+                    | `Age -> "age"))
+              reply.locked_by
+          @ (if reply.outdated then [("outdated", `Bool true)] else [])
+          @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at
+          @ opt "appearance"
+              (fun (a : appearance) ->
+                `Assoc
+                  ([
+                     ("color", `String a.color);
+                     ("colorChosen", `Bool a.color_chosen);
+                   ]
+                  @ opt "icon"
+                      (fun i -> `String (Base64.encode_string i))
+                      a.icon))
+              reply.appearance)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -744,7 +1004,14 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
              ("traffic", R.traffic_to_yojson reply.traffic);
            ]
           @ (if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else [])
-          @ opt "mount" (fun m -> `String m) reply.mount)
+          @ opt "mount" (fun m -> `String m) reply.mount
+          @
+          if reply.new_machines = [] then []
+          else
+            [
+              ( "newMachines",
+                `List (List.map (fun n -> `String n) reply.new_machines) );
+            ])
     | Pause _ -> ok [("paused", `Bool reply)]
     | Stats _ -> (
         match R.answer_to_yojson reply with `Assoc l -> ok l | j -> j)
@@ -786,6 +1053,103 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   in
   match req with
     | Ping -> ()
+    | Vault_unlock _ -> ()
+    | Vault_lock _ -> ()
+    | Vault_appearance _ -> ()
+    | Vault_delete _ -> str j "keystoreLeft"
+    | Vault_init _ -> secret_of j
+    | Vault_kit _ -> secret_of j
+    | Vault_rekey _ -> { secret = secret_of j; pending = str j "pending" }
+    | Vault_machines _ -> (
+        match member j "machines" with
+          | Some (`List l) ->
+              List.map
+                (fun m ->
+                  {
+                    uuid = Option.value ~default:"" (str m "id");
+                    this = flag m "this";
+                    entry =
+                      Option.map
+                        (fun name ->
+                          {
+                            name;
+                            enrolled =
+                              Option.value ~default:0 (int m "enrolled");
+                            last_unlock =
+                              Option.value ~default:0 (int m "lastUnlock");
+                          })
+                        (str m "name");
+                  })
+                l
+          | _ -> [])
+    | Vault_passphrase _ ->
+        if member j "secretKey" = None then None else Some (secret_of j)
+    | Vault_status ->
+        let strings k =
+          match member j k with
+            | Some (`List l) ->
+                List.filter_map (function `String s -> Some s | _ -> None) l
+            | _ -> []
+        in
+        {
+          vault =
+            (match str j "vault" with
+              | Some "absent" -> `Absent
+              | Some "locked" -> `Locked
+              | Some "unlocked" -> `Unlocked
+              | _ -> `Corrupt (Option.value ~default:"" (str j "reason")));
+          key_id = str j "keyId";
+          cached = str j "cached";
+          slots =
+            (match member j "slots" with
+              | Some (`Assoc l) ->
+                  List.filter_map
+                    (function k, `Int n -> Some (k, n) | _ -> None)
+                    l
+              | _ -> []);
+          unusable = strings "unusable";
+          copies = strings "copies";
+          keystore_error = str j "keystoreError";
+          enrolled = flag j "enrolled";
+          new_machines = strings "newMachines";
+          secret_key_replaced = flag j "secretKeyReplaced";
+          auto_lock =
+            Option.bind (member j "autoLock") (fun a ->
+                match Vault_lock.of_json a with
+                  | Ok policy ->
+                      Some
+                        {
+                          policy;
+                          from =
+                            (match member a "from" with
+                              | Some (`Assoc l) ->
+                                  List.filter_map
+                                    (function
+                                      | k, `String v -> Some (k, v) | _ -> None)
+                                    l
+                              | _ -> []);
+                        }
+                  | Error _ -> None);
+          locked_by =
+            (match str j "lockedBy" with
+              | Some "idle" -> Some `Idle
+              | Some "screen" -> Some `Screen
+              | Some "age" -> Some `Age
+              | _ -> None);
+          outdated = flag j "outdated";
+          pulled_at = Option.map float_of_int (int j "pulledAt");
+          appearance =
+            Option.map
+              (fun a ->
+                {
+                  color = Option.value ~default:"" (str a "color");
+                  color_chosen = flag a "colorChosen";
+                  icon =
+                    Option.bind (str a "icon") (fun b ->
+                        Result.to_option (Base64.decode b));
+                })
+              (member j "appearance");
+        }
     | Full_resync -> ()
     | Revert _ -> ()
     | Poll -> ()
@@ -892,6 +1256,11 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           unnamed = count "unnamed" j;
           traffic;
           mount = str j "mount";
+          new_machines =
+            (match member j "newMachines" with
+              | Some (`List l) ->
+                  List.filter_map (function `String s -> Some s | _ -> None) l
+              | _ -> []);
         }
     | Pause _ -> flag j "paused"
     | Stats _ -> (

@@ -52,6 +52,7 @@ the model reads:
 | `pendingBytes` | `pendingBytes` (integer) | unknown |
 | `sentBytes` | `traffic.upBytes` (integer) | unknown |
 | `sendRate` | `traffic.upRate` (number) | unknown |
+| `newMachines` | `newMachines`: list of strings, the machines that joined the domain's vault ([vault §6.3](../extensions/vault.md#63-machines)) | empty |
 
 - A transfer is kept only when both `name` and `rel` are non-empty strings. `bytes` is what has
   moved, `size` the total, `rate` bytes per second; each may be absent.
@@ -165,6 +166,9 @@ In order:
      `not answering` (unreachable); `Paused` (paused, nothing moving); `Idle` (nothing moving);
      else `Uploading U`, `Downloading D` or `Uploading U · Downloading D` from this domain's own
      counts, followed by ` · paused` when the domain is paused;
+   - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
+     icon `computer`, action `Nothing`: it says so until the machines are listed
+     (`tsync vault machines`);
    - its upload file rows, then its download file rows (below).
 3. **Traffic**, when shown: a separator, the traffic line, then the rate line when there is one.
    - The section, separator included, is absent when it has neither line.
@@ -289,6 +293,7 @@ Then per domain body of that reply, each preceded by a separator:
 | the mount point, ellipsised | 1 | some frontend reports one | the first `frontends[].mount` |
 | `cache <n> chunks · <bytes>[ of <max>][ · <pinned> pinned]` | 1 | chunks and bytes known | `cache.chunks`, `.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
 | `queue <n> files · <bytes> owed` | 1 | either known | `queues.pendingFiles`, `queues.bytesOwed` |
+| `extensions <name>, <name>` | 1 | the list is not empty | `settings.extensions` |
 | `read <bytes> · written <bytes>` | 1 | either known | the sums over `frontends[]` of `bytesRead`, `bytesWritten` |
 | `sync <n> pending · <n> parked · stopped at entry <n>` | 1 | any part present (the counts only when > 0, the last part only when an entry cannot be followed) | `sync.pending`, the pending count of the cycle's status ([03 §3.4](../03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)); `queues.parked`, the upload queue's parked count; `sync.cannotFollow.entry`, the number of the entry the client cannot follow |
 | one row per backend | 1 | always | `backends[]` |

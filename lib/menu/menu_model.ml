@@ -114,6 +114,7 @@ type flag = bool
 
 let flag_of_yojson j = Ok (j = `Bool true)
 let lenient of_yojson j = Ok (Result.to_option (of_yojson j))
+let string_of_yojson = function `String s -> Ok s | _ -> Error "not a string"
 
 let items of_yojson = function
   | `List l -> Ok (List.filter_map (fun j -> Result.to_option (of_yojson j)) l)
@@ -147,6 +148,8 @@ type status = {
   pending_bytes : count; [@key "pendingBytes"] [@default None]
   traffic : traffic option;
       [@of_yojson lenient traffic_of_yojson] [@default None]
+  new_machines : string list;
+      [@key "newMachines"] [@of_yojson items string_of_yojson] [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -228,7 +231,12 @@ let domain_rows (name, status) =
              with
               | [] -> if s.paused then "Paused" else "Idle"
               | parts -> join (parts @ if s.paused then ["paused"] else [])),
-            file_rows_of name s.uploading @ file_rows_of name s.downloading )
+            List.map
+              (fun m ->
+                row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
+              s.new_machines
+            @ file_rows_of name s.uploading
+            @ file_rows_of name s.downloading )
   in
   row ~action:(Open_folder name) (name ^ " — " ^ detail) :: files
 
@@ -320,6 +328,7 @@ type backend = {
 type settings = {
   read_only : flag; [@key "readOnly"] [@default false]
   versioning : flag; [@default false]
+  extensions : string list; [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -473,6 +482,10 @@ let domain_stats (d : domain) =
          (Printf.sprintf "queue %d files")
          (queued (fun q -> q.pending_files))
       @ part (fun b -> size b ^ " owed") (queued (fun q -> q.bytes_owed)))
+  @ (match d.settings with
+    | Some { extensions = _ :: _ as names; _ } ->
+        [row ~indent:1 ("extensions " ^ String.concat ", " names)]
+    | _ -> [])
   @ line ~indent:1
       (part (fun b -> "read " ^ size b) (moved (fun f -> f.bytes_read))
       @ part (fun b -> "written " ^ size b) (moved (fun f -> f.bytes_written)))

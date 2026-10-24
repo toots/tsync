@@ -283,7 +283,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "frontends":["android"],
+          "extensions":["totp"],"frontends":["android"],
           "backends":[{"type":"gated","name":"main","role":"main","path":"%s"}]}]}|}
        store_path);
 
@@ -589,6 +589,31 @@ let () =
        (action "write"
           [s "parentRef" made; s "name" "m.txt"; s "staging" (staged "s11" "m")]));
   Atomic.set mode `Up;
+  p "== the vault, then the store down (extensions README §4.1)";
+  let vault label =
+    let r = action "vault_status" [] in
+    p "  %-34s %s%s%s" label
+      (Option.value ~default:(outcome r)
+         (Option.map (fun _ -> text r "vault") (field r "vault")))
+      (if field r "outdated" = Some (`Bool true) then " outdated" else "")
+      (if field r "pulledAt" <> None then " pulledAt" else "")
+  in
+  p "  %-34s %s" "init"
+    (outcome
+       (action "vault_init" [s "passphrase" "correct horse battery staple"]));
+  vault "status";
+  wait_stale ();
+  Atomic.set mode `Down;
+  vault "status, the store down";
+  p "  %-34s %s" "init, the store down"
+    (outcome
+       (action "vault_init" [s "passphrase" "correct horse battery staple"]));
+  p "  %-34s %s" "passphrase, the store down"
+    (outcome
+       (action "vault_passphrase" [s "passphrase" "another passphrase, longer"]));
+  Atomic.set mode `Up;
+  wait_stale ();
+  vault "status, the store back";
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

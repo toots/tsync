@@ -117,6 +117,52 @@ type resynced = {
 
 type shared = { url : string; expires : float }
 
+(** A secret key shown once, and the key id it unlocks (vault §3, §7). *)
+type secret = { secret_key : string; key_id : string }
+
+(** vault §8.1: the colour in force, whether the user chose it, and the icon
+    (PNG bytes). *)
+type appearance = { color : string; color_chosen : bool; icon : string option }
+
+(** What [vault_appearance] changes: each field kept, set or cleared. *)
+type appearance_change = {
+  set_color : [ `Keep | `Set of string | `Clear ];
+  set_icon : [ `Keep | `Set of string | `Clear ];  (** PNG bytes *)
+}
+
+(** vault §6.2: the auto-lock policy in force, and where each of its parts comes
+    from ([config] or [main]), by member name. *)
+type auto_lock = { policy : Vault_lock.t; from : (string * string) list }
+
+(** vault §6.3: a machine's entry as [vault_machines] lists it; [entry] is
+    [None] for one that does not open under K. *)
+type machine_entry = { name : string; enrolled : int; last_unlock : int }
+
+type machine = { uuid : string; this : bool; entry : machine_entry option }
+
+(** vault §7.2: the new secret key, and why re-encrypting the records stopped,
+    when it did; the next unlock resumes it. *)
+type rekeyed = { secret : secret; pending : string option }
+
+(** vault §8 [status]. *)
+type vault_status = {
+  vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
+  key_id : string option;
+  cached : string option;  (** where K is held: [memory] *)
+  slots : (string * int) list;  (** count by kind *)
+  unusable : string list;  (** slots past the readers' limits *)
+  copies : string list;  (** keyring copies beside it *)
+  keystore_error : string option;  (** why the keystore was not used *)
+  enrolled : bool;  (** this machine holds the secret key of a slot *)
+  outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  pulled_at : float option;  (** of that view *)
+  appearance : appearance option;  (** vault §8.1; none without a keyring *)
+  auto_lock : auto_lock option;  (** none without a policy *)
+  locked_by : [ `Idle | `Screen | `Age ] option;  (** until the next unlock *)
+  new_machines : string list;  (** §6.3: names enrolled since the last list *)
+  secret_key_replaced : bool;  (** §7.2: the held secret key opens no slot *)
+}
+
 (** A transfer as [status] lists it (08 §3.3). *)
 type transfer = {
   name : string;
@@ -141,6 +187,7 @@ type status = {
   unnamed : int;
   traffic : R.traffic;
   mount : string option;
+  new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
 }
 
 type _ request =
@@ -212,6 +259,34 @@ type _ request =
   | Pause : bool -> bool request  (** [false] resumes; the reply is the state *)
   | Stats : string list -> Tsync_status.Status_report.answer request
   | Stop : unit request
+  | Vault_init : string -> secret request  (** the passphrase as typed *)
+  | Vault_unlock : {
+      passphrase : string;
+      secret_key : string option;
+    }
+      -> unit request
+  | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
+      (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
+          a screen lock (vault §6.2) *)
+  | Vault_appearance : appearance_change -> unit request  (** vault §8.1 *)
+  | Vault_kit : string -> secret request
+      (** vault §3.1: the passphrase as typed; the secret key it answers *)
+  | Vault_machines : string option -> machine list request
+      (** vault §6.3; [Some name] renames this machine's entry *)
+  | Vault_rekey : {
+      passphrase : string;
+      new_passphrase : string option;
+    }
+      -> rekeyed request  (** vault §7.2 *)
+  | Vault_passphrase : {
+      passphrase : string;
+      new_secret_key : bool;
+    }
+      -> secret option request
+      (** the new secret key, when one was asked for *)
+  | Vault_delete : string -> string option request
+      (** the domain's name, to confirm; why a keystore entry was left *)
+  | Vault_status : vault_status request
 
 type packed = Request : 'a request -> packed
 

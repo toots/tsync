@@ -258,6 +258,10 @@ let settings t : R.settings =
     batch_delay = tuning.batch_delay;
     project_width = tuning.project_width;
     projector = Option.bind main (fun m -> m.Tsync_store.Store.projector);
+    extensions = Config.extensions_in_force d main;
+    vault_lock =
+      (let p = Config.vault_lock_in_force d main in
+       if Vault_lock.is_none p then None else Some p);
     domain_wide = Config.sources d main;
   }
 

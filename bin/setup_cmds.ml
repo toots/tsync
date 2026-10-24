@@ -55,12 +55,20 @@ let show_config () =
                     (List.map
                        (fun (d : Config.domain) ->
                          `Assoc
-                           [
-                             ("name", `String (Domain_name.to_string d.name));
-                             ("readOnly", `Bool d.read_only);
-                             ("backends", `List (List.map backend d.backends));
-                             ("frontends", `List (List.map frontend d.frontends));
-                           ])
+                           ([
+                              ("name", `String (Domain_name.to_string d.name));
+                              ("readOnly", `Bool d.read_only);
+                              ("backends", `List (List.map backend d.backends));
+                              ( "frontends",
+                                `List (List.map frontend d.frontends) );
+                            ]
+                           @ Option.fold ~none:[]
+                               ~some:(fun l ->
+                                 [
+                                   ( "extensions",
+                                     `List (List.map (fun e -> `String e) l) );
+                                 ])
+                               d.extensions))
                        config.domains) );
               ]));
       0)
@@ -176,6 +184,7 @@ let build_info () =
       | l ->
           String.concat ", "
             (List.map Tsync_http.Transport.impl_name (List.sort compare l)));
+  say "extensions: %s" (String.concat ", " Config.extension_names);
   say "share previews: %s"
     (if Share_preview.available () then "ffmpeg" else "none");
   say "service log: %s" (String.concat " " (log_reader ()));

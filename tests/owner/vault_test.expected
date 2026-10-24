@@ -1,0 +1,114 @@
+== before init
+status                             absent not-enrolled slots={}
+unlock                           not_found: this domain has no vault: run tsync vault init
+passphrase                       not_found: this domain has no vault: run tsync vault init
+== init
+init, 15 characters              invalid: a passphrase has at least 16 characters
+init                               secret key 5-5-5-5-6, key id of 16 hex
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+init again                       exists: docs already has a vault: unlock it
+== lock and unlock
+lock                             ok
+status                             locked enrolled slots={"secret-key":1}
+passphrase while locked          locked: the vault is locked: run tsync vault unlock
+unlock, wrong passphrase         denied: wrong passphrase
+unlock, 15 characters            invalid: a passphrase has at least 16 characters
+unlock, the passphrase           ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+== appearance (§8.1)
+default                            color=the key id's chosen=false icon=none
+colour                           ok
+chosen                             color=#0d9488 chosen=true icon=none
+a bad colour                     invalid: a colour is #rrggbb
+an icon                          ok
+with an icon                       color=#0d9488 chosen=true icon=33 bytes
+an oblong icon                   invalid: an icon is square
+a JPEG                           invalid: an icon is a PNG
+back to the defaults             ok
+default again                      color=the key id's chosen=false icon=none
+colour, then lock                ok
+lock                             ok
+colour while locked              locked: the vault is locked: run tsync vault unlock
+locked, still shown                color=#9333ea chosen=true icon=none
+unlock again                     ok
+== passphrase change
+passphrase                       ok
+lock                             ok
+unlock, the old one              denied: wrong passphrase
+unlock, the new one              ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+== a new secret key
+passphrase, new secret key         secret key 5-5-5-5-6, key id of 16 hex
+a new one                          true
+== a machine not enrolled
+lock and forget                  ok
+status                             locked not-enrolled slots={"secret-key":1}
+unlock, the passphrase alone     invalid: this machine needs the vault's secret key
+unlock, the old secret key       denied: wrong secret key: it is not this vault's
+unlock, a malformed secret key   invalid: a secret key is 26 characters in groups 5-5-5-5-6
+unlock, both                     ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+== a domain that uses no extension
+vault_status                     invalid: plain uses no extension: add one to its extensions in the config
+vault_init                       invalid: plain uses no extension: add one to its extensions in the config
+vault_lock                       invalid: plain uses no extension: add one to its extensions in the config
+vault_passphrase                 invalid: plain uses no extension: add one to its extensions in the config
+vault_delete                     invalid: plain uses no extension: add one to its extensions in the config
+== delete
+delete, no confirmation          invalid: confirm is required
+delete, another name             invalid: deleting the vault needs the domain's name, docs
+delete                           ok
+status                             absent not-enrolled slots={}
+unlock                           not_found: this domain has no vault: run tsync vault init
+init again                         secret key 5-5-5-5-6, key id of 16 hex
+lock and forget                  ok
+owner exit status 0
+== after a restart
+status                             locked not-enrolled slots={"secret-key":1}
+unlock, the passphrase alone     invalid: this machine needs the vault's secret key
+unlock, with the secret key      ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+owner exit status 0
+== with a keystore: unlock
+status                             locked not-enrolled slots={"secret-key":1}
+unlock                           ok
+status                             unlocked enrolled cached=keystore slots={"secret-key":1}
+keystore entries                   [docs docs#secret-key]
+owner exit status 0
+== with a keystore: a restart, then lock
+status                             unlocked enrolled cached=keystore slots={"secret-key":1}
+lock                             ok
+status                             locked enrolled slots={"secret-key":1}
+keystore entries                   [docs#secret-key]
+owner exit status 0
+== with a keystore: a restart after the lock
+status                             locked enrolled slots={"secret-key":1}
+unlock, the passphrase alone     ok
+status                             unlocked enrolled cached=keystore slots={"secret-key":1}
+lock and forget                  ok
+status                             locked not-enrolled slots={"secret-key":1}
+keystore entries                   []
+owner exit status 0
+== a keystore that refuses the write
+unlock                           ok
+status                             unlocked enrolled cached=memory keystore error: the test keystore refuses writes slots={"secret-key":1}
+keystore entries                   []
+owner exit status 0
+== a keystore that keeps the secret key entry, then lock
+unlock                           ok
+lock and forget, one delete refused internal: test keystore could not forget the key: the test keystore keeps its entries
+status                             locked enrolled slots={"secret-key":1}
+keystore entries                   [docs#secret-key]
+owner exit status 0
+== a keystore that keeps its entries, then delete
+unlock                           ok
+delete                           ok
+  keystore left                    test keystore could not forget the key: the test keystore keeps its entries
+status                             absent not-enrolled slots={}
+keystore entries                   [docs docs#secret-key]
+owner exit status 0
+== the store
+holds the keyring: true
+holds the passphrase: false
+holds the secret key spelled: false
+holds its bytes: false

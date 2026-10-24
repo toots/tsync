@@ -372,6 +372,23 @@ let frontends io ~system current =
   in
   kept @ asked
 
+(* 07 §5.9: one question per extension, defaulting to whether it is listed. *)
+let extensions io current =
+  let listed name =
+    List.exists
+      (fun e ->
+        match e with
+          | `String n -> n = name
+          | e -> Option.bind (get e "type") show = Some name)
+      current
+  in
+  List.filter_map
+    (fun name ->
+      if yes io ~default:(listed name) (Printf.sprintf "use %s" name) then
+        Some (`String name)
+      else None)
+    Config.extension_names
+
 let domain io ~advanced ~system d =
   let d = field io d ~required:true "name" "domain name" String in
   let d =
@@ -428,7 +445,13 @@ let domain io ~advanced ~system d =
       (list_of d "backends")
   in
   let d = set d "backends" (`List backends) in
-  set d "frontends" (`List (frontends io ~system (list_of d "frontends")))
+  let d =
+    set d "frontends" (`List (frontends io ~system (list_of d "frontends")))
+  in
+  (* 07 §5.9: a domain following its main stays so unless one is chosen. *)
+    match (get d "extensions", extensions io (list_of d "extensions")) with
+    | None, [] -> unset d "extensions"
+    | _, chosen -> set d "extensions" (`List chosen)
 
 let links_used j =
   List.concat_map

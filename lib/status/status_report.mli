@@ -76,6 +76,9 @@ type self = {
     "main" or "default". *)
 type sources = (string * string) list
 
+(** vault §6.2, in force. *)
+type vault_lock = Vault_lock.t
+
 type settings = {
   versioning : bool;
   symlinks : [ `Keep | `Follow | `Skip ];
@@ -93,6 +96,8 @@ type settings = {
   batch_delay : float;
   project_width : int;
   projector : string option;
+  extensions : string list;  (** 05 §2.1 rule 5: in force *)
+  vault_lock : vault_lock option;  (** rule 7: in force, none without one *)
   domain_wide : sources;
 }
 [@@deriving yojson]
