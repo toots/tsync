@@ -142,6 +142,7 @@ holds a label: false
   the owner adds under its K         <id10>
   status                             locked copies=1
   list                               locked: the vault is locked: run tsync vault unlock
+  lock, the losing K held            ok
   unlock with the winner's passphrase ok
   list: "Race" "a"
   status                             unlocked copies=0

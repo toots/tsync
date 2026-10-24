@@ -615,6 +615,7 @@ let () =
       in
       status "status";
       answer "  list" (ask_race [("action", "totp_list")]);
+      answer "  lock, the losing K held" (ask_race [("action", "vault_lock")]);
       answer "  unlock with the winner's passphrase"
         (ask_race
            [
