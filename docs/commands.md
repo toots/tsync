@@ -92,6 +92,13 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync totp code ID` | One current code |
 | `tsync totp import FILE`, `tsync totp export` | From another authenticator's plain-text export; out as `otpauth://` links, after the passphrase |
 | `tsync totp rename ID`, `tsync totp remove ID` | Change or remove one record |
+| `tsync passwords add --title T [--url SITE]… [--username U] [--password - \| --generate N \| --words N]` | Add a login; `--otpauth`/`--totp` link a two-factor code |
+| `tsync passwords generate [--generate N] [--no-symbols] [--words N]` | Print a generated password, saved nowhere |
+| `tsync passwords add --note --title T [--notes TEXT] [--field N=V]… [--secret-field N]…` | Add a note, with custom fields |
+| `tsync passwords list [--site SITE] [--filter TEXT]` | Logins and passkeys, never a password |
+| `tsync passwords get ID` | A login's password alone |
+| `tsync passwords edit ID`, `tsync passwords remove ID` | Change or remove a login or passkey |
+| `tsync passwords import FILE`, `tsync passwords export` | From a browser's CSV export; out as CSV, after the passphrase |
 
 **macOS only**
 

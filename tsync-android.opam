@@ -23,6 +23,7 @@ depends: [
   "domain-name-android"
   "eqaf-android"
   "mem_usage-android"
+  "mirage-crypto-ec-android"
   "mirage-crypto-pk-android"
   "mirage-crypto-rng-android"
   "ppx_deriving_yojson-android"

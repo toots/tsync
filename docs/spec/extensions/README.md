@@ -14,7 +14,7 @@ Extensions: [totp](totp.md), [passwords](passwords.md).
 
 ## 1. Problem
 
-Some small, secret, per-user data (one-time-password seeds, website and app passwords)
+Some small, secret, per-user data (one-time-password seeds, website and app passwords, passkeys)
 should follow the user across machines the way files do. A domain already moves data between
 machines with history, offline edits and conflict handling. An extension reuses that, keeping
 its records encrypted in a hidden folder of the domain, instead of building a second sync
@@ -139,7 +139,20 @@ domain's names to a user or another party omits it, and only the extension layer
 
 | name | value | rule |
 |---|---|---|
-| `RECORD_KEEP` | 30 days | how long a record body read on a lazy tree stays pinned, renewed at each read |
+| `RECORD_KEEP` | 30 days | how long a record body read on a lazy tree stays pinned, renewed by a read that finds less than half of it left |
+
+### 4.6 Opened records
+
+A verb reads what it needs at the cost of a listing, however many records the folder holds:
+
+- The owner keeps each record it opened, in memory, by domain and file, with the file's version as
+  the listing states it (its etag, content id, size, mtime and whether a local edit is staged).
+  A read opens again only the files whose version changed; a listing that finds every version
+  unchanged opens nothing.
+- What was opened under a K is dropped when the owner forgets that K
+  ([vault §6](vault.md#6-unlocking-and-the-keystore): a lock, a lock that forgets the secret key,
+  a deleted vault), so a locked vault holds no plaintext record.
+- A folder with a conflicted copy is folded first (§4.2) and read whole, as the fold needs.
 
 ## 5. Host adapters
 

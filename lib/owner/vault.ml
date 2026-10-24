@@ -61,6 +61,17 @@ let key_entry (domain : Tsync_domain.Domain.t) =
 
 let secret_key_entry domain = key_entry domain ^ "/secret-key"
 
+(* security-model §10.6: what was opened under a K goes with it. Registered at
+   module initialisation, called with the domain's name. *)
+let forgotten : (string -> unit) list Atomic.t = Atomic.make []
+let when_forgotten f = Atomic.set forgotten (f :: Atomic.get forgotten)
+
+let drop_key ~domain t =
+  Atomic.set t.key None;
+  Atomic.set t.since None;
+  Atomic.set t.announced [];
+  List.iter (fun f -> f (key_entry domain)) (Atomic.get forgotten)
+
 (* §6.1: a lock whose delete failed did not happen. *)
 let forget ~domain ~secret_key t =
   let deleted entry =
@@ -72,10 +83,7 @@ let forget ~domain ~secret_key t =
             | exception Fail.E f -> Some (ks.name, f.reason))
   in
   let key_failure = deleted (key_entry domain) in
-  if key_failure = None then (
-    Atomic.set t.key None;
-    Atomic.set t.since None;
-    Atomic.set t.announced []);
+  if key_failure = None then drop_key ~domain t;
   let secret_key_failure =
     if secret_key then deleted (secret_key_entry domain) else None
   in
@@ -772,7 +780,7 @@ let delete ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree ~confirm t =
     match forget ~domain ~secret_key:true t with
     | () -> None
     | exception Fail.E f ->
-        Atomic.set t.key None;
+        drop_key ~domain t;
         Atomic.set t.secret_key None;
         Some f.reason
 

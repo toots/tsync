@@ -12,6 +12,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_vault
+  base64
   tsync_domain
   tsync_gc
   tsync_remote
@@ -20,7 +22,6 @@
   tsync_status
   tsync_http
   tsync_http_proxy
-  tsync_vault
   qrc
   unix
   yojson))

@@ -40,7 +40,8 @@ Trust boundaries, each an enforcement point in this file:
 3. The listener host's filesystem outside its stores.
 4. Local state: mirror, staged bodies, chunk cache, sync state (before-values, position), queues. Staged bodies are the only copy of content not yet on the main.
 5. Operational information: status reports, domain names, traffic, backend settings.
-6. Vault contents: extension records (one-time-password seeds, website and app passwords), each domain's vault key K, its secret key and its passphrase ([vault](../extensions/vault.md)).
+6. Vault contents: extension records (one-time-password seeds, website and app passwords,
+   passkeys' private keys), each domain's vault key K, its secret key and its passphrase ([vault](../extensions/vault.md)).
 
 ---
 
@@ -264,7 +265,7 @@ These general rules are realised by the hosts, which link here: the vault keysto
     `NSWorkspace.willSleepNotification`.
   - Android: by the app, on `ACTION_SCREEN_OFF`.
 - K leaves a machine only wrapped in the keyring. A keystore that would copy it to another device or into a backup is not used that way.
-- **Plaintext records** exist only in the owner's memory. Only envelopes reach staged bodies, the chunk cache and the store.
+- **Plaintext records** exist only in the owner's memory, which keeps those it opened until it forgets their K ([extensions README §4.6](../extensions/README.md#46-opened-records)). Only envelopes reach staged bodies, the chunk cache and the store.
 - **Codes and passphrases in a UI.** A client copies a one-time code only on the user's gesture,
   and marks it sensitive where the platform has a marker (macOS `org.nspasteboard.ConcealedType`,
   Android `EXTRA_IS_SENSITIVE`) so clipboard history, sync and previews skip it. It is not cleared

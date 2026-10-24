@@ -318,6 +318,14 @@ type _ request =
   | Totp_import : string -> totp_imported request  (** the text of a file *)
   | Totp_export : string -> totp_exported request
       (** the passphrase as typed; one URI per record *)
+  | Extension : {
+      action : string;
+      args : (string * Yojson.Safe.t) list;
+    }
+      -> (string * Yojson.Safe.t) list request
+      (** extensions README §6: an extension's verb, its request members in and
+          its reply's out, for extensions whose actions the protocol does not
+          type one by one *)
 
 type packed = Request : 'a request -> packed
 
@@ -374,6 +382,7 @@ let action : type a. a request -> string = function
   | Totp_remove _ -> "totp_remove"
   | Totp_import _ -> "totp_import"
   | Totp_export _ -> "totp_export"
+  | Extension e -> e.action
 
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
@@ -381,12 +390,17 @@ let mutates : type a. a request -> bool = function
   | Vault_appearance _ | Vault_rekey _ | Totp_add _ | Totp_rename _
   | Totp_remove _ | Totp_import _ ->
       true
+  (* extensions README §6: an extension's verbs that write, by name. *)
+  | Extension e ->
+      List.exists
+        (fun suffix -> String.ends_with ~suffix e.action)
+        ["_add"; "_edit"; "_remove"; "_import"; "_passkey_create"]
   | _ -> false
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
   | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ | Vault_rekey _
-  | Vault_kit _ ->
+  | Vault_kit _ | Extension _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
@@ -462,6 +476,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Stop | Share_clear_cache | Vault_status ->
       []
   | Totp_export p | Vault_init p -> [("passphrase", `String p)]
+  | Extension e -> e.args
   | Vault_unlock r ->
       ("passphrase", `String r.passphrase)
       :: opt "secretKey" (fun k -> `String k) r.secret_key
@@ -755,6 +770,19 @@ let decode j =
     | "totp_code" -> Request (Totp_code (required j "id"))
     | "totp_import" -> Request (Totp_import (required j "text"))
     | "totp_export" -> Request (Totp_export (required j "passphrase"))
+    | a when String.starts_with ~prefix:"passwords_" a ->
+        Request
+          (Extension
+             {
+               action = a;
+               args =
+                 (match j with
+                   | `Assoc l ->
+                       List.filter
+                         (fun (k, _) -> k <> "action" && k <> "domain")
+                         l
+                   | _ -> []);
+             })
     | a -> Fail.invalid "unknown action: %s" a
 
 let kind_name = function
@@ -907,6 +935,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Vault_unlock _ | Vault_lock _ | Vault_appearance _ | Totp_rename _
     | Totp_remove _ ->
         ok []
+    | Extension _ -> ok reply
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Totp_add _ -> ok [("id", `String reply)]
     | Totp_code _ ->
@@ -1190,6 +1219,10 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   in
   match req with
     | Ping -> ()
+    | Extension _ -> (
+        match j with
+          | `Assoc l -> List.filter (fun (k, _) -> k <> "ok") l
+          | _ -> [])
     | Vault_unlock _ -> ()
     | Vault_lock _ -> ()
     | Vault_appearance _ -> ()
