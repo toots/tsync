@@ -67,6 +67,12 @@ let matching () =
       ("https://router", "https://x.router");
       ("https://router", "http://router");
       ("https://co.uk", "https://bank.co.uk");
+      ("https://idmsa.apple.com", "https://iforgot.apple.com");
+      ("https://alice.github.io", "https://bob.github.io");
+      ("https://github.io", "https://alice.github.io");
+      ("https://bank.co.uk", "https://login.bank.co.uk");
+      ("https://10.0.0.1", "https://192.168.0.1");
+      ("https://10.0.0.1", "https://10.0.0.1");
       ("android://com.example.app", "android://com.example.app");
       ("android://com.example.app", "android://com.example.app2");
       ("android://com.example.app", "https://com.example.app");

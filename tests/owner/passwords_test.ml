@@ -363,6 +363,25 @@ let logins () =
     (List.for_all
        (fun r -> field r "kind" <> Some "note")
        (rows [("site", s "https://github.com")]));
+  List.iter
+    (fun (title, url) ->
+      answer ("add, " ^ title)
+        (ask
+           [
+             ("action", s "passwords_add");
+             ("title", s title);
+             ("urls", `List [s url]);
+             ("password", s "x");
+           ]))
+    [
+      ("A shop id", "https://id.shop.example");
+      ("Z shop help", "https://help.shop.example");
+    ];
+  p "%-40s %s" "a sibling host's listing, its own first"
+    (String.concat ", "
+       (List.filter_map
+          (fun r -> field r "title")
+          (rows [("site", s "https://help.shop.example")])));
   answer "a note with a password"
     (ask
        [
