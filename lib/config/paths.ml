@@ -10,6 +10,12 @@ let env_dir var default =
     | Some d when d <> "" && String.starts_with ~prefix:"/" d -> d
     | _ -> Filename.concat (home ()) default
 
+(* file-provider §3.1: on macOS the host asks the system for the group
+   container before the program touches it; elsewhere nothing. *)
+let group_claim = ref ignore
+let set_group_claim f = group_claim := f
+let claim_group () = !group_claim ()
+
 let group () =
   Filename.concat (home ())
     "Library/Group Containers/group.org.feverdreamtv.tsync"

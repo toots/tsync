@@ -36,7 +36,7 @@ enum OwnerFailure: Error, @unchecked Sendable {
 
     static let knownCodes: Set<String> = [
         "not_found", "exists", "not_empty", "read_only", "denied", "invalid", "unreachable",
-        "busy", "paused", "internal",
+        "busy", "paused", "locked", "internal",
     ]
 }
 

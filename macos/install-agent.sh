@@ -9,13 +9,15 @@
 set -euo pipefail
 
 APP="${1:-/Applications/TsyncApp.app}"
+# file-provider §3.2: the owner program, inside its wrapper bundle.
+DAEMON="$APP/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync"
 LABEL=org.feverdreamtv.tsync.daemon
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 SOCKET="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"
 LOG="$HOME/Library/Logs/tsync-daemon.log"
 
-[[ -x "$APP/Contents/MacOS/tsync" ]] || {
-    echo "no daemon at $APP/Contents/MacOS/tsync" >&2
+[[ -x "$DAEMON" ]] || {
+    echo "no daemon at $DAEMON" >&2
     exit 1
 }
 
@@ -39,7 +41,7 @@ cat > "$PLIST" <<EOF
     <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$APP/Contents/MacOS/tsync</string>
+        <string>$DAEMON</string>
         <string>start</string>
     </array>
     <key>AssociatedBundleIdentifiers</key>
