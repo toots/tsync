@@ -105,7 +105,27 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   the `recovered` notice, or a listing that is not `outdated`, clears it: `stat`, `status` and
   mutations succeed without the store and say nothing about it.
 
-## 6. Configuration and secrets
+### 5.1 Working offline
+
+**Direction.** The phone is often offline, and the app stays useful then: what the phone has
+seen and fetched stays usable, says how old it is, and is refreshed once the server answers.
+Only what the phone never had needs the server. Every screen and every feature added later
+follows this rule rather than failing as a whole when the store is silent; the core's side is
+[android §3.3](android.md#33-working-without-the-store) and, for the vault,
+[extensions README §4.1](../extensions/README.md#41-where-they-live).
+
+- **Files.** A folder listed before is shown from its last view, `outdated` with its age
+  (§10.3). A file whose bytes are on the phone (`cached`, `pinned`) opens from such a listing,
+  in the app and through the documents provider. A file that is `online-only` while the app is
+  offline is shown as not available offline, and an open of it is refused at once with that
+  reason, never handed out as a descriptor whose reads wait on a silent store. Saves, uploads and
+  edits are accepted and pushed later (§8). Making a file available offline, `share`, and a folder
+  never listed need the server.
+- **Vault.** The vault's last view answers offline (§10.8): the codes are listed and copied, with
+  "Offline: codes as of <time>"; a code added is listed at once and pushed later; unlocking with
+  the passphrase works from the cached keyring. Each vault screen asks again when the app comes
+  to the foreground, on the `recovered` notice, and when a code expires.
+
 
 ### 6.1 The config the app writes
 
@@ -118,7 +138,9 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
 ```
 
 - The app configures one domain backed by one http-proxy server: URL, secret, domain, cache limit
-  (default `2G`).
+  (default `2G`). The config has no `extensions`: the phone uses the extensions the server states
+  for the domain ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5) and decides
+  nothing about them.
 - **Validation**, first failure wins and is attached to its field:
   1. the URL MUST use `https://` unless its host is a loopback address
      ([android.md §4.1](android.md#41-what-the-host-provides));
@@ -324,7 +346,9 @@ implementation's.
 Until a config exists the app shows only Setup (§10.7). A config the core refuses at boot (one
 written by an earlier version, for instance with a cleartext URL) also shows Setup, with its fields
 filled from that config and the core's message; nothing is deleted. After that, three top-level destinations
-reachable from every screen: **Files** (the start destination), **Activity** and **Settings**.
+reachable from every screen: **Files** (the start destination), **Activity** and **Settings**, and
+**Vault** (§10.8) while the domain uses an extension: shown when `vault_status` is not refused for
+using none, asked at boot and again each time the app comes to the foreground.
 Process death and configuration changes restore the destination and, in Files, the folder trail.
 
 ### 10.3 Files
@@ -415,12 +439,72 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
   checked does not block setup: the domain name can be typed.
 - **Settings**:
   - *Server*: the same fields, with the restart prompt of §6.1 on a change.
-  - *Storage*: the cache limit; how much the cache (from `stats`) and the staged bodies (from
+  - *Storage*: the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
+    when empty), with the server named when they are its list; the cache limit; how much the cache (from `stats`) and the staged bodies (from
     `status`) hold now;
     "Free up space" (`evict` on the root, after a confirmation saying that files made available
     offline are removed from the phone too).
   - *Camera backup*: the controls of §11.6.
   - *About*: the app version and the commit it was built from.
+
+### 10.8 Vault
+
+The vault's extensions on this phone: one tab per extension the domain uses, **Codes** for
+`totp` ([totp](../extensions/totp.md)), more as further extensions arrive. The phone follows the
+domain: it never creates, deletes or re-keys the vault, which a computer does
+([vault §3](../extensions/vault.md#3-initialising), §7).
+
+- **The vault's mark** heads the screen: its appearance from `vault_status`
+  ([vault §8.1](../extensions/vault.md#81-appearance)), the vault's icon or the tsync glyph in
+  its colour.
+- **Menu** (⋮): the vault's state from `vault_status` (locked or unlocked, whether this phone is
+  enrolled, where K is kept); **Lock** (`vault_lock`, after a confirmation saying codes need the
+  passphrase again afterwards); **Forget the secret key on this phone** (`vault_lock` with
+  `forget`, after a confirmation saying the next unlock needs it again).
+- The owner computes every code; the app never sees a seed.
+
+#### Codes
+
+- **List** (`totp_list`): one row per record, issuer and account, the code grouped in threes, and
+  the seconds left as a countdown. The app asks again when the earliest countdown reaches zero,
+  and when the screen returns to the foreground; codes are not computed in the app. A search field
+  narrows the list (`filter`). Unreadable records (`corrupt`) are counted in a row of their own.
+- **Copy**: a tap writes the code to the clipboard with `ClipDescription.EXTRA_IS_SENSITIVE`, so
+  the keyboard and clipboard previews hide it, and confirms with a short message that names the
+  record, not the code.
+- **Add** offers:
+  - *Scan a QR code*: Google Play services' code scanner (`GmsBarcodeScanning`, QR format only),
+    which needs no camera permission. The scanned text is sent as `totp_add`; a refusal shows the
+    owner's sentence. Without Play services the choice is shown disabled, saying why. A scan that
+    fails says why, and that Play services needs the camera permission where the system
+    withholds it (GrapheneOS does by default): the scanner is Play services', not the app's.
+  - *Import a file*: a document picker for a plain-text export, sent as `totp_import`
+    ([totp §5.2](../extensions/totp.md#52-plain-text-import)). The result says how many were added,
+    already there and refused, with each refused line's number and reason.
+  - *Enter a code*: fields for the issuer, the account and the secret, which also takes a pasted
+    `otpauth://totp/` URI, masked with a show icon like the passphrase: one starting with
+    `otpauth://` is sent as `totp_add` with `uri`, anything
+    else with `secret`, `issuer` and `account` ([totp §5.3](../extensions/totp.md#53-a-bare-secret)).
+- **Opened from elsewhere**: the app handles `otpauth://` links (an intent filter on the scheme, declared
+  always), so the camera, Lens or a browser can hand a scanned code to tsync. Any app can send
+  one, so it never adds silently: a sheet names the record ("Add GitHub — me to your vault?") and
+  adds with `totp_add` on **Add**. A locked vault asks the passphrase first (the *locked* state
+  below); a domain using no extension, or no vault, says so and offers nothing.
+- **Rename** and **Remove** (after a confirmation naming the record) from a row's menu.
+- **No export.** The app never offers `totp_export` (totp §5).
+- **States**, each told apart (§10.1):
+  - *no vault* (`not_found`): a sentence saying the vault is created on a computer with
+    `tsync vault init`, and nothing to act on;
+  - *locked*: a passphrase field (masked, paste accepted, no autofill, no suggestions, a show
+    icon that reveals it while on, [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)) and, when
+    the phone is not enrolled, a secret key field (the same); **Unlock** (`vault_unlock`), which
+    enrols the phone; `denied` and `invalid` stay on the fields with the owner's sentence;
+  - *unreachable*, *offline* and *read-only* as everywhere else.
+- **Offline** (§5.1): a reply with `outdated` shows a banner "Offline: codes as of <time>" from
+  its `pulledAt`, above the list or the unlock form; the codes still copy. The `recovered` notice
+  asks again.
+- **Screens that show secrets** (the passphrase and secret key fields, the codes list) set
+  `FLAG_SECURE`: no screenshots, no recent-apps thumbnail.
 
 ## 11. Camera backup
 
@@ -649,6 +733,31 @@ What the app's build MUST guarantee; where it runs and what it gates is [10](../
 
 An implementation MUST exhibit these properties; [09-tests.md](../09-tests.md) says how they are
 checked.
+
+**Vault**
+- With a server that states no extension, no Vault destination exists; once it states `totp`, the
+  destination appears at the next foreground with no change on the phone. The app's config never
+  holds `extensions`.
+- The app offers no vault creation, deletion or passphrase change; with no vault it says so.
+- Unlock with a wrong passphrase or secret key stays on the fields with the owner's sentence; a
+  phone not enrolled is asked for the secret key, and neither secret is ever on the clipboard.
+- A copied code carries `EXTRA_IS_SENSITIVE`; the confirmation names the record, not the code.
+- An `otpauth://totp/` link opened from another app adds nothing until **Add** on the sheet that
+  names it; an `otpauth://hotp/` one shows the owner's refusal.
+- The list asks the owner again when the earliest countdown reaches zero and never computes a
+  code itself; the app holds no seed at any point, and offers no export.
+- A scanned `otpauth://hotp/` code, and a file with a refused line, show the owner's refusal; the
+  file's other lines are added.
+- The Codes and passphrase screens are absent from screenshots and the recent-apps thumbnail.
+- After an unlock, killing the app and opening it again shows the codes without a passphrase
+  (the keystore, [android.md §4.1](android.md#41-what-the-host-provides)); after a lock it asks.
+
+**Offline**
+- With the store down after the folders were listed: a listed folder shows its rows with the
+  offline banner; a `cached` or `pinned` file opens; an `online-only` file's open is refused at
+  once with "not available offline"; a save is accepted and committed when the store returns.
+- With the store down after the codes were listed: the codes list with the offline banner and
+  copy; a code added appears at once; on `recovered` the banner goes and the list is asked again.
 
 **Names and writes**
 - A share-sheet save, an in-app upload, a document creation and a first camera upload never replace

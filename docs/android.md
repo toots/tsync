@@ -11,6 +11,15 @@ The app connects to one domain on one tsync server.
 
 **Camera backup.** In Settings, turn on *Back up camera photos and videos*, and choose between everything already on the phone and new captures only. It uploads over wifi only and not on a low battery, unless you switch those off. *Back up now* runs it at once.
 
+**Vault.** <a id="vault"></a>When the server's domain uses the [vault](vault.md), a *Vault* screen appears. The phone follows the domain: create the vault, change its passphrase or delete it on a computer.
+
+- *Unlock* with the passphrase, and the first time on this phone the secret key too; the phone then stays unlocked until you lock it from the screen's menu (⋮), which can also forget the secret key.
+- *Codes* lists your two-factor codes with the seconds each has left. Tap one to copy it; the copy is marked sensitive, so the keyboard and clipboard previews hide it. Long-press to rename or remove. The search field narrows the list.
+- *Add* (+) scans a QR code, imports another authenticator's plain-text export, or takes the issuer, account and seed by hand (or a pasted `otpauth://` link). Scanning uses Google Play services' scanner; on GrapheneOS, Play services needs the camera permission for it. A QR code opened from the camera or a browser is offered to tsync too, and added only after you confirm.
+- Offline, the codes still work: a banner says when they were last refreshed.
+- When another machine joins the vault, a banner names it until you tap *Seen*; after a re-key elsewhere, the unlock asks for the new secret key and says why.
+- The screen cannot be screenshotted or shown in recent apps.
+
 **Activity.** What is uploading and downloading, what failed with a *Retry*, a pause switch, and the status text for diagnosis.
 
 **Settings → Storage → Free up space** removes every download from the phone, files kept offline included.

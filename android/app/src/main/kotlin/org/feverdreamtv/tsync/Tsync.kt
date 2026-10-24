@@ -1,6 +1,10 @@
 package org.feverdreamtv.tsync
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.provider.DocumentsContract
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -9,9 +13,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import org.feverdreamtv.tsync.bridge.Keystore
 import org.feverdreamtv.tsync.bridge.Native
 import org.feverdreamtv.tsync.bridge.NativeCore
 import org.feverdreamtv.tsync.core.Client
+import org.feverdreamtv.tsync.core.Vault
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.ConfigStore
 import org.feverdreamtv.tsync.core.Core
@@ -48,6 +54,10 @@ class Tsync private constructor(val context: Context) {
     val config = ConfigStore(home)
     val core: Core = NativeCore
     val client = Client(core)
+    val vault = Vault(client)
+
+    /** Bumped by every vault change the app makes, so each vault screen asks again (pitfall B-8.18). */
+    val vaultChanges = MutableStateFlow(0)
     val ingest = Ingest(client, IntentStore(home))
     val keepAlive = KeepAlive(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -81,6 +91,7 @@ class Tsync private constructor(val context: Context) {
         ingest.intents.recover()
         val bundle = File(home, "ca-bundle.pem")
         TrustBundle.refresh(bundle, listOf(File("/apex/com.android.conscrypt/cacerts"), File("/system/etc/security/cacerts")))
+        Keystore.directory = File(context.noBackupFilesDir, "vault")
         System.loadLibrary("tsyncjni")
         Native.nativeInit(bytes(home.path), bytes(bundle.path), bytes(ingest.intents.stagingDirectory.path))
         Thread(::readNotices, "tsync-notices").apply { isDaemon = true }.start()
@@ -100,8 +111,33 @@ class Tsync private constructor(val context: Context) {
             Boot.Failed(e.message ?: e.toString())
         }
         boot = result
-        if (result == Boot.Ready) resumeSaves()
+        if (result == Boot.Ready) {
+            resumeSaves()
+            watchScreen()
+        }
         return result
+    }
+
+    /** vault §6.2: reported while the process lives; a process that is gone holds no K to lock. */
+    private fun watchScreen() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                scope.launch {
+                    try {
+                        vault.screenLocked()
+                        vaultChanges.value += 1
+                    } catch (e: CoreException) {
+                        // No vault, or none to lock: nothing to report.
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
     }
 
     /** The core's verdict on the config on disk, for a boot that failed. */
@@ -147,6 +183,7 @@ class Tsync private constructor(val context: Context) {
                 }
                 "recovered" -> {
                     latch.recovered()
+                    vaultChanges.value++
                     notices.tryEmit(Notice.Recovered)
                     observed.keys.forEach(::notifyChildren)
                 }

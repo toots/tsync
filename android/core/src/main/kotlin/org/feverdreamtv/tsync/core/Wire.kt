@@ -14,6 +14,7 @@ enum class Code(val wire: String) {
     UNREACHABLE("unreachable"),
     BUSY("busy"),
     PAUSED("paused"),
+    LOCKED("locked"),
     INTERNAL("internal");
 
     companion object {
@@ -107,7 +108,15 @@ data class Status(
 )
 
 /** What the owner's `stats` report says about this domain's local storage and stuck work. */
-data class Stats(val cacheBytes: Long?, val pinnedBytes: Long?, val parked: Int, val lastError: String?)
+data class Stats(
+    val cacheBytes: Long?,
+    val pinnedBytes: Long?,
+    val parked: Int,
+    val lastError: String?,
+    /** 05 §2.1 rule 5: in force, and whether they are the server's list. */
+    val extensions: List<String> = emptyList(),
+    val extensionsFromServer: Boolean = false,
+)
 
 enum class Pull(val wire: String?) { DEFAULT(null), NOW("now"), NEVER("never") }
 
@@ -250,16 +259,21 @@ class Client(private val core: Core) {
         val body = if (reply.has("cache")) reply else reply.optJSONArray("domains")?.optJSONObject(0) ?: reply
         val cache = body.optJSONObject("cache")
         val queues = body.optJSONObject("queues")
+        val settings = body.optJSONObject("settings")
+        val extensions = settings?.optJSONArray("extensions")
         return Stats(
             cacheBytes = cache?.takeIf { it.has("bytes") }?.optLong("bytes"),
             pinnedBytes = cache?.takeIf { it.has("pinnedBytes") }?.optLong("pinnedBytes"),
             parked = queues?.optInt("parked", 0) ?: 0,
             lastError = queues?.let { text(it, "lastError") }?.takeIf { it.isNotEmpty() },
+            extensions = if (extensions == null) emptyList() else (0 until extensions.length()).map { extensions.optString(it) },
+            extensionsFromServer = settings?.optJSONObject("domainWide")?.optString("extensions") == "main",
         )
     }
 
     private fun items(rows: JSONArray?): List<Item> = objects(rows).map(Item::of)
 
-    private fun objects(rows: JSONArray?): List<JSONObject> =
-        if (rows == null) emptyList() else (0 until rows.length()).map { rows.getJSONObject(it) }
 }
+
+internal fun objects(rows: JSONArray?): List<JSONObject> =
+    if (rows == null) emptyList() else (0 until rows.length()).map { rows.getJSONObject(it) }

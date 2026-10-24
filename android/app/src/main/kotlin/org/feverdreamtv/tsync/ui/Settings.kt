@@ -66,6 +66,7 @@ import org.feverdreamtv.tsync.core.FormField
 import org.feverdreamtv.tsync.core.Parameters
 import org.feverdreamtv.tsync.core.ServerAnswer
 import org.feverdreamtv.tsync.core.ServerConfig
+import org.feverdreamtv.tsync.core.Stats
 import org.feverdreamtv.tsync.core.backup.BackupSettings
 
 private fun message(error: FormError): Int = when (error) {
@@ -186,7 +187,7 @@ private fun ServerForm(tsync: Tsync, initial: ServerConfig?, refusal: String?, s
     }
 }
 
-private data class Storage(val cache: Long?, val pinned: Long?, val staged: Long?)
+private data class Storage(val cache: Long?, val pinned: Long?, val staged: Long?, val stats: Stats?)
 
 @Composable
 fun SettingsScreen(tsync: Tsync, outer: PaddingValues) {
@@ -202,7 +203,7 @@ fun SettingsScreen(tsync: Tsync, outer: PaddingValues) {
         loaded = true
         storage = withContext(Dispatchers.IO) {
             val stats = runCatching { tsync.client.stats() }.getOrNull()
-            Storage(stats?.cacheBytes, stats?.pinnedBytes, runCatching { tsync.client.status().pendingBytes }.getOrNull())
+            Storage(stats?.cacheBytes, stats?.pinnedBytes, runCatching { tsync.client.status().pendingBytes }.getOrNull(), stats)
         }
     }
     Screen(stringResource(R.string.destination_settings), outer) { padding ->
@@ -221,6 +222,10 @@ fun SettingsScreen(tsync: Tsync, outer: PaddingValues) {
 
             Section(R.string.settings_storage)
             Text(stringResource(R.string.storage_limit, config?.maxCache.orEmpty()))
+            storage?.stats?.let {
+                val names = if (it.extensions.isEmpty()) stringResource(R.string.settings_extensions_none) else it.extensions.joinToString(", ")
+                Text(stringResource(R.string.settings_extensions, if (it.extensionsFromServer && it.extensions.isNotEmpty()) stringResource(R.string.settings_extensions_server, names) else names))
+            }
             storage?.let {
                 fun size(bytes: Long?) = bytes?.let { value -> Formatter.formatFileSize(context, value) } ?: context.getString(R.string.unknown_size)
                 Text(stringResource(R.string.storage_cache, size(it.cache)))

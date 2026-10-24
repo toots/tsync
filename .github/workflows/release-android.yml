@@ -40,9 +40,11 @@ jobs:
              && github.event.workflow_run.head_branch == 'main')
             || (github.event_name == 'workflow_dispatch'
                 && github.ref == 'refs/heads/main') }}
-      # A pull request never signs with the tsync key, and a fork has no secret.
-      KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_B64 || '' }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+      # 10 §5.4: every build of this repository signs with the tsync key, so a
+      # pull request's APK installs over an installed tsync; a fork has no
+      # secret. Signing is not publishing: PUBLISH alone decides that.
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -128,7 +130,7 @@ jobs:
       - name: Signing half not run
         if: env.KEYSTORE_B64 == ''
         run: |
-          echo "::notice::not signed with the tsync key (a pull request, or no ANDROID_KEYSTORE_B64: scripts/setup_android_signing.sh provisions it)"
+          echo "::notice::not signed with the tsync key (a fork, or no ANDROID_KEYSTORE_B64: scripts/setup_android_signing.sh provisions it)"
           if [ "$PUBLISH" = true ]; then
             echo "refusing to publish an APK signed with another key"; exit 1
           fi
