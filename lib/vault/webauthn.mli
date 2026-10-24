@@ -49,6 +49,3 @@ val related_host : string -> bool
     distinct registrable labels as WebAuthn's related origin requests do. A body
     that does not parse lists nothing. *)
 val related_allows : origin:string -> string -> bool
-
-(** Whether a host or suffix is a public suffix, by the bundled list. *)
-val is_public_suffix : string -> bool

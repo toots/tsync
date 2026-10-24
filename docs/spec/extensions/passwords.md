@@ -117,14 +117,16 @@ Anything else is refused `invalid`.
 A record matches a request when one of its `urls` matches it:
 
 - A web request, for origin `<scheme>://<host>[:<port>]`, matches a web site whose port is equal
-  (each scheme's default when absent), and whose host equals the request's host or, when the
-  site's host contains a `.`, is a suffix of it at a label boundary (`example.com` matches
-  `login.example.com`, not `badexample.com`). An `https` site does not match an `http` request.
+  (each scheme's default when absent), and whose host equals the request's host or shares its
+  registrable domain: the shortest suffix that is not a public suffix, by the bundled Public
+  Suffix List (§7.3). `idmsa.apple.com` matches `iforgot.apple.com`; `alice.github.io` does not
+  match `bob.github.io`, and `co.uk` matches no host but itself. An IP address has no
+  registrable domain. An `https` site does not match an `http` request.
 - An app request matches the `android://` site of its package, and the `https` sites the app is
   verified for (§4.3).
 
-The suffix rule has no public-suffix list: a site written as `co.uk` matches every host under
-it. The user wrote it.
+A list for a site shows first the records with a site on the request's own host, as a browser
+does, since one domain often holds several sign-in hosts with distinct accounts.
 
 ### 4.3 An app's websites
 
