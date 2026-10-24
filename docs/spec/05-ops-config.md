@@ -133,8 +133,11 @@ it unasked. The config editor asks about it only in its advanced mode
    them, and a client may only narrow them: a domain that leaves `extensions` out uses the list
    its main states, and one that lists `extensions` behind a main that states a list is refused
    by rule 3 unless its list is a subset of the main's, naming both. A domain whose main states
-   nothing (a plain store) uses its own list, else none. Until the main's list is learned, kept
-   from an earlier run included (rule 4), a domain that leaves `extensions` out uses none.
+   nothing (a plain store) uses its own list, else none. A vault or extension verb asked before
+   the main's list is learned, kept from an earlier run included (rule 4), asks the main first
+   ([extensions README §3](extensions/README.md#3-opting-in)): an unknown list is never read as
+   none, and a main that does not answer fails the verb UNREACHABLE. A kept list answers at
+   once, and the main is asked again behind it.
 6. A main that states its values MAY state a projector with them
    ([frontends/http-proxy](frontends/http-proxy.md), `projectCommits`). It is not a setting of the
    client: a client names it in the entries it creates and leaves their projection to it

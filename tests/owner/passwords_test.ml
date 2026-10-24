@@ -195,6 +195,56 @@ let logins () =
            ("password", s "hunter2 hunter2");
          ])
   in
+  (* android §5.1: fill answers only the site the login matches. *)
+  let filled site =
+    let r =
+      ask [("action", s "passwords_fill"); ("site", s site); ("id", s gh)]
+    in
+    match field r "password" with
+      | Some pw ->
+          p "%-40s %s" ("fill for " ^ site)
+            (if pw = "hunter2 hunter2" then "the password" else "another")
+      | None -> answer ("fill for " ^ site) r
+  in
+  filled "https://github.com";
+  filled "https://evil.example";
+  let saved label fields =
+    let r = ask (("action", s "passwords_save") :: fields) in
+    match field r "error" with
+      | Some _ -> answer label r
+      | None ->
+          p "%-40s saved %s%s" label
+            (match member r "saved" with
+              | Some (`Bool b) -> string_of_bool b
+              | _ -> "?")
+            (match field r "update" with
+              | Some id -> ", update " ^ show_id id
+              | None -> "")
+  in
+  let site = ("site", s "https://example.org/signin") in
+  saved "save, new" [site; ("username", s "a"); ("password", s "one")];
+  saved "save, the same" [site; ("username", s "a"); ("password", s "one")];
+  saved "save, another password"
+    [site; ("username", s "a"); ("password", s "two")];
+  (match
+     field
+       (ask
+          [
+            ("action", s "passwords_save");
+            site;
+            ("username", s "a");
+            ("password", s "two");
+          ])
+       "update"
+   with
+    | Some id ->
+        saved "save, approving the update"
+          [site; ("username", s "a"); ("password", s "two"); ("update", s id)];
+        saved "save, then the same"
+          [site; ("username", s "a"); ("password", s "two")]
+    | None -> p "save: no update named");
+  saved "save, a bad site"
+    [("site", s "ftp://x"); ("username", s "a"); ("password", s "x")];
   let gen =
     id_of "add, generated"
       (ask
@@ -432,6 +482,115 @@ let logins () =
   p "%-40s %d" "a login's fields, through get"
     (match member got "fields" with Some (`List l) -> List.length l | _ -> -1);
   ignore (ask [("action", s "passwords_remove"); ("id", s fielded_id)]);
+  (* §5.1: the pick saves the login, the submit sets its username. *)
+  let count () =
+    match member (ask [("action", s "passwords_list")]) "records" with
+      | Some (`List l) -> List.length l
+      | _ -> -1
+  in
+  let before = count () in
+  let sg =
+    ask
+      [
+        ("action", s "passwords_suggest");
+        ("site", s "https://signup.example/register");
+        ("username", s "");
+      ]
+  in
+  let sg_id = Option.value ~default:"" (field sg "id") in
+  let got = ask [("action", s "passwords_get"); ("id", s sg_id)] in
+  p "%-40s saved at once %b, its password the one answered %b" "suggest"
+    (count () = before + 1)
+    (field got "password" = field sg "password" && field sg "password" <> None);
+  answer "save, suggested, the username"
+    (ask
+       [
+         ("action", s "passwords_save");
+         ("site", s "https://signup.example");
+         ("username", s "new@example.com");
+         ("suggested", s sg_id);
+       ]);
+  let got = ask [("action", s "passwords_get"); ("id", s sg_id)] in
+  p "%-40s username %s, still one login %b" "  after the submit"
+    (Option.value ~default:"?" (field got "username"))
+    (count () = before + 1);
+  answer "save, suggested, another site"
+    (ask
+       [
+         ("action", s "passwords_save");
+         ("site", s "https://other.example");
+         ("username", s "x");
+         ("suggested", s sg_id);
+       ]);
+  ignore (ask [("action", s "passwords_remove"); ("id", s sg_id)]);
+  (* §4.3: an app's verified website, from a stand-in for the statement fetch. *)
+  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+      if host = "example.com" && path = "/.well-known/assetlinks.json" then
+        Some
+          {|[{"relation":["delegate_permission/common.get_login_creds"],
+              "target":{"namespace":"android_app","package_name":"com.example.app",
+                        "sha256_cert_fingerprints":["AB:CD:EF"]}}]|}
+      else None);
+  let web =
+    ask
+      [
+        ("action", s "passwords_add");
+        ("title", s "Example");
+        ("urls", `List [s "https://example.com"; s "https://other.com"]);
+        ("username", s "app user");
+        ("password", s "app pass");
+      ]
+  in
+  let web_id = Option.value ~default:"" (field web "id") in
+  let for_app certs =
+    match
+      member
+        (ask
+           [
+             ("action", s "passwords_list");
+             ("site", s "android://com.example.app");
+             ("certs", `List (List.map s certs));
+           ])
+        "records"
+    with
+      | Some (`List l) -> List.exists (fun r -> field r "id" = Some web_id) l
+      | _ -> false
+  in
+  p "%-40s %b" "an app, the first request" (for_app ["abcdef"]);
+  let rec until n =
+    for_app ["abcdef"]
+    || n > 0
+       &&
+       (Rt.sleep 0.1;
+        until (n - 1))
+  in
+  p "%-40s %b" "  a later request" (until 50);
+  let filled =
+    ask
+      [
+        ("action", s "passwords_fill");
+        ("site", s "android://com.example.app");
+        ("id", s web_id);
+        ("certs", `List [s "abcdef"]);
+      ]
+  in
+  p "%-40s %b" "  fill, for the app" (field filled "password" = Some "app pass");
+  Rt.sleep 0.3;
+  p "%-40s %b" "another certificate, later"
+    (for_app ["000000"]
+    ||
+    (Rt.sleep 0.3;
+     for_app ["000000"]));
+  answer "fill, another certificate"
+    (ask
+       [
+         ("action", s "passwords_fill");
+         ("site", s "android://com.example.app");
+         ("id", s web_id);
+         ("certs", `List [s "000000"]);
+       ]);
+  ignore (ask [("action", s "passwords_remove"); ("id", s web_id)]);
+  Tsync_owner.Asset_links_cache.reset ();
   linked
 
 let import_export () =

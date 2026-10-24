@@ -17,21 +17,24 @@ let root =
 let store_path = Filename.concat root "store"
 
 (* 09 §5.3: doubles over the real local store. Under [Hung] a call waits until
-   the link returns, then goes through; under [Down] it answers unreachable.
+   the link returns, then goes through; under [Bodies_hung] only a chunk's read
+   does; under [Down] it answers unreachable.
    Listings and reads of the log are counted on entry: a pull makes one or
    the other. *)
 let mode = Atomic.make `Up
 let listings = Atomic.make 0
 
 let gated (s : Store.t) : Store.t =
-  let rec gate f =
+  let rec gate ?(body = false) f =
     match Atomic.get mode with
       | `Up -> f ()
-      | `Hung ->
+      | `Bodies_hung when not body -> f ()
+      | `Hung | `Bodies_hung ->
           Rt.sleep 0.05;
-          gate f
+          gate ~body f
       | `Down -> Fail.raise_ Fail.Unreachable "the store is down"
   in
+  let body k = Key.chunk_of k <> None in
   {
     s with
     put = (fun ?mode k b -> gate (fun () -> s.put ?mode k b));
@@ -40,8 +43,8 @@ let gated (s : Store.t) : Store.t =
       (fun k ->
         if Key.is_log_entry k || Key.leaf k = "tree-head" then
           Atomic.incr listings;
-        gate (fun () -> s.get_opt k));
-    get_range = (fun k o l -> gate (fun () -> s.get_range k o l));
+        gate ~body:(body k) (fun () -> s.get_opt k));
+    get_range = (fun k o l -> gate ~body:(body k) (fun () -> s.get_range k o l));
     head_opt = (fun k -> gate (fun () -> s.head_opt k));
     delete = (fun k -> gate (fun () -> s.delete k));
     delete_multi = (fun ks -> gate (fun () -> s.delete_multi ks));
@@ -283,7 +286,7 @@ let () =
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
-          "extensions":["totp"],"frontends":["android"],
+          "extensions":["totp","passwords"],"frontends":["android"],
           "backends":[{"type":"gated","name":"main","role":"main","path":"%s"}]}]}|}
        store_path);
 
@@ -634,6 +637,117 @@ let () =
   wait_stale ();
   vault "status, the store back";
   codes "codes, the store back";
+  p "== a read with pull background, the store silent (android §3.2 rule 1)";
+  p "  %-34s %s" "add a login"
+    (outcome
+       (action "passwords_add"
+          [
+            s "title" "GitHub";
+            ("urls", `List [`String "https://github.com"]);
+            s "username" "me";
+            s "password" "hunter2";
+          ]));
+  let timed label extra =
+    let started = Unix.gettimeofday () in
+    let r = action "passwords_list" ([s "site" "https://github.com"] @ extra) in
+    let took = Unix.gettimeofday () -. started in
+    p "  %-34s %s in %s" label
+      (match field r "records" with
+        | Some (`List rows) ->
+            Printf.sprintf "%d row(s)%s" (List.length rows)
+              (if field r "outdated" = Some (`Bool true) then ", outdated"
+               else "")
+        | _ -> outcome r)
+      (if took < 1. then "under a second" else "a second or more")
+  in
+  timed "list, the store up" [];
+  wait_stale ();
+  Atomic.set mode `Hung;
+  timed "list, pull auto" [];
+  wait_stale ();
+  timed "list, pull background" [s "pull" "background"];
+  (* android-app §5.1: the vault screens' first read answers from the last
+     view at once. *)
+  let read label verb extra =
+    wait_stale ();
+    let started = Unix.gettimeofday () in
+    let r = action verb extra in
+    let took = Unix.gettimeofday () -. started in
+    p "  %-34s %s%s in %s" label (outcome r)
+      (if field r "outdated" = Some (`Bool true) then ", outdated" else "")
+      (if took < 1. then "under a second" else "a second or more")
+  in
+  read "vault status, pull auto" "vault_status" [];
+  read "vault status, pull background" "vault_status" [s "pull" "background"];
+  read "codes, pull auto" "totp_list" [];
+  read "codes, pull background" "totp_list" [s "pull" "background"];
+  Atomic.set mode `Up;
+  p "== a record whose body the phone lacks (extensions README §4.1)";
+  (* The peer has no K: it writes a body that differs from every one the
+     phone holds, one byte of the login's changed, which does not open. *)
+  let login_id =
+    match field (action "passwords_list" []) "records" with
+      | Some (`List (`Assoc r :: _)) -> (
+          match List.assoc_opt "id" r with Some (`String id) -> id | _ -> "")
+      | _ -> ""
+  in
+  let copy = String.make 32 'c' in
+  (* The phone's push of the login reaches the peer on its own time. *)
+  let src = ".tsync-ext/passwords/" ^ login_id in
+  let deadline = Unix.gettimeofday () +. 20. in
+  let rec until_peer_has () =
+    let has = ref false in
+    peer_does (fun (module E) -> has := E.kind src = `File);
+    if (not !has) && Unix.gettimeofday () < deadline then (
+      Thread.delay 0.1;
+      until_peer_has ())
+  in
+  until_peer_has ();
+  peer_does (fun (module E) ->
+      let h = E.open_read src in
+      let body = E.read h ~off:0 ~len:(E.stat src).size in
+      E.close_read h;
+      let dst = ".tsync-ext/passwords/" ^ copy in
+      E.create dst ~exclusive:true;
+      let body = Bigstring.to_string body in
+      let flipped =
+        String.mapi
+          (fun i c ->
+            if i = String.length body - 1 then Char.chr (Char.code c lxor 1)
+            else c)
+          body
+      in
+      E.write dst ~off:0 (Bigstring.of_string flipped);
+      E.close dst);
+  let rows extra =
+    let started = Unix.gettimeofday () in
+    let r = action "passwords_list" extra in
+    let took = Unix.gettimeofday () -. started in
+    ( (match field r "corrupt" with
+        | Some (`List rows) -> List.length rows
+        | _ -> -1),
+      field r "outdated" = Some (`Bool true),
+      took )
+  in
+  (* Only bodies are withheld: the phone lists the copy and cannot read it. *)
+  Atomic.set mode `Bodies_hung;
+  wait_stale ();
+  ignore (rows [s "pull" "background"]);
+  Thread.delay 0.5;
+  let n, outdated, took = rows [s "pull" "background"] in
+  p "  %-34s %d not opening%s in %s" "list, bodies withheld" n
+    (if outdated then ", outdated" else "")
+    (if took < 1. then "under a second" else "a second or more");
+  Atomic.set mode `Up;
+  let deadline = Unix.gettimeofday () +. 20. in
+  let rec fetched () =
+    let n, _, _ = rows [s "pull" "background"] in
+    if n >= 1 || Unix.gettimeofday () > deadline then n
+    else (
+      Thread.delay 0.1;
+      fetched ())
+  in
+  p "  %-34s %d not opening" "list once it is fetched" (fetched ());
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

@@ -53,6 +53,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Tab
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -86,6 +89,7 @@ import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Codes
 import org.feverdreamtv.tsync.core.OneTimeCode
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.VaultStatus
 
 /** android-app §10.8: no screenshot or recent-apps thumbnail while a secret can be on screen. */
@@ -105,7 +109,7 @@ fun SecureWindow() {
 }
 
 /** Runs a vault call off the main thread; a refusal comes back as the owner's sentence. */
-private suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatchers.IO) {
+internal suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatchers.IO) {
     try {
         Result.success(call())
     } catch (e: CoreException) {
@@ -113,7 +117,7 @@ private suspend fun <T> attempt(call: () -> T): Result<T> = withContext(Dispatch
     }
 }
 
-private fun Result<*>.reason(): String? = exceptionOrNull()?.message
+internal fun Result<*>.reason(): String? = exceptionOrNull()?.message
 
 /** vault §8.1: the vault's icon, or tsync's glyph in the vault's colour. */
 @Composable
@@ -136,20 +140,31 @@ fun VaultMark(appearance: org.feverdreamtv.tsync.core.Appearance, modifier: Modi
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     SecureWindow()
     var status by remember { mutableStateOf<VaultStatus?>(null) }
+    // android-app §5.1: whether the status that asked the server has answered.
+    var settled by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var generation by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Boolean?>(null) }
     var adding by remember { mutableStateOf(false) }
+    // android-app §10.8: one tab per extension the domain uses.
+    var extensions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var tab by rememberSaveable { mutableStateOf("totp") }
     val scope = rememberCoroutineScope()
     val changes by tsync.vaultChanges.collectAsState()
     val lifecycle = LocalLifecycleOwner.current
     fun reload() = generation++
     LaunchedEffect(generation, changes) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            attempt { tsync.vault.status() }
-                .onSuccess { status = it; failure = null }
-                .onFailure { failure = it.message }
+            // android-app §5.1: the last view at once, then the server's answer over it.
+            for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
+                attempt { tsync.vault.status(pull) }
+                    .onSuccess { status = it; failure = null; if (pull == Pull.DEFAULT) settled = true }
+                    .onFailure { if (status == null) failure = it.message }
+            }
+            // passwords/android §1.1: after an unlock, once the status is shown.
+            if (status?.state == "unlocked") tsync.warmPasswords()
+            attempt { tsync.ask { stats() }.extensions }.onSuccess { extensions = it }
         }
     }
     val unlocked = status?.state == "unlocked"
@@ -178,7 +193,7 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             )
         },
         floatingActionButton = {
-            if (unlocked) FloatingActionButton(onClick = { adding = true }) {
+            if (unlocked && shownTab(extensions, tab) == "totp") FloatingActionButton(onClick = { adding = true }) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = stringResource(R.string.code_add))
             }
         },
@@ -190,18 +205,26 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             current.state == "absent" -> Message(stringResource(R.string.vault_absent), padding)
             current.state == "corrupt" -> Message(stringResource(R.string.vault_corrupt), padding)
             current.state == "locked" -> Column(Modifier.padding(padding)) {
-                if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+                if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
                 if (current.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
                 Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
             }
-            current.newMachines.isNotEmpty() -> Column(Modifier.padding(padding)) {
+            else -> Column(Modifier.padding(padding)) {
                 current.newMachines.forEach { Banner(stringResource(R.string.vault_machine_joined, it)) }
-                TextButton(onClick = {
+                if (current.newMachines.isNotEmpty()) TextButton(onClick = {
                     scope.launch { attempt { tsync.vault.acknowledgeMachines() }; reload() }
                 }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.vault_machines_seen)) }
-                CodesList(tsync, PaddingValues(0.dp), onLocked = ::reload)
+                val tabs = listOf("totp", "passwords").filter { it in extensions }
+                if (tabs.size > 1) TabRow(selectedTabIndex = tabs.indexOf(shownTab(extensions, tab)).coerceAtLeast(0)) {
+                    tabs.forEach { name ->
+                        Tab(selected = shownTab(extensions, tab) == name, onClick = { tab = name }, text = {
+                            Text(stringResource(if (name == "totp") R.string.vault_tab_codes else R.string.vault_tab_passwords))
+                        })
+                    }
+                }
+                if (shownTab(extensions, tab) == "passwords") PasswordsTab(tsync, PaddingValues(), onLocked = ::reload)
+                else CodesList(tsync, PaddingValues(), onLocked = ::reload)
             }
-            else -> CodesList(tsync, padding, onLocked = ::reload)
         }
     }
     confirm?.let { forget ->
@@ -222,6 +245,11 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     }
     if (adding) AddCodeSheet(tsync, onDismiss = { adding = false; tsync.vaultChanges.value++ })
 }
+
+/** The tab asked for when the domain uses its extension, else the one it uses. */
+private fun shownTab(extensions: List<String>, asked: String): String =
+    if (asked in extensions || "totp" !in extensions && "passwords" !in extensions) asked
+    else if ("totp" in extensions) "totp" else "passwords"
 
 private fun describe(context: Context, status: VaultStatus): String {
     val state = context.getString(if (status.state == "unlocked") R.string.vault_state_unlocked else R.string.vault_state_locked)
@@ -279,6 +307,9 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
     var codes by remember { mutableStateOf<Codes?>(null) }
+    // android-app §5.1: whether a read that waited for the server has answered, before which an
+    // outdated list is the last view shown at once, not yet a sign of being offline.
+    var settled by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }
     var acting by remember { mutableStateOf<OneTimeCode?>(null) }
@@ -288,9 +319,10 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
     // at each return to the foreground, and after each change it makes (pitfall B-8.18).
     LaunchedEffect(filter, changes) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (codes == null) attempt { tsync.vault.codes(filter, Pull.BACKGROUND) }.onSuccess { codes = it }
             while (true) {
                 val result = attempt { tsync.vault.codes(filter) }
-                result.onSuccess { codes = it; failure = null }.onFailure { failure = it.message }
+                result.onSuccess { codes = it; settled = true; failure = null }.onFailure { failure = it.message }
                 if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
                     onLocked()
                     return@repeatOnLifecycle
@@ -309,7 +341,7 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
         )
         failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         val current = codes ?: return@Column Loading()
-        if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
+        if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
             if (current.records.isEmpty()) item { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
             items(current.records, key = { it.id }) { record ->

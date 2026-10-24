@@ -510,7 +510,7 @@ let bridge_request config j =
                                    | None -> [])) );
                            ]
                        | _ -> []))
-                 (all (fun d -> Vault_cmds.ask d P.Vault_status))) );
+                 (all (fun d -> Vault_cmds.ask d (P.Vault_status `Auto)))) );
         ]
     | Some "match" ->
         let origin = required j "origin" in
@@ -549,73 +549,22 @@ let bridge_request config j =
                      | _ -> None)
                  answers) );
         ]
+    (* §9.2: the owner's passwords_fill and passwords_save, which a page's
+       origin names the site of. *)
     | Some "fill" ->
-        let origin = required j "origin" and id = required j "id" in
-        let reply = call (pick j) "get" [("id", s id)] in
-        let got = `Assoc reply in
-        (* §9.2: a page never receives another site's login. *)
-        let urls =
-          match member got "urls" with
-            | Some (`List l) ->
-                List.filter_map (function `String u -> Some u | _ -> None) l
-            | _ -> []
-        in
-        if
-          field got "kind" <> Some "login"
-          || not
-               (List.exists (fun site -> Passwords.matches ~site ~origin) urls)
-        then Fail.invalid "the login does not match %s" origin;
-        List.filter
-          (fun (k, _) ->
-            List.mem k ["username"; "password"; "code"; "secondsLeft"])
-          reply
+        call (pick j) "fill"
+          [("site", s (required j "origin")); ("id", s (required j "id"))]
     | Some "save" ->
-        let origin = required j "origin"
-        and username = required j "username"
-        and password = required j "password" in
-        let d = pick j in
-        let same =
-          List.filter
-            (fun row -> field row "username" = Some username)
-            (List.filter
-               (fun row -> field row "kind" = Some "login")
-               (records (call d "list" [("site", s origin)])))
-        in
-        (* §8 save: equal adds nothing, one with another password is
-           updated only on [update], anything else is added. *)
-        let has_password row =
-          field
-            (`Assoc (call d "get" [("id", s (Option.get (field row "id")))]))
-            "password"
-          = Some password
-        in
-        if List.exists has_password same then [("saved", `Bool false)]
-        else (
-          match (same, str j "update") with
-            | [row], Some id when field row "id" = Some id ->
-                ignore (call d "edit" [("id", s id); ("password", s password)]);
-                [("saved", `Bool true); ("id", s id)]
-            | [row], None ->
-                [
-                  ("saved", `Bool false);
-                  ("update", Option.get (member row "id"));
-                ]
-            | _ ->
-                let site =
-                  match Passwords.site_of_string origin with
-                    | Ok site -> site
-                    | Error reason -> Fail.invalid "%s" reason
-                in
-                let added =
-                  call d "add"
-                    [
-                      ("title", s site);
-                      ("urls", `List [s site]);
-                      ("username", s username);
-                      ("password", s password);
-                    ]
-                in
-                [("saved", `Bool true)] @ added)
+        call (pick j) "save"
+          ([
+             ("site", s (required j "origin"));
+             ("username", s (required j "username"));
+             ("password", s (required j "password"));
+           ]
+          @
+            match str j "update" with
+            | Some id -> [("update", s id)]
+            | None -> [])
     | Some "passkey_match" ->
         [
           ( "passkeys",

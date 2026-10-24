@@ -118,7 +118,10 @@ data class Stats(
     val extensionsFromServer: Boolean = false,
 )
 
-enum class Pull(val wire: String?) { DEFAULT(null), NOW("now"), NEVER("never") }
+/** android §3.2 rule 1; [BACKGROUND] answers the last view at once. */
+enum class Pull(val wire: String?) { DEFAULT(null), NOW("now"), NEVER("never"), BACKGROUND("background") }
+
+internal fun JSONObject.pull(pull: Pull): JSONObject = apply { pull.wire?.let { put("pull", it) } }
 
 internal fun text(row: JSONObject, key: String): String? =
     if (row.has(key) && !row.isNull(key)) row.optString(key, "") else null

@@ -34,9 +34,9 @@ class Vault(private val client: Client) {
     private fun action(name: String) = JSONObject().put("action", name)
 
     /** Null when the domain uses no extension here (05 §2.1 rule 5): no Vault destination. */
-    fun status(): VaultStatus? {
+    fun status(pull: Pull = Pull.DEFAULT): VaultStatus? {
         val reply = try {
-            client.call(action("vault_status"))
+            client.call(action("vault_status").pull(pull))
         } catch (e: CoreException) {
             if (e.code == Code.INVALID) return null
             throw e
@@ -82,8 +82,8 @@ class Vault(private val client: Client) {
         client.call(action("vault_lock").put("reason", "screen"))
     }
 
-    fun codes(filter: String? = null): Codes {
-        val request = action("totp_list")
+    fun codes(filter: String? = null, pull: Pull = Pull.DEFAULT): Codes {
+        val request = action("totp_list").pull(pull)
         filter?.takeIf { it.isNotBlank() }?.let { request.put("filter", it) }
         val reply = client.call(request)
         val records = objects(reply.optJSONArray("records")).map {

@@ -125,7 +125,13 @@ let for_listing t ~pull dir =
   in
   match pull with
     | `Never -> { pulled_at = E.pulled_at dir; outdated = not (is_fresh t dir) }
-    | `Auto when is_fresh t dir -> fresh ()
+    | (`Auto | `Background) when is_fresh t dir -> fresh ()
+    | `Background ->
+        let done_ = start t dir in
+        if has_view t dir then stale ()
+        else (
+          Rt.Promise.await done_;
+          fresh ())
     | `Auto | `Now ->
         let done_ = start t dir in
         if has_view t dir then (

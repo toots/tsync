@@ -18,7 +18,8 @@ let holder ?name config id =
             (fun (_, (l : P.totp_listing)) ->
               List.exists (fun (r : P.totp_row) -> r.id = id) l.rows
               || List.mem id l.corrupt)
-            (each config (fun d -> Vault_cmds.ask d (P.Totp_list None)))
+            (each config (fun d ->
+                 Vault_cmds.ask d (P.Totp_list { filter = None; pull = `Auto })))
         with
           | [(d, _)] -> d
           | [] -> Fail.absent "no record %s" id
@@ -120,7 +121,8 @@ let list_cmd =
                   prerr_endline
                     ("tsync: " ^ dname d ^ " " ^ id ^ " does not open"))
                 l.corrupt)
-            (each ?name config (fun d -> Vault_cmds.ask d (P.Totp_list filter)));
+            (each ?name config (fun d ->
+                 Vault_cmds.ask d (P.Totp_list { filter; pull = `Auto })));
           0)
       $ filter $ show_codes)
 

@@ -18,6 +18,8 @@ import org.feverdreamtv.tsync.bridge.Native
 import org.feverdreamtv.tsync.bridge.NativeCore
 import org.feverdreamtv.tsync.core.Client
 import org.feverdreamtv.tsync.core.Vault
+import org.feverdreamtv.tsync.core.Passwords
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.ConfigStore
 import org.feverdreamtv.tsync.core.Core
@@ -55,6 +57,7 @@ class Tsync private constructor(val context: Context) {
     val core: Core = NativeCore
     val client = Client(core)
     val vault = Vault(client)
+    val passwords = Passwords(client)
 
     /** Bumped by every vault change the app makes, so each vault screen asks again (pitfall B-8.18). */
     val vaultChanges = MutableStateFlow(0)
@@ -160,6 +163,27 @@ class Tsync private constructor(val context: Context) {
             }
         }
     }
+
+    /**
+     * passwords/android §1.1: a background listing starts the fetch of the record bodies the
+     * phone lacks, outside the vault's locks, so a form that asks later is answered from what
+     * the phone holds. A domain not using passwords, or a locked vault, has nothing to fetch.
+     */
+    fun warmPasswords() {
+        if (!warming.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                if (boot() == Boot.Ready) passwords.list(pull = Pull.BACKGROUND)
+            } catch (e: CoreException) {
+                // Nothing to warm, or nothing reachable: the next form asks again.
+            } finally {
+                warming.set(false)
+            }
+        }
+    }
+
+    /** One warm-up at a time. */
+    private val warming = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Runs a request, feeding the offline latch (app §5). */
     fun <T> ask(request: Client.() -> T): T = try {

@@ -71,6 +71,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     implementation("androidx.work:work-runtime:2.10.1")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.biometric:biometric:1.1.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.15.1")

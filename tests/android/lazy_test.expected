@@ -117,5 +117,17 @@
   passphrase, the store down         unreachable (the store is down)
   status, the store back             unlocked pulledAt
   codes, the store back              2 record(s)
+== a read with pull background, the store silent (android §3.2 rule 1)
+  add a login                        ok
+  list, the store up                 1 row(s) in under a second
+  list, pull auto                    1 row(s), outdated in a second or more
+  list, pull background              1 row(s), outdated in under a second
+  vault status, pull auto            ok, outdated in a second or more
+  vault status, pull background      ok, outdated in under a second
+  codes, pull auto                   ok, outdated in a second or more
+  codes, pull background             ok, outdated in under a second
+== a record whose body the phone lacks (extensions README §4.1)
+  list, bodies withheld              0 not opening, outdated in under a second
+  list once it is fetched            1 not opening
 == status
   names the frontend                 true

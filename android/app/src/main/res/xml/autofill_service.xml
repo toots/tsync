@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- passwords/android §1: the autofill service; it is set up from the Vault screen, which has no settings of its own here. -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />

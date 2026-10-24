@@ -44,7 +44,9 @@ a top-level command or a frontend's CLI group
   nothing, when the client's config lists it
   ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5). Behind an http-proxy the
   server decides: a client can only narrow its list, and one that leaves `extensions` out (the
-  Android app) decides nothing. For a domain whose config lists
+  Android app) decides nothing. A client that has not yet learned what the main states asks it
+  before deciding: an unknown statement never reads as stating nothing, and a main that does not
+  answer fails the verb with its code (UNREACHABLE), never `invalid`. For a domain whose config lists
   none, this client runs nothing of this file: it writes nothing under `/.tsync-ext/`, folds
   nothing, and refuses every vault and extension verb `invalid`. The folder still syncs, hidden,
   like any other.
@@ -70,7 +72,13 @@ a top-level command or a frontend's CLI group
   - A **read** (`vault_status`, an extension's `list` and `code`) waits for the pulls at most the
     pull patience, then answers from the last view of those folders, its reply carrying
     `outdated: true` and the oldest `pulledAt` among them. The pulls go on and the next read is
-    fresh. No `changed` notice names these folders (§4.4); a host showing an outdated vault
+    fresh. A read carrying `pull` takes it as a listing does
+    ([android §3.2](../frontends/android.md#32-freshness-without-a-background-cycle) rule 1):
+    `background` answers the last view without waiting. A `background` read also waits for no
+    record body: one not on this machine is left out of the answer, which says `outdated: true`,
+    and the owner fetches it after answering, outside the folders' locks, at most
+    `PREFETCH_WORKERS` at a time, opening each into the records it keeps (§4.6) so the next read
+    has it. No `changed` notice names these folders (§4.4); a host showing an outdated vault
     answer asks again on the `recovered` notice, as it re-lists folders.
   - A **record write** (an extension's `add`, `import`, `rename`, `remove`) proceeds on the last
     view as any mutation does, stays pending and is pushed once the store answers; the
@@ -139,6 +147,7 @@ domain's names to a user or another party omits it, and only the extension layer
 
 | name | value | rule |
 |---|---|---|
+| `PREFETCH_WORKERS` | 4 | record bodies a background read's prefetch fetches at once (§4.1) |
 | `RECORD_KEEP` | 30 days | how long a record body read on a lazy tree stays pinned, renewed by a read that finds less than half of it left |
 
 ### 4.6 Opened records

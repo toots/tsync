@@ -211,6 +211,17 @@
     <string name="vault_secret_key_replaced">This vault\'s secret key was replaced on another machine: enter the new one</string>
     <string name="vault_machine_joined">%1$s joined this vault</string>
     <string name="vault_machines_seen">Seen</string>
+    <string name="autofill_suggest">Use a strong password</string>
+    <string name="passwords_note">Note</string>
+    <string name="autofill_other_logins">Other logins…</string>
+    <string name="autofill_other_logins_detail">Pick one for this app</string>
+    <string name="autofill_link_confirm">Use %1$s for %2$s? tsync will offer it to this app from now on.</string>
+    <string name="autofill_link_use">Use it</string>
+    <string name="passwords_copy_notes">Copy notes</string>
+    <string name="passwords_notes_copied">Notes of %1$s copied</string>
+    <string name="passwords_copy_field">Copy %1$s</string>
+    <string name="passwords_field_copied">%1$s copied</string>
+    <string name="autofill_suggest_detail">Saved in tsync as you pick it</string>
     <string name="vault_unlock">Unlock</string>
     <string name="vault_lock">Lock</string>
     <string name="vault_lock_confirm">Lock the vault? Codes need the passphrase again afterwards.</string>
@@ -257,4 +268,30 @@
         <item quantity="one">%1$d record cannot be read</item>
         <item quantity="other">%1$d records cannot be read</item>
     </plurals>
+    <!-- passwords/android -->
+    <string name="vault_tab_codes">Codes</string>
+    <string name="vault_tab_passwords">Passwords</string>
+    <string name="autofill_turn_on">Turn on tsync for autofill</string>
+    <string name="autofill_turn_on_detail">So apps and browsers offer your logins and passkeys</string>
+    <string name="passwords_search">Search logins</string>
+    <string name="passwords_empty">No logins yet. They arrive from your computer, or when you save one as you sign in.</string>
+    <string name="passwords_passkey">Passkey · %1$s</string>
+    <string name="passwords_copy_username">Copy username</string>
+    <string name="passwords_copy_password">Copy password</string>
+    <string name="passwords_copy_code">Copy code</string>
+    <string name="passwords_username_copied">Username of %1$s copied</string>
+    <string name="passwords_password_copied">Password of %1$s copied</string>
+    <string name="passwords_remove_confirm">Remove %1$s from the vault?</string>
+    <string name="autofill_locked">tsync is locked</string>
+    <string name="autofill_locked_detail">Open tsync to unlock</string>
+    <string name="channel_passwords">Passwords</string>
+    <string name="save_login_done">Saved a login for %1$s</string>
+    <string name="save_login_failed">A login for %1$s was not saved</string>
+    <string name="save_login_locked">The vault is locked. Unlock it in tsync and save again.</string>
+    <string name="save_login_not_ready">tsync is not ready yet.</string>
+    <string name="save_login_update_title">Update the password for %1$s?</string>
+    <string name="save_login_update">Update</string>
+    <string name="passkey_not_offered">tsync offers passkeys to the browsers it knows only.</string>
+    <string name="passkey_sign_in">Sign in to %1$s</string>
+    <string name="passkey_save">Save a passkey for %1$s</string>
 </resources>

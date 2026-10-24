@@ -191,8 +191,10 @@ module type S = sig
   val set_paused : bool -> unit
   val is_paused : unit -> bool
 
-  (** The domain-wide settings the main states, once learned (05 §2.1). *)
-  val stated_settings : unit -> Tsync_store.Store.domain_settings option
+  (** The domain-wide settings the main states, once learned (05 §2.1); [wait]
+      asks the main now when they are not learned yet. *)
+  val stated_settings :
+    ?wait:bool -> unit -> Tsync_store.Store.domain_settings option
 
   val pending_uploads : unit -> int
 

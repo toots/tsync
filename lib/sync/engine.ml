@@ -267,9 +267,11 @@ module Make (C : Engine_ctx.S) = struct
         | None -> Fs.unlink_quiet settings_path)
 
   (* 05 §2.1 rule 4: what the main states is kept; while it cannot be asked,
-     the last statement stands. *)
-  let stated_settings () =
-    match R.stated () with
+     the last statement stands. [wait] asks the main now only when nothing is
+     kept: a kept statement answers at once and is refreshed behind. *)
+  let stated_settings ?(wait = false) () =
+    let wait = wait && remembered () = None in
+    match R.stated ~wait () with
       | `Stated s ->
           (try keep (Some s)
            with Fail.E f -> Log.warn "domain settings not kept: %s" f.reason);

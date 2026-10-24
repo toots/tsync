@@ -77,11 +77,13 @@ import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.Parameters
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.ServerConfig
 
 class MainActivity : ComponentActivity() {
     private var shared by mutableStateOf<List<Uri>?>(null)
-    private var activityRequests by mutableIntStateOf(0)
+    /** A screen another component asked for, with a count so the same one asked twice still shows. */
+    private var requested by mutableStateOf<Pair<Destination, Int>?>(null)
     private var codeLink by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,7 +92,7 @@ class MainActivity : ComponentActivity() {
         accept(intent)
         setContent {
             TsyncTheme {
-                App(shared, activityRequests, codeLink, onCodeLinkDone = { codeLink = null }, onShareDone = ::finish)
+                App(shared, requested, codeLink, onCodeLinkDone = { codeLink = null }, onShareDone = ::finish)
             }
         }
     }
@@ -102,7 +104,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun accept(intent: Intent) {
-        if (intent.getBooleanExtra(EXTRA_SHOW_ACTIVITY, false)) activityRequests++
+        val count = (requested?.second ?: 0) + 1
+        if (intent.getBooleanExtra(EXTRA_SHOW_ACTIVITY, false)) requested = Destination.ACTIVITY to count
+        if (intent.getBooleanExtra(EXTRA_SHOW_VAULT, false)) requested = Destination.VAULT to count
         if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "otpauth") {
             codeLink = intent.data.toString()
             return
@@ -131,6 +135,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SHOW_ACTIVITY = "org.feverdreamtv.tsync.SHOW_ACTIVITY"
+        const val EXTRA_SHOW_VAULT = "org.feverdreamtv.tsync.SHOW_VAULT"
     }
 }
 
@@ -149,7 +154,7 @@ fun TsyncTheme(content: @Composable () -> Unit) {
 private data class Started(val boot: Boot, val refusal: String?, val config: ServerConfig?)
 
 @Composable
-private fun App(shared: List<Uri>?, activityRequests: Int, codeLink: String?, onCodeLinkDone: () -> Unit, onShareDone: () -> Unit) {
+private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink: String?, onCodeLinkDone: () -> Unit, onShareDone: () -> Unit) {
     val context = LocalContext.current
     val tsync = remember { Tsync.get(context) }
     var started by remember { mutableStateOf<Started?>(null) }
@@ -174,7 +179,7 @@ private fun App(shared: List<Uri>?, activityRequests: Int, codeLink: String?, on
         }
         shared != null -> SaveTarget(tsync, shared, onShareDone)
         else -> {
-            Main(tsync, activityRequests)
+            Main(tsync, requested)
             codeLink?.let { CodeLinkSheet(tsync, it, onCodeLinkDone) }
         }
     }
@@ -213,29 +218,42 @@ fun rememberTrail(rootName: String): SnapshotStateList<Crumb> =
     rememberSaveable(saver = trailSaver) { listOf(Crumb(Parameters.ROOT, rootName)).toMutableStateList() }
 
 @Composable
-private fun Main(tsync: Tsync, activityRequests: Int) {
+private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
     var destination by rememberSaveable { mutableStateOf(Destination.FILES) }
     val trail = rememberTrail(tsync.domain)
     var moving by remember { mutableStateOf<Item?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current
-    LaunchedEffect(activityRequests) { if (activityRequests > 0) destination = Destination.ACTIVITY }
+
     LaunchedEffect(Unit) {
         // Outcomes are shown here only while the screen is; otherwise they become notifications.
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { tsync.outcomes.collect { snackbar.showSnackbar(it) } }
     }
-    // android-app §10.2: shown while the domain uses an extension, asked again at each foreground.
-    var vaultShown by rememberSaveable { mutableStateOf(false) }
+    // android-app §5.1, §10.2: shown at once from what the phone last knew, then from the
+    // vault's last view, then from the server, each answer settling it.
+    val context = LocalContext.current
+    val known = remember { context.getSharedPreferences("vault", android.content.Context.MODE_PRIVATE) }
+    var vaultShown by rememberSaveable { mutableStateOf(known.getBoolean("shown", false)) }
     LaunchedEffect(Unit) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vaultShown = withContext(Dispatchers.IO) {
-                try {
-                    tsync.vault.status() != null
-                } catch (e: CoreException) {
-                    vaultShown
-                }
+            for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
+                val shown = withContext(Dispatchers.IO) {
+                    try {
+                        tsync.vault.status(pull) != null
+                    } catch (e: CoreException) {
+                        android.util.Log.w(Tsync.TAG, "vault status: ${e.code.wire}: ${e.message}")
+                        null
+                    }
+                } ?: continue
+                vaultShown = shown
+                known.edit().putBoolean("shown", shown).apply()
             }
+            // After the status: the warm-up holds the vault's folders while it fetches.
+            if (vaultShown) tsync.warmPasswords()
         }
+    }
+    LaunchedEffect(requested, vaultShown) {
+        requested?.first?.takeIf { it != Destination.VAULT || vaultShown }?.let { destination = it }
     }
     if (destination == Destination.VAULT && !vaultShown) destination = Destination.FILES
     BackHandler(enabled = destination != Destination.FILES) { destination = Destination.FILES }
