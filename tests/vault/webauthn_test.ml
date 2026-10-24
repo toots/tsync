@@ -156,6 +156,10 @@ let rp_ids () =
       ("https://Login.Example.com", "example.com");
       ("https://evil.github.io", "github.io");
       ("https://evil.github.io", "evil.github.io");
+      ("https://evil.s3.amazonaws.com", "amazonaws.com");
+      ("https://evil.s3.amazonaws.com", "s3.amazonaws.com");
+      ("https://evil.s3.amazonaws.com", "evil.s3.amazonaws.com");
+      ("https://login.example.amazonaws.com", "amazonaws.com");
       ("http://example.com", "example.com");
       ("https://example.com", "other.com");
       ("https://example.com", "ample.com");
