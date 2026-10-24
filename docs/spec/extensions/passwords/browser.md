@@ -68,11 +68,16 @@ capability. What has been seen working is recorded in §10.
   authentication code, for a code), as the Android service does
   ([android §4](android.md#4-one-time-codes)). A field named only *Code* is not one (a promo or
   postal code as often), nor a *security code* (a card's CVC); its code is in the popup.
+  Several code fields in one form are a code split in one box per digit, which tsync does not
+  fill, and an account number, account holder or routing number is no username.
+- A field the page marks for password managers to leave alone (`data-1p-ignore`,
+  `data-bwignore`, `data-lpignore="true"`) is none of these.
 - It marks each username, password and code field it found with tsync's icon (its mark in a blue
   circle, 20 px) at the right end inside the field, from the page's load and on every field
   drawn, not only the focused one, so tsync is seen to be there before a click. The icons are
   drawn in a closed shadow root the page cannot reach into, follow their fields on scroll and
-  resize, and leave a field too small to carry one.
+  resize, and leave a field too small to carry one or not drawn: transparent, hidden by an
+  ancestor, under `aria-hidden` or `inert`, or clipped away by a container.
 - **Finding asks nothing.** Classifying and marking fields sends no request: a page that draws a
   form learns nothing, and the bridge is not asked about it.
 

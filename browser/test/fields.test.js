@@ -39,6 +39,18 @@ test("Apple's code split in one box per digit is no code field", () => {
   assert.deepEqual(classify([digit(1)]), ["code"], "a single box is the whole code");
 });
 
+test("PayNearMe's bank account form is no sign-in", () => {
+  const bank = [
+    { type: "text", name: "ach_aba_pii", label: "Routing Number" },
+    { type: "text", name: "ach_account_pii", label: "Account Number" },
+    { type: "text", name: "confirm_ach_account_pii", label: "Re-enter Account Number" },
+    { type: "text", name: "name", label: "Account Holder Name" },
+  ];
+  assert.deepEqual(classify(bank), [null, null, null, null], "by their labels");
+  assert.deepEqual(classify([{ type: "text", name: "login", ignored: true }]), [null], "a page's opt-out prevails");
+  assert.equal(kind({ type: "text", label: "Account" }), "username");
+});
+
 test("a lone text field before a password is its username", () => {
   assert.deepEqual(classify([{ type: "text", name: "q1" }, { type: "password" }]), ["username", "password"]);
   assert.deepEqual(classify([{ type: "text", hidden: true }, { type: "password" }]), [null, "password"]);
