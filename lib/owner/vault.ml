@@ -207,7 +207,6 @@ let adopt ~domain ~engine t entry =
 
 (* §9 [VAULT_KEYSTORE_RETRY]; a test shortens it. *)
 let keystore_retry = Atomic.make 60.
-
 let restoring = Keyed_locks.create ()
 
 (* §6.1 owner start: read before the first use of either secret, and again after
