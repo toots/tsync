@@ -208,9 +208,13 @@ let adopt ~domain ~engine t entry =
 (* §9 [VAULT_KEYSTORE_RETRY]; a test shortens it. *)
 let keystore_retry = Atomic.make 60.
 
+let restoring = Keyed_locks.create ()
+
 (* §6.1 owner start: read before the first use of either secret, and again after
    a failed read while no K is held, at most once per [keystore_retry]. *)
 let restore ~domain ~engine t =
+  (* A request that finds the read under way waits for its K. *)
+  Keyed_locks.with_key restoring (key_entry domain) @@ fun () ->
   let auto_locks = auto_locks ~domain ~engine in
   let seen = Atomic.get t.keystore_read in
   let due =
