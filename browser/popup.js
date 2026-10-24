@@ -1,0 +1,73 @@
+// passwords/browser §3.3: the current tab's logins, each domain's state, and what
+// is missing. No other site's logins, no password.
+"use strict";
+
+const main = document.getElementById("popup");
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  node.append(...children);
+  return node;
+}
+
+async function render() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const state = await chrome.runtime.sendMessage({ type: "popup-state", tabId: tab.id });
+  main.replaceChildren(el("h1", { textContent: "tsync" }));
+  if (!state.status || !state.status.ok) {
+    main.append(el("p", { className: "detail", textContent: state.status ? state.status.error : "tsync did not answer" }));
+    return;
+  }
+  const domains = state.status.domains || [];
+  if (!domains.length) main.append(el("p", { className: "detail", textContent: "No domain uses passwords on this machine." }));
+  const looks = {};
+  for (const d of domains) {
+    looks[d.domain] = d.appearance || null;
+    main.append(el("p", { className: "detail mark" }, TsyncMark.element(d.appearance, 16),
+      ` ${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}`));
+  }
+  // §3.3: the user's choice, never the extension's: Chrome's own manager offers and
+  // fills too until it is turned off here.
+  const browserManager = chrome.privacy?.services?.passwordSavingEnabled;
+  if (browserManager) {
+    const setting = await browserManager.get({});
+    if (setting.levelOfControl === "controllable_by_this_extension" || setting.levelOfControl === "controlled_by_this_extension") {
+      const box = el("input", { type: "checkbox", checked: setting.value === false, onchange: () =>
+        box.checked ? browserManager.set({ value: false }) : browserManager.clear({}) });
+      main.append(el("label", { className: "detail" }, box, " Turn off the browser's own password manager"));
+    }
+  }
+  if (!state.origin) return main.append(el("p", { className: "detail", textContent: "Not a web page." }));
+  main.append(el("h2", { textContent: new URL(state.origin).host }));
+  const logins = (state.match && state.match.ok && state.match.logins) || [];
+  if (!logins.length) main.append(el("p", { className: "detail", textContent: "Nothing in tsync for this site." }));
+  // vault §8.1: with several domains, each one's logins under a header carrying its mark.
+  const several = new Set(logins.map((l) => l.domain)).size > 1;
+  let heading = null;
+  for (const login of several ? [...logins].sort((a, b) => a.domain.localeCompare(b.domain)) : logins) {
+    if (several && login.domain !== heading) {
+      heading = login.domain;
+      main.append(el("p", { className: "detail mark" }, TsyncMark.element(looks[login.domain], 16), ` ${login.domain}`));
+    }
+    const fill = el("button", { textContent: "Fill", className: "primary", onclick: async () => {
+      const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+        exact: login.exact, title: login.title, username: login.username });
+      if (reply && reply.error) main.append(el("p", { className: "detail", textContent: reply.error }));
+      else window.close();
+    } });
+    const actions = el("div", { className: "actions" }, fill);
+    if (login.code) {
+      actions.prepend(el("button", { textContent: "Copy code", onclick: async () => {
+        const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+          exact: login.exact, title: login.title, username: login.username, kind: "code" });
+        if (reply.code) await navigator.clipboard.writeText(reply.code);
+        main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
+      } }));
+    }
+    main.append(el("div", { className: "login" },
+      el("strong", { textContent: login.title }),
+      el("small", { textContent: login.username }), actions));
+  }
+}
+
+render();

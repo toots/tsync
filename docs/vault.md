@@ -190,6 +190,18 @@ tsync passwords get ID --field PIN            # one custom field's value
 
 **Autofill on Android.** See [the Android page](android.md#passwords-and-autofill).
 
+**In Chrome** <a id="browser"></a>(and Chromium, Brave, Edge or Vivaldi, on Linux or a Mac). tsync's browser extension fills logins and two-factor codes, saves new logins, suggests strong passwords, and makes and uses passkeys.
+
+- **Setting it up.** Run `tsync passwords browser install`: it lets your browsers start tsync's bridge, and copies the extension next to it. Then open `chrome://extensions`, turn on *Developer mode*, choose *Load unpacked*, and pick the folder it printed.
+- **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
+- **Codes.** A two-factor field offers the code of the site's login that links one. The popup (tsync's toolbar icon) also copies it.
+- **Saving.** Signing in with a password you typed asks *Save this login in tsync?*, or *Update the password* when tsync has another one for that username. *Never for this site* stops asking there.
+- **A strong password.** Signing up, or changing a password, a new-password field offers *Use a strong password*: it fills a generated password, and the field confirming it, and saves the login in tsync at once; submitting the form adds the username to that login.
+- **Passkeys.** A site asking to make or use a passkey shows tsync's sheet, naming the site; on Linux it asks the vault's passphrase when the site wants you verified, on a Mac Touch ID. tsync answers every passkey request, even on a site where it has none: Chrome only gets a sign-in when you pick *Use a phone or security key*, and never a new passkey.
+- **A locked vault** is said in the menu and the sheets: unlock it in tsync, from the tray, the menu bar or `tsync vault unlock`.
+- **Chrome's own password manager.** Installing tsync's extension turns off Chrome's offer to save passwords, and its address and card autofill, so nothing new lands in Chrome by mistake; the popup's checkbox gives them back if you want. Passwords and passkeys Chrome already saved stay in Chrome until you delete them there: export them from Chrome's password manager, `tsync passwords import` the file, then delete them in Chrome.
+- **Incognito.** Chrome turns every extension off in incognito windows: allow tsync there in `chrome://extensions` → tsync → *Details* → *Allow in Incognito*, handy to try a sign-in with no cookies. It then works as in a regular window, and keeps no *Never for this site* from an incognito tab.
+
 **Moving from a browser or another manager.** `tsync passwords import FILE` reads the CSV export of a browser, Bitwarden or 1Password-style managers (columns named like `name`, `url`, `username`, `password`, `notes`, and `otpauth` or `login_totp` for two-factor seeds). It adds every row, so importing a file twice gives each login twice. The CSV is plaintext: delete it once imported. `tsync passwords export` prints every login as CSV after the passphrase; passkeys are not exported.
 
 Two machines editing the same login at once keep the newer edit; a login whose password was changed on both sides keeps both, the second labelled `(conflicted copy from <machine>)`.

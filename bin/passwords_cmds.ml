@@ -462,8 +462,18 @@ let fields_of j = match j with `Assoc l -> l | _ -> []
 (* The members of a request a verb takes; the rest are dropped. *)
 let only j keys = List.filter (fun (k, _) -> List.mem k keys) (fields_of j)
 
+(* §9.2 verify: set by a platform verification, spent by the session's next
+   passkey request. *)
+type session = { mutable verified : bool }
+
+let verified_once session =
+  if session.verified then (
+    session.verified <- false;
+    [("verified", `Bool true)])
+  else []
+
 (* §9.2: every domain using passwords, each answering on its own. *)
-let bridge_request config j =
+let bridge_request config session j =
   let all f =
     List.map
       (fun (d : Config.domain) -> (d, try Ok (f d) with Fail.E e -> Error e))
@@ -477,6 +487,11 @@ let bridge_request config j =
   match str j "type" with
     | Some "status" ->
         [
+          (* browser §5: without one, the extension asks the passphrase. *)
+          ( "verifier",
+            match Tsync_owner.Verifier.registered () with
+              | Some v -> `String v.name
+              | None -> `Null );
           ( "domains",
             `List
               (List.map
@@ -535,6 +550,19 @@ let bridge_request config j =
                                       ( "username",
                                         Option.get (member row "username") );
                                       ("code", Option.get (member row "code"));
+                                      (* browser §3.2: whether the login is for
+                                         this origin itself, not by suffix. *)
+                                      ( "exact",
+                                        `Bool
+                                          (match
+                                             Passwords.site_of_string origin
+                                           with
+                                            | Ok site ->
+                                                List.mem (`String site)
+                                                  (match member row "urls" with
+                                                    | Some (`List l) -> l
+                                                    | _ -> [])
+                                            | Error _ -> false) );
                                     ]))
                            (records reply)
                      | Error _ -> [])
@@ -559,13 +587,29 @@ let bridge_request config j =
           ([
              ("site", s (required j "origin"));
              ("username", s (required j "username"));
-             ("password", s (required j "password"));
            ]
+          @ (match str j "suggested" with
+            | Some id -> [("suggested", s id)]
+            | None -> [("password", s (required j "password"))])
           @
             match str j "update" with
             | Some id -> [("update", s id)]
             | None -> [])
+    (* passwords §5.1: the reply names the domain the login went to, which the
+       submit's save names again. *)
+    | Some "suggest" ->
+        let d = pick j in
+        ("domain", s (dname d))
+        :: call d "suggest"
+             [
+               ("site", s (required j "origin"));
+               ("username", s (Option.value ~default:"" (str j "username")));
+             ]
     | Some "passkey_match" ->
+        let answers =
+          all (fun d ->
+              call d "passkey_match" (only j ["origin"; "rpId"; "allow"]))
+        in
         [
           ( "passkeys",
             `List
@@ -577,33 +621,54 @@ let bridge_request config j =
                            | Some (`List l) -> l
                            | _ -> [])
                      | Error _ -> [])
-                 (all (fun d ->
-                      call d "passkey_match"
-                        (List.filter
-                           (fun (k, _) ->
-                             List.mem k ["origin"; "rpId"; "allow"])
-                           (fields_of j))))) );
+                 answers) );
+          (* browser §5: a locked domain is said, not passed over. *)
+          ( "locked",
+            `List
+              (List.filter_map
+                 (fun (d, r) ->
+                   match r with
+                     | Error (e : Fail.t) when e.kind = Locked ->
+                         Some (s (dname d))
+                     | _ -> None)
+                 answers) );
         ]
-    (* §7.4: a browser verifies with the passphrase only; whatever else it
-       sends, [verified] included, never reaches the owner. *)
+    (* §9.2 verify: the platform's own verifier; the prompt names the origin
+       the browser gave, never a page's words. *)
+    | Some "verify" -> (
+        match Tsync_owner.Verifier.registered () with
+          | None ->
+              Fail.invalid
+                "this machine has no verifier: the passphrase verifies"
+          | Some verifier -> (
+              let reason = "use a passkey on " ^ required j "origin" in
+              match verifier.verify ~reason with
+                | Ok () ->
+                    session.verified <- true;
+                    [("verified", `Bool true)]
+                | Error why -> Fail.raise_ Denied "%s: %s" verifier.name why))
+    (* §7.4: a browser verifies with the passphrase, or through [verify]; a
+       [verified] it sends never reaches the owner. *)
     | Some "passkey_create" ->
         call (pick j) "passkey_create"
-          (only j
-             [
-               "origin";
-               "rpId";
-               "userHandle";
-               "userName";
-               "userDisplayName";
-               "algorithms";
-               "exclude";
-               "clientDataHash";
-               "passphrase";
-               "login";
-             ])
+          (verified_once session
+          @ only j
+              [
+                "origin";
+                "rpId";
+                "userHandle";
+                "userName";
+                "userDisplayName";
+                "algorithms";
+                "exclude";
+                "clientDataHash";
+                "passphrase";
+                "login";
+              ])
     | Some "passkey_assert" ->
         call (pick j) "passkey_assert"
-          (only j ["origin"; "rpId"; "id"; "clientDataHash"; "passphrase"])
+          (verified_once session
+          @ only j ["origin"; "rpId"; "id"; "clientDataHash"; "passphrase"])
     | Some other -> Fail.invalid "the bridge does not forward %s" other
     | None -> Fail.invalid "a request names its type"
 
@@ -617,6 +682,7 @@ let browser_host_cmd =
           set_binary_mode_out stdout true;
           Cli.run @@ fun () ->
           let config = Cli.config () in
+          let session = { verified = false } in
           let rec serve () =
             match read_message stdin with
               | None -> 0
@@ -624,7 +690,7 @@ let browser_host_cmd =
                   let reply =
                     match Yojson.Safe.from_string text with
                       | j -> (
-                          match bridge_request config j with
+                          match bridge_request config session j with
                             | fields -> `Assoc (("ok", `Bool true) :: fields)
                             | exception Fail.E e -> Tsync_ipc.Ipc.failure e)
                       | exception Yojson.Json_error _ ->
@@ -636,6 +702,181 @@ let browser_host_cmd =
           serve ())
       (* Chromium passes the caller's origin; Firefox the manifest path. *)
       $ Arg.(value & pos_all string [] & info [] ~docv:"ARGS"))
+
+(* browser §2: the extension's id, fixed by the public key its manifest
+   carries. *)
+let extension_id = "cdnflbhllfjagecmodmfhaidolcjlpga"
+let host_name = "org.feverdreamtv.tsync"
+
+(* The per-user directories of the Chromium-family browsers, by host. *)
+let browser_dirs () =
+  let home = Sys.getenv "HOME" in
+  if Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" then
+    List.map
+      (Filename.concat (Filename.concat home "Library/Application Support"))
+      [
+        "Google/Chrome";
+        "Google/Chrome Beta";
+        "Chromium";
+        "BraveSoftware/Brave-Browser";
+        "Microsoft Edge";
+        "Vivaldi";
+      ]
+  else (
+    let config =
+      match Sys.getenv_opt "XDG_CONFIG_HOME" with
+        | Some d when d <> "" -> d
+        | _ -> Filename.concat home ".config"
+    in
+    List.map (Filename.concat config)
+      [
+        "google-chrome";
+        "google-chrome-beta";
+        "chromium";
+        "BraveSoftware/Brave-Browser";
+        "microsoft-edge";
+        "vivaldi";
+      ])
+
+(* A browser starts the host with arguments of its own: a script names this
+   program by its resolved path. *)
+let launcher () =
+  let home = Sys.getenv "HOME" in
+  let dir =
+    if Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" then
+      Filename.concat home "Library/Application Support/tsync"
+    else
+      Filename.concat
+        (match Sys.getenv_opt "XDG_DATA_HOME" with
+          | Some d when d <> "" -> d
+          | _ -> Filename.concat home ".local/share")
+        "tsync"
+  in
+  Filename.concat dir "browser-host"
+
+let manifest_path dir =
+  Filename.concat dir ("NativeMessagingHosts/" ^ host_name ^ ".json")
+
+(* The outermost app bundle holding this program carries the extension; a
+   Linux package puts it under /usr/share. *)
+let extension_dir program =
+  let parts = String.split_on_char '/' program in
+  let rec bundle acc = function
+    | [] -> None
+    | p :: _ when Filename.check_suffix p ".app" ->
+        Some (String.concat "/" (List.rev (p :: acc)))
+    | p :: rest -> bundle (p :: acc) rest
+  in
+  let candidates =
+    Option.to_list
+      (Option.map
+         (fun app -> Filename.concat app "Contents/Resources/browser-extension")
+         (bundle [] parts))
+    @ ["/usr/share/tsync/browser-extension"]
+  in
+  List.find_opt Sys.file_exists candidates
+
+let browser_install ids =
+  List.iter
+    (fun id ->
+      if
+        String.length id <> 32
+        || not (String.for_all (function 'a' .. 'p' -> true | _ -> false) id)
+      then Fail.invalid "%s is not an extension id: 32 letters a to p" id)
+    ids;
+  let program = Unix.realpath Sys.executable_name in
+  let script = launcher () in
+  Fs.mkdir_p (Filename.dirname script);
+  Fs.replace ~perm:0o755 script
+    (Printf.sprintf "#!/bin/sh\nexec %s passwords browser-host \"$@\"\n"
+       (Filename.quote program));
+  let manifest =
+    Yojson.Safe.pretty_to_string
+      (`Assoc
+         [
+           ("name", `String host_name);
+           ("description", `String "tsync passwords");
+           ("path", `String script);
+           ("type", `String "stdio");
+           ( "allowed_origins",
+             `List
+               (List.map
+                  (fun id -> `String ("chrome-extension://" ^ id ^ "/"))
+                  (extension_id :: ids)) );
+         ])
+  in
+  let installed =
+    List.filter_map
+      (fun dir ->
+        if not (Sys.file_exists dir) then None
+        else (
+          let path = manifest_path dir in
+          Fs.mkdir_p (Filename.dirname path);
+          Fs.replace ~perm:0o644 path (manifest ^ "\n");
+          Some path))
+      (browser_dirs ())
+  in
+  if installed = [] then say "No Chromium-family browser found for this user."
+  else List.iter (say "installed %s") installed;
+  (* browser §2: a browser's folder picker cannot open a folder inside an app
+     bundle, so the extension is copied next to the launcher, replaced whole. *)
+    match extension_dir program with
+    | Some source ->
+        let dir =
+          Filename.concat (Filename.dirname script) "browser-extension"
+        in
+        Fs.rm_rf dir;
+        if
+          Sys.command
+            (Printf.sprintf "cp -R %s %s" (Filename.quote source)
+               (Filename.quote dir))
+          <> 0
+        then Fail.raise_ Refused "could not copy the extension to %s" dir;
+        say
+          "To add the extension: open chrome://extensions, turn on Developer \
+           mode, choose Load unpacked, and pick %s"
+          dir
+    | None -> ()
+
+let browser_uninstall () =
+  List.iter
+    (fun dir ->
+      let path = manifest_path dir in
+      if Sys.file_exists path then (
+        Sys.remove path;
+        say "removed %s" path))
+    (browser_dirs ());
+  if Sys.file_exists (launcher ()) then Sys.remove (launcher ())
+
+let browser_cmd =
+  let ids =
+    Arg.(
+      value & opt_all string []
+      & info ["extension-id"] ~docv:"ID"
+          ~doc:"Also allow the extension with this id; repeat for several.")
+  in
+  Cmd.group
+    (Cmd.info "browser"
+       ~doc:"The browser extension's native-messaging host (browser §2).")
+    [
+      Cli.cmd "install"
+        ~doc:
+          "Let the browsers of this user start the bridge for tsync's \
+           extension."
+        Term.(
+          const (fun ids ->
+              Cli.run @@ fun () ->
+              browser_install ids;
+              0)
+          $ ids);
+      Cli.cmd "uninstall" ~doc:"Remove what install wrote."
+        Term.(
+          const (fun () ->
+              Cli.run @@ fun () ->
+              browser_uninstall ();
+              0)
+          $ const ());
+    ]
 
 let cmds =
   [
@@ -652,5 +893,6 @@ let cmds =
         import_cmd;
         export_cmd;
         browser_host_cmd;
+        browser_cmd;
       ];
   ]
