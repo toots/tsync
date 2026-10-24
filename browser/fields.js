@@ -7,10 +7,12 @@ const TsyncFields = (() => {
   // plus mfa, one-time and the login or authentication code (a "security code" is a card's CVC).
   const CODE_NAME = /otp|verification.code|2fa|six.digit|mfa|one.time|(login|auth\w*).code/i;
   const USERNAME_NAME = /user.?name|login|e.?mail|account|identifier/i;
+  const NOT_USERNAME = /account.?(n(o|um)|holder)|routing/i;
 
-  // A field is described by plain data, so the rule can be tested without a DOM.
+  // A field is described by plain data, so the rule can be tested without a DOM;
+  // [ignored] is a page's opt-out from password managers, as 1Password, LastPass and Bitwarden honor it.
   function kind(field) {
-    if (field.hidden || field.disabled || field.readOnly) return null;
+    if (field.hidden || field.disabled || field.readOnly || field.ignored) return null;
     const type = (field.type || "text").toLowerCase();
     if (!["text", "email", "password", "tel", "number", "search", ""].includes(type)) return null;
     const autocomplete = (field.autocomplete || "").toLowerCase().split(/\s+/);
@@ -20,7 +22,7 @@ const TsyncFields = (() => {
     if (type === "password") return "password";
     const names = [field.name, field.id, field.label, field.placeholder].filter(Boolean).join(" ");
     if (CODE_NAME.test(names)) return "code";
-    if (type === "email" || USERNAME_NAME.test(names)) return "username";
+    if (type === "email" || (USERNAME_NAME.test(names) && !NOT_USERNAME.test(names))) return "username";
     return null;
   }
 

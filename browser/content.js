@@ -67,6 +67,7 @@
       autocomplete: input.getAttribute("autocomplete"),
       hidden: input.type === "hidden" || style.display === "none" || style.visibility === "hidden" || input.offsetWidth === 0,
       disabled: input.disabled, readOnly: input.readOnly,
+      ignored: input.hasAttribute("data-1p-ignore") || input.hasAttribute("data-bwignore") || input.getAttribute("data-lpignore") === "true",
     };
   }
 
