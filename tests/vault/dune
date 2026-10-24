@@ -93,3 +93,94 @@
  (alias runtest)
  (action
   (diff passwords_merge_test.expected passwords_merge_test.output)))
+
+; The Linux keystore against a Secret Service double on a private bus. The
+; double links the tray's binding and the test the dlopen one, which define the
+; same C symbols, so they are two processes.
+
+(executable
+ (name secret_service_double)
+ (modules secret_service_double)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus tsync_tray_lib))
+
+(executable
+ (name secret_service_test)
+ (modules secret_service_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_owner tsync_secret_service unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   secret_service_test.output
+   (run ./secret_service_test.exe %{exe:secret_service_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff secret_service_test.expected secret_service_test.output)))
+
+(executable
+ (name logind_double)
+ (modules logind_double)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus tsync_tray_lib unix))
+
+(executable
+ (name logind_test)
+ (modules logind_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_logind unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   logind_test.output
+   (run ./logind_test.exe %{exe:logind_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff logind_test.expected logind_test.output)))
+
+(executable
+ (name polkit_double)
+ (modules polkit_double)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_dbus tsync_tray_lib unix))
+
+(executable
+ (name polkit_test)
+ (modules polkit_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core tsync_polkit unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   polkit_test.output
+   (run ./polkit_test.exe %{exe:polkit_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff polkit_test.expected polkit_test.output)))

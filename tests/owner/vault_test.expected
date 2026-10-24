@@ -75,6 +75,11 @@ unlock                           ok
 status                             unlocked enrolled cached=keystore slots={"secret-key":1}
 keystore entries                   [docs docs#secret-key]
 owner exit status 0
+== with a keystore that comes up after the owner
+status                             locked not-enrolled keystore error: the test keystore is not up yet slots={"secret-key":1}
+status, the keystore up, within the retry locked not-enrolled keystore error: the test keystore is not up yet slots={"secret-key":1}
+status, the keystore up, after the retry unlocked enrolled cached=keystore slots={"secret-key":1}
+owner exit status 0
 == with a keystore: a restart, then lock
 status                             unlocked enrolled cached=keystore slots={"secret-key":1}
 lock                             ok

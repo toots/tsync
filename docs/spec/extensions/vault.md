@@ -251,7 +251,10 @@ A machine's vault for a domain is **unlocked** when it holds K for the keyring's
   until its user unlocks it with that keyring's secrets.
 - `tsync vault lock` (action `vault_lock`) removes K from the keystore and from memory, and keeps
   the secret key: the machine stays enrolled, and the next unlock asks only for the passphrase.
-  `--forget` (`forget` in the action) also removes the secret key.
+  `--forget` (`forget` in the action) also removes the secret key. A K whose key id is not the
+  keyring's (§4.3, §7.2) is the only key to the records still under it: a lock, an auto-lock and a
+  policy keep it, in memory and in the keystore, until the unlock that re-encrypts them. It never
+  unlocks the vault.
 - Operations that need K on a locked vault are refused `locked`
   ([failure-model §7.2](../algorithms/failure-model.md#72-client-error-codes)). Folds and
   arrivals that need no plaintext go on.
@@ -271,7 +274,10 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
 - **Owner start** reads the domain's entry. One for the keyring's key id unlocks the vault with
   `cached: keystore`. One for another key id is held as the K of §4.3, the vault staying locked:
   the next unlock re-encrypts under the domain's K and replaces the entry. A read that fails leaves
-  the vault locked, and status reports the keystore's reason.
+  the vault locked, and status reports the keystore's reason. A keystore may come up after the
+  owner (a desktop session that starts after it): until K is held or dropped, a verb that needs the
+  vault reads again, at most once per `VAULT_KEYSTORE_RETRY`. A K this owner held or dropped is never
+  read back, so an entry a failed delete left behind does not return.
 - **Lock** deletes the domain's K entry (and with `forget` its secret key entry), then forgets
   each entry deleted. Both deletes are attempted. One that fails leaves what that entry held, in
   the keystore and in memory, and the lock is refused `internal` with the keystore's reason: a
@@ -309,7 +315,7 @@ machines locked states a policy from its server.
 - **No keystore.** While a policy is in force, an unlock keeps K in the owner's memory only
   (`cached: memory`), and the domain's K entry is deleted at owner start and when a policy is
   learned. A restart of the owner or of the machine therefore leaves the vault locked. The secret
-  key entry stays.
+  key entry stays, and so does a K of §4.3 (§6).
 - A policy learned while the vault is unlocked applies at once, counting from the last use and
   from the unlock as they were.
 
@@ -392,7 +398,8 @@ change alone leaves both valid (§7).
 - It then re-encrypts every record under the old key id as §4.3 does for a copy's K, in every
   extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done;
   then it keeps the new K (§6). A re-encryption that fails leaves the old K held, and is resumed
-  at this machine's next unlock, with the new secret key; the reply then says why (`pending`).
+  at this machine's next unlock, with the new secret key; the reply then says why (`pending`). The
+  old K is then written to the keystore whatever the policy (§6).
   Either way the reply carries the new secret key, shown once and offering the kit (§3.1). The
   appearance (§8.1), unsealed, stays.
 - It rewrites the machine list (§6.3) with this machine alone.
@@ -493,6 +500,7 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
 | `VAULT_KDF_MAX_MEM` / `VAULT_KDF_MAX_ITERATIONS` / `VAULT_KDF_MAX_PARALLELISM` | 256 MiB / 10 / 4 | readers refuse above; MUST fit the smallest host that unlocks |
 | `VAULT_MAX_SLOTS` | 8 | slots one unlock derives for |
 | `VAULT_MIN_PASSPHRASE` | 16 | characters of a chosen passphrase |
+| `VAULT_KEYSTORE_RETRY` | 60 s | between reads of a keystore whose last read failed (§6.1) |
 
 ## 10. Conformance
 

@@ -336,9 +336,9 @@ let () =
          "backends":[{"name":"gcs","role":"main","reach":{"reachable":true}}]}]}|};
     ];
 
-  let codes answers =
+  let codes ?add answers =
     List.iter entry
-      (M.codes
+      (M.codes ?add
          (List.map
             (fun (d, reply) ->
               (d, M.codes_of_json (Option.map Yojson.Safe.from_string reply)))
@@ -380,6 +380,12 @@ let () =
     ];
   case "codes: no code domain at all";
   codes [];
+  case "codes: a caller that adds no codes gets no Add a code row";
+  codes ~add:false
+    [
+      ("work", Some two_records);
+      ("d", Some {|{"ok":true,"records":[],"corrupt":[]}|});
+    ];
   case "codes: the JSON form, and no code in any row";
   let rows =
     M.codes

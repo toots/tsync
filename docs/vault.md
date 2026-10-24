@@ -71,7 +71,7 @@ While a machine is unlocked, any program running as you on it can ask tsync for 
 ```
 
 - `idleMinutes`: no code, password or passkey used for that long. A status or a listing that shows no secret does not count as use.
-- `onScreenLock`: the screen locks or the machine goes to sleep: on a Mac the menu bar app reports it, and on Android the phone's screen turning off locks it.
+- `onScreenLock`: the screen locks or the machine goes to sleep: on Linux tsync watches this itself, on a Mac the menu bar app reports it, and on Android the phone's screen turning off locks it.
 - `maxHours`: that long after unlocking, however much the vault is used.
 
 The server can set one for everyone behind it, and the strictest of yours and the server's applies: you can make it lock sooner, never later. While a policy is on, the key is never kept in the system keychain, so a restart leaves the vault locked; the machine stays set up and asks only for the passphrase. `tsync vault status` shows the policy in force, and why the vault was locked last.
@@ -144,7 +144,7 @@ tsync totp code ID            # one code
 
 **Moving out.** `tsync totp export` prints every record as an `otpauth://` link. It asks for the passphrase each time, even on an unlocked machine: no other way gets the seeds out.
 
-**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray shows no codes: use `tsync totp list` there.
+**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray lists and copies codes, and unlocks, the same way, on Wayland; it has no *Add a code…* ([desktop](desktop.md#tray)).
 
 **On an Android phone.** The app's *Vault* screen appears when the server's domain uses an extension; see [the Android page](android.md#vault).
 
@@ -192,7 +192,7 @@ tsync passwords get ID --field PIN            # one custom field's value
 
 **In Chrome** <a id="browser"></a>(and Chromium, Brave, Edge or Vivaldi, on Linux or a Mac). tsync's browser extension fills logins and two-factor codes, saves new logins, suggests strong passwords, and makes and uses passkeys.
 
-- **Setting it up.** Run `tsync passwords browser install`: it lets your browsers start tsync's bridge, and copies the extension next to it. Then open `chrome://extensions`, turn on *Developer mode*, choose *Load unpacked*, and pick the folder it printed.
+- **Setting it up.** Run `tsync passwords browser install` once per user: it lets your browsers start tsync's bridge. Then add tsync's extension from the Chrome Web Store, which keeps it up to date. Its store listing is not published yet; until it is, the extension is loaded from tsync's source, `browser/` in *Developer mode* with *Load unpacked*, which is meant for development.
 - **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
 - **Codes.** A two-factor field offers the code of the site's login that links one. The popup (tsync's toolbar icon) also copies it.
 - **Saving.** Signing in with a password you typed asks *Save this login in tsync?*, or *Update the password* when tsync has another one for that username. *Never for this site* stops asking there.

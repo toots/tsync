@@ -115,11 +115,15 @@ const asked = (preference) => (preference || "preferred") !== "discouraged";
 const refused = (reply) => ({ error: { name: "NotAllowedError", message: reply.error || "refused" } });
 
 // The user verified before the request (§5): the platform's verifier in the same
-// session, else the passphrase the sheet asked for.
+// session, else the passphrase the sheet asked for. A verifier with no way to ask
+// right now (polkit without an agent) answers unreachable, and the passphrase asks.
 async function verified(origin, preference, request) {
   if (!asked(preference)) return one(request);
   const status = await one({ type: "status" });
-  if (status.ok && status.verifier) return (await session([{ type: "verify", origin }, request]))[1];
+  if (status.ok && status.verifier) {
+    const [verify, reply] = await session([{ type: "verify", origin }, request]);
+    if (verify.ok || verify.code !== "unreachable") return reply;
+  }
   const answer = await sheet({ kind: "passphrase", origin });
   if (answer.action !== "ok") return { ok: false, code: "denied", error: "cancelled" };
   return one({ ...request, passphrase: answer.passphrase });
@@ -324,7 +328,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // §3.3: once installed, the extension turns off the browser's own password saving, so
 // nothing lands there by default; the popup gives it back on the user's choice.
-const BROWSER_OWN = ["passwordSavingEnabled"];
+const BROWSER_OWN = ["passwordSavingEnabled", "autofillAddressEnabled", "autofillCreditCardEnabled"];
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason !== "install") return;
   for (const name of BROWSER_OWN) chrome.privacy?.services?.[name]?.set({ value: false }).catch(() => {});

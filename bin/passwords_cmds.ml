@@ -681,6 +681,7 @@ let browser_host_cmd =
           set_binary_mode_in stdin true;
           set_binary_mode_out stdout true;
           Cli.run @@ fun () ->
+          Platform.register_verifier ();
           let config = Cli.config () in
           let session = { verified = false } in
           let rec serve () =
@@ -757,25 +758,6 @@ let launcher () =
 let manifest_path dir =
   Filename.concat dir ("NativeMessagingHosts/" ^ host_name ^ ".json")
 
-(* The outermost app bundle holding this program carries the extension; a
-   Linux package puts it under /usr/share. *)
-let extension_dir program =
-  let parts = String.split_on_char '/' program in
-  let rec bundle acc = function
-    | [] -> None
-    | p :: _ when Filename.check_suffix p ".app" ->
-        Some (String.concat "/" (List.rev (p :: acc)))
-    | p :: rest -> bundle (p :: acc) rest
-  in
-  let candidates =
-    Option.to_list
-      (Option.map
-         (fun app -> Filename.concat app "Contents/Resources/browser-extension")
-         (bundle [] parts))
-    @ ["/usr/share/tsync/browser-extension"]
-  in
-  List.find_opt Sys.file_exists candidates
-
 let browser_install ids =
   List.iter
     (fun id ->
@@ -817,26 +799,9 @@ let browser_install ids =
       (browser_dirs ())
   in
   if installed = [] then say "No Chromium-family browser found for this user."
-  else List.iter (say "installed %s") installed;
-  (* browser §2: a browser's folder picker cannot open a folder inside an app
-     bundle, so the extension is copied next to the launcher, replaced whole. *)
-    match extension_dir program with
-    | Some source ->
-        let dir =
-          Filename.concat (Filename.dirname script) "browser-extension"
-        in
-        Fs.rm_rf dir;
-        if
-          Sys.command
-            (Printf.sprintf "cp -R %s %s" (Filename.quote source)
-               (Filename.quote dir))
-          <> 0
-        then Fail.raise_ Refused "could not copy the extension to %s" dir;
-        say
-          "To add the extension: open chrome://extensions, turn on Developer \
-           mode, choose Load unpacked, and pick %s"
-          dir
-    | None -> ()
+  else (
+    List.iter (say "installed %s") installed;
+    say "Add the tsync extension from the Chrome Web Store.")
 
 let browser_uninstall () =
   List.iter

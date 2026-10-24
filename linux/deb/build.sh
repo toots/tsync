@@ -38,7 +38,7 @@ shlibs() {
     -xtsync --ignore-missing-info "$@") | sed 's/^shlibs:Depends=//'
 }
 
-# pack NAME DEPENDS SUMMARY DESCRIPTION: the tree at $work/NAME becomes
+# pack NAME DEPENDS SUMMARY DESCRIPTION [RECOMMENDS]: the tree at $work/NAME becomes
 # dist/NAME_<distro>_<arch>.deb. No version in the name: the nightly release
 # keeps one asset per package, distro and architecture, so uploading over it
 # is the whole of the cleanup; the package name keeps the three apart.
@@ -49,7 +49,8 @@ Package: $1
 Version: $version
 Architecture: $arch
 Maintainer: Romain Beauxis <toots@rastageeks.org>
-Depends: $2
+Depends: $2${5:+
+Recommends: $5}
 Section: utils
 Priority: optional
 Homepage: https://github.com/toots/tsync
@@ -67,6 +68,7 @@ install -Dm644 _build/default/linux/mounts/libtsync_mounts.so \
   "$root$libdir/tsync/libtsync_mounts.so"
 strip --strip-unneeded "$root$libdir/tsync/libtsync_mounts.so"
 install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.service"
+install -Dm644 linux/org.feverdreamtv.tsync.policy "$root/usr/share/polkit-1/actions/org.feverdreamtv.tsync.policy"
 install -Dm644 assets/tsync-app.svg "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
 for script in postinst prerm postrm; do
   install -Dm755 "linux/deb/$script" "$root/DEBIAN/$script"
@@ -92,7 +94,8 @@ deps=$(shlibs "$root/usr/bin/tsync-tray")
 test -n "$deps"
 pack tsync-tray "$deps, tsync (= $version)" "Tray icon for tsync" \
 " Shows the state of every tsync domain as an icon in the desktop's
- notification area, with a menu to open folders and hold changes."
+ notification area, with a menu to open folders, hold changes and copy
+ one-time codes." "wl-clipboard, kdialog"
 
 root="$work/tsync-dolphin"
 DESTDIR="$root" cmake --install linux/dolphin/build --strip

@@ -40,6 +40,8 @@ type t = {
   mutable domains : domain list;
   mutable reported_mounts : (string * string) list;
   mutable stats_started : float;
+  mutable unlocking : bool;
+  mutable code_domains : string list;  (** at the last refresh (§6.5) *)
   refreshing : Rt.Fmutex.t;
   finished : int Rt.Promise.t;
 }
@@ -73,6 +75,10 @@ let label ~indent text =
   String.make (4 * indent) ' '
   ^ String.concat "__" (String.split_on_char '_' text)
 
+(* §6.5: each code domain's vault mark, by domain, as fetched at the last
+   opening. One tray runs per process (§2 step 3). *)
+let marks : (string * string) list Atomic.t = Atomic.make []
+
 let row_properties : M.entry -> (string * Dbus.value) list = function
   | Separator -> [("type", String "separator")]
   | Item i ->
@@ -83,6 +89,12 @@ let row_properties : M.entry -> (string * Dbus.value) list = function
       ]
       @ (match i.icon with
         | Some n -> [("icon-name", Dbus.String n)]
+        | None -> [])
+      @ (match i.vault with
+        | Some domain -> (
+            match List.assoc_opt domain (Atomic.get marks) with
+              | Some png -> [("icon-data", Dbus.byte_array png)]
+              | None -> [])
         | None -> [])
       @ (match i.checked with
         | Some c ->
@@ -200,6 +212,38 @@ let string_field name = function
       match List.assoc_opt name l with Some (`String s) -> Some s | _ -> None)
   | _ -> None
 
+(* §6.5: whether a status reply lists totp among the extensions in force. *)
+let lists_totp = function
+  | `Assoc l -> (
+      match List.assoc_opt "extensions" l with
+        | Some (`List e) -> List.mem (`String "totp") e
+        | _ -> false)
+  | _ -> false
+
+let on_path program =
+  List.exists
+    (fun dir -> dir <> "" && Sys.file_exists (Filename.concat dir program))
+    (String.split_on_char ':'
+       (Option.value (Sys.getenv_opt "PATH") ~default:""))
+
+(* §6.5: of the domains whose status lists totp, those whose codes this tray
+   can copy. *)
+let code_domains listed =
+  match listed with
+    | [] -> []
+    | listed -> (
+        match (Sys.getenv_opt "WAYLAND_DISPLAY", on_path "wl-copy") with
+          | Some display, true when display <> "" -> listed
+          | Some display, false when display <> "" ->
+              Log.once "tray-codes-wl-copy" Log.Warn
+                "tray: no one-time codes: wl-copy (wl-clipboard) is not \
+                 installed";
+              []
+          | _ ->
+              Log.once "tray-codes-wayland" Log.Warn
+                "tray: no one-time codes: they are copied on Wayland only";
+              [])
+
 let refresh t =
   Rt.Fmutex.with_lock t.refreshing @@ fun () ->
   let domains = try configured_domains () with _ -> [] in
@@ -214,12 +258,22 @@ let refresh t =
       (fun d reply -> (d, reply, Option.bind reply M.status_of_json))
       domains replies
   in
+  let codes =
+    code_domains
+      (List.filter_map
+         (fun (d, reply, status) ->
+           match (status, reply) with
+             | Some _, Some reply when lists_totp reply -> Some d.name
+             | _ -> None)
+         answers)
+  in
   let menu =
-    M.render ~quit:"Quit tsync tray"
+    M.render ~quit:"Quit tsync tray" ~codes
       (List.map (fun (d, _, status) -> (d.name, status)) answers)
   in
   locked t (fun () ->
       t.domains <- domains;
+      t.code_domains <- codes;
       t.reported_mounts <-
         List.filter_map
           (fun (d, reply, status) ->
@@ -235,6 +289,213 @@ let refresh t =
         item_signal t "NewToolTip");
       announce t (Layout.set_menu t.layout ~now:(Rt.now ()) menu.entries))
 
+let notify t summary body =
+  match
+    Bus.call t.bus ~timeout:file_manager_timeout
+      ~destination:"org.freedesktop.Notifications"
+      ~path:"/org/freedesktop/Notifications"
+      ~interface:"org.freedesktop.Notifications" ~member:"Notify"
+      [
+        String "tsync";
+        Uint32 0;
+        String "tsync";
+        String summary;
+        String body;
+        Array ("s", []);
+        Array ("{sv}", []);
+        Int32 (-1);
+      ]
+  with
+    | Ok _ -> ()
+    | Error reason ->
+        Log.warn "tray: %s: %s (no notification: %s)" summary body reason
+
+let domain_named t name =
+  locked t (fun () -> List.find_opt (fun d -> d.name = name) t.domains)
+
+(* The owner's typed answer to one request, or its failure. *)
+let ask_domain ~deadline d request =
+  match Ipc.ask ~deadline d.socket (Protocol.encode request) with
+    | None -> Error "tsync is not answering"
+    | Some reply -> (
+        match Protocol.decode_reply request reply with
+          | answer -> Ok answer
+          | exception Fail.E f -> Error f.reason)
+
+let mark d =
+  match ask_domain ~deadline:stats_deadline d (Vault_status `Auto) with
+    | Ok { appearance = Some { icon = Some png; _ }; _ } -> Some png
+    | Ok { appearance = Some { color; _ }; _ } -> Mark.glyph color
+    | _ -> None
+
+(* One code domain's answer at an opening. *)
+type code_answer = { domain : string; codes : M.codes; mark : string option }
+
+(* §6.5: rows from an earlier opening are never shown again. *)
+let fetch_codes t =
+  let domains =
+    locked t (fun () ->
+        List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
+  in
+  if domains <> [] then (
+    ignore
+      (change_layout t (fun layout ->
+           Layout.set_children layout Show_codes M.codes_placeholder));
+    let answers =
+      Rt.map_concurrently
+        (fun d ->
+          let codes =
+            M.codes_of_json
+              (Ipc.ask ~deadline:stats_deadline d.socket
+                 (Protocol.encode (Totp_list { filter = None; pull = `Auto })))
+          in
+          { domain = d.name; codes; mark = mark d })
+        domains
+    in
+    Atomic.set marks
+      (List.filter_map
+         (fun a -> Option.map (fun m -> (a.domain, m)) a.mark)
+         answers);
+    let rows =
+      M.codes ~add:false (List.map (fun a -> (a.domain, a.codes)) answers)
+    in
+    ignore
+      (change_layout t (fun layout ->
+           Layout.set_children layout Show_codes rows)))
+
+(* The helper's standard output, or [None] when it failed or was closed; its
+   exit is awaited on a thread of its own, since a dialog stays open for as long
+   as the user leaves it. *)
+let helper ?input program arguments =
+  Rt.within `Threaded (fun () ->
+      let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
+      let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
+      match
+        Unix.create_process program
+          (Array.of_list (program :: arguments))
+          stdin_read stdout_write Unix.stderr
+      with
+        | exception Unix.Unix_error (e, _, _) ->
+            List.iter Unix.close
+              [stdin_read; stdin_write; stdout_read; stdout_write];
+            Log.warn "tray: cannot run %s: %s" program (Unix.error_message e);
+            None
+        | pid -> (
+            Unix.close stdin_read;
+            Unix.close stdout_write;
+            (* A helper that exits without reading leaves the pipe closed. *)
+            (try
+               Option.iter
+                 (fun s ->
+                   ignore
+                     (Unix.write_substring stdin_write s 0 (String.length s)))
+                 input
+             with Unix.Unix_error _ -> ());
+            Unix.close stdin_write;
+            let output =
+              In_channel.input_all (Unix.in_channel_of_descr stdout_read)
+            in
+            Unix.close stdout_read;
+            match snd (Unix.waitpid [] pid) with
+              | WEXITED 0 -> Some output
+              | _ -> None))
+
+(* security-model §10.6: the code goes on standard input, never in arguments,
+   and the clipboard is never cleared. *)
+let copy_code t domain id =
+  match domain_named t domain with
+    | None -> ()
+    | Some d -> (
+        match ask_domain ~deadline:stats_deadline d (Totp_code id) with
+          | Error reason -> notify t "The code was not copied" reason
+          | Ok { code; _ } -> (
+              match
+                helper ~input:code "wl-copy"
+                  ["--sensitive"; "--type"; "text/plain"]
+              with
+                | Some _ -> ()
+                | None ->
+                    notify t "The code was not copied" "wl-copy did not take it"
+              ))
+
+let dialog ~title text =
+  Option.map
+    (fun answer ->
+      if String.ends_with ~suffix:"\n" answer then
+        String.sub answer 0 (String.length answer - 1)
+      else answer)
+    (helper "kdialog" ["--title"; title; "--password"; text])
+
+let unlock_deadline = 120.
+
+(* §6.5: [sentence] is the owner's word on the previous attempt. *)
+let rec unlock_dialogs ?sentence ~enrolled t d =
+  let title = "Unlock " ^ d.name in
+  let above text =
+    match sentence with Some s -> s ^ "\n\n" ^ text | None -> text
+  in
+  match dialog ~title (above ("The passphrase of " ^ d.name ^ "'s vault")) with
+    | None -> ()
+    | Some passphrase -> (
+        let secret_key =
+          if enrolled then Some ""
+          else dialog ~title "This machine also needs the vault's secret key"
+        in
+        match secret_key with
+          | None -> ()
+          | Some secret_key -> (
+              let request =
+                Protocol.Vault_unlock
+                  {
+                    passphrase;
+                    secret_key =
+                      (if secret_key = "" then None else Some secret_key);
+                  }
+              in
+              match
+                Ipc.ask ~deadline:unlock_deadline d.socket
+                  (Protocol.encode request)
+              with
+                | None ->
+                    notify t
+                      ("Unlocking " ^ d.name ^ " failed")
+                      "tsync is not answering"
+                | Some reply -> (
+                    match Protocol.failure_of_reply reply with
+                      | None -> ()
+                      | Some { kind = Denied | Invalid; reason; _ } ->
+                          unlock_dialogs ~sentence:reason ~enrolled t d
+                      | Some f ->
+                          notify t ("Unlocking " ^ d.name ^ " failed") f.reason)
+              ))
+
+let unlock t domain =
+  let start =
+    locked t (fun () ->
+        if t.unlocking then false
+        else (
+          t.unlocking <- true;
+          true))
+  in
+  if start then
+    Fun.protect
+      ~finally:(fun () -> locked t (fun () -> t.unlocking <- false))
+      (fun () ->
+        match domain_named t domain with
+          | None -> ()
+          | Some d -> (
+              let run_cli = "Run tsync vault unlock in a terminal." in
+              match
+                ask_domain ~deadline:stats_deadline d (Vault_status `Auto)
+              with
+                | Error reason ->
+                    notify t ("Cannot unlock " ^ domain) (reason ^ " " ^ run_cli)
+                | Ok _ when not (on_path "kdialog") ->
+                    notify t
+                      ("Cannot unlock " ^ domain)
+                      ("kdialog is not installed. " ^ run_cli)
+                | Ok status -> unlock_dialogs ~enrolled:status.enrolled t d))
+
 let fetch_stats t =
   let due =
     locked t (fun () ->
@@ -244,7 +505,7 @@ let fetch_stats t =
           t.stats_started <- now;
           true))
   in
-  if due then
+  if due then (
     Rt.spawn ~name:"tray stats" (fun () ->
         let rows =
           M.stats
@@ -252,7 +513,10 @@ let fetch_stats t =
                (fun (_, reply) -> Option.bind reply M.stats_of_json)
                (ask_all t ~deadline:stats_deadline (Stats [])))
         in
-        ignore (change_layout t (fun layout -> Layout.set_stats layout rows)))
+        ignore
+          (change_layout t (fun layout ->
+               Layout.set_children layout Show_stats rows)));
+    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t))
 
 let set_paused t paused =
   List.iter
@@ -270,10 +534,9 @@ let set_paused t paused =
   refresh t
 
 let run_action t : M.action -> unit = function
-  (* linux-tray §6.5: the tray gives the model no code domain, so no codes row
-     reaches it. *)
-  | Nothing | Show_stats | Show_codes | Copy_code _ | Unlock _ | Add_code _ ->
-      ()
+  | Nothing | Show_stats | Show_codes | Add_code _ -> ()
+  | Copy_code { domain; id } -> copy_code t domain id
+  | Unlock domain -> unlock t domain
   | Quit -> ignore (Rt.Promise.try_resolve t.finished 0)
   | Set_paused paused -> set_paused t paused
   | Open_folder name -> Option.iter (show t ~folder:true) (mount_point t name)
@@ -667,19 +930,6 @@ let dispatch t exported message =
         after ()
     | Method_return | Error_reply -> ()
 
-(* §2 step 1: the tray never lets a bus be started for it. *)
-let bus_address () =
-  match Sys.getenv_opt "DBUS_SESSION_BUS_ADDRESS" with
-    | Some address when address <> "" -> Some address
-    | _ -> (
-        match Sys.getenv_opt "XDG_RUNTIME_DIR" with
-          | Some dir when dir <> "" -> (
-              let socket = Filename.concat dir "bus" in
-              match Unix.stat socket with
-                | { st_kind = S_SOCK; _ } -> Some ("unix:path=" ^ socket)
-                | _ | (exception Unix.Unix_error _) -> None)
-          | _ -> None)
-
 let bus_call bus member arguments =
   Bus.call bus ~timeout:watcher_timeout ~destination:"org.freedesktop.DBus"
     ~path:"/org/freedesktop/DBus" ~interface:"org.freedesktop.DBus" ~member
@@ -717,6 +967,8 @@ let serve bus =
       domains = [];
       reported_mounts = [];
       stats_started = neg_infinity;
+      unlocking = false;
+      code_domains = [];
       refreshing = Rt.Fmutex.create ();
       finished = Rt.Promise.create ();
     }
@@ -758,7 +1010,7 @@ let serve bus =
               Rt.Promise.await t.finished)
 
 let run () =
-  match bus_address () with
+  match Dbus.session_address () with
     | None ->
         prerr_endline
           "tsync-tray: no session bus: the tray needs a running desktop session";

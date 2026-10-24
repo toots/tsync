@@ -24,4 +24,9 @@
   tsync_http_proxy
   qrc
   unix
-  yojson))
+  yojson
+  (select
+   platform.ml
+   from
+   (tsync_secret_service tsync_logind tsync_polkit -> platform.linux.ml)
+   (-> platform.none.ml))))

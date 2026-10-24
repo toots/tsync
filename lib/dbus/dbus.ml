@@ -43,8 +43,11 @@ external new_error : message -> string -> string -> message
 external new_signal : string -> string -> string -> message
   = "tsync_dbus_new_signal"
 
+external available : unit -> bool = "tsync_dbus_available"
 external connect : string -> t = "tsync_dbus_connect"
+external close : t -> unit = "tsync_dbus_close"
 external descriptor : t -> Unix.file_descr = "tsync_dbus_descriptor"
+external unique_name : t -> string = "tsync_dbus_unique_name"
 external send : t -> message -> int = "tsync_dbus_send"
 external read_write : t -> bool = "tsync_dbus_read_write"
 external pop : t -> message option = "tsync_dbus_pop"
@@ -74,15 +77,47 @@ let rec clean = function
   | Dict_entry (k, v) -> Dict_entry (clean k, clean v)
   | v -> v
 
+let loaded () =
+  if not (available ()) then raise (Error "libdbus-1.so.3 is not installed")
+
 let filled message values =
   append message (List.map clean values);
   message
 
 let method_call ~destination ~path ~interface ~member values =
+  loaded ();
   filled (new_method_call destination path interface member) values
 
 let method_return call values = filled (new_method_return call) values
 let error_reply call ~name text_ = new_error call name (text text_)
 
 let signal ~path ~interface ~member values =
+  loaded ();
   filled (new_signal path interface member) values
+
+let byte_array s =
+  Array
+    ("y", List.of_seq (Seq.map (fun c -> Byte (Char.code c)) (String.to_seq s)))
+
+let string_of_bytes values =
+  String.of_seq
+    (Seq.filter_map
+       (function Byte b -> Some (Char.chr b) | _ -> None)
+       (List.to_seq values))
+
+let system_address () =
+  match Sys.getenv_opt "DBUS_SYSTEM_BUS_ADDRESS" with
+    | Some address when address <> "" -> address
+    | _ -> "unix:path=/run/dbus/system_bus_socket"
+
+let session_address () =
+  match Sys.getenv_opt "DBUS_SESSION_BUS_ADDRESS" with
+    | Some address when address <> "" -> Some address
+    | _ -> (
+        match Sys.getenv_opt "XDG_RUNTIME_DIR" with
+          | Some dir when dir <> "" -> (
+              let socket = Filename.concat dir "bus" in
+              match Unix.stat socket with
+                | { st_kind = S_SOCK; _ } -> Some ("unix:path=" ^ socket)
+                | _ | (exception Unix.Unix_error _) -> None)
+          | _ -> None)

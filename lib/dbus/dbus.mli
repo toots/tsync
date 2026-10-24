@@ -61,13 +61,39 @@ val error_reply : message -> name:string -> string -> message
 val signal :
   path:string -> interface:string -> member:string -> value list -> message
 
+(** A string as an [ay]. *)
+val byte_array : string -> value
+
+(** The bytes of an [ay]'s elements; anything else in it is skipped. *)
+val string_of_bytes : value list -> string
+
 type t
+
+(** Whether libdbus can be called: always in [tsync_dbus], and in
+    [tsync_dbus_dl] once it was found at run time. Every other call raises
+    {!Error} without it. *)
+val available : unit -> bool
+
+(** The system bus: [DBUS_SYSTEM_BUS_ADDRESS], else its well-known socket. *)
+val system_address : unit -> string
+
+(** The session bus of this environment: [DBUS_SESSION_BUS_ADDRESS], else
+    [$XDG_RUNTIME_DIR/bus] when that socket exists. Never one started for the
+    caller (linux-tray §2). *)
+val session_address : unit -> string option
 
 (** Opens a private connection to the bus at this address and registers on it. A
     closed bus never ends the process. Blocks for the handshake. *)
 val connect : string -> t
 
+(** Closes the connection and frees it; every later call on it raises {!Error}.
+    Closing twice does nothing. *)
+val close : t -> unit
+
 val descriptor : t -> Unix.file_descr
+
+(** The name the bus gave this connection at registration, as [":1.42"]. *)
+val unique_name : t -> string
 
 (** Queues the message; its serial. *)
 val send : t -> message -> int

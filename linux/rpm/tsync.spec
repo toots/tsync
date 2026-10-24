@@ -29,10 +29,13 @@ once, and mounts them with FUSE.
 %package tray
 Summary:        Tray icon for tsync
 Requires:       tsync = %{version}-%{release}
+# linux-tray §6.5: copying codes and unlocking, which the tray does without.
+Recommends:     wl-clipboard kdialog
 
 %description tray
 Shows the state of every tsync domain as an icon in the desktop's
-notification area, with a menu to open folders and hold changes.
+notification area, with a menu to open folders, hold changes and copy
+one-time codes.
 
 %package dolphin
 Summary:        Dolphin context menu for tsync
@@ -50,6 +53,8 @@ folders in a tsync mount.
 install -Dm755 %{srcdir}/_build/default/bin/tsync.exe %{buildroot}%{_bindir}/tsync
 strip %{buildroot}%{_bindir}/tsync
 install -Dm644 %{srcdir}/linux/tsync@.service %{buildroot}%{_unitdir}/tsync@.service
+install -Dm644 %{srcdir}/linux/org.feverdreamtv.tsync.policy \
+  %{buildroot}%{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 install -Dm644 %{srcdir}/assets/tsync-app.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 install -Dm755 %{srcdir}/_build/default/linux/mounts/libtsync_mounts.so \
@@ -68,6 +73,7 @@ DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build --strip
 %files
 %{_bindir}/tsync
 %{_unitdir}/tsync@.service
+%{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 %{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 %{_libdir}/tsync/libtsync_mounts.so
 

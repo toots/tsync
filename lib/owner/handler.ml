@@ -979,6 +979,10 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           unnamed = Atomic.get t.unnamed;
           traffic = t.traffic ();
           mount = Option.bind (t.hooks.frontend ()) (fun f -> f.mount);
+          (* 08 §3.3: status never asks the main; the kept statement answers. *)
+          extensions =
+            Tsync_config.Config.extensions_in_force t.domain.domain
+              (try E.stated_settings () with Fail.E _ -> None);
           new_machines = Vault.announced t.vault;
         }
     | Stats args -> t.stats args

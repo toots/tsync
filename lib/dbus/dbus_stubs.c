@@ -9,6 +9,12 @@
 #include <dbus/dbus.h>
 #include <string.h>
 
+#ifdef TSYNC_DBUS_DLOPEN
+#include "dbus_dlopen.h"
+#else
+static int tsync_dbus_load(void) { return 1; }
+#endif
+
 /* The constructors of Dbus.value that carry arguments, in declaration order. */
 enum {
   TAG_BYTE,
@@ -449,10 +455,17 @@ CAMLprim value tsync_dbus_new_signal(value _path, value _interface,
       String_val(_path), String_val(_interface), String_val(_member))));
 }
 
+CAMLprim value tsync_dbus_available(value _unit) {
+  (void)_unit;
+  return Val_bool(tsync_dbus_load());
+}
+
 CAMLprim value tsync_dbus_connect(value _address) {
   CAMLparam1(_address);
   CAMLlocal1(_connection);
   DBusError error;
+  if (!tsync_dbus_load())
+    raise_error("libdbus-1.so.3 is not installed");
   char *address = strdup(String_val(_address));
   if (address == NULL)
     caml_raise_out_of_memory();
@@ -489,6 +502,22 @@ static DBusConnection *open_connection(value _connection) {
   if (connection == NULL)
     raise_error("the connection is closed");
   return connection;
+}
+
+CAMLprim value tsync_dbus_close(value _connection) {
+  DBusConnection *connection = Connection_val(_connection);
+  if (connection != NULL) {
+    Connection_val(_connection) = NULL;
+    dbus_connection_close(connection);
+    dbus_connection_unref(connection);
+  }
+  return Val_unit;
+}
+
+CAMLprim value tsync_dbus_unique_name(value _connection) {
+  CAMLparam1(_connection);
+  const char *name = dbus_bus_get_unique_name(open_connection(_connection));
+  CAMLreturn(caml_copy_string(name ? name : ""));
 }
 
 CAMLprim value tsync_dbus_descriptor(value _connection) {

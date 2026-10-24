@@ -140,7 +140,7 @@ Three things make this hard, and the rules of this section answer them:
 - the content is recomputed every few seconds, while a host that is told the whole layout changed
   may drop the menu it is drawing;
 - a click names a row by a number the host fetched earlier;
-- the Stats submenu is written by another source than the rest of the tree.
+- the Stats and codes submenus are written by another source than the rest of the tree.
 
 ### 4.1 State
 
@@ -162,6 +162,7 @@ A separator has `type` = `separator`. An item has:
 | `enabled` | `b` | the model's |
 | `visible` | `b` | true, always sent |
 | `icon-name` | `s` | only when the model gives an icon |
+| `icon-data` | `ay` | a PNG, only on a codes header row with a vault mark (§6.5) |
 | `toggle-type` | `s` | `checkmark`, only for a checkmark row |
 | `toggle-state` | `i` | 1 or 0, only for a checkmark row |
 | `children-display` | `s` | `submenu`, only for a submenu row |
@@ -200,7 +201,7 @@ While the menu is open the tray MUST NOT announce a change of the root. It annou
 layout when the menu closes, when a new opening begins, or at the first refresh after the menu
 has been open for `MENU_OPEN_BOUND`, whichever comes first (§4.4).
 
-**Setting the Stats row's children**, given entries:
+**Setting the Stats row's children**, given entries (the codes row's alike, by `ShowCodes`):
 
 1. Find the top-level row whose action is `ShowStats`; none → nothing.
 2. Equal to its current children → nothing.
@@ -226,7 +227,7 @@ the root or a submenu row. Some never report a close of the root.
 - The menu stops counting as open `MENU_OPEN_BOUND` after it was marked open. A menu that only
   swapped its content on close would otherwise keep its first content forever on a host that
   reports no close.
-- Every opening notice, for any id, runs the stats fetch of §6.1.
+- Every opening notice, for any id, runs the stats fetch of §6.1 and the codes fetch of §6.5.
 
 ### 4.5 Methods
 
@@ -342,10 +343,40 @@ Leave. The owners keep running.
 
 ### 6.5 One-time codes
 
-The tray gives the menu model no code domain
-([menu-model.md §5](menu-model.md#5-rows)), so it shows no `One-time codes` row: putting a code on
-the clipboard needs an X11 or Wayland client, which the tray is not. On Linux, codes are read with
-`tsync totp list` and the vault is unlocked with `tsync vault unlock`.
+The tray is not a Wayland client, so it copies through `wl-copy` (wl-clipboard), which is, and
+asks for a passphrase through `kdialog`, whose password dialog has the show-in-clear control of
+[security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases). Neither
+helper ever receives a secret in its arguments, which other processes can list.
+
+- **Code domains.** When `WAYLAND_DISPLAY` is set and `wl-copy` is on the `PATH`, the tray gives
+  the menu model every domain whose last `status` lists `totp` in `extensions` as a code domain
+  ([menu-model.md §5](menu-model.md#5-rows)); otherwise none, and it warns once why. It does not
+  add codes ([menu-model.md §7](menu-model.md#7-codes-submenu)): that is `tsync totp add`.
+- **The submenu.** Every opening notice (§4.4) sets the codes row's children to the placeholder,
+  then sends `totp_list` and `vault_status` to every code domain at the same time, each under
+  `TRAY_STATS_DEADLINE`, and sets the rows of [menu-model.md §7](menu-model.md#7-codes-submenu)
+  as the row's children (§4.3). Rows from an earlier opening are never shown again: a record
+  added on another machine shows at the next opening.
+- **The mark.** With several code domains, each domain's header row (the model's `vault`) carries
+  its vault's mark ([vault §8.1](../extensions/vault.md#81-appearance)) as `icon-data` (`ay`, a
+  PNG): the vault's icon as stored, or the tsync glyph in the vault's colour. A record's row
+  carries none, and neither does a domain whose `vault_status` did not answer.
+- **`CopyCode(domain, id)`** asks the owner `totp_code`, then runs
+  `wl-copy --sensitive --type text/plain` with the code on its standard input, which offers
+  `x-kde-passwordManagerHint` = `secret` beside the text so Klipper keeps no history of it. The
+  tray waits for `wl-copy` to return, which it does once it serves the clipboard. The code is not
+  cleared on a timer, never logged and not kept. A refusal, or `wl-copy` failing, is a desktop
+  notification (`org.freedesktop.Notifications`) carrying the reason; nothing is copied.
+- **`Unlock(domain)`** asks `vault_status`, then runs `kdialog --password` naming the domain, and
+  reads the passphrase from its standard output; on a machine not enrolled
+  ([vault §6](../extensions/vault.md#6-unlocking-and-the-keystore)), a second one for the secret
+  key. A dialog closed without OK sends nothing. It sends `vault_unlock` without the `secretKey`
+  member when that answer is empty. `denied` or `invalid` opens the dialogs again with the
+  owner's sentence above the prompt; success ends, and the next opening lists the domain's
+  records. A status that fails, or no `kdialog` on the `PATH`, is a notification saying to run
+  `tsync vault unlock`. The answers are dropped once the request is sent, never logged.
+- These run outside the work that answers the bus (§5.1), one unlock at a time: a click on an
+  unlock row while a dialog is open does nothing.
 
 ## 7. Showing a path in the file manager
 
@@ -372,6 +403,8 @@ the clipboard needs an X11 or Wayland client, which the tray is not. On Linux, c
 | an owner refuses a pause | a warning; the checkmark shows what the owners report |
 | the session bus closes | exit 0 |
 | a second tray is started | it says so and exits 0 |
+| no Wayland session or no `wl-copy` | no codes row; one warning |
+| a code or an unlock refused, or a helper failing | a notification with the reason; nothing copied |
 
 ## 9. Conformance
 
@@ -444,6 +477,15 @@ records calls, and none; a config as a file.
   appear within two poll intervals. A config rewritten twice in quick succession ends with the
   second content shown.
 - **Quit.** After Quit the process has exited 0 and every owner still answers.
+- **Codes.** With a `wl-copy` double on the `PATH` recording its arguments and standard input:
+  an opening lists the code domains' records, each row with `icon-data`; a click on one runs it
+  with `--sensitive` and the owner's code on standard input, and no argument holds the code. With
+  no `WAYLAND_DISPLAY`, or no `wl-copy`, there is no codes row. No row has the `Add a code…`
+  label.
+- **Unlock.** With a `kdialog` double answering a passphrase: the locked row's click sends
+  `vault_unlock` with it, and no helper's arguments hold it; a `denied` reply runs the double
+  again with the owner's sentence; a double that exits 1 sends nothing. With no `kdialog`, the
+  click is a notification.
 
 **Incidental throughout:** log wording, the introspection document's text, the order of
 properties in a reply.

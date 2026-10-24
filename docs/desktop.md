@@ -48,6 +48,7 @@ Quit tsync tray
 - Clicking a domain opens its folder. Clicking a file shows it in the file manager; it never opens the file.
 - *Stats* is a short form of `tsync status`, read when you open it.
 - *Hold changes* is `tsync pause` for every domain. The checkmark shows what the service reports, not what you clicked.
+- *One-time codes* appears for a domain that uses `totp`, whether its config lists it or the server it follows does, on Wayland with `wl-copy` (wl-clipboard) installed. It lists each code by `issuer — account`, with its vault's colour or icon; clicking one copies its current code, marked so Klipper keeps no history of it. A locked domain's *Locked — unlock…* asks for the passphrase in KDE's dialog (`kdialog`). Codes are added with `tsync totp add`.
 - *Quit* closes the tray only. Syncing continues.
 
 The package starts the tray with your desktop session. To turn that off, use your desktop's autostart settings, or:

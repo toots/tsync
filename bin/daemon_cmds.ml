@@ -150,6 +150,7 @@ let owner names mount tls =
           | _ -> ());
         ignore (Fs.raise_nofile 65536);
         Owner.stop_on_signals ();
+        Platform.register ();
         match Owner.host_for domains with
           | Some host ->
               host ~mount domains ~run:(fun present ->

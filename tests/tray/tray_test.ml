@@ -62,6 +62,7 @@ type world = {
   mutable registrations : string list;
   mutable file_manager : (string * string) list;
   mutable file_manager_answers : bool;
+  mutable notifications : string list;
   mutable tray : int;
   out : Buffer.t;
 }
@@ -99,6 +100,13 @@ let host_handler w message =
                   w.file_manager <- (member, uri) :: w.file_manager)
           | _ -> ());
         if locked w (fun () -> w.file_manager_answers) then reply []
+    | Method_call, _, "Notify" ->
+        (match Dbus.body message with
+          | [_; _; _; String summary; String body; _; _; _] ->
+              locked w (fun () ->
+                  w.notifications <- (summary ^ ": " ^ body) :: w.notifications)
+          | _ -> ());
+        reply [Uint32 1]
     | Method_call, _, _ ->
         Bus.send w.host
           (Dbus.error_reply message
@@ -175,6 +183,7 @@ let world () =
       registrations = [];
       file_manager = [];
       file_manager_answers = true;
+      notifications = [];
       tray = 0;
       out = Buffer.create 1024;
     }
@@ -183,10 +192,18 @@ let world () =
   ignore (bus_call w "AddMatch" [String "type='signal'"]);
   w
 
-let environment ?(address = true) ?(runtime = false) w =
+(* [bare] leaves only the scenario's own helpers on the PATH: this machine's
+   wl-copy and kdialog are never the ones a scenario means. *)
+let environment ?(address = true) ?(runtime = false) ?(wayland = false)
+    ?(bare = false) w =
   let dropped =
     [
-      "HOME="; "XDG_"; "DBUS_SESSION_BUS_ADDRESS="; "TSYNC_CONFIG_JSON="; "PATH=";
+      "HOME=";
+      "XDG_";
+      "DBUS_SESSION_BUS_ADDRESS=";
+      "TSYNC_CONFIG_JSON=";
+      "PATH=";
+      "WAYLAND_DISPLAY=";
     ]
   in
   Array.of_list
@@ -194,8 +211,9 @@ let environment ?(address = true) ?(runtime = false) w =
        "HOME=" ^ path w "h";
        "XDG_CONFIG_HOME=" ^ path w "c";
        "XDG_DATA_HOME=" ^ path w "d";
-       "PATH=" ^ path w "bin" ^ ":" ^ Sys.getenv "PATH";
+       ("PATH=" ^ path w "bin" ^ if bare then "" else ":" ^ Sys.getenv "PATH");
      ]
+    @ (if wayland then ["WAYLAND_DISPLAY=wayland-test"] else [])
     @ (if address then ["DBUS_SESSION_BUS_ADDRESS=" ^ w.address] else [])
     @ (if runtime then ["XDG_RUNTIME_DIR=" ^ path w "rt"] else [])
     @ List.filter
@@ -203,20 +221,22 @@ let environment ?(address = true) ?(runtime = false) w =
           not (List.exists (fun prefix -> String.starts_with ~prefix v) dropped))
         (Array.to_list (Unix.environment ())))
 
-let run_tray ?address ?runtime ?(arguments = []) w =
+let run_tray ?address ?runtime ?wayland ?bare ?(arguments = []) w =
   let file name =
     Unix.openfile (path w name) [O_WRONLY; O_CREAT; O_APPEND] 0o600
   in
   let out = file "tray.out" and err = file "tray.err" in
   let pid =
-    spawn ~env:(environment ?address ?runtime w) ~out ~err tray_exe arguments
+    spawn
+      ~env:(environment ?address ?runtime ?wayland ?bare w)
+      ~out ~err tray_exe arguments
   in
   Unix.close out;
   Unix.close err;
   pid
 
-let start_tray w =
-  w.tray <- run_tray w;
+let start_tray ?wayland ?bare w =
+  w.tray <- run_tray ?wayland ?bare w;
   if not (wait_until (fun () -> has_owner w (item w))) then
     failwith "the tray did not start"
 
@@ -244,7 +264,7 @@ let configure w names =
              (fun name ->
                Printf.sprintf
                  {|{"name":%S,"symlinks":"keep","versioning":true,
-                    "extensions":[],"frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
+                    "frontends":[{"type":"fuse","mountPoint":"/cfg/%s"}],
                     "backends":[{"type":"local","name":"main","role":"main","path":"/srv/%s"}]}|}
                  name name name)
              names)))
@@ -1013,6 +1033,200 @@ let config w =
           (fun l -> Text.contains l "tray: no domains")
           (lines (path w "tray.err"))))
 
+(* Helper doubles run under a bare PATH (see environment), so they name every
+   command they use by its absolute path. *)
+let helper_double w name body =
+  let file = path w ("bin/" ^ name) in
+  write file ("#!/bin/sh\n" ^ body);
+  Unix.chmod file 0o700
+
+(* Records its arguments, one call per line, and what it was given. *)
+let wl_copy_double w =
+  helper_double w "wl-copy"
+    (Printf.sprintf
+       "echo \"$*\" >> %s/wl-copy.args\n/bin/cat >> %s/wl-copy.in\n" w.dir w.dir)
+
+(* Answers each call with the next line of kdialog.answers: CANCEL exits 1, a
+   line WAIT first waits for the file go. *)
+let kdialog_double w =
+  helper_double w "kdialog"
+    (Printf.sprintf
+       {|echo "$*" >> %s/kdialog.args
+answer=$(/usr/bin/head -n 1 %s/kdialog.answers)
+/usr/bin/sed -i 1d %s/kdialog.answers
+if [ "$answer" = WAIT ]; then
+  while [ ! -e %s/go ]; do /usr/bin/sleep 0.05; done
+  answer=$(/usr/bin/head -n 1 %s/kdialog.answers)
+  /usr/bin/sed -i 1d %s/kdialog.answers
+fi
+[ "$answer" = CANCEL ] && exit 1
+echo "$answer"
+|}
+       w.dir w.dir w.dir w.dir w.dir w.dir)
+
+let codes_row w = find w "One-time codes"
+
+(* A dialog's text may span lines; each call starts with its title. *)
+let dialogs w =
+  List.filter
+    (String.starts_with ~prefix:"--title")
+    (lines (path w "kdialog.args"))
+
+let codes_children w =
+  match codes_row w with Some n -> List.map label n.children | None -> []
+
+let opened_codes w =
+  ignore (menu w "AboutToShow" [Int32 0]);
+  wait_until (fun () ->
+      match codes_children w with [] | ["Reading…"] -> false | _ -> true)
+
+let png_signature = "\137PNG\r\n\026\n"
+
+let icon_data n =
+  match List.assoc_opt "icon-data" n.properties with
+    | Some (Array (_, bytes)) ->
+        String.of_seq
+          (Seq.filter_map
+             (function Dbus.Byte b -> Some (Char.chr b) | _ -> None)
+             (List.to_seq bytes))
+    | _ -> ""
+
+(* The config lists no extension: the status says which are in force. *)
+let with_totp = {|{"ok":true,"extensions":["totp"]}|}
+
+let two_records =
+  {|{"ok":true,"records":[{"id":"3f2a","issuer":"ACME Co","account":"john","code":"000000","secondsLeft":9},{"id":"9c1e","issuer":"GitHub","account":"me","code":"000000","secondsLeft":9}],"corrupt":[]}|}
+
+let restart_tray ?wayland ?bare w =
+  Unix.kill w.tray Sys.sigterm;
+  ignore (exit_status w.tray);
+  start_tray ?wayland ?bare w;
+  ignore (shows w "work")
+
+(* §9 "Codes". *)
+let codes w =
+  configure w ["work"; "home"; "plain"];
+  owner w "work" ~status:with_totp;
+  owner w "home" ~status:with_totp;
+  owner w "plain";
+  write (script w "work" "totp_list") two_records;
+  write
+    (script w "work" "vault_status")
+    {|{"ok":true,"vault":"unlocked","enrolled":true,"appearance":{"color":"#dc2626","colorChosen":false}}|};
+  write
+    (script w "home" "totp_list")
+    {|{"ok":false,"code":"locked","error":"the vault is locked"}|};
+  write
+    (script w "work" "totp_code")
+    {|{"ok":true,"code":"492039","secondsLeft":12}|};
+  wl_copy_double w;
+  start_tray ~wayland:true ~bare:true w;
+  check w "a code domain on Wayland with wl-copy has the codes row"
+    (wait_until (fun () -> codes_row w <> None));
+  check w "an opening fills the codes row" (opened_codes w);
+  say w "the codes row holds: %s" (String.concat " | " (codes_children w));
+  let records =
+    List.filter
+      (fun n ->
+        List.mem (String.trim (label n)) ["ACME Co — john"; "GitHub — me"])
+      (Option.get (codes_row w)).children
+  in
+  let header name =
+    List.find_opt
+      (fun n -> String.trim (label n) = name)
+      (Option.get (codes_row w)).children
+  in
+  let marked n = String.starts_with ~prefix:png_signature (icon_data n) in
+  check w "a record row carries no mark"
+    (records <> [] && not (List.exists marked records));
+  check w "the work header carries its vault's PNG mark"
+    (Option.fold ~none:false ~some:marked (header "work"));
+  check w "a header whose vault did not answer carries none"
+    (Option.fold ~none:false ~some:(fun n -> not (marked n)) (header "home"));
+  check w "a domain whose status lists no totp has no codes"
+    (not (List.mem "plain" (codes_children w)));
+  check w "no row is Add a code"
+    (not
+       (List.exists (fun l -> Text.contains l "Add a code") (codes_children w)));
+  click w (List.hd records).id;
+  check w "a click runs wl-copy"
+    (wait_until (fun () -> lines (path w "wl-copy.in") <> []));
+  let arguments = lines (path w "wl-copy.args") in
+  say w "wl-copy ran with: %s" (String.concat " | " arguments);
+  check w "the owner's code is on its standard input"
+    (lines (path w "wl-copy.in") = ["492039"]);
+  check w "no argument holds the code"
+    (not (List.exists (fun a -> Text.contains a "492039") arguments));
+  restart_tray ~bare:true w;
+  check w "with no WAYLAND_DISPLAY there is no codes row"
+    (Rt.sleep (2. *. poll_interval);
+     codes_row w = None);
+  Sys.remove (path w "bin/wl-copy");
+  restart_tray ~wayland:true ~bare:true w;
+  check w "with no wl-copy there is no codes row"
+    (Rt.sleep (2. *. poll_interval);
+     codes_row w = None)
+
+(* §9 "Unlock". *)
+let unlock w =
+  configure w ["home"];
+  owner w "home" ~status:with_totp;
+  write
+    (script w "home" "totp_list")
+    {|{"ok":false,"code":"locked","error":"the vault is locked"}|};
+  write
+    (script w "home" "vault_status")
+    {|{"ok":true,"vault":"locked","enrolled":true}|};
+  write
+    (script w "home" "vault_unlock")
+    {|{"ok":false,"code":"denied","error":"wrong passphrase"}|};
+  write (path w "kdialog.answers") "first-guess\nWAIT\nsecond-guess\nCANCEL\n";
+  wl_copy_double w;
+  kdialog_double w;
+  own w "org.freedesktop.Notifications";
+  start_tray ~wayland:true ~bare:true w;
+  ignore (wait_until (fun () -> codes_row w <> None));
+  ignore (opened_codes w);
+  say w "the codes row holds: %s" (String.concat " | " (codes_children w));
+  let locked_row () =
+    List.find
+      (fun n -> String.starts_with ~prefix:"Locked" (label n))
+      (Option.get (codes_row w)).children
+  in
+  click w (locked_row ()).id;
+  check w "the click sends vault_unlock"
+    (wait_until (fun () -> requests w "home" "vault_unlock" = 1));
+  check w "a denied unlock asks again"
+    (wait_until (fun () -> List.length (dialogs w) = 2));
+  write (script w "home" "vault_unlock") {|{"ok":true}|};
+  write (path w "go") "";
+  check w "the second answer is sent"
+    (wait_until (fun () -> requests w "home" "vault_unlock" = 2));
+  check w "the second dialog carries the owner's sentence"
+    (Text.contains (List.nth (dialogs w) 1) "wrong passphrase");
+  let sent = lines (script w "home" "requests") in
+  check w "each answer went to the owner, in order"
+    (List.exists (fun l -> Text.contains l "first-guess") sent
+    && List.exists (fun l -> Text.contains l "second-guess") sent);
+  check w "no helper's arguments hold a passphrase"
+    (not
+       (List.exists
+          (fun l -> Text.contains l "guess")
+          (lines (path w "kdialog.args"))));
+  ignore (opened_codes w);
+  click w (locked_row ()).id;
+  check w "a cancelled dialog sends nothing"
+    (wait_until (fun () -> List.length (dialogs w) = 3)
+    &&
+    (Rt.sleep 1.;
+     requests w "home" "vault_unlock" = 2));
+  Sys.remove (path w "bin/kdialog");
+  click w (locked_row ()).id;
+  check w "with no kdialog, a notification"
+    (wait_until (fun () -> locked w (fun () -> w.notifications) <> []));
+  say w "it says: %s"
+    (String.concat " | " (locked w (fun () -> w.notifications)))
+
 (* The scenarios that measure a bound run first, one at a time: beside a
    dozen trays starting at once they would measure the machine. *)
 let measured =
@@ -1034,6 +1248,8 @@ let side_by_side =
     ("panel lifecycle", panel);
     ("session and quit", session);
     ("config", config);
+    ("one-time codes", codes);
+    ("unlock", unlock);
   ]
 
 let () =
