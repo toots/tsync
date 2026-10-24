@@ -25,9 +25,10 @@ const TsyncFields = (() => {
   }
 
   // The fields of one form: a lone text field before a password field is its
-  // username, as most sign-in pages draw it.
+  // username, as most sign-in pages draw it, and several code fields are one code split in boxes, which tsync does not fill.
   function classify(fields) {
     const kinds = fields.map(kind);
+    if (kinds.filter((k) => k === "code").length > 1) kinds.forEach((k, i) => { if (k === "code") kinds[i] = null; });
     const firstPassword = kinds.indexOf("password");
     if (firstPassword > 0 && !kinds.includes("username")) {
       for (let i = firstPassword - 1; i >= 0; i--) {

@@ -120,11 +120,22 @@
     follow();
   }
 
-  // ponytail: a field clipped by a scrolled container keeps its icon over the clip; hide by intersection if pages show it.
+  // Pages hide a field they keep for later steps by opacity, an ancestor's visibility or clip, or aria-hidden.
+  function drawn(el, r) {
+    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+    if (el.closest("[aria-hidden=true], [inert]")) return false;
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      if (getComputedStyle(n).overflow === "visible") continue;
+      const c = n.getBoundingClientRect();
+      if (r.bottom <= c.top || r.top >= c.bottom || r.right <= c.left || r.left >= c.right) return false;
+    }
+    return true;
+  }
+
   function follow() {
     for (const [el, b] of badges) {
       const r = el.getBoundingClientRect();
-      b.hidden = r.width < 48 || r.height < 16 || r.bottom < 0 || r.top > innerHeight;
+      b.hidden = r.width < 48 || r.height < 16 || r.bottom < 0 || r.top > innerHeight || !drawn(el, r);
       if (!b.hidden) place(el, b, false);
     }
   }
@@ -144,6 +155,7 @@
 
   window.addEventListener("scroll", () => { menu.hidden = true; refollow(); }, true);
   window.addEventListener("resize", refollow);
+  document.addEventListener("transitionend", refollow, true);
   document.addEventListener("focusin", refollow, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; }, true);
 
