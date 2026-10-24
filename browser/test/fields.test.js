@@ -1,4 +1,4 @@
-// passwords/browser §3.1. Run: node --test browser/test
+// passwords/browser §3.1. Run: node --test 'browser/test/*.test.js'
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
@@ -31,6 +31,12 @@ test("a login or authentication code by its label, never a bare Code", () => {
   assert.equal(kind({ type: "text", label: "Login code" }), "code");
   assert.equal(kind({ type: "tel", placeholder: "Authentication code" }), "code");
   assert.equal(kind({ type: "text", label: "Security code" }), null, "a card's CVC");
+});
+
+test("Apple's code split in one box per digit is no code field", () => {
+  const digit = (n) => ({ type: "tel", autocomplete: "off", label: `Verification Code Digit ${n}` });
+  assert.deepEqual(classify([1, 2, 3, 4, 5, 6].map(digit)), [null, null, null, null, null, null]);
+  assert.deepEqual(classify([digit(1)]), ["code"], "a single box is the whole code");
 });
 
 test("a lone text field before a password is its username", () => {
