@@ -31,6 +31,7 @@ type t = {
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
   pulls : Pulls.t option;  (** on a pulled tree *)
   vault : Vault.t;
+  formats : Format_merge.t;
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -123,8 +124,31 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       answered_unreachable = Atomic.make false;
       running = Atomic.make None;
       vault = Vault.create ?pulls ();
+      formats = Format_merge.create ();
     }
   in
+  (* format-merge §3.1, §3.2, each with its fold alone and its locks taken in
+     §6's order. *)
+  Format_merge.register t.formats
+    {
+      name = "vault-keyring";
+      folder = Vault.folder;
+      settle =
+        (fun () ->
+          Format_merge.locked Vault.folder (fun () ->
+              ignore (Vault.read ~domain engine)));
+    };
+  Format_merge.register t.formats
+    {
+      name = "totp-records";
+      folder = Totp_verbs.folder;
+      settle =
+        (fun () ->
+          Format_merge.locked Totp_verbs.folder (fun () ->
+              Format_merge.locked Vault.folder (fun () ->
+                  Totp_verbs.fold ~domain ~engine ~lazy_tree:domain.lazy_tree
+                    t.vault)));
+    };
   (* vault §6.3: the domain's status reports new machines from the start, the
      keystore's K included. *)
   Rt.spawn ~name:"vault machines" (fun () ->
@@ -139,6 +163,15 @@ let notify_folders t dirs =
     folders_changed ~domain:(domain_name t) ~engine:t.engine ~publish:t.publish
       dirs
 
+(* format-merge §2 rule 1: the engine's changes; a copy a settling just moved
+   away is no longer there and schedules nothing. *)
+let copies_arrived t keys =
+  let (module E : Engine.S) = t.engine in
+  Format_merge.arrived t.formats
+    ~present:(fun path -> E.kind path = `File)
+    ~spawn:(fun f -> Rt.spawn ~name:"format merge" f)
+    keys
+
 (* vault §6.3: an entry arriving in the machine list is announced at once. *)
 let keys_changed t keys =
   notify_folders t (List.map Names.parent_of keys);
@@ -146,6 +179,20 @@ let keys_changed t keys =
     Rt.spawn ~name:"vault machines" (fun () ->
         try ignore (Vault.announce ~domain:t.domain ~engine:t.engine t.vault)
         with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
+
+(* format-merge §2 rule 1: at owner start, the copies already in a format's
+   folder, whatever their arrival. *)
+let sweep_copies t =
+  let (module E : Engine.S) = t.engine in
+  copies_arrived t
+    (List.concat_map
+       (fun dir ->
+         if E.kind dir <> `Dir then []
+         else
+           List.map
+             (fun (e : E.entry) -> Names.join dir e.name)
+             (E.list_children dir))
+       (Format_merge.registered_folders t.formats))
 
 let event t name fields =
   `Assoc
@@ -815,42 +862,60 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   let vault f =
     f ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree t.vault
   in
+  (* format-merge §6: a vault verb holds the vault's folder from its read to
+     its write; a record verb the extension's and then the vault's. *)
+  let on_vault f = Format_merge.locked Vault.folder f in
+  let on_records f =
+    Format_merge.locked Totp_verbs.folder (fun () -> on_vault f)
+  in
   match req with
     | Ping -> ()
-    | Vault_init passphrase -> vault Vault.init passphrase
+    | Vault_init passphrase -> on_vault (fun () -> vault Vault.init passphrase)
     | Vault_unlock r -> (
-        vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase;
+        on_vault (fun () ->
+            vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase);
         (* The vault is unlocked whatever the fold does: one left now runs at
-           the next verb. *)
-        (* pitfall A-4.18 *)
-          try vault Totp_verbs.fold with
+           the next verb. Its locks after the unlock's, in format-merge §6's
+           order. pitfall A-4.18 *)
+          try on_records (fun () -> vault Totp_verbs.fold) with
           | (Stop.Stopping | Rt.Cancelled) as e -> raise e
           | e ->
               Log.warn "totp: the fold after unlock is left: %s"
                 (Fail.classify e).reason)
-    | Vault_lock `Screen -> vault Vault.screen_locked
+    | Vault_lock `Screen -> on_vault (fun () -> vault Vault.screen_locked)
     | Vault_lock ((`Lock | `Forget) as how) ->
-        vault (Vault.lock ~forget_secret_key:(how = `Forget))
+        on_vault (fun () ->
+            vault (Vault.lock ~forget_secret_key:(how = `Forget)))
     | Vault_appearance c ->
-        vault (Vault.set_appearance ~color:c.set_color ~icon:c.set_icon)
+        on_vault (fun () ->
+            vault (Vault.set_appearance ~color:c.set_color ~icon:c.set_icon))
     | Vault_passphrase r ->
-        vault (Vault.passphrase ~new_secret_key:r.new_secret_key) r.passphrase
+        on_vault (fun () ->
+            vault
+              (Vault.passphrase ~new_secret_key:r.new_secret_key)
+              r.passphrase)
     | Vault_delete confirm ->
-        Vault.delete ~domain:t.domain ~engine:t.engine
-          ~lazy_tree:t.domain.lazy_tree ~confirm t.vault
-    | Vault_status -> vault Vault.status
-    | Vault_kit passphrase -> vault Vault.kit passphrase
-    | Vault_machines name -> vault (Vault.list_machines ?name)
+        on_vault (fun () ->
+            Vault.delete ~domain:t.domain ~engine:t.engine
+              ~lazy_tree:t.domain.lazy_tree ~confirm t.vault)
+    | Vault_status -> on_vault (fun () -> vault Vault.status)
+    | Vault_kit passphrase -> on_vault (fun () -> vault Vault.kit passphrase)
+    | Vault_machines name ->
+        on_vault (fun () -> vault (Vault.list_machines ?name))
     | Vault_rekey r ->
-        vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase
-    | Totp_add source -> vault Totp_verbs.add source
-    | Totp_list filter -> vault Totp_verbs.list filter
-    | Totp_code id -> vault Totp_verbs.code id
+        on_records (fun () ->
+            vault (Vault.rekey ?new_passphrase:r.new_passphrase) r.passphrase)
+    | Totp_add source -> on_records (fun () -> vault Totp_verbs.add source)
+    | Totp_list filter -> on_records (fun () -> vault Totp_verbs.list filter)
+    | Totp_code id -> on_records (fun () -> vault Totp_verbs.code id)
     | Totp_rename r ->
-        vault (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id)
-    | Totp_remove id -> vault Totp_verbs.remove id
-    | Totp_import text -> vault Totp_verbs.import text
-    | Totp_export passphrase -> vault Totp_verbs.export passphrase
+        on_records (fun () ->
+            vault
+              (Totp_verbs.rename ?issuer:r.issuer ?account:r.account ~id:r.id))
+    | Totp_remove id -> on_records (fun () -> vault Totp_verbs.remove id)
+    | Totp_import text -> on_records (fun () -> vault Totp_verbs.import text)
+    | Totp_export passphrase ->
+        on_records (fun () -> vault Totp_verbs.export passphrase)
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit

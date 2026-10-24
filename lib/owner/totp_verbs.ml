@@ -19,6 +19,7 @@ type ctx = {
   opened : (string, Totp.t option) Hashtbl.t;
       (** by body: a verb opens each body once, the fold's included *)
   keep : bool;  (** a lazy tree: bodies read stay pinned (README §4.1) *)
+  writable : bool;  (** format-merge §2: a fold is applied only then *)
 }
 
 let opened ctx (f : Fold.file) =
@@ -56,7 +57,7 @@ let relabel ctx = function
               if r.issuer <> "" then { r with issuer = r.issuer ^ suffix }
               else { r with account = r.account ^ suffix }
             in
-            Vault.write_file ctx.engine ~exclusive:false path
+            Format_merge.write_file ctx.engine ~exclusive:false path
               (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
                  (Totp.to_string r))
         | _ -> ())
@@ -65,23 +66,22 @@ let relabel ctx = function
 (* README §4.3, run before a verb reads: what a fold settles is never shown
    twice. *)
 let settled ctx =
-  let files = Vault.files ~keep:ctx.keep ctx.engine folder in
+  let read () = Vault.files ~keep:ctx.keep ctx.engine folder in
   match
-    Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
-      ~modified:(fun (r : Totp.t) -> r.modified)
-      files
+    Format_merge.settle_folder ~after:(relabel ctx) ~writable:ctx.writable ~read
+      ~fold:
+        (Fold.grouped ~open_:(opened ctx) ~key:Totp.code_fields
+           ~modified:(fun (r : Totp.t) -> r.modified))
+      ctx.engine folder
   with
-    | [] -> files
-    | actions ->
-        Vault.apply ctx.engine folder actions;
-        List.iter (relabel ctx) actions;
-        Vault.files ~keep:ctx.keep ctx.engine folder
+    | Some files -> files
+    | None -> read ()
 
 (* README §4.1: a read answers the last view of the vault's folders and this
    one; a write proceeds on it, pushed later. *)
-let context ?(writing = false) ~domain ~engine ~lazy_tree t =
+let context ?(writing = false) ?use ~domain ~engine ~lazy_tree t =
   check_uses ~domain ~engine;
-  let keyring, key = Vault.held ~domain ~engine ~lazy_tree t in
+  let keyring, key = Vault.held ?use ~domain ~engine ~lazy_tree t in
   if lazy_tree then (
     let (module E : Tsync_sync.Engine.S) = engine in
     if not writing then
@@ -94,6 +94,7 @@ let context ?(writing = false) ~domain ~engine ~lazy_tree t =
     key_id = keyring.Tsync_vault.Keyring.key_id;
     opened = Hashtbl.create 16;
     keep = lazy_tree;
+    writable = not domain.Tsync_domain.Domain.domain.read_only;
   }
 
 let now () = int_of_float (Unix.time ())
@@ -103,7 +104,7 @@ let write ctx ~exclusive id record =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [Names.extension_root; folder];
-  Vault.write_file ctx.engine ~exclusive (Names.join folder id)
+  Format_merge.write_file ctx.engine ~exclusive (Names.join folder id)
     (Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
        (Totp.to_string record))
 
@@ -254,7 +255,7 @@ let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
 (* README §4.2: the fold that waited for the key. *)
 let fold ~domain ~engine ~lazy_tree t =
   if List.mem name (Vault.extensions ~domain ~engine) then
-    ignore (records (context ~domain ~engine ~lazy_tree t))
+    ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
 
 let export ~domain ~engine ~lazy_tree t passphrase =
   let ctx = context ~domain ~engine ~lazy_tree t in

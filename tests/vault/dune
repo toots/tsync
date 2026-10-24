@@ -29,3 +29,19 @@
  (alias runtest)
  (action
   (diff totp_test.expected totp_test.output)))
+
+(executable
+ (name totp_merge_test)
+ (modules totp_merge_test)
+ (libraries tsync_vault tsync_merge_kit))
+
+(rule
+ (action
+  (with-stdout-to
+   totp_merge_test.output
+   (run ./totp_merge_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff totp_merge_test.expected totp_merge_test.output)))

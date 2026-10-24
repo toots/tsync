@@ -143,7 +143,7 @@ let adopt ~domain ~engine t entry =
           match Stop.sleep (Float.min 10. (Atomic.get minute /. 4.)) with
             | exception Stop.Stopping -> Atomic.set t.watching false
             | () ->
-                expire ~domain ~engine t;
+                Format_merge.locked folder (fun () -> expire ~domain ~engine t);
                 if Atomic.get t.key <> None then loop ()
                 else (
                   Atomic.set t.watching false;
@@ -316,29 +316,6 @@ let files ?(keep = false) engine dir : Tsync_vault.Fold.file list =
           Some { Tsync_vault.Fold.name = e.name; body }))
       (E.list_children dir)
 
-let write_file (module E : Engine.S) ~exclusive path body =
-  E.create path ~exclusive;
-  E.truncate path 0;
-  E.write path ~off:0 (Bigstring.of_string body);
-  E.close path
-
-(* README §4.2: a fold that cannot be applied now is left for the next. Its
-   actions run in order and stop at the first failure, so a copy is never
-   removed after what should have absorbed it failed to be written. *)
-let apply engine dir actions =
-  let (module E : Engine.S) = engine in
-  try
-    List.iter
-      (function
-        | Tsync_vault.Fold.Move { src; dst } ->
-            E.rename ~src:(Names.join dir src) ~dst:(Names.join dir dst)
-              ~exclusive:false
-        | Remove name -> E.delete (Names.join dir name)
-        | Write { name; body } ->
-            write_file engine ~exclusive:false (Names.join dir name) body)
-      actions
-  with Fail.E f -> Log.warn "vault: a fold in %s is left: %s" dir f.reason
-
 type found = {
   keyring : [ `Absent | `Corrupt of string | `Ok of Keyring.t ];
   copies : string list;  (** the conflicted copies beside it *)
@@ -351,7 +328,8 @@ let read ~(domain : Tsync_domain.Domain.t) engine =
     Tsync_vault.Fold.keyring ~name:"keyring"
       (files ~keep:domain.lazy_tree engine folder)
   in
-  if not domain.domain.read_only then apply engine folder actions;
+  if not domain.domain.read_only then
+    ignore (Format_merge.apply engine folder actions);
   let keyring =
     match E.kind keyring_path with
       | `Absent | `Dir -> `Absent
@@ -365,7 +343,8 @@ let read ~(domain : Tsync_domain.Domain.t) engine =
 let write engine ~exclusive keyring =
   let (module E : Engine.S) = engine in
   List.iter (fun dir -> E.mkdir dir ~exclusive:false) [ext; folder];
-  write_file engine ~exclusive keyring_path (Keyring.to_string keyring)
+  Format_merge.write_file engine ~exclusive keyring_path
+    (Keyring.to_string keyring)
 
 let now () = int_of_float (Unix.time ())
 
@@ -400,7 +379,7 @@ let write_machine ~domain engine ~key_id ~key (m : Tsync_vault.Machine.t) =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [ext; folder; machines_folder];
-  write_file engine ~exclusive:false (machine_path domain)
+  Format_merge.write_file engine ~exclusive:false (machine_path domain)
     (Tsync_vault.Envelope.seal ~key ~key_id ~extension:"vault"
        (Tsync_vault.Machine.to_string m))
 
@@ -545,7 +524,8 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
             Envelope.open_ ~key:old_key ~key_id:old_id ~extension f.body
           with
             | Ok plaintext ->
-                write_file engine ~exclusive:false (Names.join dir f.name)
+                Format_merge.write_file engine ~exclusive:false
+                  (Names.join dir f.name)
                   (Envelope.seal ~key ~key_id ~extension plaintext)
             | Error _ -> ())
         (files engine dir))
@@ -559,7 +539,7 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
           | _ -> None)
       (files engine folder)
   in
-  apply engine folder copies
+  ignore (Format_merge.apply engine folder copies)
 
 let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
   let enrolls = secret_key <> None in
@@ -832,7 +812,7 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
   List.iter
     (fun dir -> E.mkdir dir ~exclusive:false)
     [ext; folder; appearance_folder];
-  write_file engine ~exclusive:false appearance_path
+  Format_merge.write_file engine ~exclusive:false appearance_path
     (Tsync_vault.Appearance.to_string next);
   List.iter
     (fun (f : Tsync_vault.Fold.file) ->

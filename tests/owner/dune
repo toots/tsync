@@ -199,6 +199,21 @@
   (diff totp_test.expected totp_test.output)))
 
 (executable
+ (name format_merge_test)
+ (modules format_merge_test)
+ (libraries tsync_owner))
+
+(rule
+ (with-stdout-to
+  format_merge_test.output
+  (run ./format_merge_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff format_merge_test.expected format_merge_test.output)))
+
+(executable
  (name autolock_test)
  (modules autolock_test)
  (libraries

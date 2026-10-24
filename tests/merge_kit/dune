@@ -1,0 +1,5 @@
+; The merge kit (format-merge §7): test-only, never linked into the program.
+
+(library
+ (name tsync_merge_kit)
+ (libraries tsync_core tsync_vault unix))
