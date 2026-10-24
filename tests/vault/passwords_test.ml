@@ -70,6 +70,8 @@ let matching () =
       ("https://idmsa.apple.com", "https://iforgot.apple.com");
       ("https://alice.github.io", "https://bob.github.io");
       ("https://github.io", "https://alice.github.io");
+      ("https://alice.s3.amazonaws.com", "https://bob.s3.amazonaws.com");
+      ("https://a.amazonaws.com", "https://b.amazonaws.com");
       ("https://bank.co.uk", "https://login.bank.co.uk");
       ("https://10.0.0.1", "https://192.168.0.1");
       ("https://10.0.0.1", "https://10.0.0.1");

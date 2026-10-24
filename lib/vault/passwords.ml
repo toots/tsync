@@ -280,11 +280,13 @@ let is_public_suffix d =
   && (Hashtbl.mem rules.normal d
      || Option.fold ~none:true ~some:(Hashtbl.mem rules.wildcard) parent)
 
-(* The shortest suffix of [host] that is not a public suffix. *)
+(* The longest public suffix of [host] and the label before it. *)
 let registrable host =
-  List.fold_left
-    (fun found d -> if is_public_suffix d then found else Some d)
-    None (suffixes host)
+  let rec walk below = function
+    | [] -> None
+    | d :: rest -> if is_public_suffix d then below else walk (Some d) rest
+  in
+  walk None (suffixes host)
 
 (* An IP address has no registrable domain, though the PSL walk would name its
    last two numbers. *)

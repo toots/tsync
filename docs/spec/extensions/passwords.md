@@ -118,9 +118,10 @@ A record matches a request when one of its `urls` matches it:
 
 - A web request, for origin `<scheme>://<host>[:<port>]`, matches a web site whose port is equal
   (each scheme's default when absent), and whose host equals the request's host or shares its
-  registrable domain: the shortest suffix that is not a public suffix, by the bundled Public
+  registrable domain: its longest public suffix and the label before it, by the bundled Public
   Suffix List (§7.3). `idmsa.apple.com` matches `iforgot.apple.com`; `alice.github.io` does not
-  match `bob.github.io`, and `co.uk` matches no host but itself. An IP address has no
+  match `bob.github.io`, nor `alice.s3.amazonaws.com` `bob.s3.amazonaws.com` though
+  `amazonaws.com` is no public suffix, and `co.uk` matches no host but itself. An IP address has no
   registrable domain. An `https` site does not match an `http` request.
 - An app request matches the `android://` site of its package, and the `https` sites the app is
   verified for (§4.3).
@@ -263,12 +264,13 @@ every domain:
 
 - **The RP ID belongs to the origin.** The request's `origin` must be `https://` (or
   `http://localhost`), and its `rpId` the origin's host or a suffix of it at a label boundary
-  that is not a public suffix, by the [Public Suffix List](https://publicsuffix.org/) snapshot
-  each release carries: `login.example.com` may name `example.com`, `evil.github.io` may not
-  name `github.io`. A browser checks this for its own authenticators; a browser extension that
+  that is not a public suffix and is within the origin's registrable domain (§4.2), by the
+  [Public Suffix List](https://publicsuffix.org/) snapshot each release carries:
+  `login.example.com` may name `example.com`, `evil.github.io` may not name `github.io`, nor
+  `evil.s3.amazonaws.com` `amazonaws.com`. A browser checks this for its own authenticators; a browser extension that
   stands in for them is not trusted to, so the owner checks it on every request.
-- **Related origins** (WebAuthn's related origin requests): an RP ID that is a domain name and not
-  a public suffix may also vouch for other origins, as `accounts.meta.com` does for
+- **Related origins** (WebAuthn's related origin requests): an RP ID that is a domain name, not an IP
+  address and not a public suffix may also vouch for other origins, as `accounts.meta.com` does for
   `https://www.facebook.com`. The owner fetches `https://<RP ID>/.well-known/webauthn` (a 200 of
   at most 256 KiB within 5 s, no redirect, asked with a `User-Agent`, without which Meta's
   server redirects), and accepts the origin when its `origins` list names

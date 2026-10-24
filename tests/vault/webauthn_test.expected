@@ -49,6 +49,10 @@ https://login.example.com:8443   example.com      ok
 https://Login.Example.com        example.com      ok
 https://evil.github.io           github.io        refused: the RP ID is a public suffix
 https://evil.github.io           evil.github.io   ok
+https://evil.s3.amazonaws.com    amazonaws.com    refused: the RP ID is above the origin's registrable domain
+https://evil.s3.amazonaws.com    s3.amazonaws.com refused: the RP ID is a public suffix
+https://evil.s3.amazonaws.com    evil.s3.amazonaws.com ok
+https://login.example.amazonaws.com amazonaws.com    ok
 http://example.com               example.com      refused: the origin is http and not localhost
 https://example.com              other.com        refused: the RP ID is neither the origin's host nor a suffix of it
 https://example.com              ample.com        refused: the RP ID is neither the origin's host nor a suffix of it

@@ -205,11 +205,20 @@ let rp_id_allowed ~origin ~rp_id =
   else if rp_id = "localhost" then Ok ()
   else if Passwords.is_public_suffix rp_id then
     Error "the RP ID is a public suffix"
-  else Ok ()
+  else (
+    match Passwords.registrable host with
+      | Some d when List.mem d (Passwords.suffixes rp_id) -> Ok ()
+      | _ -> Error "the RP ID is above the origin's registrable domain")
 
 let related_host rp_id =
   let rp_id = String.lowercase_ascii rp_id in
-  List.for_all valid_label (String.split_on_char '.' rp_id)
+  let labels = String.split_on_char '.' rp_id in
+  List.for_all valid_label labels
+  && (not
+        (String.for_all
+           (fun c -> c >= '0' && c <= '9')
+           (List.hd (List.rev labels))))
+  && (not (Passwords.is_public_suffix rp_id))
   && Passwords.registrable rp_id <> None
 
 let max_labels = 5
