@@ -79,6 +79,15 @@ let silent (domain : Tsync_domain.Domain.t) () =
   in
   mains <> [] && List.for_all Health.is_down mains
 
+(* vault §6.3, in the background; reading the list settles the keyring, which a
+   verb rewriting it must not see change under it. *)
+let announce_machines ~domain ~engine vault =
+  Rt.spawn ~name:"vault machines" (fun () ->
+      try
+        Format_merge.locked Vault.folder (fun () ->
+            ignore (Vault.announce ~domain ~engine vault))
+      with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
+
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     ?(background =
       let one_at_a_time = Rt.Fmutex.create () in
@@ -151,9 +160,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     };
   (* vault §6.3: the domain's status reports new machines from the start, the
      keystore's K included. *)
-  Rt.spawn ~name:"vault machines" (fun () ->
-      try ignore (Vault.announce ~domain ~engine t.vault)
-      with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason);
+  announce_machines ~domain ~engine t.vault;
   t
 
 let domain_name t = Domain_name.to_string t.domain.name
@@ -176,9 +183,7 @@ let copies_arrived t keys =
 let keys_changed t keys =
   notify_folders t (List.map Names.parent_of keys);
   if List.exists (fun k -> Names.parent_of k = Vault.machines_folder) keys then
-    Rt.spawn ~name:"vault machines" (fun () ->
-        try ignore (Vault.announce ~domain:t.domain ~engine:t.engine t.vault)
-        with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
+    announce_machines ~domain:t.domain ~engine:t.engine t.vault
 
 (* format-merge §2 rule 1: at owner start, the copies already in a format's
    folder, whatever their arrival. *)
