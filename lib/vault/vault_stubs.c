@@ -30,8 +30,8 @@ CAMLprim value tsync_vault_open(value _key, value _nonce, value _ad, value _seal
   size_t sealed_size = caml_string_length(_sealed);
   if (sealed_size < 16) CAMLreturn(Val_none);
   size_t plaintext_size = sealed_size - 16;
-  const uint8_t *sealed = (const uint8_t *)String_val(_sealed);
   _plaintext = caml_alloc_string(plaintext_size);
+  const uint8_t *sealed = (const uint8_t *)String_val(_sealed);
   int failed = crypto_aead_unlock((uint8_t *)Bytes_val(_plaintext), sealed + plaintext_size,
                                   (const uint8_t *)String_val(_key),
                                   (const uint8_t *)String_val(_nonce),
