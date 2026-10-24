@@ -14,6 +14,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let lock = NSLock()
     private var polling = false
     private var isOpen = false
+    /// The codes submenu's last fetch: an older one's reply is dropped.
+    private var codesFetch = 0
     private var latest: [String: Any]?
     private var reachable = true
     private var report = ReconcileReport()
@@ -168,6 +170,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// The owner's rows for the code domains: labels only, a record's code is
     /// asked for when it is clicked. A failure leaves the placeholder.
     private func fetchCodes(_ submenu: NSMenu) {
+        codesFetch += 1
+        let fetch = codesFetch
         Thread.detachNewThread {
             let reply = try? OwnerClient.call(["action": "menu_codes"])
             guard let entries = reply?["entries"] as? [[String: Any]] else { return }
@@ -176,6 +180,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             var looks: [String: NSImage] = [:]
             for domain in domains { looks[domain] = VaultLook.image(domain: domain) }
             DispatchQueue.main.async {
+                guard fetch == self.codesFetch else { return }
                 submenu.removeAllItems()
                 for entry in entries {
                     let item = self.menuItem(entry)
