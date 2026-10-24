@@ -598,13 +598,32 @@ let () =
       (if field r "outdated" = Some (`Bool true) then " outdated" else "")
       (if field r "pulledAt" <> None then " pulledAt" else "")
   in
+  let codes label =
+    let r = action "totp_list" [] in
+    match field r "records" with
+      | Some (`List rows) ->
+          p "  %-34s %d record(s)%s" label (List.length rows)
+            (if field r "outdated" = Some (`Bool true) then ", outdated" else "")
+      | _ -> p "  %-34s %s" label (outcome r)
+  in
   p "  %-34s %s" "init"
     (outcome
        (action "vault_init" [s "passphrase" "correct horse battery staple"]));
+  p "  %-34s %s" "add"
+    (outcome
+       (action "totp_add"
+          [s "uri" "otpauth://totp/Online:me?secret=JBSWY3DPEHPK3PXP"]));
   vault "status";
+  codes "codes";
   wait_stale ();
   Atomic.set mode `Down;
   vault "status, the store down";
+  codes "codes, the store down";
+  p "  %-34s %s" "add, the store down"
+    (outcome
+       (action "totp_add"
+          [s "uri" "otpauth://totp/Offline:me?secret=JBSWY3DPEHPK3PXP"]));
+  codes "codes after it";
   p "  %-34s %s" "init, the store down"
     (outcome
        (action "vault_init" [s "passphrase" "correct horse battery staple"]));
@@ -614,6 +633,7 @@ let () =
   Atomic.set mode `Up;
   wait_stale ();
   vault "status, the store back";
+  codes "codes, the store back";
   p "== status";
   p "  %-34s %b" "names the frontend"
     (let st = Android_host.status () in

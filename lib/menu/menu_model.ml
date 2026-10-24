@@ -4,6 +4,10 @@ type action =
   | Reveal of { domain : string; rel : string }
   | Set_paused of bool
   | Show_stats
+  | Show_codes
+  | Copy_code of { domain : string; id : string }
+  | Unlock of string
+  | Add_code of string
   | Quit
 
 type item = {
@@ -14,6 +18,7 @@ type item = {
   indent : int;
   action : action;
   submenu : bool;
+  vault : string option;
 }
 
 type entry = Separator | Item of item
@@ -23,8 +28,8 @@ let file_rows = 5
 let label_max = 64
 
 let row ?(enabled = true) ?icon ?checked ?(indent = 0) ?(submenu = false)
-    ?(action = Nothing) label =
-  Item { label; enabled; icon; checked; indent; action; submenu }
+    ?(action = Nothing) ?vault label =
+  Item { label; enabled; icon; checked; indent; action; submenu; vault }
 
 let join = String.concat " · "
 let size = Tsync_core.Narrate.size
@@ -240,7 +245,7 @@ let domain_rows (name, status) =
   in
   row ~action:(Open_folder name) (name ^ " — " ^ detail) :: files
 
-let render ?quit domains =
+let render ?quit ?(codes = []) domains =
   let reachable = List.filter_map snd domains in
   let all_unreachable = reachable = [] in
   let all_paused =
@@ -290,9 +295,10 @@ let render ?quit domains =
     (if domains = [] then [row tooltip] else [])
     @ List.concat_map domain_rows domains
     @ traffic
+    @ [Separator; row ~submenu:true ~action:Show_stats "Stats"]
+    @ (if codes = [] then []
+       else [row ~submenu:true ~action:Show_codes "One-time codes"])
     @ [
-        Separator;
-        row ~submenu:true ~action:Show_stats "Stats";
         row ~checked:all_paused ~enabled:(not all_unreachable)
           ~action:(Set_paused (not all_paused)) "Hold changes";
       ]
@@ -554,6 +560,81 @@ let stats = function
       process_stats first
       @ List.concat_map (fun s -> Separator :: process_stats s) rest
 
+(* §7: what the model reads of one domain's [totp_list] reply, or its
+   failure. *)
+type record = {
+  id : string;
+  issuer : string; [@default ""]
+  account : string; [@default ""]
+}
+[@@deriving of_yojson { strict = false }]
+
+type codes =
+  | Records of { records : record list; unreadable : int }
+  | Locked
+  | No_vault
+  | Not_answering
+
+let codes_of_json = function
+  | None -> Not_answering
+  | Some j -> (
+      let field k = match j with `Assoc l -> List.assoc_opt k l | _ -> None in
+      match (field "ok", field "code") with
+        | Some (`Bool true), _ ->
+            Records
+              {
+                records =
+                  (match field "records" with
+                    | Some j -> Result.get_ok (items record_of_yojson j)
+                    | None -> []);
+                unreadable =
+                  (match field "corrupt" with
+                    | Some (`List l) -> List.length l
+                    | _ -> 0);
+              }
+        | _, Some (`String "locked") -> Locked
+        | _, Some (`String "not_found") -> No_vault
+        | _ -> Not_answering)
+
+let codes_placeholder = [row "Reading…"]
+
+let record_label r =
+  match (r.issuer, r.account) with
+    | "", a -> a
+    | i, "" -> i
+    | i, a -> i ^ " — " ^ a
+
+let domain_codes ~indent (domain, codes) =
+  match codes with
+    | Locked -> [row ~indent ~action:(Unlock domain) "Locked — unlock…"]
+    | No_vault -> [row ~indent "No vault — run tsync vault init"]
+    | Not_answering -> [row ~indent "not answering"]
+    | Records { records; unreadable } ->
+        (if records = [] then [row ~indent "No codes"] else [])
+        @ List.map
+            (fun r ->
+              row ~indent
+                ~action:(Copy_code { domain; id = r.id })
+                (ellipsis (record_label r)))
+            records
+        @ (if unreadable > 0 then
+             [
+               row ~indent
+                 (Printf.sprintf "%d unreadable — run tsync totp list"
+                    unreadable);
+             ]
+           else [])
+        @ [row ~indent ~action:(Add_code domain) "Add a code…"]
+
+let codes = function
+  | [] -> [row "No codes"]
+  | [one] -> domain_codes ~indent:0 one
+  | several ->
+      List.concat_map
+        (fun ((domain, _) as one) ->
+          row ~vault:domain domain :: domain_codes ~indent:1 one)
+        several
+
 let action_to_yojson = function
   | Nothing -> `Assoc []
   | Open_folder domain -> `Assoc [("openFolder", `String domain)]
@@ -562,6 +643,12 @@ let action_to_yojson = function
         [("reveal", `Assoc [("domain", `String domain); ("rel", `String rel)])]
   | Set_paused paused -> `Assoc [("setPaused", `Bool paused)]
   | Show_stats -> `Assoc [("stats", `Bool true)]
+  | Show_codes -> `Assoc [("codes", `Bool true)]
+  | Copy_code { domain; id } ->
+      `Assoc
+        [("copyCode", `Assoc [("domain", `String domain); ("id", `String id)])]
+  | Unlock domain -> `Assoc [("unlock", `String domain)]
+  | Add_code domain -> `Assoc [("addCode", `String domain)]
   | Quit -> `Assoc [("quit", `Bool true)]
 
 (* §7: a row's icon is not sent. *)
@@ -572,6 +659,7 @@ type wire_item = {
   action : action;
   checked : bool option; [@default None]
   submenu : bool; [@default false]
+  vault : string option; [@default None]
 }
 [@@deriving to_yojson]
 
@@ -579,8 +667,10 @@ type separator = { separator : bool } [@@deriving to_yojson]
 
 let entry_to_json = function
   | Separator -> separator_to_yojson { separator = true }
-  | Item { label; enabled; indent; action; checked; submenu; icon = _ } ->
-      wire_item_to_yojson { label; enabled; indent; action; checked; submenu }
+  | Item { label; enabled; indent; action; checked; submenu; vault; icon = _ }
+    ->
+      wire_item_to_yojson
+        { label; enabled; indent; action; checked; submenu; vault }
 
 type json = Yojson.Safe.t
 

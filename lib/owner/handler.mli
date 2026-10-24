@@ -67,3 +67,7 @@ val open_version : t -> string -> Tsync_sync.Local_ops.handle
 
 (** The path a reference resolves to; mints nothing (08 §2.2). *)
 val path_of_ref : t -> string -> string
+
+(** The extensions the domain uses here: configured, else stated by its main (05
+    §2.1 rule 5). *)
+val extensions : t -> string list

@@ -18,15 +18,7 @@ let unreserved = function
 
 let allowed_in_key c = unreserved c || c = ','
 let allowed_in_value c = unreserved c || c = '='
-
-let escape allowed s =
-  let b = Buffer.create (String.length s) in
-  String.iter
-    (fun c ->
-      if allowed c then Buffer.add_char b c
-      else Buffer.add_string b (Printf.sprintf "%%%02X" (Char.code c)))
-    s;
-  Buffer.contents b
+let escape allowed s = Text.percent_escape ~allowed s
 
 let canonical_query params =
   String.concat "&"
@@ -34,31 +26,7 @@ let canonical_query params =
        (fun (k, v) -> escape allowed_in_key k ^ "=" ^ escape allowed_in_value v)
        params)
 
-let unescape s =
-  let b = Buffer.create (String.length s) in
-  let hex c =
-    match c with
-      | '0' .. '9' -> Some (Char.code c - 48)
-      | 'a' .. 'f' -> Some (Char.code c - 87)
-      | 'A' .. 'F' -> Some (Char.code c - 55)
-      | _ -> None
-  in
-  let n = String.length s in
-  let rec go i =
-    if i >= n then Some (Buffer.contents b)
-    else if s.[i] = '%' then
-      if i + 2 >= n then None
-      else (
-        match (hex s.[i + 1], hex s.[i + 2]) with
-          | Some a, Some c ->
-              Buffer.add_char b (Char.chr ((a * 16) + c));
-              go (i + 3)
-          | _ -> None)
-    else (
-      Buffer.add_char b s.[i];
-      go (i + 1))
-  in
-  go 0
+let unescape = Text.percent_unescape
 
 let parse_query raw =
   if raw = "" then Some []

@@ -1,0 +1,144 @@
+== before init
+list                                 not_found: this domain has no vault: run tsync vault init
+lock                                 ok
+== locked
+add                                  locked: the vault is locked: run tsync vault unlock
+list                                 locked: the vault is locked: run tsync vault unlock
+code                                 locked: the vault is locked: run tsync vault unlock
+rename                               locked: the vault is locked: run tsync vault unlock
+remove                               locked: the vault is locked: run tsync vault unlock
+export                               locked: the vault is locked: run tsync vault unlock
+unlock                               ok
+== add and list
+add the §6 URI                      <id1>
+add hotp                             invalid: only otpauth://totp/ URIs are kept
+add 9 digits                         invalid: digits is 6 to 8
+add an unknown algorithm             invalid: unknown algorithm
+add an empty secret                  invalid: the secret is missing
+add a lower-case padded secret       <id2>
+add a bare secret                    ok
+add a secret with no labels          invalid: issuer and account are empty
+add a secret and a uri               invalid: totp_add takes a uri or a secret, not both
+list
+  <id1> "ACME Co" "john@example.com" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+cli list: no code                        3 rows, true
+cli list --show-codes                    3 rows, true
+list acme
+  <id1> "ACME Co" "john@example.com" code of 6 digits
+code                                 matches the seed: true, carries no seed: true
+code of a malformed id               invalid: "xyz" is not a record id
+code of an absent id                 not_found: no record 00000000000000000000000000000000
+rename                               ok
+rename to nothing                    invalid: issuer and account cannot both be empty
+rename a malformed id                invalid: "xyz" is not a record id
+remove an absent id                  not_found: no record 00000000000000000000000000000000
+list
+  <id1> "ACME Inc" "john@example.com" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+export without a passphrase          invalid: passphrase is required
+export, a wrong passphrase           denied: wrong passphrase
+export
+  otpauth://totp/ACME%20Inc:john%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Inc&algorithm=SHA1&digits=6&period=30
+  otpauth://totp/Other:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Other&algorithm=SHA1&digits=6&period=30
+  otpauth://totp/Text:typed?secret=MFRGGZDFMZTWQ2LK&issuer=Text&algorithm=SHA1&digits=6&period=30
+== import
+import                               added 1, already 1 {"line":3,"reason":"only otpauth://totp/ URIs are kept"}
+the same again                       added 0, already 2 {"line":3,"reason":"only otpauth://totp/ URIs are kept"}
+separators                           added 3, already 0 {"line":1,"reason":"entry 3: only otpauth://totp/ URIs are kept"}
+list
+  <id1> "ACME Inc" "john@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+export spare with docs' passphrase   denied: wrong passphrase
+an export into an empty domain       added 7, already 0
+  the same records                   true
+list on a domain without totp        invalid: plain does not use totp: add it to its extensions in the config
+== the store
+holds the keyring: true
+holds a seed: false
+holds a label: false
+== both rename one record
+  pause                              ok
+  owner renames                      ok
+  resume                             ok
+  before the fold: <id1> <id1> (conflicted copy from test) <id2> <id3> <id4> <id5> <id6> <id7>
+  list
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+  after: <id1> <id2> <id3> <id4> <id5> <id6> <id7>
+== a seed changed in place on B
+  pause                              ok
+  owner renames                      ok
+  resume                             ok
+  before the fold: <id1> <id2> <id2> (conflicted copy from test) <id3> <id4> <id5> <id6> <id7>
+  list
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+  after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
+  list again, nothing to fold
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+  after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8>
+== a record whose plaintext is corrupt
+  list
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+  corrupt <id9>
+  after: <id1> <id2> <id3> <id4> <id5> <id6> <id7> <id8> <id9>
+  export names it: true
+  remove it                          ok
+  list
+  <id1> "ACME Inc" "b@example.com" code of 6 digits
+  <id4> "B" "b" code of 6 digits
+  <id5> "Foo, Inc" "a" code of 6 digits
+  <id6> "Mail" "me@example.org" code of 6 digits
+  <id2> "Other" "bob" code of 6 digits
+  <id8> "Other Inc (conflicted copy from test)" "bob" code of 6 digits
+  <id7> "Raw, Inc" "r" code of 6 digits
+  <id3> "Text" "typed" code of 6 digits
+== both change the keyring
+  pause                              ok
+  owner changes the passphrase       ok
+  resume                             ok
+  before the fold: keyring keyring (conflicted copy from test) machines
+  status unlocked slots={"secret-key":2,"unknown":1} copies=[]
+  after: keyring machines
+== two inits race; the owner's loses
+  the owner adds under its K         <id10>
+  status                             locked copies=1
+  list                               locked: the vault is locked: run tsync vault unlock
+  unlock with the winner's passphrase ok
+  list: "Race" "a"
+  status                             unlocked copies=0
+  the vault folder: keyring machines
+owner exit status 0

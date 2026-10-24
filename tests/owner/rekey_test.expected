@@ -4,6 +4,7 @@ cli kit                              exit 0
 the kit                              mode 600, the secret key true, a QR code true
 cli kit, the same path again         exit 1, unchanged true
 machines, named                      machine A (this)
+a code                               ok
 status                               unlocked enrolled
 owner exit status 0
 == b-enroll
@@ -22,6 +23,7 @@ status, after the list               unlocked enrolled
 domain status, after the list        newMachines []
 rekey, wrong passphrase              denied: wrong passphrase
 rekey                                secret key 5-5-5-5-6, a new one: true, pending: none
+codes, under the new key             [ACME / john] corrupt 0
 machines                             machine A (this)
 status                               unlocked enrolled
 owner exit status 0
@@ -30,6 +32,7 @@ unlock, the old secret key           denied: wrong secret key: it is not this va
 status                               locked not-enrolled secret-key-replaced
 unlock, the new secret key           ok
 status                               unlocked enrolled
+codes, under the new key             [ACME / john] corrupt 0
 machines, named again                machine A; machine B (this)
 lock --forget                        ok
 owner exit status 0

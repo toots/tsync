@@ -447,7 +447,7 @@ unit and the binary link and leaves lingering enabled.
 ## B7. Conformance (desktop)
 
 [linux-desktop.md §6](linux-desktop.md#6-conformance), [dolphin.md §7](dolphin.md#7-conformance),
-[linux-tray.md §9](linux-tray.md#9-conformance), [menu-model.md §8](menu-model.md#8-conformance).
+[linux-tray.md §9](linux-tray.md#9-conformance), [menu-model.md §9](menu-model.md#9-conformance).
 
 ---
 

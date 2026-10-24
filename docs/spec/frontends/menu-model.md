@@ -7,11 +7,12 @@ platforms cannot drift apart.
 
 Two clients draw it: the Linux tray ([linux-tray.md](linux-tray.md)), which evaluates the model
 itself, and the macOS menu ([file-provider.md §10](file-provider.md#10-menu-bar)), which receives
-its output as JSON (§7) from the owner.
+its output as JSON (§8) from the owner.
 
-Inputs are the `status` and `stats` replies of the request handler
-([08 §3.3](../08-frontends.md#33-actions), [07 §5.5](../07-daemon-cli.md#55-tsync-status)). This
-file owns nothing of those replies; it names the fields it reads.
+Inputs are the `status`, `stats` and `totp_list` replies of the request handler
+([08 §3.3](../08-frontends.md#33-actions), [07 §5.5](../07-daemon-cli.md#55-tsync-status),
+[totp §5](../extensions/totp.md#5-commands)). This file owns nothing of those replies; it names
+the fields it reads.
 
 ---
 
@@ -21,13 +22,14 @@ file owns nothing of those replies; it names the fields it reads.
 menu   = { icon, tooltip, entries }
 entry  = Separator | Item
 Item   = { label, enabled, icon?, checked?, indent, action, submenu }
-action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | ShowStats | Quit
+action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | ShowStats
+       | ShowCodes | CopyCode(domain, id) | Unlock(domain) | AddCode(domain) | Quit
 ```
 
 - `indent` is a nesting level (0, 1 or 2). How it is drawn is the renderer's.
 - `checked`, when present, makes the row a checkmark row in that state.
 - `submenu` marks a row that opens a menu of its own. Its rows are not part of this output; they
-  are the stats rows of §6, supplied by whoever fetched them.
+  are the stats rows of §6 or the codes rows of §7, supplied by whoever fetched them.
 - An action MUST name a domain and a path under it, never an absolute path: where a domain's
   folder is differs per client.
 - An informational row is `enabled` with action `Nothing`. A disabled row draws grey and reads as
@@ -179,6 +181,9 @@ In order:
      pending bytes at the send rate.
 4. A separator.
 5. **Stats**: label `Stats`, action `ShowStats`, `submenu`.
+   **One-time codes**, only when the caller gives a non-empty list of **code domains** (the
+   domains whose config lists `totp` and whose codes this client can copy; the Linux tray gives
+   none): label `One-time codes`, action `ShowCodes`, `submenu`.
 6. **Hold changes**: label `Hold changes`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that
    answers ([07 §2.6](../07-daemon-cli.md#26-pause) says what a pause holds).
@@ -327,7 +332,41 @@ Worked example:
             far (backfill) — unreachable · not checked
 ```
 
-## 7. JSON form
+## 7. Codes submenu
+
+A third pure function, from one `totp_list` reply (or failure) per code domain, in configuration
+order, to the rows of the One-time codes submenu. It never shows a code: a row names a record,
+and its action makes the client ask the owner for the current code when it is clicked, so a code
+is never drawn stale and never travels in a menu.
+
+- **Placeholder**, shown until the replies arrive: one row `Reading…`.
+- **Per domain**, a header row `<domain>` (informational, `vault` naming the domain, which a
+  client marks with the vault's appearance, [vault §8.1](../extensions/vault.md#81-appearance)) when
+  there is more than one code domain, then, first match:
+  - a reply refused `locked`: a row `Locked — unlock…`, action `Unlock(domain)`;
+  - a reply refused `not_found` (no vault): a row `No vault — run tsync vault init` (informational);
+  - another failure or no reply: a row `not answering` (informational);
+  - a reply with no record: a row `No codes` (informational);
+  - else one row per record, in the reply's order, label `<issuer> — <account>`, or the one that
+    is not empty, ellipsised to `LABEL_MAX`; action `CopyCode(domain, id)`.
+- Records the reply lists as `corrupt` add one informational row
+  `<n> unreadable — run tsync totp list`.
+- A domain that answered with records, or with none, ends with a row `Add a code…`, action
+  `AddCode(domain)`; a locked, vault-less or silent domain has none.
+- Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
+
+Worked example, two code domains, one locked:
+
+```
+        work
+            ACME Co — john@example.com -> copy work:3f2a…
+            GitHub — me -> copy work:9c1e…
+            Add a code… -> add work
+        home
+            Locked — unlock… -> unlock home
+```
+
+## 8. JSON form
 
 For a client that cannot evaluate the model. The menu:
 
@@ -351,16 +390,18 @@ For a client that cannot evaluate the model. The menu:
 
 - An entry is `{"separator": true}` or an item with `label`, `enabled`, `indent` and `action`.
 - `action` is an object with at most one key: `{}` (Nothing), `{"openFolder": <domain>}`,
-  `{"reveal": {"domain", "rel"}}`, `{"setPaused": <bool>}`, `{"stats": true}`, `{"quit": true}`.
+  `{"reveal": {"domain", "rel"}}`, `{"setPaused": <bool>}`, `{"stats": true}`,
+  `{"codes": true}`, `{"copyCode": {"domain", "id"}}`, `{"unlock": <domain>}`,
+  `{"addCode": <domain>}`, `{"quit": true}`.
 - `checked` and `submenu` are present only when set.
 - A row's `icon` is not sent: it is a freedesktop name, and a reader of this form has no such
   icons. A reader that draws a file icon MUST derive it from the action's `rel`, never from the
   label, which may have been shortened.
-- The stats rows are served apart, as a list of the same entries. Until they arrive, a reader
-  shows the placeholder of §6, spelled as §6 spells it.
+- The stats rows and the codes rows are served apart, each as a list of the same entries. Until
+  they arrive, a reader shows the placeholder of §6 or §7, spelled as they spell it.
 - A reader MUST ignore keys it does not know.
 
-## 8. Conformance
+## 9. Conformance
 
 One suite renders fixed inputs and compares everything a user reads.
 
@@ -386,6 +427,9 @@ someone agrees to; and both functions are total.
 - no domains; with and without a quit label;
 - the JSON form of a menu containing every kind of entry and action;
 - the stats rows: full, sparse, an entry that cannot be followed, nothing answering;
+- the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable, the Add a code row only where the domain answered;
+  records, a label longer than `LABEL_MAX`; no code domain gives no `One-time codes` row; no row
+  of any menu carries a code;
 - the formatter tables of §3;
 - replies with fields of the wrong type, and an empty object: no failure.
 
@@ -395,7 +439,7 @@ action and its target, `enabled`, `checked`, `submenu`, and the JSON key names a
 
 **Doubles:** none. The suite needs no bus, no owner and no mount.
 
-## 9. Parameters
+## 10. Parameters
 
 | name | recommended | protects |
 |---|---|---|
