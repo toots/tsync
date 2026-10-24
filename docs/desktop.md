@@ -4,7 +4,7 @@
 
 **Finder.** The domain is a location in the sidebar. A cloud badge marks files that are online-only. Right-click for *Make Available Offline*, *Make Online Only* and *Copy Share URL*. Finder's own *Download Now* and *Remove Download* work too, but they do not keep a file offline for you: the system may remove such a download when it wants space.
 
-**Menu bar.** The icon shows idle, transferring, paused or unreachable. The menu lists each domain with the files moving now; clicking a domain opens it and clicking a file reveals it in Finder. *Stats* is a short form of `tsync status`, and *Hold changes* is `tsync pause` for every domain. *One-time codes* copies a two-factor code from the [vault](vault.md#two-factor-codes), and unlocks it when it is locked. There is no Quit: the app is what tells Finder about changes made elsewhere.
+**Menu bar.** The icon shows idle, transferring, paused or unreachable. The menu lists each domain with the files moving now; clicking a domain opens it and clicking a file reveals it in Finder. *Stats* is a short form of `tsync status`, and *Hold changes* is `tsync pause` for every domain. *One-time codes* copies a two-factor code from the [vault](vault.md#two-factor-codes), and unlocks it when it is locked. With passwords in the vault, tsync also fills logins, codes and passkeys through [AutoFill](vault.md#passwords-and-passkeys). There is no Quit: the app is what tells Finder about changes made elsewhere.
 
 **Editing large files.** Finder hands tsync a whole file after an edit, so the whole file is read again. Only the chunks that changed are uploaded.
 

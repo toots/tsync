@@ -157,7 +157,8 @@ A verb reads what it needs at the cost of a listing, however many records the fo
 ## 5. Host adapters
 
 - A host adapter belongs to one extension and one host: `linux`, `macos` or `android`
-  ([README §5](../README.md#5-hosts-one-core-several-compositions)). It runs in the owner and
+  ([README §5](../README.md#5-hosts-one-core-several-compositions)). It runs in the owner, or in
+  a platform component that is the owner's client (an app extension the system loads), and
   declares a set of **capabilities**, drawn from a vocabulary the extension's spec defines.
 - An extension's spec is host-independent: it defines each capability, and what the extension
   does on a host that lacks it. Every capability is optional. Each host has its own spec,
@@ -176,6 +177,10 @@ A verb reads what it needs at the cost of a listing, however many records the fo
   works on every host.
 - A host adapter is where an extension touches the platform. The record format and fold MUST NOT
   depend on which hosts have one.
+- **A host adapter never initialises, locks or unlocks a vault**, nor takes a passphrase or a
+  secret key to do so: those are core operations, done from the tsync app, its menu or the CLI,
+  never delegated to a platform's or a third party's workflow. On a locked domain it says the
+  domain is locked and where to unlock it, and asks nothing.
 
 ## 6. Commands and actions
 

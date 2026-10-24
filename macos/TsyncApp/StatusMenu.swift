@@ -1,4 +1,5 @@
 import AppKit
+import AuthenticationServices
 import FileProvider
 import UserNotifications
 
@@ -18,6 +19,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var codesFetch = 0
     private var latest: [String: Any]?
     private var reachable = true
+    /// passwords/macos §1: AutoFill is off while a domain uses passwords.
+    private var autofillOff = false
     private var report = ReconcileReport()
     private var registrationProblem: String?
     private var domains: [String: NSFileProviderDomain] = [:]
@@ -39,6 +42,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             self?.poll()
         }
         poll()
+        if #available(macOS 14.0, *) {
+            Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in Identities.refresh() }
+            Identities.refresh()
+        }
     }
 
     func update(domains registered: [NSFileProviderDomain], report: ReconcileReport) {
@@ -80,6 +87,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        if menu === self.menu {
+            checkAutofill()
+            if #available(macOS 14.0, *) { Identities.refresh() }
+        }
         if menu === codesSubmenu {
             menu.removeAllItems()
             menu.addItem(Self.placeholder())
@@ -111,7 +122,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.isEnabled = false
             menu.addItem(entry)
         }
-        if !localLines().isEmpty { menu.addItem(.separator()) }
+        if autofillOff {
+            let entry = NSMenuItem(
+                title: "Turn on AutoFill for tsync in System Settings…",
+                action: #selector(openAutofillSettings), keyEquivalent: "")
+            entry.target = self
+            menu.addItem(entry)
+        }
+        if !localLines().isEmpty || autofillOff { menu.addItem(.separator()) }
         if let model = model {
             for entry in model["entries"] as? [[String: Any]] ?? [] {
                 menu.addItem(menuItem(entry))
@@ -121,6 +139,47 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.isEnabled = false
             menu.addItem(entry)
         }
+    }
+
+    /// passwords/macos §1: asked when the menu opens, off the main queue.
+    private func checkAutofill() {
+        guard #available(macOS 14.0, *), Self.hasCredentialsExtension else { return }
+        ASCredentialIdentityStore.shared.getState { state in
+            let enabled = state.isEnabled
+            DispatchQueue.global().async {
+                let uses = !enabled && self.anyDomainUsesPasswords()
+                DispatchQueue.main.async {
+                    if uses != self.autofillOff {
+                        self.autofillOff = uses
+                        self.rebuild()
+                    }
+                }
+            }
+        }
+    }
+
+    /// A build without the extension's profile carries no extension (build.sh).
+    private static let hasCredentialsExtension: Bool = {
+        guard let plugins = Bundle.main.builtInPlugInsURL else { return false }
+        return FileManager.default.fileExists(
+            atPath: plugins.appendingPathComponent("TsyncCredentials.appex").path)
+    }()
+
+    /// A domain answering a passwords request, or refusing it as locked.
+    private func anyDomainUsesPasswords() -> Bool {
+        Tsync.domainNames().contains { name in
+            do {
+                _ = try OwnerClient.call(["action": "passwords_list", "domain": name])
+                return true
+            } catch let failure as OwnerFailure {
+                return failure.code == "locked"
+            } catch { return false }
+        }
+    }
+
+    /// macOS has no stable link to the AutoFill pane: the row names the path.
+    @objc private func openAutofillSettings() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 
     private func localLines() -> [String] {
@@ -420,60 +479,5 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             top -= gap
         }
         return column
-    }
-}
-
-/// security-model §10.6: a secret's field, masked until its Show box is
-/// checked; the box starts unchecked each time the field is made.
-final class SecretField: NSView {
-    static let fieldHeight: CGFloat = 24
-    static let height: CGFloat = fieldHeight + 22
-
-    let masked = NSSecureTextField()
-    private let clear = NSTextField()
-    private let show = NSButton(checkboxWithTitle: "Show", target: nil, action: nil)
-
-    init(placeholder: String) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Self.height))
-        for field in [masked, clear] as [NSTextField] {
-            field.placeholderString = placeholder
-            field.isAutomaticTextCompletionEnabled = false
-            field.autoresizingMask = [.width]
-            addSubview(field)
-        }
-        clear.isHidden = true
-        show.target = self
-        show.action = #selector(toggle)
-        addSubview(show)
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func layout() {
-        super.layout()
-        let width = bounds.width
-        masked.frame = NSRect(x: 0, y: bounds.height - Self.fieldHeight, width: width, height: Self.fieldHeight)
-        clear.frame = masked.frame
-        show.frame = NSRect(x: 0, y: 0, width: width, height: 18)
-    }
-
-    var stringValue: String {
-        get { show.state == .on ? clear.stringValue : masked.stringValue }
-        set {
-            masked.stringValue = newValue
-            clear.stringValue = newValue
-        }
-    }
-
-    /// The field typed into now, for the dialog's first responder.
-    var input: NSTextField { show.state == .on ? clear : masked }
-
-    @objc private func toggle() {
-        let shown = show.state == .on
-        let value = shown ? masked.stringValue : clear.stringValue
-        stringValue = value
-        masked.isHidden = shown
-        clear.isHidden = show.state != .on
-        window?.makeFirstResponder(input)
     }
 }

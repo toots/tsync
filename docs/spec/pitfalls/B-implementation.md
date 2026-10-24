@@ -577,6 +577,16 @@ This file collects the traps that came from the implementation medium rather tha
 
 ## 12. Test harnesses that pass while testing nothing [tests]
 
+
+### B-11.13 A restricted entitlement signed without the identifier its profile is for
+- **Pitfall** — The AutoFill extension was signed by hand with the AutoFill credential provider entitlement and its profile embedded, but its entitlements named neither `com.apple.application-identifier` nor `com.apple.developer.team-identifier`. macOS registered the extension (`pluginkit` listed it) and never offered it: System Settings' AutoFill list left it out, with nothing in the logs. Xcode adds both claims when it signs; a release signed after Xcode, from a source entitlements file, loses them.
+- **Check** — An entitlements file a release signs with names the application identifier and the team its profile is for, and the build compares the claimed identifier with the profile's and refuses a mismatch, as for the daemon (B-11.12). On an installed build, `codesign -d --entitlements - <bundle>` shows both claims.
+- **Seen** — passwords-macos (stamped build of ec9e87b2, 2026-10-19).
+
+### B-11.14 An AutoFill extension whose app lacks the entitlement
+- **Pitfall** — The AutoFill extension was signed with the credential provider entitlement under its own profile, registered (`pluginkit` listed it, and `pluginkit -e use` enabled it), and the System Settings pane discovered it, yet never listed it: the containing app held no AutoFill entitlement, its App ID not having the capability.
+- **Check** — The app's App ID has the AutoFill Credential Provider capability, its profile carries the entitlement, and the app's release signature claims it with the app's identifier and team; the build refuses a release whose app profile lacks it. `codesign -d --entitlements - TsyncApp.app` shows it.
+- **Seen** — passwords-macos (stamped build 315, 2026-10-19).
 ### B-12.1 Suites that verified nothing and reported success
 - **Pitfall** — Crash mode injected 0 faults and passed 112 ops; all nine scheduled fault cells landed 0 faults; a CI sweep scored 16 aborted runs clean ("no FAIL lines"); an unpublished store counted as "all checks pass"; conformance passed with no store configured; Gradle and `connectedAndroidTest` pass with zero tests. 17 hand-rolled check helpers, only 6 counting; one suite reported 0 checks; "does not raise" checks were constant `true`.
 - **Check** — One counting harness; every suite asserts a positive expected count of what it exercised (faults landed, store non-empty, mount is a mount, N racers, N tests) and exits non-zero when nothing was verified.

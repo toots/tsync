@@ -101,6 +101,7 @@ jobs:
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_PROFILE_APP: ${{ secrets.MACOS_PROFILE_APP }}
           MACOS_PROFILE_APPEX: ${{ secrets.MACOS_PROFILE_APPEX }}
+          MACOS_PROFILE_CREDENTIALS: ${{ secrets.MACOS_PROFILE_CREDENTIALS }}
           MACOS_PROFILE_DAEMON: ${{ secrets.MACOS_PROFILE_DAEMON }}
           AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
@@ -109,7 +110,7 @@ jobs:
         run: |
           missing=
           for v in MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_PROFILE_APP \
-                   MACOS_PROFILE_APPEX MACOS_PROFILE_DAEMON AC_API_KEY_P8 AC_API_KEY_ID \
+                   MACOS_PROFILE_APPEX MACOS_PROFILE_CREDENTIALS MACOS_PROFILE_DAEMON AC_API_KEY_P8 AC_API_KEY_ID \
                    AC_API_ISSUER_ID; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
@@ -138,6 +139,7 @@ jobs:
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           PROFILE_APP_B64: ${{ secrets.MACOS_PROFILE_APP }}
           PROFILE_APPEX_B64: ${{ secrets.MACOS_PROFILE_APPEX }}
+          PROFILE_CREDENTIALS_B64: ${{ secrets.MACOS_PROFILE_CREDENTIALS }}
           PROFILE_DAEMON_B64: ${{ secrets.MACOS_PROFILE_DAEMON }}
           AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
         run: |
@@ -158,6 +160,7 @@ jobs:
 
           echo "$PROFILE_APP_B64" | base64 -d > "$RUNNER_TEMP/app.provisionprofile"
           echo "$PROFILE_APPEX_B64" | base64 -d > "$RUNNER_TEMP/appex.provisionprofile"
+          echo "$PROFILE_CREDENTIALS_B64" | base64 -d > "$RUNNER_TEMP/credentials.provisionprofile"
           echo "$PROFILE_DAEMON_B64" | base64 -d > "$RUNNER_TEMP/daemon.provisionprofile"
           echo "$AC_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/ac_key.p8"
 
@@ -176,6 +179,7 @@ jobs:
         env:
           PROFILE_APP: ${{ runner.temp }}/app.provisionprofile
           PROFILE_APPEX: ${{ runner.temp }}/appex.provisionprofile
+          PROFILE_CREDENTIALS: ${{ runner.temp }}/credentials.provisionprofile
           PROFILE_DAEMON: ${{ runner.temp }}/daemon.provisionprofile
           AC_API_KEY_PATH: ${{ runner.temp }}/ac_key.p8
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}

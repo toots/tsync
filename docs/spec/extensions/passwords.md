@@ -323,14 +323,14 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 
 - Each is `confirm` or `authenticate` on every host: the user picks the login, or approves the
   save. The extension never calls either by itself.
-- A `fill` request on a locked vault answers that it is locked, and the host's app offers to
-  unlock; it never fills from a cache.
+- A `fill` request on a locked vault answers that it is locked, and the host says so and where to
+  unlock ([README §5](README.md#5-host-adapters)); it never fills from a cache.
 - A `save` whose site, username and password equal those of a matching record adds nothing. A
   `save` whose site and username match one record with another password asks whether to update
   it; otherwise it adds a record.
 
-No host declares a capability yet. Each gets `extensions/passwords/<host>.md` once one is seen
-([README §5](README.md#5-host-adapters)). Planned, not declared:
+No host declares a capability yet. Each host has `extensions/passwords/<host>.md`
+([README §5](README.md#5-host-adapters)): [macOS](passwords/macos.md). Planned, not declared:
 
 | host | `fill` | `save` | `passkey` |
 |---|---|---|---|

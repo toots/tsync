@@ -36,6 +36,8 @@ targets:
     dependencies:
       - target: TsyncFileProvider
         embed: true
+      - target: TsyncCredentials
+        embed: true
 
   TsyncFileProvider:
     type: app-extension
@@ -49,6 +51,26 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.fileprovider
         CODE_SIGN_ENTITLEMENTS: TsyncFileProvider/TsyncFileProvider.entitlements
         INFOPLIST_FILE: TsyncFileProvider/Info.plist
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_PREVIEWS: NO
+
+  # passwords/macos §1: the AutoFill credential provider.
+  TsyncCredentials:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Shared
+      - path: TsyncCredentials
+      # vault §8.1: the rows' marks, as the app's menu draws them.
+      - path: TsyncApp/VaultLook.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.credentials
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_ENTITLEMENTS: TsyncCredentials/TsyncCredentials.entitlements
+        INFOPLIST_FILE: TsyncCredentials/Info.plist
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_PREVIEWS: NO
