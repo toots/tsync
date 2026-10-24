@@ -192,8 +192,8 @@ let rename ?issuer ?account ~domain ~engine ~lazy_tree ~id t =
   let r =
     {
       r with
-      issuer = Option.value ~default:r.issuer issuer;
-      account = Option.value ~default:r.account account;
+      issuer = Option.fold ~none:r.issuer ~some:String.trim issuer;
+      account = Option.fold ~none:r.account ~some:String.trim account;
       modified = now ();
     }
   in

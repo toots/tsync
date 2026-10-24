@@ -357,13 +357,13 @@ let () =
       answer "code of an absent id"
         (ask [("action", "totp_code"); ("id", String.make 32 '0')]);
       answer "rename"
-        (ask [("action", "totp_rename"); ("id", acme); ("issuer", "ACME Inc")]);
+        (ask [("action", "totp_rename"); ("id", acme); ("issuer", " ACME Inc ")]);
       answer "rename to nothing"
         (ask
            [
              ("action", "totp_rename");
              ("id", acme);
-             ("issuer", "");
+             ("issuer", " ");
              ("account", "");
            ]);
       answer "rename a malformed id"
