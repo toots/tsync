@@ -374,15 +374,20 @@ let () =
       answer "export without a passphrase" (ask [("action", "totp_export")]);
       answer "export, a wrong passphrase"
         (ask [("action", "totp_export"); ("passphrase", String.make 26 '0')]);
-      (match
-         member
-           (ask [("action", "totp_export"); ("passphrase", passphrase)])
-           "uris"
-       with
-        | Some (`List uris) ->
-            p "export";
-            List.iter (function `String u -> p "  %s" u | _ -> ()) uris
-        | _ -> p "export failed");
+      (* A failed export prints its error, which the comparisons below would hide. *)
+      let export ?(domain = "docs") label passphrase =
+        let r =
+          ask ~domain [("action", "totp_export"); ("passphrase", passphrase)]
+        in
+        match member r "uris" with
+          | Some (`List uris) ->
+              List.filter_map (function `String u -> Some u | _ -> None) uris
+          | _ ->
+              answer label r;
+              []
+      in
+      p "export";
+      List.iter (p "  %s") (export "export" passphrase);
       p "== import";
       let imported ?(domain = "docs") label text =
         let r = ask ~domain [("action", "totp_import"); ("text", text)] in
@@ -415,19 +420,7 @@ let () =
          otpauth://totp/B:b?secret=MFRGGZDFMZTWQ2LK;otpauth://hotp/C:c?secret=MFRGGZDFMZTWQ2LK\n\
          otpauth://totp/Raw, Inc:r?secret=MFRGGZDFMZTWQ2LK";
       listing "list";
-      let exported =
-        match
-          member
-            (ask [("action", "totp_export"); ("passphrase", passphrase)])
-            "uris"
-        with
-          | Some (`List uris) ->
-              String.concat "\n"
-                (List.filter_map
-                   (function `String u -> Some u | _ -> None)
-                   uris)
-          | _ -> ""
-      in
+      let exported = String.concat "\n" (export "export docs" passphrase) in
       let spare = "the spare vault's passphrase" in
       ignore
         (ask ~domain:"spare" [("action", "vault_init"); ("passphrase", spare)]);
@@ -436,18 +429,7 @@ let () =
            [("action", "totp_export"); ("passphrase", passphrase)]);
       imported ~domain:"spare" "an export into an empty domain" exported;
       let again =
-        match
-          member
-            (ask ~domain:"spare"
-               [("action", "totp_export"); ("passphrase", spare)])
-            "uris"
-        with
-          | Some (`List uris) ->
-              String.concat "\n"
-                (List.filter_map
-                   (function `String u -> Some u | _ -> None)
-                   uris)
-          | _ -> ""
+        String.concat "\n" (export ~domain:"spare" "export spare" spare)
       in
       p "%-36s %b" "  the same records" (again = exported);
       (* What differs, by label, should it ever. *)
