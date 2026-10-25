@@ -96,7 +96,8 @@ platform vouches for:
 - **Save** (`save`, `confirm`). A fill response with a password field carries save info for the
   username and password, so the platform offers "Save to tsync?" when the user submits the form.
   `onSaveRequest` sends `passwords_save` (passwords §8) with the request's site, and the username and
-  password typed. The platform's prompt is the approval.
+  password typed, a new-password field's over the current one's (passwords §5.1). The platform's
+  prompt is the approval.
 - A reply naming a record to update (passwords §8: same site and username, another password)
   shows a notification "Update the password for `<site>`?", private on the lock screen, with
   **Update**, which sends `passwords_save` again with `update`. Nothing is updated without that
@@ -107,7 +108,7 @@ platform vouches for:
 ### 5.1 Suggesting a password
 
 - **Suggest** (`suggest`, `confirm`). A request with a new-password field (passwords §5.1:
-  `AUTOFILL_HINT_NEW_PASSWORD`, the page's `new-password`, or the second of two password fields)
+  `AUTOFILL_HINT_NEW_PASSWORD`, the page's `new-password`, or one the form's count makes new)
   gets one more dataset, *Use a strong password*, gated as §3. The pick sends
   `passwords_suggest` with the site and the username field's value, and returns a dataset filling
   the new-password field and its confirmation with the answer.

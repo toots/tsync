@@ -171,9 +171,12 @@ On a form that creates an account or changes a password, a host or the browser e
 *Use a strong password*. The pick fills a generated password, and the login is saved at once.
 
 - **A new-password field** is one the page marks so (`autocomplete="new-password"`, Android's
-  `AUTOFILL_HINT_NEW_PASSWORD`), or the second of two password fields in one form, or one whose
-  name, id or label reads as a new or confirmed password. Its confirmation field, when the form
-  has one, is filled with the same password.
+  `AUTOFILL_HINT_NEW_PASSWORD`), or one whose name, id or label reads as a new or confirmed
+  password. Among the password fields marked neither so nor as the current one
+  (`current-password`, or a name reading as the current or old password), both of a form of two
+  are new, and every one but the first of a form of three or more, a change form whose first
+  asks for the current password. Its confirmation field, when the form has one, is filled with
+  the same password; a current-password field never is, and a save sends the new password.
 - **On the pick** the host asks `passwords_suggest` with the site and the username the form holds,
   possibly empty: the owner draws a password (characters, the defaults of §5), adds a login for
   the site with it, and answers the password and the record's id. The pick is the approval; no
