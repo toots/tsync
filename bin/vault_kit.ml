@@ -87,12 +87,6 @@ let write ~path ~domain kit =
     Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
       tm.tm_mday
   in
-  let body = page ~domain ~date kit in
-  let fd =
-    try Unix.openfile path [O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC] 0o600
-    with Unix.Unix_error (EEXIST, _, _) ->
-      Tsync_core.Fail.invalid "%s exists: a kit never replaces a file" path
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () -> ignore (Unix.write_substring fd body 0 (String.length body)))
+  try Tsync_core.Fs.create_new path (page ~domain ~date kit)
+  with Tsync_core.Fail.E { kind = Exists; _ } ->
+    Tsync_core.Fail.invalid "%s exists: a kit never replaces a file" path

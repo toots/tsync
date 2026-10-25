@@ -169,6 +169,16 @@ let write_temp ?perm dir data =
 
 let rename ?(op = "") a b = sys ~op (fun () -> Unix.rename a b)
 
+(* Written aside and linked into place, so [p] is whole or absent, and a link
+   never replaces a file. *)
+let create_new ?perm p data =
+  let dir = Filename.dirname p in
+  let tmp = write_temp ?perm dir data in
+  Fun.protect
+    ~finally:(fun () -> unlink_quiet tmp)
+    (fun () -> sys ~op:"link" (fun () -> Unix.link tmp p));
+  fsync_dir dir
+
 let replace_gen ~dir_sync ?perm p data =
   let dir = Filename.dirname p in
   mkdir_p dir;

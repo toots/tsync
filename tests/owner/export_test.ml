@@ -214,9 +214,14 @@ let keystore : Keystore.t =
 let status () = ask [("action", s "vault_status")]
 let backup_dir = file "backups"
 
+(* Another domain's backup in the same folder, whose name begins with this
+   domain's and a hyphen. *)
+let decoy = "docs-old-20991231T000000.000Z.tsync-vault-backup"
+
 let backup_files () =
   match Sys.readdir backup_dir with
-    | names -> List.sort compare (Array.to_list names)
+    | names ->
+        List.sort compare (List.filter (( <> ) decoy) (Array.to_list names))
     | exception Sys_error _ -> []
 
 let backup_state () =
@@ -236,6 +241,8 @@ let rec until ?(tries = 200) f =
 (* §8.3: a schedule needs a backup key; it writes while K is held, keeps the
    newest [keep], and a backup restores with the backup key alone. *)
 let backups ~login ~note ~before =
+  Fs.mkdir_p backup_dir;
+  Fs.write_file_for_test (Filename.concat backup_dir decoy) "another domain's";
   ignore (until (fun () -> backup_state () <> "overdue true, error none"));
   p "%-40s %s, files %d" "no backup key yet" (backup_state ())
     (List.length (backup_files ()));
@@ -252,6 +259,8 @@ let backups ~login ~note ~before =
          let now = backup_files () in
          List.length now = 2 && not (List.mem first now)));
   p "%-40s %s" "  status" (backup_state ());
+  p "%-40s %b" "  another domain's backup left alone"
+    (Sys.file_exists (Filename.concat backup_dir decoy));
   answer "lock" (ask [("action", s "vault_lock")]);
   let locked = backup_files () in
   Rt.sleep 0.5;

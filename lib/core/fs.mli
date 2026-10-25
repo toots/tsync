@@ -75,6 +75,10 @@ val release : string -> bool
 (** Best-effort cleanup whose outcome nobody reads. *)
 val unlink_quiet : string -> unit
 
+(** Creates [p] holding [data] (mode [perm], 0600 by default), whole or not at
+    all; EXISTS when [p] exists, which is never replaced. *)
+val create_new : ?perm:int -> string -> string -> unit
+
 (** Remove a tree without following symbolic links. *)
 val rm_rf : string -> unit
 
