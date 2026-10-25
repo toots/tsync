@@ -1078,7 +1078,7 @@ let opened_export text unseal =
 
 (* §8.2: into an empty vault only; the whole file is read before anything is
    written. *)
-let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
+let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.imported =
   let (module E : Engine.S) = engine in
   let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
   if
@@ -1130,8 +1130,7 @@ let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
     write engine ~exclusive:false retired;
   {
     records = List.length p.records;
-    keys = List.length retired.retired - List.length keyring.retired;
-    skipped = [];
+    retired = List.length retired.retired - List.length keyring.retired;
   }
 
 let backup_suffix = ".tsync-vault-backup"

@@ -542,7 +542,8 @@ across (export, `delete`, upgrade, `init`, import).
   record: one just made with `init`. Any other is refused INVALID, and nothing is merged. The
   whole file is opened and checked before anything is written; then each record is sealed
   under this vault's K at its name in its folder, the appearance written, and the export's keys
-  added to the keyring's retired keys. A secret key other than the one the export names is
+  added to the keyring's retired keys; the reply counts the records written (`records`) and the
+  keys retired (`retired`). A secret key other than the one the export names is
   refused DENIED, naming the id it needs; a wrong passphrase DENIED; a file that is not an export
   of this version, or does not read, INVALID or CORRUPT.
 - After an import every machine enrolls again with the new vault's secret key, as after a re-key
