@@ -93,6 +93,11 @@ let () =
                 (Bigstring.to_string r.body)
           | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind
           | exception x -> "refused: " ^ Printexc.to_string x);
+      p "== a body over the caller's bound is refused while it streams";
+      p "  %s"
+        (match Client.request ~max_body:8 e ~meth:"GET" "/stream" with
+          | r -> Printf.sprintf "delivered %S" (Bigstring.to_string r.body)
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind);
       p "== a body refused partway closes its connection";
       let smuggled = "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n" in
       let fd = Unix.socket PF_INET SOCK_STREAM 0 in

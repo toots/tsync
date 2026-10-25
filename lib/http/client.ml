@@ -148,7 +148,7 @@ let write_body ~progress t body =
   in
   go 0
 
-let exchange e c ~progress ~meth ~target ~headers ~body ~reused =
+let exchange ~max_body e c ~progress ~meth ~target ~headers ~body ~reused =
   let b = Buffer.create 256 in
   let head =
     [("host", e.authority)]
@@ -192,7 +192,7 @@ let exchange e c ~progress ~meth ~target ~headers ~body ~reused =
     then `Length 0
     else Codec.framing headers
   in
-  let body = Codec.read_body ~limit:max_int c.reader framing in
+  let body = Codec.read_body ~limit:max_body c.reader framing in
   let keep =
     framing <> `Eof
     && (match Codec.header headers "connection" with
@@ -204,8 +204,8 @@ let exchange e c ~progress ~meth ~target ~headers ~body ~reused =
 
 (* A pooled connection the server closed while idle fails on write or answers
    nothing at all; only then is the request sent again, on a fresh one. *)
-let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
-    target =
+let request ?(stall = default_stall) ?(max_body = max_int)
+    ?(headers = fun () -> []) ?body e ~meth target =
   Rt.Semaphore.with_slot e.slots (fun () ->
       try
         Rt.with_stall_timeout stall (fun progress ->
@@ -213,7 +213,8 @@ let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
             progress ();
             let attempt c ~reused =
               match
-                exchange e c ~progress ~meth ~target ~headers ~body ~reused
+                exchange ~max_body e c ~progress ~meth ~target ~headers ~body
+                  ~reused
               with
                 | r, keep ->
                     if keep then put_idle e c else Transport.close c.t;
