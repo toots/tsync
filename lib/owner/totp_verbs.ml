@@ -252,10 +252,13 @@ let import ~domain ~engine ~lazy_tree t text : Protocol.totp_imported =
     (String.split_on_char '\n' text);
   { added = !added; already = !already; refused = List.rev !refused }
 
-(* README §4.2: the fold that waited for the key. *)
+(* README §4.2: the fold that waited for the key, run by an arrival only while
+   K is held, so it never reads the keystore or counts as a use. *)
 let fold ~domain ~engine ~lazy_tree t =
-  if List.mem name (Vault.extensions ~domain ~engine) then
-    ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
+  if
+    Atomic.get t.Vault.key <> None
+    && List.mem name (Vault.extensions ~domain ~engine)
+  then ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
 
 let export ~domain ~engine ~lazy_tree t passphrase =
   let ctx = context ~domain ~engine ~lazy_tree t in
