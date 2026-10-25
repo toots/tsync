@@ -26,10 +26,11 @@ Out of scope, here as for plain files ([security-model §3.1](security-model.md#
 - **Names and structure.** A file's name, its folder, its size, its timestamps and the shape of the
   tree stay readable to the storage layer: they live in the log and the tree. Hiding them is left
   to a later version (encrypted folders), which this format leaves room for.
-- **A leaked K.** K cannot be replaced in this version
-  ([vault §7.2](../extensions/vault.md#72-new-k)): a K that leaks exposes every encrypted file of
-  the domain, past and future. The key id each encrypted manifest carries (§7) is there so a later
-  version can re-key.
+- **A leaked K.** A re-key ([vault §7.2](../extensions/vault.md#72-re-key)) seals what is written
+  from then on under a new K, and keeps the old K as a retired key
+  ([vault §4.1](../extensions/vault.md#41-format)) so the files sealed under it stay readable:
+  they are not re-sealed. Whoever holds a leaked K reads every file sealed under it, and every
+  version, until those files are rewritten and their versions expire.
 - **Clients that are not updated.** A build that does not know this file writes new files plain
   and cannot read encrypted ones. Every client of a domain is updated together; keeping them so is
   the user's.
@@ -48,7 +49,9 @@ Out of scope, here as for plain files ([security-model §3.1](security-model.md#
   domain has none. The Android app follows its server and offers nothing. Nothing turns it on by
   itself.
 - `encryptFiles: true` gives the domain a vault even when it lists no extension
-  ([extensions README §3](../extensions/README.md#3-opting-in)).
+  ([extensions README §3](../extensions/README.md#3-opting-in)), and so does a keyring already in
+  the store: turning `encryptFiles` off never takes the vault verbs away from a domain whose
+  encrypted files need them.
 - It can be turned on later, and off. Either applies to files whose first version is written from
   then on (§3). **Turning it off while encrypted files exist is the user's choice:** they stay
   encrypted and readable with the vault, and can no longer be decrypted (§4) until it is on again.
@@ -60,13 +63,15 @@ Out of scope, here as for plain files ([security-model §3.1](security-model.md#
 
 - **A new file** is encrypted when its first version is written while the domain uses
   `encryptFiles: true`. Behind an http-proxy main, a client that has not yet learned the server's
-  settings holds a new file's first version, staged, until it has: an unknown setting is never
-  read as false.
+  settings holds a new file's first version, staged, until it has: a setting not yet learned is
+  never read as false. A server that answers without stating it (one older than this version,
+  [backends/http-proxy §8.4](../backends/http-proxy.md#84-capabilities)) has no file encryption:
+  its absence is `false`, and status says the server does not support it.
 - **A file keeps what it is.** A new version, a rename, a move, or a copy within the domain of an
   encrypted file stays encrypted; of a plain file, plain. A switch (§4) is the only change.
 - A **symlink** is never encrypted: its target is a name.
-- A **conflicted copy** made while the domain uses `encryptFiles: true` is encrypted; otherwise it
-  keeps the encryption of the version it was made from.
+- A **conflicted copy** keeps the encryption of the version it was made from: a copy of a plain
+  version that was already published hides nothing by being sealed, and needs no vault.
 
 ### 3.2 A downgrade is never written plain
 
@@ -79,7 +84,10 @@ edit by "a plain file stays plain" would then upload it plain.
   **downgrade**: it writes the next version encrypted, and reports the file ("this file was
   encrypted and now reads plain; its next version is encrypted").
 - A deliberate decryption (§4) writes a **plain `tsyncm04`** (bit 0 clear), whose MAC only a holder
-  of K can produce. It lifts the record: the file is plain from then on.
+  of K can produce and which names the encrypted version it decrypts (`from`, §7). It lifts the
+  record only on a client with K whose MAC check passes and whose last encrypted version of that
+  file is the one `from` names: a plain `tsyncm04` replayed at another file's place, or at this
+  file's place over a later encrypted version, lifts nothing. A locked client keeps the record.
 - What remains: a file a client has never seen encrypted, replaced before the client first reads
   it. The client then writes it as the plain file it appears to be.
 
@@ -102,8 +110,8 @@ While the domain uses `encryptFiles: true`, a user can switch a file either way:
   domain's history until retention removes them; the command and the menu say so, and
   `tsync expire` can remove them sooner ([05 §4.8](../05-ops-config.md#48-deleted-files-and-retention)).
 - **A switch can race an edit** on another machine, as any two writes do: the main's value keeps
-  the name and the other becomes the conflicted copy. A copy made while the domain uses
-  `encryptFiles: true` is encrypted (§3.1). `encrypt` reports, after its commit, any file under its
+  the name and the other becomes the conflicted copy, which keeps its own encryption (§3.1).
+  `encrypt` reports, after its commit, any file under its
   paths that still reads plain.
 - A menu shows only the entry that applies: *Encrypt* on a plain file, *Decrypt* on an encrypted
   one, neither on a symlink or while the domain does not use `encryptFiles`. A folder offers both,
@@ -134,6 +142,9 @@ They are derived when the vault is unlocked and forgotten with K; none is writte
   - the body is `len(p) + 40` bytes. Equal plaintext chunks of the domain seal to equal bodies.
 - **Opening** checks the tag, then derives the nonce again from the plaintext and checks it equals
   the body's: a body sealed with any other nonce does not open.
+- **A new version is sealed under the current K.** Of a file sealed under a retired key, its
+  inherited chunks are opened and sealed again: the first edit after a re-key uploads every chunk
+  once.
 - **A sealed chunk is named like any chunk**, by the dual digest of its bytes
   ([02 §2.1](../02-remote-model.md#21-digests)): here the sealed bytes. Equal sealed bodies
   deduplicate, and a new version uploads only the chunks whose plaintext changed. Sealed and plain
@@ -165,12 +176,19 @@ off  len  field
 124  name_len         leaf name bytes, recorded at write time
 ..   count × e        chunk entries, in index order: the chunk key (33 bytes), then, when bit 0 is
                       set, the chunk's 24-byte nonce (e = 57); with bit 0 clear, e = 33
+..   32               from, with bit 0 clear only: h1 then h2 of the version decrypted (§3.2)
 ```
 
 - **Reader.** A body with magic `tsyncm04` MUST be rejected as malformed if it is shorter than 124
-  bytes, has `size < 0`, `link_len ≠ 0`, a flag bit other than bit 0, or a length other than
-  `124 + name_len + e × count`. `size` is the plaintext size; with bit 0 set, chunk `i` covers
+  bytes, has `size < 0`, `link_len ≠ 0`, a flag bit other than bit 0, a `key_id` that is not 16
+  lowercase hex characters, or a length other than `124 + name_len + e × count` (+ 32 with bit 0
+  clear, below), computed without overflow. `size` is the plaintext size; with bit 0 set, chunk `i` covers
   plaintext bytes as in tsyncm03 and its sealed body is 40 bytes longer.
+- **`from`**, with bit 0 clear only: 32 bytes after the chunk entries, the `h1` and `h2` of the
+  encrypted version this one decrypts, as its header carries them (§3.2). The MAC covers it.
+- **Which K.** `key_id` names the vault's K or one of its retired keys
+  ([vault §4.1](../extensions/vault.md#41-format)); the file's keys (§5) derive from that K. A
+  `key_id` the keyring does not hold is CORRUPT `sealed`: no machine can open it.
 - **Digests.** `h1`/`h2` are computed as for tsyncm03 from the chunk keys and the stored lengths
   (sealed lengths when encrypted). The same content under the same K gives the same digests, so
   "same content" holds between two encrypted versions as between two plain ones, and never between
@@ -197,9 +215,27 @@ off  len  field
   sealed chunks from the start, so the before-guard, the no-op check and a frontend's content id
   agree with what is published. On a locked vault an encrypted version is not adopted: it stays
   staged, the write's caller is answered UNPREPARED/`locked`, and it is adopted once the vault is
-  unlocked. Nothing of it reaches the store plain.
-- **Reading** fetches sealed chunks and opens them with `Kc`, after the manifest's MAC. The chunk
-  cache keeps sealed bodies, as fetched ([data-model/local-cache](../data-model/local-cache.md)).
+  unlocked.
+- **The upload job seals** a version whose keys it computes, as a byte-level write's are
+  ([04 §4.6](../04-checkout-cache.md)): the write was answered at its `close`, and its bytes are
+  the user's. On a locked vault the job does not run; the version waits, staged, counted in status
+  as waiting for the vault, and is sealed and uploaded once the vault is unlocked. No write that
+  was answered done is refused later, and nothing of either kind reaches the store plain.
+- **No vault** (`encryptFiles: true` and no keyring, or a vault deleted): new and switched
+  versions wait as on a locked vault, and status says the domain encrypts files but has no vault
+  and how to make one (`tsync vault init`).
+- **Reading** fetches sealed chunks and opens them with `Kc`, after the manifest's MAC. A sealed
+  chunk is fetched whole, never by range: its tag covers the whole body, and no byte of it is
+  served before the tag and the nonce check. A range read of an encrypted file fetches the chunks
+  its range covers ([read-path-and-cache §4.4](read-path-and-cache.md#44-range-fill)).
+- **The chunk cache keeps sealed bodies**, as fetched and as uploaded, named by their keys
+  ([data-model/local-cache](../data-model/local-cache.md)): a group body of an encrypted file is
+  the concatenation of its members' sealed bodies, member `i` at the sum of the sealed lengths
+  before it. A staged body is plaintext, so promoting an encrypted version writes the sealed group
+  into the cache instead of linking the staged body
+  ([04 §4.7](../04-checkout-cache.md)); the slow path of an edit opens an Inherit member from its
+  sealed cache body before copying it into the plaintext staged body (04 §4.3). Both need the K
+  the version is sealed under, which its adoption already held.
 - **Plaintext on the user's disk** exists where tsync keeps a file's bytes before sealing or after
   opening: staged bodies (an encrypted version waiting for the vault included), whole-file upload
   snapshots ([02 §4.1](../02-remote-model.md)), export and rsync temporaries, and every local copy a
@@ -238,8 +274,10 @@ the storage layer, which keeps what a share serves. It is never made implicitly.
   serves those artifacts as it serves any.
 - **A preview image** of an encrypted file is made only for such a share, by the sharing machine,
   under the same confirmation.
-- The artifacts are removed when the share expires or is revoked, as share artifacts are. An
-  encrypted file shared before it changed keeps serving the version shared.
+- The artifacts are removed when the share expires or is revoked, as share artifacts are. A share
+  of an encrypted file serves only the artifacts the sharing machine wrote, which name the version
+  shared: whoever serves the link never assembles a `tsyncm04` file. An encrypted file edited
+  after it was shared keeps serving the version shared until the user shares it again.
 
 ### 9.3 The rest
 
@@ -252,8 +290,8 @@ the storage layer, which keeps what a share serves. It is never made implicitly.
   also checks each `tsyncm04` manifest's MAC and opens its chunks.
 - **`tsync vault delete`** destroys K, and with it every encrypted file and version of the domain.
   While the domain holds encrypted files it asks a second confirmation naming how many, after the
-  domain's name ([vault §7.1](../extensions/vault.md#71-deleting-the-vault)). It is the user's
-  decision; tsync says what it costs.
+  domain's name (`confirmFiles`, the count, [vault §7.1](../extensions/vault.md#71-deleting-the-vault)).
+  It is the user's decision; tsync says what it costs. The domain then has no vault (§8).
 
 ## 10. What the storage layer learns
 
@@ -294,3 +332,12 @@ it whether those chunks were there already.
 - Behind an http-proxy main, a client that has not learned `encryptFiles` holds a new file; one
   that learned `true` encrypts it.
 - An earlier build reading a `tsyncm04` manifest reports it malformed and serves nothing.
+- After a re-key, a file sealed under the old K opens on every unlocked client and is not
+  re-uploaded; its next edit is sealed under the new K. After two inits raced, the files the
+  losing machine sealed open once its K is retired.
+- A plain `tsyncm04` put at the place of another file, or over a later encrypted version of its
+  own file, lifts no downgrade record; the next version is written encrypted.
+- A server that answers `/domain-settings` without `encryptFiles`, or only `/chunk-size`, gets new
+  files plain.
+- A sealed chunk is never served from a range fetch; the cache holds an encrypted file's groups
+  sealed, and promoting its version writes them sealed.

@@ -645,7 +645,8 @@ entry's, at owner start (§4.10) and before the key's next change (§4.3). Each 
    - otherwise, or when links are unsupported: install the group from the staged bytes as a
      whole body ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.5).
    Groups with an Inherit member keep their key; a cached body for them is still right. A whole
-   edit hands nothing to the cache.
+   edit hands nothing to the cache. An encrypted file's groups are written to the cache sealed,
+   never linked ([file-encryption §8](algorithms/file-encryption.md#8-writing-reading-and-a-locked-vault)).
 3. Durably replace the mirror entry with the uploaded manifest.
 4. Release the staged manifest and fsync its directory.
 5. Release the staged bodies, except those an open read handle references (released when the
