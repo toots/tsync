@@ -21,11 +21,11 @@ The idea is the one behind iCloud Drive or Dropbox Smart Sync, pointed at your o
 - **Only what you open takes space.** The whole tree is listed; content is cached as it is read, and the cache can be capped. A folder can be kept offline, or made online-only again.
 - **Several machines share it.** Each one publishes its changes and picks up the others'. Work done in two places at once ends as two files, never as a lost one.
 - **History is kept.** With versioning on, every change, rename and delete of a file leaves the previous version behind, and a deleted file can be put back.
-- **More than one copy.** A domain can write to a main store and keep replicas on others, and hand out public share links to a file or a folder.
+- **More than one copy.** Changes go to a main store and can be kept on replicas too, and a file or a folder can be handed out as a public share link.
 
 ## Secrets
 
-A domain can also keep a **vault**: two-factor codes, logins, notes and passkeys, sealed on your machine before they reach the storage and synced to your other machines like the files.
+Beside the files, tsync can keep a **vault**: two-factor codes, logins, notes and passkeys, sealed on your machine before they reach the storage and synced to your other machines like the files.
 
 - **Sealed under two secrets.** A passphrase you remember and a secret key your machines keep: whoever reads the storage or runs the server reads nothing.
 - **Filled where you sign in.** AutoFill in Safari and apps on macOS, a Chrome extension on Linux and macOS, autofill on Android, and one-time codes from the macOS menu bar and the Linux tray.
