@@ -237,8 +237,11 @@ module Make (R : RECORD) = struct
     let (module E : Tsync_sync.Engine.S) = engine in
     E.delete (Names.join folder id)
 
-  (* README §4.2: the fold that waited for the key. *)
+  (* README §4.2: the fold that waited for the key, run by an arrival only
+     while K is held, so it never reads the keystore or counts as a use. *)
   let fold ~domain ~engine ~lazy_tree t =
-    if List.mem name (Vault.extensions ~domain ~engine) then
-      ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
+    if
+      Atomic.get t.Vault.key <> None
+      && List.mem name (Vault.extensions ~domain ~engine)
+    then ignore (records (context ~use:false ~domain ~engine ~lazy_tree t))
 end
