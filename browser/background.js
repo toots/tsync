@@ -192,7 +192,7 @@ async function offerSave(origin, username, password, incognito) {
   const match = await one({ type: "match", origin });
   if (!match.ok) return;
   if (match.locked.length && !match.logins.length) {
-    await sheet({ kind: "save-locked", origin });
+    await sheet({ kind: "save-failed", origin });
     return;
   }
   const same = match.logins.filter((l) => l.exact && l.username === username);
@@ -202,7 +202,8 @@ async function offerSave(origin, username, password, incognito) {
   // The domain holding the login updated; a new one goes to the default domain.
   const domain = same[0]?.domain;
   const first = await one({ type: "save", origin, username, password, domain });
-  if (first.ok && first.update) await one({ type: "save", origin, username, password, update: first.update, domain });
+  const saved = first.ok && first.update ? await one({ type: "save", origin, username, password, update: first.update, domain }) : first;
+  if (!saved.ok) await sheet({ kind: "save-failed", origin, error: saved.error || "tsync could not save it." });
 }
 
 // passwords §5.1: the pick is the approval; the login is saved before the form is.
@@ -215,13 +216,13 @@ async function suggestFor(origin, username) {
 // --- messages ---------------------------------------------------------------------
 
 async function fillFor(origin, m) {
-  // §3.2: a login matching only by suffix fills after the user confirms it in the sheet.
-  if (!m.exact) {
-    const answer = await sheet({ kind: "fill-suffix", origin, title: m.title, username: m.username });
-    if (answer.action !== "ok") return { error: "cancelled" };
-  }
   const reply = await one({ type: "fill", origin, domain: m.domain, id: m.id });
   if (!reply.ok) return { error: reply.error };
+  // §3.2: a login matching only by suffix, as tsync says, fills after the user confirms it in the sheet.
+  if (!reply.exact) {
+    const answer = await sheet({ kind: "fill-suffix", origin, title: m.title, username: reply.username });
+    if (answer.action !== "ok") return { error: "cancelled" };
+  }
   return m.kind === "code" ? { code: reply.code } : { username: reply.username, password: reply.password };
 }
 

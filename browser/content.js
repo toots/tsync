@@ -271,7 +271,7 @@
     menu.hidden = true;
     let values;
     try {
-      values = await chrome.runtime.sendMessage({ type: "fill", domain: login.domain, id: login.id, exact: login.exact,
+      values = await chrome.runtime.sendMessage({ type: "fill", domain: login.domain, id: login.id,
         title: login.title, username: login.username, kind });
     } catch (_) {
       return;
