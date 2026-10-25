@@ -110,9 +110,6 @@ let of_string body =
             color;
             icon;
             modified;
-            unknown =
-              List.filter
-                (fun (k, _) -> not (List.mem k ["color"; "icon"; "modified"]))
-                l;
+            unknown = Members.unknown ~known:["color"; "icon"; "modified"] l;
           }
     | _ | (exception Yojson.Json_error _) -> Error "not an appearance"

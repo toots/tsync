@@ -47,18 +47,9 @@ let of_string body =
                       | _ -> []);
                   modified;
                   unknown =
-                    List.filter
-                      (fun (k, _) ->
-                        not
-                          (List.mem k
-                             [
-                               "name";
-                               "enrolled";
-                               "lastUnlock";
-                               "seen";
-                               "modified";
-                             ]))
-                      l;
+                    Members.unknown l
+                      ~known:
+                        ["name"; "enrolled"; "lastUnlock"; "seen"; "modified"];
                 }
           | _ -> Error "not a machine entry")
     | _ -> Error "not a machine entry"

@@ -111,9 +111,7 @@ let sized name size s =
 let unknown_members ~known json =
   List.sort
     (fun (a, _) (b, _) -> String.compare a b)
-    (List.filter
-       (fun (name, _) -> not (List.mem name known))
-       (Yojson.Safe.Util.to_assoc json))
+    (Members.unknown ~known (Yojson.Safe.Util.to_assoc json))
 
 let kdf_of_json kdf =
   let open Yojson.Safe.Util in
