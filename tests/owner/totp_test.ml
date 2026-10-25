@@ -591,6 +591,7 @@ let () =
       R.start ~background:false ();
       let ask_race fields = ask ~domain:"race" fields in
       ignore (ask_race [("action", "vault_init"); ("passphrase", passphrase)]);
+      ignore (ask_race [("action", "vault_backup_key")]);
       ignore
         (added ~domain:"race" "  the owner adds under its K"
            "otpauth://totp/Race:a?secret=JBSWY3DPEHPK3PXP");
@@ -608,12 +609,13 @@ let () =
       settle_owner ~domain:"race" 100;
       let status label =
         let st = ask_race [("action", "vault_status")] in
-        p "  %-34s %s copies=%d retired=%d" label
+        p "  %-34s %s copies=%d retired=%d backup key=%b" label
           (Option.get (field st "vault"))
           (match member st "copies" with
             | Some (`List l) -> List.length l
             | _ -> -1)
           (match member st "retired" with Some (`Int n) -> n | _ -> -1)
+          (field st "backupKey" <> None)
       in
       status "status";
       answer "  list" (ask_race [("action", "totp_list")]);
