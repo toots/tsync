@@ -365,11 +365,18 @@ let fetch_codes t =
 
 (* The helper's standard output, or [None] when it failed or was closed; its
    exit is awaited on a thread of its own, since a dialog stays open for as long
-   as the user leaves it. *)
-let helper ?input program arguments =
+   as the user leaves it. Without [capture] its output goes to /dev/null: a
+   helper that leaves a child behind holding it, as wl-copy does, would keep
+   the read open. *)
+let helper ?input ?(capture = true) program arguments =
   Rt.within `Threaded (fun () ->
       let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
-      let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
+      let stdout_read, stdout_write =
+        if capture then Unix.pipe ~cloexec:true ()
+        else (
+          let null = Unix.openfile "/dev/null" [O_WRONLY; O_CLOEXEC] 0 in
+          (Unix.dup ~cloexec:true null, null))
+      in
       match
         Unix.create_process program
           (Array.of_list (program :: arguments))
@@ -393,7 +400,9 @@ let helper ?input program arguments =
              with Unix.Unix_error _ -> ());
             Unix.close stdin_write;
             let output =
-              In_channel.input_all (Unix.in_channel_of_descr stdout_read)
+              if capture then
+                In_channel.input_all (Unix.in_channel_of_descr stdout_read)
+              else ""
             in
             Unix.close stdout_read;
             match snd (Unix.waitpid [] pid) with
@@ -410,7 +419,7 @@ let copy_code t domain id =
           | Error reason -> notify t "The code was not copied" reason
           | Ok { code; _ } -> (
               match
-                helper ~input:code "wl-copy"
+                helper ~input:code ~capture:false "wl-copy"
                   ["--sensitive"; "--type"; "text/plain"]
               with
                 | Some _ -> ()
