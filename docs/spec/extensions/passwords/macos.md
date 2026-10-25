@@ -89,8 +89,10 @@ The system offers a provider's code on a code field only for an entry the provid
 ## 4. Passkeys
 
 - **Creation** (`passkey`, macOS 14). `prepareInterface(forPasskeyRegistration:)` receives an
-  `ASPasskeyCredentialRequest`. The new passkey goes to the first domain using passwords
-  (README §6.1); a locked one is shown as §6 says, not passed over for the next. The sheet names
+  `ASPasskeyCredentialRequest`. The new passkey goes where README §6.1 sends a new record: the
+  only domain using passwords, else the default domain when it uses them; with several and none
+  the default, the sheet names them and how to set the default, and adds nothing. A locked one
+  is shown as §6 says, not passed over for another. The sheet names
   the site (the RP ID), the user name and that domain; on approval it sends
   `passwords_passkey_create` with origin `https://<RP ID>`, the RP ID, the user handle, user name
   and display name, the algorithms the request supports, its excluded credentials as `exclude`
