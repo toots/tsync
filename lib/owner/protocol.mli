@@ -183,6 +183,10 @@ type vault_status = {
   cached : string option;  (** where K is held: [memory] *)
   slots : (string * int) list;  (** count by kind *)
   unusable : string list;  (** slots past the readers' limits *)
+  retired : int;  (** §4.1: the Ks a re-key or a raced init replaced *)
+  retired_unreadable : string list;
+      (** the ids of the retired keys that do not unwrap, known while unlocked
+      *)
   copies : string list;  (** keyring copies beside it *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)

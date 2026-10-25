@@ -140,11 +140,11 @@ holds a label: false
   after: keyring machines
 == two inits race; the owner's loses
   the owner adds under its K         <id10>
-  status                             locked copies=1
+  status                             locked copies=1 retired=0
   list                               locked: the vault is locked: run tsync vault unlock
   lock, the losing K held            ok
   unlock with the winner's passphrase ok
   list: "Race" "a"
-  status                             unlocked copies=0
+  status                             unlocked copies=0 retired=1
   the vault folder: keyring machines
 owner exit status 0

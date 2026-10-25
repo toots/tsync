@@ -12,9 +12,12 @@ type slot =
     }
   | Unknown of { id : string; json : Yojson.Safe.t }
 
+type retired = { key_id : string; nonce : string; wrapped : string }
+
 type t = {
   key_id : string;
   slots : slot list;
+  retired : retired list;
   extra : (string * Yojson.Safe.t) list;
 }
 
@@ -40,6 +43,22 @@ let unb64 s =
     | Error _ -> failwith "base64url"
 
 let slot_ad ~key_id id = "tsync-vault-slot/" ^ key_id ^ "/" ^ id
+
+let retired_ad ~key_id retired_id =
+  "tsync-vault-retired/" ^ key_id ^ "/" ^ retired_id
+
+let retired_to_json (r : retired) =
+  `Assoc
+    [
+      ("keyId", `String r.key_id);
+      ("nonce", `String (b64 r.nonce));
+      ("wrapped", `String (b64 r.wrapped));
+    ]
+
+let sort_retired retired =
+  List.sort
+    (fun (a : retired) (b : retired) -> String.compare a.key_id b.key_id)
+    retired
 
 let slot_to_json = function
   | Unknown { json; _ } -> json
@@ -74,7 +93,12 @@ let to_string t =
     (`Assoc
        (("keyId", `String t.key_id)
        :: ("slots", `List (List.map slot_to_json (sort_slots t.slots)))
-       :: t.extra))
+       ::
+         (match t.retired with
+         | [] -> t.extra
+         | retired ->
+             ("retired", `List (List.map retired_to_json (sort_retired retired)))
+             :: t.extra)))
 
 let sized name size s =
   if String.length s <> size then failwith name;
@@ -133,6 +157,20 @@ let slot_of_json json =
           }
     | _ -> Unknown { id; json }
 
+let retired_of_json json =
+  let open Yojson.Safe.Util in
+  let key_id = to_string (member "keyId" json) in
+  if not (is_hex16 key_id) then failwith "retired keyId";
+  {
+    key_id;
+    nonce =
+      sized "retired nonce" Crypto.nonce_size
+        (unb64 (to_string (member "nonce" json)));
+    wrapped =
+      sized "retired wrapped" wrapped_size
+        (unb64 (to_string (member "wrapped" json)));
+  }
+
 let of_string s =
   match
     let open Yojson.Safe.Util in
@@ -144,7 +182,22 @@ let of_string s =
     if slots = [] then failwith "no slot";
     if List.length (List.sort_uniq String.compare ids) <> List.length ids then
       failwith "duplicate slot id";
-    { key_id; slots; extra = unknown_members json ~known:["keyId"; "slots"] }
+    let retired =
+      match member "retired" json with
+        | `Null -> []
+        | l -> List.map retired_of_json (to_list l)
+    in
+    let retired_ids = List.map (fun (r : retired) -> r.key_id) retired in
+    if
+      List.length (List.sort_uniq String.compare retired_ids)
+      <> List.length retired_ids
+    then failwith "duplicate retired keyId";
+    {
+      key_id;
+      slots;
+      retired;
+      extra = unknown_members json ~known:["keyId"; "slots"; "retired"];
+    }
   with
     | t -> Ok t
     | exception (Failure msg | Yojson.Json_error msg) -> Error msg
@@ -215,6 +268,7 @@ let create ?params ~now ~secret_key passphrase =
     {
       key_id;
       slots = [slot ?params ~now ~key_id ~key ~secret_key passphrase];
+      retired = [];
       extra = [];
     } )
 
@@ -278,5 +332,54 @@ let union a b =
             | Some old -> greatest old slot
             | None -> slot))
       (a.slots @ b.slots);
+    let retired =
+      List.fold_left
+        (fun acc (r : retired) ->
+          match
+            List.partition (fun (o : retired) -> o.key_id = r.key_id) acc
+          with
+            | [], rest -> r :: rest
+            | o :: _, rest ->
+                let canonical x = Yojson.Safe.to_string (retired_to_json x) in
+                (if String.compare (canonical o) (canonical r) >= 0 then o
+                 else r)
+                :: rest)
+        [] (a.retired @ b.retired)
+    in
     Some
-      { a with slots = sort_slots (List.of_seq (Hashtbl.to_seq_values by_id)) })
+      {
+        a with
+        slots = sort_slots (List.of_seq (Hashtbl.to_seq_values by_id));
+        retired = sort_retired retired;
+      })
+
+(* §4.1: one already retired is kept as it is. *)
+let retire t ~key (retired_id, retired_key) =
+  if
+    retired_id = t.key_id
+    || List.exists (fun (r : retired) -> r.key_id = retired_id) t.retired
+  then t
+  else (
+    let nonce = Tsync_core.Ids.urandom Crypto.nonce_size in
+    let wrapped =
+      Crypto.seal ~key ~nonce
+        ~ad:(retired_ad ~key_id:t.key_id retired_id)
+        retired_key
+    in
+    {
+      t with
+      retired =
+        sort_retired ({ key_id = retired_id; nonce; wrapped } :: t.retired);
+    })
+
+let retired_keys t ~key =
+  List.partition_map
+    (fun (r : retired) ->
+      match
+        Crypto.open_ ~key ~nonce:r.nonce
+          ~ad:(retired_ad ~key_id:t.key_id r.key_id)
+          r.wrapped
+      with
+        | Some k -> Left (r.key_id, k)
+        | None -> Right r.key_id)
+    t.retired

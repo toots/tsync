@@ -170,6 +170,10 @@ type vault_status = {
   cached : string option;  (** where K is held: [memory] *)
   slots : (string * int) list;  (** count by kind *)
   unusable : string list;  (** slots past the readers' limits *)
+  retired : int;  (** §4.1: the Ks a re-key or a raced init replaced *)
+  retired_unreadable : string list;
+      (** the ids of the retired keys that do not unwrap, known while unlocked
+      *)
   copies : string list;  (** keyring copies beside it *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
@@ -1037,6 +1041,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                    | `Unlocked -> "unlocked") );
              ("slots", `Assoc (List.map (fun (k, n) -> (k, `Int n)) reply.slots));
              ("unusable", strings reply.unusable);
+             ("retired", `Int reply.retired);
+             ("retiredUnreadable", strings reply.retired_unreadable);
              ("copies", strings reply.copies);
            ]
           @ (match reply.vault with
@@ -1346,6 +1352,9 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
                     l
               | _ -> []);
           unusable = strings "unusable";
+          retired =
+            (match member j "retired" with Some (`Int n) -> n | _ -> 0);
+          retired_unreadable = strings "retiredUnreadable";
           copies = strings "copies";
           keystore_error = str j "keystoreError";
           enrolled = flag j "enrolled";

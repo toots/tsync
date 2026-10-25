@@ -63,6 +63,14 @@ union holds every slot                                       yes
 union is symmetric, bytewise                                 yes
 both passphrases unlock the union                            yes
 different key ids do not fold                                yes
+a retired key unwraps under K                                yes
+a retired key does not unwrap under another key              yes
+retiring it again changes nothing                            yes
+the keyring's own K is never retired                         yes
+retired keys written after the slots, and read back          yes
+a K never appears in the text                                yes
+union holds the retired keys of both copies                  yes
+union of retired keys is symmetric, bytewise                 yes
 different unknown members do not fold                        yes
 equal unknown members fold                                   yes
 == unknown members

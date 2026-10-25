@@ -228,7 +228,14 @@ let folds () =
 
 let keyrings () =
   p "\n== keyring fold\n";
-  let k = { Keyring.key_id = "0123456789abcdef"; slots = []; extra = [] } in
+  let k =
+    {
+      Keyring.key_id = "0123456789abcdef";
+      slots = [];
+      retired = [];
+      extra = [];
+    }
+  in
   let slot id =
     Keyring.Unknown
       { id; json = `Assoc [("id", `String id); ("kind", `String "later")] }
@@ -267,6 +274,7 @@ let keyrings () =
             {
               key_id = "fedcba9876543210";
               slots = [slot "3333333333333333"];
+              retired = [];
               extra = [];
             };
       };

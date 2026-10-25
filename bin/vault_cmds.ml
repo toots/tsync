@@ -328,6 +328,11 @@ let status_cmd =
          List.iter
            (say "unusable slot: %s (past the readers' limits)")
            s.unusable;
+         if s.retired > 0 then say "retired keys: %d" s.retired;
+         List.iter
+           (say
+              "retired key: %s does not unwrap; the files under it do not open")
+           s.retired_unreadable;
          List.iter (say "keyring copy: %s") s.copies;
          Option.iter
            (fun (a : P.appearance) ->

@@ -18,11 +18,16 @@ type slot =
       (** A slot of a kind this version does not know: skipped by [unlock], kept
           through a rewrite. *)
 
+(** A K a re-key or a raced init replaced, wrapped under the keyring's K (§4.1).
+*)
+type retired = { key_id : string; nonce : string; wrapped : string }
+
 (** [key_id] and slot ids are 16 lowercase hex; [extra] holds the members this
     version does not know, kept through a rewrite. *)
 type t = {
   key_id : string;
   slots : slot list;
+  retired : retired list;
   extra : (string * Yojson.Safe.t) list;
 }
 
@@ -69,3 +74,11 @@ val unusable : t -> string list
 (** The fold of two copies with one key id (§4.3); [None] when the key ids
     differ, or the members this version does not know. *)
 val union : t -> t -> t option
+
+(** [t] with [(key_id, key)] among its retired keys, wrapped under [key], the
+    keyring's K; unchanged when it is already there or is the keyring's own. *)
+val retire : t -> key:string -> string * string -> t
+
+(** The retired keys that unwrap under [key], as [(key_id, key)], and the ids of
+    those that do not. *)
+val retired_keys : t -> key:string -> (string * string) list * string list
