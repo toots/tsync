@@ -24,7 +24,6 @@
   "permissions": [
     "nativeMessaging",
     "storage",
-    "tabs",
     "privacy"
   ],
   "host_permissions": [
