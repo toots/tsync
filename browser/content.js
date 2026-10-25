@@ -249,7 +249,7 @@
       return;
     }
     if (!answer || answer.error || !answer.password) return;
-    for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "password") set(input, answer.password);
+    for (const input of scope.querySelectorAll("input")) if (newPassword.has(input)) set(input, answer.password);
     suggested.set(scope, { id: answer.id, domain: answer.domain });
   }
 

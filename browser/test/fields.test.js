@@ -78,4 +78,10 @@ test("passwords §5.1: the fields that ask for a new password", () => {
   assert.deepEqual(newPasswords(named, classify(named)), [false, true]);
   const signin = [{ type: "text", name: "login" }, { type: "password", name: "password" }];
   assert.deepEqual(newPasswords(signin, classify(signin)), [false, false]);
+  const change = [{ type: "password", name: "pw" }, { type: "password", name: "pw1" }, { type: "password", name: "pw2" }];
+  assert.deepEqual(newPasswords(change, classify(change)), [false, true, true], "a change form's first is the current one");
+  const old = [{ type: "password", name: "old_password" }, { type: "password", name: "password" }];
+  assert.deepEqual(newPasswords(old, classify(old)), [false, true], "named the current one");
+  const bold = [{ type: "password", name: "bold" }, { type: "password", name: "x" }];
+  assert.deepEqual(newPasswords(bold, classify(bold)), [true, true]);
 });
