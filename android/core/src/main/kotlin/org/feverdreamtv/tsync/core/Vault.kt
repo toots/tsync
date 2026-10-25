@@ -101,7 +101,7 @@ class Vault(private val client: Client) {
     fun add(secret: String, issuer: String = "", account: String = ""): String {
         val trimmed = secret.trim()
         val request = action("totp_add")
-        if (trimmed.startsWith("otpauth://")) request.put("uri", trimmed)
+        if (trimmed.startsWith("otpauth://", ignoreCase = true)) request.put("uri", trimmed)
         else request.put("secret", trimmed).put("issuer", issuer.trim()).put("account", account.trim())
         return client.call(request).getString("id")
     }
