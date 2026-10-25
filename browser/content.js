@@ -19,9 +19,8 @@
   shadow.innerHTML = `<style>
     :host { all: initial; }
     .icon { position: fixed; width: 20px; height: 20px; cursor: pointer; z-index: 2147483646;
-            background: url("${ICON}") center / 20px no-repeat; border: 0; padding: 0; border-radius: 50%;
-            opacity: .9; }
-    .icon:hover { opacity: 1; box-shadow: 0 0 0 3px #2563eb33; }
+            background: url("${ICON}") center / 20px no-repeat; border: 0; padding: 0; border-radius: 50%; }
+    .icon:hover { box-shadow: 0 0 0 3px #2563eb33; }
     .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px;
             background: Canvas; color: CanvasText; border: 1px solid #8884; border-radius: 8px;
             box-shadow: 0 4px 16px #0003; font: 13px system-ui, sans-serif; padding: 4px; }
@@ -35,6 +34,18 @@
     .heading > svg, .heading > img { vertical-align: -2px; }
   </style><div class="menu" hidden></div>`;
   const menu = shadow.querySelector(".menu");
+
+  // §6: the icons and the menu with nothing painted over them, a decoy that lets
+  // clicks through included, as Chrome's IntersectionObserver v2 reports it.
+  const tracked = typeof IntersectionObserverEntry !== "undefined" && "isVisible" in IntersectionObserverEntry.prototype;
+  const unobscured = new WeakSet();
+  const painted = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isVisible) unobscured.add(entry.target);
+      else unobscured.delete(entry.target);
+    }
+  }, { trackVisibility: true, delay: 100 });
+  painted.observe(menu);
 
   // §6: a page's stylesheet cannot fade, hide or reshape the overlay; inline
   // !important wins over it.
@@ -105,12 +116,14 @@
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => seen(e) && open(el));
     shadow.insertBefore(b, menu);
+    painted.observe(b);
     return b;
   }
 
   function mark() {
     for (const [el, b] of badges) {
       if (!kinds.has(el) || !el.isConnected) {
+        painted.unobserve(b);
         b.remove();
         badges.delete(el);
       }
@@ -163,10 +176,11 @@
   // --- filling (§3.2): on a gesture only -------------------------------------
 
   // §6: a pick counts only for a real click on the overlay as the user sees it:
-  // trusted, on top at the click's point, with nothing in the top layer over it.
+  // trusted, on top at the click's point, unobscured, with nothing in the top layer over it.
   function seen(e) {
     if (!e.isTrusted) return false;
     if (document.elementFromPoint(e.clientX, e.clientY) !== host) return false;
+    if (tracked && !unobscured.has(e.currentTarget.closest(".menu") || e.currentTarget)) return false;
     const style = getComputedStyle(host);
     if (style.opacity !== "1" || style.visibility !== "visible" || style.filter !== "none") return false;
     try {
