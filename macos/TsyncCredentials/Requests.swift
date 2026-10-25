@@ -96,7 +96,7 @@ enum Requests {
 
     /// passwords/macos §4: the passkeys answering the RP ID.
     static func passkeys(rpId: String, allow: [Data]) -> Listed {
-        trace.info("passkeys of \(rpId, privacy: .public), \(allow.count) allowed")
+        trace.info("passkeys of \(rpId, privacy: .private(mask: .hash)), \(allow.count) allowed")
         return merged(
             { domain in
                 var args: [String: Any] = ["origin": "https://" + rpId, "rpId": rpId]
