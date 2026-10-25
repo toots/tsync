@@ -177,6 +177,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                     self.reset(title)
                     self.add(self.note("No domain on this Mac uses passwords."))
                     self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
+                case .several(let domains):
+                    self.reset(title)
+                    self.add(self.note(
+                        "\(domains.joined(separator: ", ")) use passwords. Pick the one for new passkeys with tsync default-domain NAME."))
+                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
                 case .domain(let domain):
                     self.approve("\(title) in \(domain)?") {
                         try self.register(request, identity, in: domain)

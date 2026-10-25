@@ -31,6 +31,8 @@ struct Listed {
 enum CreationDomain {
     case domain(String)
     case locked(String)
+    /// Several domains use passwords and none of them is the default.
+    case several([String])
     case none
 }
 
@@ -112,18 +114,24 @@ enum Requests {
             })
     }
 
-    /// §4: the first domain using passwords; a locked one is named so the sheet
-    /// can say so, an unlocked one after it is not taken in its place.
+    /// extensions README §6.1: the only domain using passwords, else the default domain
+    /// when it does; a locked one is named so the sheet can say so.
     static func creationDomain() -> CreationDomain {
+        var using: [(name: String, locked: Bool)] = []
         for domain in Tsync.domainNames() {
             do {
-                _ = try call(domain, "list")
-                return .domain(domain)
+                _ = try call(domain, "list", ["use": false])
+                using.append((domain, false))
             } catch let failure as OwnerFailure where failure.code == "locked" {
-                return .locked(domain)
+                using.append((domain, true))
             } catch {}
         }
-        return .none
+        let preferred = (try? String(contentsOf: Tsync.dataDir.appendingPathComponent("default-domain"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let target = using.count == 1 ? using.first : using.first(where: { $0.name == preferred }) else {
+            return using.isEmpty ? .none : .several(using.map(\.name))
+        }
+        return target.locked ? .locked(target.name) : .domain(target.name)
     }
 
     /// A binary member of a reply; a reply without it is malformed.
