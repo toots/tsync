@@ -1018,24 +1018,10 @@ let payload ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t (keyring, key
     },
     skipped )
 
-(* §8.2: created, never replacing a file, readable by its owner alone. *)
 let write_new path text =
-  match Unix.openfile path [O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC] 0o600 with
-    | exception Unix.Unix_error (EEXIST, _, _) ->
-        Fail.invalid "%s exists: an export never replaces a file" path
-    | exception Unix.Unix_error (e, _, _) ->
-        Fail.invalid "%s: %s" path (Unix.error_message e)
-    | fd ->
-        Fun.protect
-          ~finally:(fun () -> Unix.close fd)
-          (fun () ->
-            let b = Bytes.unsafe_of_string text in
-            let rec go off =
-              if off < Bytes.length b then
-                go (off + Unix.write fd b off (Bytes.length b - off))
-            in
-            go 0;
-            Unix.fsync fd)
+  try Fs.create_new path text
+  with Fail.E { kind = Exists; _ } ->
+    Fail.invalid "%s exists: an export never replaces a file" path
 
 let export ~domain ~engine ~lazy_tree t ~path typed : Protocol.carried =
   let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
@@ -1140,19 +1126,39 @@ let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
     skipped = [];
   }
 
-(* §8.3: this domain's backups in [dir], oldest first; their names sort by
+let backup_suffix = ".tsync-vault-backup"
+
+(* §8.3: [<domain>-YYYYMMDDTHHMMSS.mmmZ.tsync-vault-backup], so names sort by
    when they were written. *)
-let backups ~(domain : Tsync_domain.Domain.t) dir =
-  let prefix = Domain_name.to_string domain.name ^ "-"
-  and suffix = ".tsync-vault-backup" in
+let backup_name (domain : Tsync_domain.Domain.t) now =
+  let tm = Unix.gmtime now in
+  Printf.sprintf "%s-%04d%02d%02dT%02d%02d%02d.%03dZ%s"
+    (Domain_name.to_string domain.name)
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min
+    tm.tm_sec
+    (int_of_float (Float.rem now 1. *. 1000.))
+    backup_suffix
+
+(* The whole name is matched: another domain's name may begin with this one's
+   and a hyphen. *)
+let is_backup_of (domain : Tsync_domain.Domain.t) name =
+  let prefix = Domain_name.to_string domain.name ^ "-" in
+  let stamp_len = String.length "YYYYMMDDTHHMMSS.mmmZ" in
+  String.length name
+  = String.length prefix + stamp_len + String.length backup_suffix
+  && String.starts_with ~prefix name
+  && String.ends_with ~suffix:backup_suffix name
+  && String.for_all
+       (function '0' .. '9' | 'T' | '.' | 'Z' -> true | _ -> false)
+       (String.sub name (String.length prefix) stamp_len)
+
+(* §8.3: this domain's backups in [dir], oldest first. *)
+let backups ~domain dir =
   match Sys.readdir dir with
     | exception Sys_error _ -> []
     | names ->
         List.sort compare
-          (List.filter
-             (fun n ->
-               String.starts_with ~prefix n && String.ends_with ~suffix n)
-             (Array.to_list names))
+          (List.filter (is_backup_of domain) (Array.to_list names))
 
 let last_backup ~domain dir =
   match List.rev (backups ~domain dir) with
@@ -1174,15 +1180,23 @@ let backup_overdue (domain : Tsync_domain.Domain.t) =
 
 (* §8.3: written while K is held and the last is a period old, sealed to the
    backup key alone; the oldest beyond [keep] are removed. *)
+(* §8.3: what a tick checks before it takes any lock: K held, and the newest
+   backup a period old. *)
+let backup_due (domain : Tsync_domain.Domain.t) t =
+  Atomic.get t.key <> None
+  &&
+    match domain.domain.vault_backup with
+    | None -> false
+    | Some b -> (
+        match last_backup ~domain b.dir with
+          | Some at -> Unix.gettimeofday () -. at >= backup_period b
+          | None -> true)
+
 let backup_tick ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t =
   match domain.domain.vault_backup with
     | None -> ()
     | Some b -> (
-        let due =
-          match last_backup ~domain b.dir with
-            | Some at -> Unix.gettimeofday () -. at >= backup_period b
-            | None -> true
-        in
+        let due = backup_due domain t in
         let held =
           match (read ~domain engine).keyring with
             | `Ok k -> Option.map (fun key -> (k, key)) (key t k)
@@ -1201,16 +1215,9 @@ let backup_tick ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t =
                         payload ~domain ~engine ~lazy_tree t (keyring, key)
                       in
                       Fs.mkdir_p ~perm:0o700 b.dir;
-                      let now = Unix.gettimeofday () in
-                      let tm = Unix.gmtime now in
                       write_new
                         (Filename.concat b.dir
-                           (Printf.sprintf
-                              "%s-%04d%02d%02dT%02d%02d%02d.%03dZ.tsync-vault-backup"
-                              (Domain_name.to_string domain.name)
-                              (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                              tm.tm_hour tm.tm_min tm.tm_sec
-                              (int_of_float (Float.rem now 1. *. 1000.))))
+                           (backup_name domain (Unix.gettimeofday ())))
                         (Tsync_vault.Export.seal_to_backup backup p);
                       let all = backups ~domain b.dir in
                       List.iteri
@@ -1223,9 +1230,11 @@ let backup_tick ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t =
                           (String.concat ", " skipped)
               with
                 | () -> Atomic.set t.backup_error None
-                | exception Fail.E f ->
-                    Log.warn "vault: no backup written: %s" f.reason;
-                    Atomic.set t.backup_error (Some f.reason))
+                | exception e when not (Rt.is_cancelled e || e = Stop.Stopping)
+                  ->
+                    let reason = (Fail.classify e).reason in
+                    Log.warn "vault: no backup written: %s" reason;
+                    Atomic.set t.backup_error (Some reason))
           | _ -> ())
 
 let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =

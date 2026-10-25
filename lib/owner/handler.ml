@@ -96,6 +96,7 @@ let schedule_backups ~(domain : Tsync_domain.Domain.t) ~engine vault =
         let rec loop () =
           match Stop.sleep (Float.min 10. (Atomic.get Vault.minute /. 4.)) with
             | exception Stop.Stopping -> ()
+            | () when not (Vault.backup_due domain vault) -> loop ()
             | () ->
                 (try
                    Format_merge.locked Passwords_verbs.folder (fun () ->

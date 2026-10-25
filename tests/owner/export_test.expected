@@ -24,6 +24,7 @@ a backup written                         true
   mode 600                               true
   and later ones, the oldest removed     true
   status                                 overdue false, error none
+  another domain's backup left alone     true
 lock                                     ok
 locked, none written                     true
 delete                                   ok
