@@ -28,6 +28,7 @@ type response = {
     called for every piece sent or received. *)
 val request :
   ?stall:float ->
+  ?max_body:int ->
   ?headers:(unit -> Codec.headers) ->
   ?body:Tsync_core.Bigstring.t ->
   endpoint ->
