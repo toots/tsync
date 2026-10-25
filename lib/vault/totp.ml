@@ -121,7 +121,7 @@ let of_string s =
                   digits;
                   period;
                   modified;
-                  unknown = List.filter (fun (k, _) -> not (List.mem k known)) l;
+                  unknown = Members.unknown ~known l;
                 }
           | _ -> Error "a required member is missing or of the wrong type")
     | _ -> Error "not a JSON object"

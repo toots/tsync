@@ -500,9 +500,8 @@ let fields_of members =
                              value;
                              secret;
                              unknown =
-                               List.filter
-                                 (fun (k, _) ->
-                                   not (List.mem k ["name"; "value"; "secret"]))
+                               Members.unknown
+                                 ~known:["name"; "value"; "secret"]
                                  f;
                            }
                           :: acc)
@@ -529,9 +528,6 @@ let fields_json fields =
              fields) );
     ]
 
-let unknown ~known members =
-  List.filter (fun (k, _) -> not (List.mem k known)) members
-
 let login_of members =
   let* title = str members "title" in
   let* urls = strings members "urls" in
@@ -551,7 +547,7 @@ let login_of members =
       totp;
       fields;
       modified;
-      unknown = unknown ~known:login_keys members;
+      unknown = Members.unknown ~known:login_keys members;
     }
 
 let note_of members =
@@ -565,7 +561,7 @@ let note_of members =
       notes;
       fields;
       modified;
-      unknown = unknown ~known:note_keys members;
+      unknown = Members.unknown ~known:note_keys members;
     }
 
 let passkey_of members =
@@ -591,7 +587,7 @@ let passkey_of members =
       login;
       created;
       modified;
-      unknown = unknown ~known:passkey_keys members;
+      unknown = Members.unknown ~known:passkey_keys members;
     }
 
 (* A parser's message quotes the text it stopped at, which may be a password. *)
