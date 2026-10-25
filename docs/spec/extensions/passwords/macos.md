@@ -115,6 +115,8 @@ The system offers a provider's code on a code field only for an entry the provid
 - An exclusion the owner refuses `exists` cancels the registration with
   `ASExtensionError.Code.matchedExcludedCredential` where the system has it, else a failure.
 - A reply missing a binary member fails the request; nothing completes with empty data.
+- A **Cancel** while `passwords_passkey_create` runs removes the passkey it created
+  (`passwords_remove`): no site holds its public key.
 
 ### 4.1 Passkey entries
 

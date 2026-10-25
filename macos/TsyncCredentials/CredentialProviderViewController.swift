@@ -221,7 +221,16 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             relyingParty: rpId, clientDataHash: request.clientDataHash,
             credentialID: try Requests.data(reply, "credentialId"),
             attestationObject: try Requests.data(reply, "attestationObject"))
-        finish { $0.completeRegistrationRequest(using: credential) }
+        let completed: Bool = DispatchQueue.main.sync {
+            guard !finished else { return false }
+            finished = true
+            extensionContext.completeRegistrationRequest(using: credential)
+            return true
+        }
+        // A cancel during the request: no site will ever know this passkey.
+        if !completed, let id = reply["id"] as? String {
+            _ = try? Requests.call(domain, "remove", ["id": id])
+        }
     }
 
     override func prepareInterfaceForExtensionConfiguration() {
