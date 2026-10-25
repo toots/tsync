@@ -372,6 +372,9 @@ let retire t ~key (retired_id, retired_key) =
         sort_retired ({ key_id = retired_id; nonce; wrapped } :: t.retired);
     })
 
+let retire_all t ~key keys =
+  List.fold_left (fun t retired -> retire t ~key retired) t keys
+
 let retired_keys t ~key =
   List.partition_map
     (fun (r : retired) ->
@@ -383,3 +386,13 @@ let retired_keys t ~key =
         | Some k -> Left (r.key_id, k)
         | None -> Right r.key_id)
     t.retired
+
+(* §7.2: the new keyring keeps what this version does not know of the old one;
+   another machine's slots go, being what a re-key shuts out. *)
+let succeed t ~key ~from ~from_key =
+  let kept, lost = retired_keys from ~key:from_key in
+  ( {
+      (retire_all t ~key ((from.key_id, from_key) :: kept)) with
+      extra = from.extra;
+    },
+    lost )

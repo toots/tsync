@@ -79,6 +79,14 @@ val union : t -> t -> t option
     keyring's K; unchanged when it is already there or is the keyring's own. *)
 val retire : t -> key:string -> string * string -> t
 
+(** {!retire} for each of [keys]. *)
+val retire_all : t -> key:string -> (string * string) list -> t
+
+(** [t], a re-key's new keyring under [key], retiring [from]'s K [from_key] and
+    every key [from] retired, and keeping [from]'s members this version does not
+    know; with the ids of [from]'s retired keys that do not unwrap. *)
+val succeed : t -> key:string -> from:t -> from_key:string -> t * string list
+
 (** The retired keys that unwrap under [key], as [(key_id, key)], and the ids of
     those that do not. *)
 val retired_keys : t -> key:string -> (string * string) list * string list
