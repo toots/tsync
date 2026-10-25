@@ -189,6 +189,15 @@ let () =
          ("music", idle);
        ]);
 
+  case "one vault's scheduled backup is overdue";
+  show
+    (menu
+       [
+         ( "docs",
+           {|{"ok":true,"newMachines":["laptop"],"vaultBackupOverdue":true}|} );
+         ("music", idle);
+       ]);
+
   case "two reachable domains, one paused";
   show (menu [("photos", {|{"ok":true,"paused":true}|}); ("music", idle)]);
 

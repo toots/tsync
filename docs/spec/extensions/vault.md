@@ -454,9 +454,10 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 | `appearance` / `vault_appearance` | yes | §8.1 |
 | `export` / `vault_export` | yes | §8.2 |
 | `import` / `vault_import` | yes | §8.2 |
+| `backup-key` / `vault_backup_key` | yes | §8.3 |
 
 `vault_init`, `vault_rekey`, `vault_kit`, and `vault_passphrase` with a new secret key, are the
-only replies that carry a secret: the secret key.
+only replies that carry a secret: the secret key; and `vault_backup_key`, the backup key.
 
 - `init`, `unlock`, `passphrase`, `rekey`, `kit`, `export` and `import` derive keys at up to the limits of §4.2 and init resyncs the
   domain first, so each is a bulk action
@@ -547,6 +548,42 @@ across (export, `delete`, upgrade, `init`, import).
 - After an import every machine enrolls again with the new vault's secret key, as after a re-key
   (§7.2).
 
+### 8.3 Scheduled backups
+
+A backup made by hand is only as recent as the last time the user thought of it. A machine can
+write one on a schedule, sealed so that no machine can open it: only the backup key, which the
+user keeps away from every computer.
+
+- **The backup key** is an X25519 key pair made from a 16-byte seed: the private key is the
+  SHA-256 of `"tsync-vault-backup-key/"` and the seed, its id the first 8 bytes, in hex, of the
+  SHA-256 of `"tsync-vault-backup-key-id/"` and the public key. `tsync vault backup-key` (action
+  `vault_backup_key`, needs K) makes one and shows its seed once, spelled as a secret key is
+  (§2.1), with `--kit FILE` writing a page to print as the emergency kit is (§3.1). No machine
+  keeps the seed. A new backup key replaces the last; backups keep the one they were sealed to.
+- **Its public half lives in the vault**, at `vault/backup/key`, sealed under K like a machine
+  entry (§6.3): `{"keyId", "publicKey", "created"}`. Whoever cannot write under K cannot put
+  their own key in its place and read later backups. A re-key seals it under the new K, and an
+  export carries it (`backupKey` in the payload), so a restored vault backs up to the same key.
+- **The schedule** is this machine's `vaultBackup` ([05 §2.1](../05-ops-config.md#21-schema-and-validation)):
+  a directory, a period and how many to keep. While the owner holds K and the newest backup in
+  the directory is a period old, or there is none, it writes one: the payload of §8.2, sealed
+  with `{"kind": "backup-key", "backupKeyId", "ephemeral"}`, `ephemeral` a fresh X25519 public
+  key, and `sealed = XChaCha20-Poly1305-Seal(SHA-256("tsync-vault-backup/" shared ephemeral
+  public key), nonce, payload, ad = "tsync-vault-export/1/backup-key/" backupKeyId)`, `shared`
+  the exchange of the ephemeral secret with the backup key. The file is named
+  `<domain>-<UTC time to the millisecond>Z.tsync-vault-backup`, created with mode 0600; the oldest
+  beyond `keep` are removed. It holds the domain's folders as an export does (format-merge §6).
+- **A locked vault writes none**: the schedule resumes at the next unlock. Under an auto-lock
+  policy (§6.2) backups follow the user's unlocks.
+- **Status:** `vault_status` answers `backupKey` (its id, while unlocked) and, where this machine
+  schedules them, `backup`: `dir`, `everyHours`, `last`, `stale` (no backup, or the newest two
+  periods old), and `error` (why the last was not written, such as no backup key). The domain's
+  `status` says `vaultBackupOverdue`, which the menu shows
+  ([menu-model §5](../frontends/menu-model.md#5-rows)).
+- **Restoring:** `tsync vault import --backup-key FILE` (action `vault_import` with `backupKey`)
+  asks for the backup key instead of a passphrase and secret key, into an empty vault as §8.2
+  says; a key other than the one the backup names is refused DENIED, naming the id it needs.
+
 ## 9. Parameters
 
 | name | value | rule |
@@ -589,6 +626,9 @@ across (export, `delete`, upgrade, `init`, import).
   gives back every record byte for byte under the new K, and the export's keys as retired keys; a
   passkey signs with its old key. An import into a vault holding a record, with another secret
   key, or with a wrong passphrase writes nothing.
+- A scheduled backup is written only while K is held, opens with its backup key alone and with no
+  passphrase or secret key, and the newest `keep` remain. A vault without a backup key writes
+  none and says so in status. A re-key keeps the backup key.
 - A re-key retires the old K and carries the keys it retired; a second re-key's keyring holds
   both. A machine holding a raced init's K that unlocks the domain's vault retires it. Copies'
   retired keys fold by key id, and a retired key wrapped under another K is reported. The appearance and a machine entry keep an unknown member

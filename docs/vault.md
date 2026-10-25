@@ -130,6 +130,30 @@ tsync vault import vault.export             # asks for the export's passphrase a
 
 The import asks for the passphrase and secret key the export was made with, which are the old ones: the new vault has its own. It only goes into a vault with nothing in it yet. Afterwards every other machine unlocks with the new secret key, as after `tsync vault rekey`.
 
+## Scheduled backups
+
+A machine can back the vault up on its own. Each backup is sealed to a backup key that no computer keeps, so a stolen laptop or a read of the backup folder gives nothing away.
+
+First make the backup key, and print its kit:
+
+```bash
+tsync vault backup-key --kit backup-kit.html
+```
+
+It shows the key once. Keep the printed page somewhere other than your computers; delete the file. Then give the domain a schedule in the config:
+
+```json
+"vaultBackup": {"dir": "/mnt/backups/tsync", "everyHours": 24, "keep": 14}
+```
+
+While the vault is unlocked, tsync writes a backup when the last one is a period old, and keeps the newest `keep`. A locked vault writes none until you unlock it. `tsync vault status` shows the last backup, and the menu says when one is overdue. Choose a folder on another disk, or in a domain on another store: a backup in the same place as the vault does not survive losing it.
+
+To restore one, into a new vault as for an export:
+
+```bash
+tsync vault import --backup-key /mnt/backups/tsync/Files-20261025T141516.123Z.tsync-vault-backup
+```
+
 ## Status and deleting
 
 `tsync vault status` says whether the domain has a vault, whether it is unlocked here, and whether this machine is enrolled.

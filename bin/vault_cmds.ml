@@ -445,6 +445,20 @@ let status_cmd =
               "retired key: %s does not unwrap; the files under it do not open")
            s.retired_unreadable;
          List.iter (say "keyring copy: %s") s.copies;
+         Option.iter (say "backup key: %s") s.backup_key;
+         Option.iter
+           (fun (b : P.backup_state) ->
+             say "backups: every %d h to %s, %s%s" b.every_hours b.dir
+               (match b.last with
+                 | Some at ->
+                     let tm = Unix.localtime at in
+                     Printf.sprintf "the last %04d-%02d-%02d %02d:%02d"
+                       (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour
+                       tm.tm_min
+                 | None -> "none yet")
+               (if b.stale then " (overdue)" else "");
+             Option.iter (say "backup not written: %s") b.error)
+           s.backup;
          Option.iter
            (fun (a : P.appearance) ->
              say "colour: %s%s" a.color

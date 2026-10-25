@@ -88,6 +88,30 @@ let announce_machines ~domain ~engine vault =
             ignore (Vault.announce ~domain ~engine vault))
       with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
 
+(* vault §8.3: checked on the auto-lock watcher's period, holding the folders
+   an export reads in format-merge §6's order. *)
+let schedule_backups ~(domain : Tsync_domain.Domain.t) ~engine vault =
+  if domain.domain.vault_backup <> None then
+    Rt.spawn ~name:"vault backups" (fun () ->
+        let rec loop () =
+          match Stop.sleep (Float.min 10. (Atomic.get Vault.minute /. 4.)) with
+            | exception Stop.Stopping -> ()
+            | () ->
+                (try
+                   Format_merge.locked Passwords_verbs.folder (fun () ->
+                       Format_merge.locked Totp_verbs.folder (fun () ->
+                           Format_merge.locked Vault.folder (fun () ->
+                               Vault.backup_tick ~domain ~engine
+                                 ~lazy_tree:domain.lazy_tree vault)))
+                 with
+                  | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+                  | e ->
+                      Log.warn "vault: no backup written: %s"
+                        (Fail.classify e).reason);
+                loop ()
+        in
+        try loop () with Stop.Stopping -> ())
+
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     ?(background =
       let one_at_a_time = Rt.Fmutex.create () in
@@ -173,6 +197,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
   (* vault §6.3: the domain's status reports new machines from the start, the
      keystore's K included. *)
   announce_machines ~domain ~engine t.vault;
+  schedule_backups ~domain ~engine t.vault;
   t
 
 let domain_name t = Domain_name.to_string t.domain.name
@@ -996,6 +1021,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             Tsync_config.Config.extensions_in_force t.domain.domain
               (try E.stated_settings () with Fail.E _ -> None);
           new_machines = Vault.announced t.vault;
+          vault_backup_overdue = Vault.backup_overdue t.domain;
         }
     | Stats args -> t.stats args
     | Stop -> t.stop ()
