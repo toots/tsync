@@ -471,14 +471,15 @@ let init ~domain ~engine ~lazy_tree t typed =
 
 (* §7.1: a machine that finds the vault gone forgets the K it held. *)
 let gone ~domain t =
-  if Atomic.exchange t.key None <> None then
+  if Atomic.get t.key <> None then (
+    drop_key ~domain t;
     Option.iter
       (fun (ks : Keystore.t) ->
         try ks.delete ~domain:(key_entry domain)
         with Fail.E f ->
           Log.warn "vault: %s keeps the key of a deleted vault: %s" ks.name
             f.reason)
-      (Keystore.registered ())
+      (Keystore.registered ()))
 
 (* [strict]: a keyring write, which needs the current keyring (README §4.1). *)
 let current ?(strict = false) ~domain engine ~lazy_tree t =
