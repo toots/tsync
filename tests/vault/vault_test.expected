@@ -76,6 +76,19 @@ equal unknown members fold                                   yes
 == unknown members
 appearance: an unknown member kept through a rewrite         yes
 machine entry: an unknown member kept through a rewrite      yes
+== export
+the header names the secret key                              yes
+opens with the passphrase and secret key                     yes
+a wrong passphrase does not open it                          yes
+another secret key does not open it                          yes
+no plaintext, key or seed in the file                        yes
+a changed byte does not open                                 yes
+the backup key's record reads back                           yes
+the header names the backup key                              yes
+opens with the backup key's seed                             yes
+another seed does not open it                                yes
+two seals of one payload differ                              yes
+another text is no export                                    yes
 == envelope
 length for 6 bytes: 58
 two seals differ                                             yes

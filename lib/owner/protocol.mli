@@ -176,6 +176,10 @@ type machine = { uuid : string; this : bool; entry : machine_entry option }
     when it did; the next unlock resumes it. *)
 type rekeyed = { secret : secret; pending : string option }
 
+(** vault §8.2: what an export or an import carried; [skipped] names the records
+    that open under no key the vault holds. *)
+type carried = { records : int; keys : int; skipped : string list }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -315,6 +319,17 @@ type _ request =
       new_passphrase : string option;
     }
       -> rekeyed request  (** vault §7.2 *)
+  | Vault_export : { passphrase : string; path : string } -> carried request
+      (** vault §8.2: the passphrase as typed; [path] a file created there *)
+  | Vault_import : {
+      path : string;
+      unseal : [ `Vault of string * string | `Backup_key of string ];
+    }
+      -> carried request
+      (** vault §8.2: [`Vault (passphrase, secret key)] as typed, or the backup
+          key's seed as typed (§8.3) *)
+  | Vault_backup_key : secret request
+      (** vault §8.3: a new backup key; its seed, spelled, shown once *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;

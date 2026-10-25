@@ -405,6 +405,64 @@ let unknown_members () =
     Tsync_vault.Machine.to_string
     {|{"name":"booky","enrolled":1,"lastUnlock":2,"seen":[],"modified":3,"future":[1]}|}
 
+(* §8.2, §8.3 *)
+let export () =
+  p "== export\n";
+  let module E = Tsync_vault.Export in
+  let payload : E.payload =
+    {
+      created = 1;
+      domain = "docs";
+      keys = [("0123456789abcdef", String.make 32 'k')];
+      appearance = Some {|{"color":"#2563eb","modified":5}|};
+      backup_key = None;
+      records =
+        [{ extension = "totp"; name = "r1"; plaintext = "{\"seed\":\"s\"}" }];
+    }
+  in
+  let secret_key = Tsync_vault.Secret_key.generate () in
+  let text = E.seal_with_vault ~secret_key ~passphrase:"a passphrase" payload in
+  check "the header names the secret key"
+    (E.header text = Ok (`Secret_key (Tsync_vault.Secret_key.id secret_key)));
+  check "opens with the passphrase and secret key"
+    (E.open_with_vault ~secret_key ~passphrase:"a passphrase" text = Ok payload);
+  check "a wrong passphrase does not open it"
+    (E.open_with_vault ~secret_key ~passphrase:"another" text = Error `Wrong);
+  check "another secret key does not open it"
+    (E.open_with_vault
+       ~secret_key:(Tsync_vault.Secret_key.generate ())
+       ~passphrase:"a passphrase" text
+    = Error `Wrong);
+  check "no plaintext, key or seed in the file"
+    (not
+       (contains text "seed" || contains text "docs"
+       || contains text (String.make 32 'k')));
+  let tampered =
+    let b = Bytes.of_string text in
+    let i = String.rindex text '"' - 3 in
+    Bytes.set b i (if text.[i] = 'A' then 'B' else 'A');
+    Bytes.to_string b
+  in
+  check "a changed byte does not open"
+    (E.open_with_vault ~secret_key ~passphrase:"a passphrase" tampered
+    = Error `Wrong);
+  let seed = Tsync_core.Ids.urandom 16 in
+  let backup = E.backup_key_of_seed seed in
+  check "the backup key's record reads back"
+    (E.backup_key_of_string (E.backup_key_to_string backup ~created:1)
+    = Ok backup);
+  let sealed = E.seal_to_backup backup payload in
+  check "the header names the backup key"
+    (E.header sealed = Ok (`Backup_key backup.id));
+  check "opens with the backup key's seed"
+    (E.open_with_backup ~seed sealed = Ok payload);
+  check "another seed does not open it"
+    (E.open_with_backup ~seed:(Tsync_core.Ids.urandom 16) sealed = Error `Wrong);
+  check "two seals of one payload differ"
+    (E.seal_to_backup backup payload <> sealed);
+  check "another text is no export"
+    (Result.is_error (E.header {|{"tsyncVaultExport":2}|}))
+
 let () =
   words ();
   argon2 ();
@@ -413,4 +471,5 @@ let () =
   passphrase ();
   keyring ();
   unknown_members ();
+  export ();
   envelope ()

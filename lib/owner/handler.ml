@@ -922,6 +922,13 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               ~lazy_tree:t.domain.lazy_tree ~confirm t.vault)
     | Vault_status pull -> on_vault (fun () -> vault (Vault.status ~pull))
     | Vault_kit passphrase -> on_vault (fun () -> vault Vault.kit passphrase)
+    (* vault §8.2: an export reads, and an import writes, every extension's
+       records. *)
+    | Vault_export r ->
+        on_passwords (fun () -> vault (Vault.export ~path:r.path) r.passphrase)
+    | Vault_import r ->
+        on_passwords (fun () -> vault (Vault.import ~path:r.path) r.unseal)
+    | Vault_backup_key -> on_vault (fun () -> vault Vault.new_backup_key ())
     | Vault_machines name ->
         on_vault (fun () -> vault (Vault.list_machines ?name))
     | Vault_rekey r ->

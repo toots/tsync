@@ -41,7 +41,7 @@ let kit_arg =
 let write_kit dom path (s : P.secret) =
   Vault_kit.write ~path
     ~domain:(Domain_name.to_string dom.Tsync_config.Config.name)
-    ~secret_key:s.secret_key;
+    (`Emergency s.secret_key);
   prerr_endline
     ("wrote " ^ path ^ ": print it, keep the paper, and delete the file")
 
@@ -213,6 +213,117 @@ let kit_cmd =
           0)
       $ output
       $ stdin_flag "the passphrase")
+
+(* vault §8.2: the owner writes and reads the file, so a path is made absolute
+   here, where the user's directory is. *)
+let absolute path =
+  if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+  else path
+
+let say_carried what (c : P.carried) =
+  say "%s %d records and %d keys" what c.records c.keys;
+  List.iter
+    (say "left out: %s, which opens under no key this vault holds")
+    c.skipped
+
+let export_cmd =
+  let output =
+    Arg.(
+      required
+      & opt (some string) None
+      & info ["output"] ~docv:"FILE" ~doc:"Where to write the export.")
+  in
+  verb "export"
+    ~doc:
+      "Write every record of the vault, its keys and its appearance to one \
+       file, sealed with the passphrase and this machine's secret key; asks \
+       for the passphrase."
+    Term.(
+      const (fun output stdin dom ->
+          say_carried "exported"
+            (ask dom
+               (P.Vault_export
+                  {
+                    passphrase = read_passphrase ~stdin ();
+                    path = absolute output;
+                  }));
+          prerr_endline
+            "it opens with this passphrase and secret key: keep the emergency \
+             kit that holds them";
+          0)
+      $ output
+      $ stdin_flag "the passphrase")
+
+let import_cmd =
+  let file =
+    Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"FILE" ~doc:"An export, or a scheduled backup.")
+  in
+  let backup =
+    Arg.(
+      value & flag
+      & info ["backup-key"]
+          ~doc:"The file is a scheduled backup: ask for its backup key.")
+  in
+  verb "import"
+    ~doc:
+      "Put an export's records, keys and appearance into this domain's vault, \
+       which must be new and empty; asks for the passphrase and secret key it \
+       was sealed with, or its backup key."
+    Term.(
+      const (fun file backup stdin dom ->
+          let unseal =
+            if backup then
+              `Backup_key (read_passphrase ~prompt:"backup key" ~stdin ())
+            else (
+              let passphrase =
+                read_passphrase ~prompt:"the export's passphrase" ~stdin ()
+              in
+              `Vault
+                (passphrase, read_passphrase ~prompt:"its secret key" ~stdin ()))
+          in
+          say_carried "imported"
+            (ask dom (P.Vault_import { path = absolute file; unseal }));
+          0)
+      $ file $ backup
+      $ stdin_flag "the passphrase then the secret key, or the backup key,")
+
+let backup_key_cmd =
+  let kit =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["kit"] ~docv:"FILE"
+          ~doc:
+            "Also write the backup kit, a page to print, at $(docv); it holds \
+             the backup key, so print it and delete the file.")
+  in
+  verb "backup-key"
+    ~doc:
+      "Make the vault a new backup key, which scheduled backups are sealed to; \
+       shows its private half once, which no machine keeps."
+    Term.(
+      const (fun kit dom ->
+          let s = ask dom P.Vault_backup_key in
+          say "%s" s.secret_key;
+          prerr_endline
+            ("this is backup key " ^ s.key_id
+           ^ ": it opens the scheduled backups and nothing else; keep it away \
+              from your computers, as no machine keeps it and tsync never \
+              shows it again");
+          Option.iter
+            (fun path ->
+              Vault_kit.write ~path
+                ~domain:(Domain_name.to_string dom.Tsync_config.Config.name)
+                (`Backup (s.secret_key, s.key_id));
+              prerr_endline
+                ("wrote " ^ path
+               ^ ": print it, keep the paper, and delete the file"))
+            kit;
+          0)
+      $ kit)
 
 let machines_cmd =
   let name =
@@ -437,6 +548,9 @@ let cmds =
         rekey_cmd;
         machines_cmd;
         kit_cmd;
+        export_cmd;
+        import_cmd;
+        backup_key_cmd;
         delete_cmd;
         status_cmd;
         appearance_cmd;
