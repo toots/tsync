@@ -320,6 +320,17 @@ let keyring () =
         check "union of retired keys is symmetric, bytewise"
           (Keyring.to_string ab = Keyring.to_string ba)
     | _ -> p "union of retired keys refused\n");
+  (* §7.2: a re-key's keyring *)
+  let old = { retiring with extra = [("future", `Int 1)] } in
+  let new_key, fresh =
+    Keyring.create ~now:9 ~secret_key "the next passphrase"
+  in
+  let next, lost = Keyring.succeed fresh ~key:new_key ~from:old ~from_key:key in
+  check "a re-key keeps the unknown members" (next.extra = old.extra);
+  check "a re-key retires the old K and what it retired, none lost"
+    (List.map fst (fst (Keyring.retired_keys next ~key:new_key))
+     = List.sort compare [ring.key_id; old_id]
+    && lost = []);
   let future = { ring with extra = [("future", `Int 1)] } in
   check "different unknown members do not fold"
     (Keyring.union ring future = None);

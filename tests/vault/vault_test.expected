@@ -71,6 +71,8 @@ retired keys written after the slots, and read back          yes
 a K never appears in the text                                yes
 union holds the retired keys of both copies                  yes
 union of retired keys is symmetric, bytewise                 yes
+a re-key keeps the unknown members                           yes
+a re-key retires the old K and what it retired, none lost    yes
 different unknown members do not fold                        yes
 equal unknown members fold                                   yes
 == unknown members

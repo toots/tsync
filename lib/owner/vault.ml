@@ -667,14 +667,11 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
 (* §7.2: a re-key's keyring retires the old K and every key the old keyring
    retired, so files sealed under any of them stay readable. *)
 let carry_retired ~from:(keyring, old_key) ~key next =
-  let kept, lost = Keyring.retired_keys keyring ~key:old_key in
+  let next, lost = Keyring.succeed next ~key ~from:keyring ~from_key:old_key in
   if lost <> [] then
     Log.warn "vault: retired keys that do not unwrap are left behind: %s"
       (String.concat ", " lost);
-  List.fold_left
-    (fun next retired -> Keyring.retire next ~key retired)
-    next
-    ((keyring.Keyring.key_id, old_key) :: kept)
+  next
 
 let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
   let enrolls = secret_key <> None in
@@ -691,7 +688,7 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
         (* §4.3: a raced init's K is retired before it is forgotten. *)
         if not domain.domain.read_only then (
           let keyring = current ~strict:true ~domain engine ~lazy_tree t in
-          let retired = Keyring.retire keyring ~key old in
+          let retired = Keyring.retire_all keyring ~key [old] in
           if retired.retired <> keyring.retired then
             write engine ~exclusive:false retired)
     | _ -> ());
@@ -1134,11 +1131,7 @@ let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
       Format_merge.write_file engine ~exclusive:false appearance_path a)
     p.appearance;
   Option.iter (write_backup_key engine ~key_id:keyring.key_id ~key) p.backup_key;
-  let retired =
-    List.fold_left
-      (fun k retired -> Keyring.retire k ~key retired)
-      keyring p.keys
-  in
+  let retired = Keyring.retire_all keyring ~key p.keys in
   if retired.retired <> keyring.retired then
     write engine ~exclusive:false retired;
   {
