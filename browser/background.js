@@ -90,6 +90,12 @@ chrome.windows.onRemoved.addListener((id) => {
     s.resolve({ action: "cancel" });
   }
 });
+// A page that reloads after its submit, as a sign-in does, brings its window
+// back over the sheet: each load raises the sheets still open.
+chrome.tabs.onUpdated.addListener((_tab, change) => {
+  if (change.status !== "complete") return;
+  for (const s of sheets.values()) if (s.window !== null) chrome.windows.update(s.window, { focused: true }).catch(() => {});
+});
 // An open sheet keeps a port, and pings it, so the worker outlives the user's answer.
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "sheet") port.onMessage.addListener(() => {});

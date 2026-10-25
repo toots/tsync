@@ -147,6 +147,9 @@ the extension never turns it off again by itself.
 - **A suggested password's submit** shows no sheet: the content script sends `save` with
   `suggested`, the id kept at the pick, and the username submitted. The password itself is not
   sent again.
+- The sheet is a window of its own, so the page's reload after its submit does not close it; each
+  page load raises the sheets still open, since a sign-in's reload brings the browser's window
+  back over them.
 - The password waits in the service worker's memory until the sheet is answered or closed, then is
   dropped. *Never for this site* is the one thing the extension keeps (§1): a list of origins,
   without usernames.
