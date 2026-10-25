@@ -93,7 +93,9 @@ capability. What has been seen working is recorded in §10.
   (extensions README §5).
 - **A pick counts only as the user saw it**: a trusted click (`isTrusted`) on the icon or a row, the
   overlay on top at the click's point (`elementFromPoint`), visible, unfiltered, with nothing in the
-  top layer over it; the overlay's own styles are pinned with inline `!important` so a page's
+  top layer over it, and the icon or the menu with nothing painted over it, a decoy that lets
+  clicks through included (IntersectionObserver v2's `isVisible`, where the browser has it, which
+  needs the icon drawn at full opacity); the overlay's own styles are pinned with inline `!important` so a page's
   stylesheet cannot fade or hide it. A click that fails any of these does nothing.
 - **The pick** asks `fill` with the frame's origin, the domain and the id; the bridge refuses a login
   that does not match that origin (passwords §9.2). The content script sets the username and
