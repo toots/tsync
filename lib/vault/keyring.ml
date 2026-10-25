@@ -60,6 +60,16 @@ let sort_retired retired =
     (fun (a : retired) (b : retired) -> String.compare a.key_id b.key_id)
     retired
 
+let kdf_to_json kdf =
+  `Assoc
+    [
+      ("alg", `String "argon2id");
+      ("memKiB", `Int kdf.mem_kib);
+      ("iterations", `Int kdf.iterations);
+      ("parallelism", `Int kdf.parallelism);
+      ("salt", `String (b64 kdf.salt));
+    ]
+
 let slot_to_json = function
   | Unknown { json; _ } -> json
   | Secret_key { id; secret_key_id; kdf; nonce; wrapped; created; extra } ->
@@ -68,15 +78,7 @@ let slot_to_json = function
            ("id", `String id);
            ("kind", `String "secret-key");
            ("secretKeyId", `String secret_key_id);
-           ( "kdf",
-             `Assoc
-               [
-                 ("alg", `String "argon2id");
-                 ("memKiB", `Int kdf.mem_kib);
-                 ("iterations", `Int kdf.iterations);
-                 ("parallelism", `Int kdf.parallelism);
-                 ("salt", `String (b64 kdf.salt));
-               ] );
+           ("kdf", kdf_to_json kdf);
            ("nonce", `String (b64 nonce));
            ("wrapped", `String (b64 wrapped));
            ("created", `Int created);
@@ -113,28 +115,30 @@ let unknown_members ~known json =
        (fun (name, _) -> not (List.mem name known))
        (Yojson.Safe.Util.to_assoc json))
 
+let kdf_of_json kdf =
+  let open Yojson.Safe.Util in
+  if to_string (member "alg" kdf) <> "argon2id" then failwith "kdf alg";
+  {
+    mem_kib = to_int (member "memKiB" kdf);
+    iterations = to_int (member "iterations" kdf);
+    parallelism = to_int (member "parallelism" kdf);
+    salt = sized "salt" salt_size (unb64 (to_string (member "salt" kdf)));
+  }
+
 let slot_of_json json =
   let open Yojson.Safe.Util in
   let id = to_string (member "id" json) in
   if not (is_hex16 id) then failwith "slot id";
   match to_string (member "kind" json) with
     | "secret-key" ->
-        let kdf = member "kdf" json in
-        if to_string (member "alg" kdf) <> "argon2id" then failwith "kdf alg";
+        let kdf = kdf_of_json (member "kdf" json) in
         let secret_key_id = to_string (member "secretKeyId" json) in
         if not (is_hex16 secret_key_id) then failwith "secretKeyId";
         Secret_key
           {
             id;
             secret_key_id;
-            kdf =
-              {
-                mem_kib = to_int (member "memKiB" kdf);
-                iterations = to_int (member "iterations" kdf);
-                parallelism = to_int (member "parallelism" kdf);
-                salt =
-                  sized "salt" salt_size (unb64 (to_string (member "salt" kdf)));
-              };
+            kdf;
             nonce =
               sized "nonce" Crypto.nonce_size
                 (unb64 (to_string (member "nonce" json)));

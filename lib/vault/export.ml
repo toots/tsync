@@ -82,21 +82,29 @@ let payload_of_string s =
         failwith what;
       v
     in
+    let records =
+      List.map
+        (fun j ->
+          {
+            extension = leaf "an extension" (str "extension" j);
+            name = leaf "a record name" (str "name" j);
+            plaintext = unb64 (str "plaintext" j);
+          })
+        (to_list (member "records" json))
+    in
+    let once what l =
+      if List.length (List.sort_uniq compare l) <> List.length l then
+        failwith (what ^ " named twice")
+    in
+    once "a key" (List.map fst keys);
+    once "a record" (List.map (fun r -> (r.extension, r.name)) records);
     {
       created = to_int (member "created" json);
       domain = str "domain" json;
       keys;
       appearance = opt "appearance";
       backup_key = opt "backupKey";
-      records =
-        List.map
-          (fun j ->
-            {
-              extension = leaf "an extension" (str "extension" j);
-              name = leaf "a record name" (str "name" j);
-              plaintext = unb64 (str "plaintext" j);
-            })
-          (to_list (member "records" json));
+      records;
     }
   with
     | p -> Ok p
@@ -113,6 +121,8 @@ let file ~seal ~nonce ~sealed =
          ("sealed", `String (b64 sealed));
        ])
 
+type parts = { seal : Yojson.Safe.t; nonce : string; sealed : string }
+
 (* The parts every reader needs, with the seal's own members. *)
 let parts text =
   let open Yojson.Safe.Util in
@@ -123,14 +133,14 @@ let parts text =
     let seal = member "seal" json in
     let nonce = unb64 (to_string (member "nonce" json)) in
     if String.length nonce <> Crypto.nonce_size then failwith "the nonce";
-    (seal, nonce, unb64 (to_string (member "sealed" json)))
+    { seal; nonce; sealed = unb64 (to_string (member "sealed" json)) }
   with
     | parts -> Ok parts
     | exception (Failure m | Yojson.Json_error m) -> Error m
     | exception Type_error (m, _) -> Error m
 
 let header text =
-  Result.bind (parts text) (fun (seal, _, _) ->
+  Result.bind (parts text) (fun { seal; _ } ->
       let open Yojson.Safe.Util in
       match
         ( to_string_option (member "kind" seal),
@@ -146,47 +156,24 @@ let opened ~key ~ad ~nonce sealed =
     | None -> Error `Wrong
     | Some s -> Result.map_error (fun m -> `Corrupt m) (payload_of_string s)
 
-(* §8.2: the readers' limits of a keyring slot (§9). *)
-let kdf_of_json kdf =
-  let open Yojson.Safe.Util in
-  let int k = to_int (member k kdf) in
-  let mem_kib = int "memKiB"
-  and iterations = int "iterations"
-  and parallelism = int "parallelism"
-  and salt = unb64 (to_string (member "salt" kdf)) in
-  if
-    to_string (member "alg" kdf) <> "argon2id"
-    || mem_kib < 8 * parallelism
-    || mem_kib > 256 * 1024
-    || iterations < 1 || iterations > 10 || parallelism < 1 || parallelism > 4
-    || String.length salt <> 16
-  then failwith "the KDF parameters";
-  (mem_kib, iterations, parallelism, salt)
+(* §8.2: a slot's KDF object, under the readers' limits of a slot (§9). *)
+let kdf_of_json json =
+  let kdf = Keyring.kdf_of_json json in
+  if not (Keyring.within_limits kdf) then failwith "the KDF parameters";
+  kdf
 
 let seal_with_vault ~secret_key ~passphrase p =
-  let r = Keyring.recommended in
-  let salt = Tsync_core.Ids.urandom 16
+  let kdf = { Keyring.recommended with salt = Tsync_core.Ids.urandom 16 }
   and nonce = Tsync_core.Ids.urandom Crypto.nonce_size
   and id = Secret_key.id secret_key in
-  let key =
-    Crypto.argon2id ~secret:secret_key ~mem_kib:r.mem_kib
-      ~iterations:r.iterations ~parallelism:r.parallelism ~salt passphrase
-  in
+  let key = Keyring.kek kdf ~secret_key passphrase in
   file ~nonce
     ~seal:
       (`Assoc
          [
            ("kind", `String "secret-key");
            ("secretKeyId", `String id);
-           ( "kdf",
-             `Assoc
-               [
-                 ("alg", `String "argon2id");
-                 ("memKiB", `Int r.mem_kib);
-                 ("iterations", `Int r.iterations);
-                 ("parallelism", `Int r.parallelism);
-                 ("salt", `String (b64 salt));
-               ] );
+           ("kdf", Keyring.kdf_to_json kdf);
          ])
     ~sealed:
       (Crypto.seal ~key ~nonce ~ad:(ad "secret-key" id) (payload_to_string p))
@@ -194,16 +181,13 @@ let seal_with_vault ~secret_key ~passphrase p =
 let open_with_vault ~secret_key ~passphrase text =
   match parts text with
     | Error m -> Error (`Corrupt m)
-    | Ok (seal, nonce, sealed) -> (
+    | Ok { seal; nonce; sealed } -> (
         match kdf_of_json (Yojson.Safe.Util.member "kdf" seal) with
           | exception (Failure m | Yojson.Safe.Util.Type_error (m, _)) ->
               Error (`Corrupt m)
-          | mem_kib, iterations, parallelism, salt ->
-              let key =
-                Crypto.argon2id ~secret:secret_key ~mem_kib ~iterations
-                  ~parallelism ~salt passphrase
-              in
-              opened ~key ~nonce sealed
+          | kdf ->
+              opened ~nonce sealed
+                ~key:(Keyring.kek kdf ~secret_key passphrase)
                 ~ad:(ad "secret-key" (Secret_key.id secret_key)))
 
 let backup_key_of_seed seed =
@@ -270,7 +254,7 @@ let seal_to_backup k p =
 let open_with_backup ~seed text =
   match parts text with
     | Error m -> Error (`Corrupt m)
-    | Ok (seal, nonce, sealed) -> (
+    | Ok { seal; nonce; sealed } -> (
         let k = backup_key_of_seed seed in
         match
           ( X25519.secret_of_octets (sha256 ("tsync-vault-backup-key/" ^ seed)),
