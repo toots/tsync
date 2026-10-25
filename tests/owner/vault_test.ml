@@ -143,7 +143,7 @@ let after_restart () =
           status "status"))
 
 (* vault §6.1 against a keystore kept in files of ROOT, as a host's would
-   survive the owner; [broken] refuses every write, and reads fail until the
+   survive the owner; [broken] refuses every write, [stuck] every delete, and reads fail until the
    file [up_marker] exists when [late]. *)
 let keystore_dir = Filename.concat root "keystore"
 let up_marker = Filename.concat root "keystore-up"
@@ -251,10 +251,12 @@ let keystore_phase = function
           status "status";
           p "%-34s [%s]" "keystore entries" (entries ()))
   | _ ->
-      with_keystore ~broken:true (fun passphrase secret_key ->
+      with_keystore ~stuck:true ~broken:true (fun passphrase secret_key ->
           answer "unlock" (unlock ~secret_key passphrase);
           status "status";
-          p "%-34s [%s]" "keystore entries" (entries ()))
+          p "%-34s [%s]" "keystore entries" (entries ());
+          answer "lock, K in memory alone" (ask [("action", "vault_lock")]);
+          status "status")
 
 let child phase =
   let pid =

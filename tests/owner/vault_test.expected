@@ -98,6 +98,8 @@ owner exit status 0
 unlock                           ok
 status                             unlocked enrolled cached=memory keystore error: the test keystore refuses writes slots={"secret-key":1}
 keystore entries                   []
+lock, K in memory alone          ok
+status                             locked enrolled keystore error: the test keystore refuses writes slots={"secret-key":1}
 owner exit status 0
 == a keystore that keeps the secret key entry, then lock
 unlock                           ok
