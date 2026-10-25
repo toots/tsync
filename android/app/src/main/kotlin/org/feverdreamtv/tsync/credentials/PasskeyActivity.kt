@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.ui.MainActivity
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.autofill.Browsers
 import org.feverdreamtv.tsync.core.Code
@@ -112,6 +113,10 @@ class PasskeyActivity : FragmentActivity() {
                     val result = Intent()
                     PendingIntentHandler.setCreateCredentialException(result, CreatePublicKeyCredentialDomException(InvalidStateError(), e.message))
                     done(result)
+                } else if (e.code == Code.LOCKED) {
+                    // §1: a create has no entry to say so before the pick; the Vault screen opens instead.
+                    startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_SHOW_VAULT, true))
+                    createFailed(getString(R.string.autofill_locked))
                 } else createFailed(e.message.orEmpty())
             }) { made ->
                 tsync.vaultChanges.value++

@@ -141,7 +141,8 @@ the owner does not do: a passkey request from an app off the list is answered wi
   the list answers one entry, named by the domain. The system's sheet names the site and the user
   name; picking tsync's entry is the approval. The activity it starts verifies the user when asked
   (§7), sends `passwords_passkey_create` and returns the registration response's JSON. An exclusion the owner refuses `exists` returns WebAuthn's
-  `InvalidStateError`.
+  `InvalidStateError`. A create response has no authentication action, so a locked vault is
+  learned at the pick: the request fails "tsync is locked" and the Vault screen opens (§1).
 
 ### 6.3 The origin
 
