@@ -83,34 +83,39 @@ let read_file (module E : Engine.S) path =
     (fun () -> Bigstring.to_string (E.read h ~off:0 ~len:(E.stat path).size))
 
 (* §4.3: a K the keyring no longer names is the only key to the records still
-   sealed under it, so no lock or policy drops it before they are re-encrypted. *)
+   sealed under it, so no lock or policy drops it before they are re-encrypted;
+   [`Unknown] when the keyring does not read, which may be that K's case. *)
 let stale ~engine t =
   let (module E : Engine.S) = engine in
   match Atomic.get t.key with
-    | None -> false
+    | None -> `Current
     | Some (id, _) -> (
         try
-          E.kind keyring_path = `File
-          &&
+          if E.kind keyring_path <> `File then `Current
+          else (
             match Keyring.of_string (read_file engine keyring_path) with
-            | Ok k -> k.key_id <> id
-            | Error _ -> false
-        with Fail.E _ -> false)
+              | Ok k -> if k.key_id <> id then `Stale else `Current
+              | Error _ -> `Unknown)
+        with Fail.E _ -> `Unknown)
 
+(* The clocks stop: §6.2's limits no longer apply to a K kept for §4.3. *)
 let keep_stale ~domain t =
+  Atomic.set t.since None;
   Option.iter
     (fun (key_id, key) ->
       Option.iter
         (fun (ks : Keystore.t) ->
-          match ks.put ~domain:(key_entry domain) ~key_id ~key with
-            | () -> Atomic.set t.cached `Keystore
-            | exception Fail.E f ->
-                Log.warn "vault: %s keeps an old key in memory only: %s" ks.name
-                  f.reason)
+          if Atomic.get t.cached <> `Keystore then (
+            match ks.put ~domain:(key_entry domain) ~key_id ~key with
+              | () -> Atomic.set t.cached `Keystore
+              | exception Fail.E f ->
+                  Log.warn "vault: %s keeps an old key in memory only: %s"
+                    ks.name f.reason))
         (Keystore.registered ()))
     (Atomic.get t.key)
 
-(* §6.1: a lock whose delete failed did not happen. *)
+(* §6.1: a lock whose delete failed did not happen, unless K was in memory
+   alone, which the lock drops anyway. *)
 let forget ~domain ~engine ~secret_key t =
   let deleted entry =
     match Keystore.registered () with
@@ -120,10 +125,24 @@ let forget ~domain ~engine ~secret_key t =
             | () -> None
             | exception Fail.E f -> Some (ks.name, f.reason))
   in
-  let keeps = stale ~engine t in
-  let key_failure = if keeps then None else deleted (key_entry domain) in
-  if keeps then keep_stale ~domain t
-  else if key_failure = None then drop_key ~domain t;
+  let key_failure =
+    match stale ~engine t with
+      | `Stale ->
+          keep_stale ~domain t;
+          None
+      | `Unknown ->
+          Some ("the vault", "its keyring does not read, so K may be an old one")
+      | `Current -> (
+          match deleted (key_entry domain) with
+            | Some (name, reason) when Atomic.get t.cached = `Memory ->
+                Log.warn "vault: %s could not delete its entry: %s" name reason;
+                drop_key ~domain t;
+                None
+            | Some failure -> Some failure
+            | None ->
+                drop_key ~domain t;
+                None)
+  in
   let secret_key_failure =
     if secret_key then deleted (secret_key_entry domain) else None
   in
@@ -144,7 +163,7 @@ let auto_locks ~domain ~engine =
 
 (* §6.2: while a policy is in force no K entry stays in the keystore. *)
 let clear_keystore_key ~domain ~engine t =
-  if not (stale ~engine t) then
+  if stale ~engine t = `Current then
     Option.iter
       (fun (ks : Keystore.t) ->
         match ks.delete ~domain:(key_entry domain) with
@@ -240,7 +259,7 @@ let restore ~domain ~engine t =
                   if Atomic.get t.key = None then (
                     adopt ~domain ~engine t entry;
                     Atomic.set t.cached `Keystore;
-                    if auto_locks && not (stale ~engine t) then
+                    if auto_locks && stale ~engine t = `Current then
                       drop_key ~domain t))
                 key;
               if auto_locks then clear_keystore_key ~domain ~engine t;

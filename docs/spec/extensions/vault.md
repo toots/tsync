@@ -281,7 +281,10 @@ the entry), `get(name)` and `delete(name)`; the names are the domain and the dom
 - **Lock** deletes the domain's K entry (and with `forget` its secret key entry), then forgets
   each entry deleted. Both deletes are attempted. One that fails leaves what that entry held, in
   the keystore and in memory, and the lock is refused `internal` with the keystore's reason: a
-  lock that did not happen is never reported as done, and status says what is still held.
+  lock that did not happen is never reported as done, and status says what is still held. A K
+  held in memory alone (`cached: memory`) is dropped whatever its delete does, the failure
+  logged: a host with no keystore reachable still locks. A K kept for §4.3 stays, and so does
+  one while the keyring does not read, since it may be that K; that lock is refused.
 - A keystore entry is only ever read by the owner of its domain, on the machine that wrote it. It
   never needs user interaction to be read: an entry the platform would guard with a prompt or a
   biometric is not used, since the owner reads it unattended at start.
