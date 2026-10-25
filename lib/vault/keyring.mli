@@ -10,13 +10,21 @@ type slot =
       nonce : string;
       wrapped : string;
       created : int;
-    }  (** the passphrase with the secret key (§4.2) *)
+      extra : (string * Yojson.Safe.t) list;
+    }
+      (** the passphrase with the secret key (§4.2); [extra] holds the members
+          this version does not know, kept through a rewrite *)
   | Unknown of { id : string; json : Yojson.Safe.t }
       (** A slot of a kind this version does not know: skipped by [unlock], kept
           through a rewrite. *)
 
-(** [key_id] and slot ids are 16 lowercase hex. *)
-type t = { key_id : string; slots : slot list }
+(** [key_id] and slot ids are 16 lowercase hex; [extra] holds the members this
+    version does not know, kept through a rewrite. *)
+type t = {
+  key_id : string;
+  slots : slot list;
+  extra : (string * Yojson.Safe.t) list;
+}
 
 (** The writers' recommended parameters, [salt] unused (§9). *)
 val recommended : kdf
@@ -59,5 +67,5 @@ val enrolls : t -> secret_key_id:string -> bool
 val unusable : t -> string list
 
 (** The fold of two copies with one key id (§4.3); [None] when the key ids
-    differ. *)
+    differ, or the members this version does not know. *)
 val union : t -> t -> t option

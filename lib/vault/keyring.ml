@@ -8,10 +8,15 @@ type slot =
       nonce : string;
       wrapped : string;
       created : int;
+      extra : (string * Yojson.Safe.t) list;
     }
   | Unknown of { id : string; json : Yojson.Safe.t }
 
-type t = { key_id : string; slots : slot list }
+type t = {
+  key_id : string;
+  slots : slot list;
+  extra : (string * Yojson.Safe.t) list;
+}
 
 let recommended =
   { mem_kib = 65536; iterations = 3; parallelism = 1; salt = "" }
@@ -38,25 +43,26 @@ let slot_ad ~key_id id = "tsync-vault-slot/" ^ key_id ^ "/" ^ id
 
 let slot_to_json = function
   | Unknown { json; _ } -> json
-  | Secret_key { id; secret_key_id; kdf; nonce; wrapped; created } ->
+  | Secret_key { id; secret_key_id; kdf; nonce; wrapped; created; extra } ->
       `Assoc
-        [
-          ("id", `String id);
-          ("kind", `String "secret-key");
-          ("secretKeyId", `String secret_key_id);
-          ( "kdf",
-            `Assoc
-              [
-                ("alg", `String "argon2id");
-                ("memKiB", `Int kdf.mem_kib);
-                ("iterations", `Int kdf.iterations);
-                ("parallelism", `Int kdf.parallelism);
-                ("salt", `String (b64 kdf.salt));
-              ] );
-          ("nonce", `String (b64 nonce));
-          ("wrapped", `String (b64 wrapped));
-          ("created", `Int created);
-        ]
+        ([
+           ("id", `String id);
+           ("kind", `String "secret-key");
+           ("secretKeyId", `String secret_key_id);
+           ( "kdf",
+             `Assoc
+               [
+                 ("alg", `String "argon2id");
+                 ("memKiB", `Int kdf.mem_kib);
+                 ("iterations", `Int kdf.iterations);
+                 ("parallelism", `Int kdf.parallelism);
+                 ("salt", `String (b64 kdf.salt));
+               ] );
+           ("nonce", `String (b64 nonce));
+           ("wrapped", `String (b64 wrapped));
+           ("created", `Int created);
+         ]
+        @ extra)
 
 let canonical_slot slot = Yojson.Safe.to_string (slot_to_json slot)
 
@@ -66,14 +72,22 @@ let sort_slots slots =
 let to_string t =
   Yojson.Safe.to_string
     (`Assoc
-       [
-         ("keyId", `String t.key_id);
-         ("slots", `List (List.map slot_to_json (sort_slots t.slots)));
-       ])
+       (("keyId", `String t.key_id)
+       :: ("slots", `List (List.map slot_to_json (sort_slots t.slots)))
+       :: t.extra))
 
 let sized name size s =
   if String.length s <> size then failwith name;
   s
+
+(* §4.1: the members a release does not know, kept through a rewrite in name
+   order so equal content still gives equal bytes. *)
+let unknown_members ~known json =
+  List.sort
+    (fun (a, _) (b, _) -> String.compare a b)
+    (List.filter
+       (fun (name, _) -> not (List.mem name known))
+       (Yojson.Safe.Util.to_assoc json))
 
 let slot_of_json json =
   let open Yojson.Safe.Util in
@@ -104,6 +118,18 @@ let slot_of_json json =
               sized "wrapped" wrapped_size
                 (unb64 (to_string (member "wrapped" json)));
             created = to_int (member "created" json);
+            extra =
+              unknown_members json
+                ~known:
+                  [
+                    "id";
+                    "kind";
+                    "secretKeyId";
+                    "kdf";
+                    "nonce";
+                    "wrapped";
+                    "created";
+                  ];
           }
     | _ -> Unknown { id; json }
 
@@ -118,7 +144,7 @@ let of_string s =
     if slots = [] then failwith "no slot";
     if List.length (List.sort_uniq String.compare ids) <> List.length ids then
       failwith "duplicate slot id";
-    { key_id; slots }
+    { key_id; slots; extra = unknown_members json ~known:["keyId"; "slots"] }
   with
     | t -> Ok t
     | exception (Failure msg | Yojson.Json_error msg) -> Error msg
@@ -179,14 +205,18 @@ let slot ?(params = recommended) ~now ~key_id ~key ~secret_key passphrase =
       nonce;
       wrapped;
       created = now;
+      extra = [];
     }
 
 let create ?params ~now ~secret_key passphrase =
   let key = Tsync_core.Ids.urandom Crypto.key_size in
   let key_id = Tsync_core.Ids.hex (Tsync_core.Ids.urandom 8) in
   ( key,
-    { key_id; slots = [slot ?params ~now ~key_id ~key ~secret_key passphrase] }
-  )
+    {
+      key_id;
+      slots = [slot ?params ~now ~key_id ~key ~secret_key passphrase];
+      extra = [];
+    } )
 
 let unusable t =
   List.filter_map
@@ -230,9 +260,11 @@ let unlock t ~secret_key passphrase =
       | None -> Error `Wrong_passphrase)
 
 (* Spec §4.3: a union by slot id; for one id, the bytewise greatest canonical
-   slot, so every client folding the same copies writes the same bytes. *)
+   slot, so every client folding the same copies writes the same bytes. Copies
+   whose unknown members differ are left to a release that knows how to fold
+   them. *)
 let union a b =
-  if a.key_id <> b.key_id then None
+  if a.key_id <> b.key_id || a.extra <> b.extra then None
   else (
     let greatest x y =
       if String.compare (canonical_slot x) (canonical_slot y) >= 0 then x else y

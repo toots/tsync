@@ -139,10 +139,12 @@ The keyring is the file `/.tsync-ext/vault/keyring`: one JSON object, UTF-8.
 | `kdf`, `nonce`, `wrapped` | the wrapping (§4.2); present on a `secret-key` slot |
 
 - `b64url` is base64url without padding.
-- **Readers** accept members in any order and ignore unknown members. A slot of an unknown kind
-  is skipped when unlocking, kept when the keyring is rewritten, and counted in status.
-- **Writers** write the canonical form: members in the order of the table, no whitespace, slots
-  sorted by `id` ascending, a slot of an unknown kind written as it was read. Two writers of the
+- **Readers** accept members in any order and keep the members they do not know, of the keyring
+  and of each slot, to write them back. A slot of an unknown kind is skipped when unlocking, kept
+  when the keyring is rewritten, and counted in status.
+- **Writers** write the canonical form: members in the order of the table, then the unknown ones
+  in name order, no whitespace, slots sorted by `id` ascending, a slot of an unknown kind written
+  as it was read. A later version adds members without breaking this one. Two writers of the
   same keyring content then write the same bytes, which the fold relies on (§4.3).
 - A keyring that does not parse, or has no slot, is CORRUPT; the vault stays locked and status
   reports it.
@@ -184,7 +186,9 @@ fold ([README §4.2](README.md#42-the-fold)) settles it:
 
 - **Same `keyId`.** The keyring becomes the union of the slots of every copy, by slot id (for
   one id, the slot whose canonical JSON is bytewise greatest), written canonically at `keyring`.
-  The copies are removed. The fold needs no key.
+  The copies are removed. The fold needs no key. A copy whose unknown keyring members differ from
+  the keyring's is not folded and is left for a version that knows how to fold them: guessing
+  could lose what that version keeps there.
 - **Different `keyId`.** Two inits raced. The keyring at `keyring` is the domain's vault; the
   copy is not folded and is reported. Each machine that holds the copy's K (the one that made
   it, and any unlocked from it before the race settled) keeps it cached: when that machine is
@@ -332,7 +336,8 @@ and notices a new one.
   `{"name", "enrolled", "lastUnlock", "seen", "modified"}`, epoch seconds but for `name`, which
   is the host's name (1 to 256 bytes) until the user gives another (`tsync vault machines --name
   NAME`, action `vault_machines` with `name`). `seen` lists the client uuids of the entries this
-  machine has acknowledged; a reader takes it as empty when absent.
+  machine has acknowledged; a reader takes it as empty when absent. A rewrite keeps the members
+  this version does not know.
 - A machine writes its entry at init, at a re-key, and at an unlock that enrolls it, and refreshes
   `lastUnlock` at an unlock when it is a day old. `lock --forget` removes it.
 - `tsync vault machines` (action `vault_machines`, needs K) lists the entries by name, with when
@@ -483,7 +488,8 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
   its own. Everything else about a row stays as it is.
 - **Where it lives:** `/.tsync-ext/vault/appearance/appearance`, a JSON object `{"color"?,
   "icon"? (base64), "modified"}`, in a folder of its own so the keyring's fold (§4.3) never takes
-  it for a copy. It is **not sealed**: a locked vault's rows need it, and it holds nothing secret.
+  it for a copy; a rewrite keeps the members this version does not know. It is **not sealed**: a
+  locked vault's rows need it, and it holds nothing secret.
   An icon is readable by whoever reads the store; it should not be a sensitive image.
 - **Concurrent changes:** a reader takes the newest of the file and its conflicted copies by
   `modified`, passing over one that does not read; a write replaces the file and removes the
@@ -529,7 +535,9 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
   without being derived; a ninth slot is skipped.
 - Writing the keyring twice with the same content gives identical bytes. A keyring with an
   unknown slot kind and unknown members unlocks through its known slot, and keeps the unknown
-  slot through a rewrite.
+  slot and every unknown member, its own and a known slot's, through a rewrite. Two copies whose
+  unknown members differ do not fold. The appearance and a machine entry keep an unknown member
+  through a rewrite.
 - Two clients each add a slot concurrently: after both fold, the keyring holds both slots and no
   copy, and no further copy appears.
 - Two clients init concurrently: the second keyring stays as a reported copy; after the second

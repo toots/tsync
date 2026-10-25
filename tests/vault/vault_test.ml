@@ -137,12 +137,19 @@ let keyring () =
         ("pk", `String "x");
       ]
   in
+  let hinted =
+    List.map
+      (function
+        | `Assoc members -> `Assoc (("hint", `String "h") :: members)
+        | slot -> slot)
+      slots
+  in
   let mangled =
     Yojson.Safe.to_string
       (`Assoc
          [
            ("future", `Int 1);
-           ("slots", `List (slots @ [unknown]));
+           ("slots", `List (hinted @ [unknown]));
            ("keyId", `String ring.key_id);
          ])
   in
@@ -152,7 +159,12 @@ let keyring () =
         check "unknown kind and members: still unlocks"
           (unlock r passphrase = Ok key);
         let out = Keyring.to_string r in
-        check "unknown member dropped" (not (contains out "future"));
+        check "unknown member kept, after the known ones"
+          (String.ends_with ~suffix:{|],"future":1}|} out);
+        check "a known slot's unknown member kept, after the known ones"
+          (contains out {|,"hint":"h"}|});
+        check "rewritten twice, the same bytes"
+          (Result.map Keyring.to_string (Keyring.of_string out) = Ok out);
         check "unknown slot kept as read"
           (contains out {|{"id":"0000000000000000","kind":"device","pk":"x"}|});
         check "slots sorted by id, unknown first"
@@ -279,7 +291,13 @@ let keyring () =
           (unlock ab passphrase = Ok key && unlock ab other = Ok key)
     | _ -> p "union refused\n");
   let _, raced = Keyring.create ~now:3 ~secret_key other in
-  check "different key ids do not fold" (Keyring.union ring raced = None)
+  check "different key ids do not fold" (Keyring.union ring raced = None);
+  let future = { ring with extra = [("future", `Int 1)] } in
+  check "different unknown members do not fold"
+    (Keyring.union ring future = None);
+  check "equal unknown members fold"
+    (Option.map (fun k -> k.Keyring.extra) (Keyring.union future future)
+    = Some [("future", `Int 1)])
 
 let envelope () =
   p "== envelope\n";
@@ -340,6 +358,25 @@ let words () =
   p "distinct words drawn: %d, none drawn more than 160 times: %b\n"
     (Hashtbl.length seen) (most <= 160)
 
+(* §6.3, §8.1: a rewrite keeps what a later version added. *)
+let unknown_members () =
+  p "== unknown members\n";
+  let kept name of_string to_string body =
+    match of_string body with
+      | Ok t ->
+          let out = to_string t in
+          check
+            (name ^ ": an unknown member kept through a rewrite")
+            (contains out {|"future":[1]|})
+      | Error e -> p "%s refused: %s\n" name e
+  in
+  kept "appearance" Tsync_vault.Appearance.of_string
+    Tsync_vault.Appearance.to_string
+    {|{"color":"#2563eb","modified":5,"future":[1]}|};
+  kept "machine entry" Tsync_vault.Machine.of_string
+    Tsync_vault.Machine.to_string
+    {|{"name":"booky","enrolled":1,"lastUnlock":2,"seen":[],"modified":3,"future":[1]}|}
+
 let () =
   words ();
   argon2 ();
@@ -347,4 +384,5 @@ let () =
   secret_key ();
   passphrase ();
   keyring ();
+  unknown_members ();
   envelope ()

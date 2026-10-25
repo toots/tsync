@@ -228,7 +228,7 @@ let folds () =
 
 let keyrings () =
   p "\n== keyring fold\n";
-  let k = { Keyring.key_id = "0123456789abcdef"; slots = [] } in
+  let k = { Keyring.key_id = "0123456789abcdef"; slots = []; extra = [] } in
   let slot id =
     Keyring.Unknown
       { id; json = `Assoc [("id", `String id); ("kind", `String "later")] }
@@ -264,7 +264,11 @@ let keyrings () =
         name = copy;
         body =
           Keyring.to_string
-            { key_id = "fedcba9876543210"; slots = [slot "3333333333333333"] };
+            {
+              key_id = "fedcba9876543210";
+              slots = [slot "3333333333333333"];
+              extra = [];
+            };
       };
     ];
   show "no copy" [{ name = "keyring"; body = ring [slot "1111111111111111"] }]
