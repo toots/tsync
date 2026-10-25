@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -290,13 +291,13 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 val result = attempt { tsync.vault.codes(filter) }
-                result.onSuccess { codes = it; failure = null }.onFailure { failure = it.message }
+                result.onSuccess { codes = it; failure = null; elapsed = 0 }.onFailure { failure = it.message }
                 if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
                     onLocked()
                     return@repeatOnLifecycle
                 }
-                elapsed = 0
-                val wait = codes?.records?.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
+                // A failed read keeps counting the codes it has down, which may then show as expired.
+                val wait = if (result.isFailure) 5 else codes?.records?.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
                 repeat(wait) { delay(1000); elapsed++ }
             }
         }
@@ -308,7 +309,7 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
             singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
         failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        val current = codes ?: return@Column Loading()
+        val current = codes ?: return@Column if (failure == null) Loading() else Unit
         if (current.outdated) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
             if (current.records.isEmpty()) item { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
@@ -541,6 +542,12 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
         onDismissRequest = onDone,
         title = { Text(stringResource(R.string.code_link_title)) },
         text = {
+            // The dialog's own view: a window drawn over it could pass the user's taps on to Add.
+            val dialogView = LocalView.current
+            DisposableEffect(dialogView) {
+                dialogView.filterTouchesWhenObscured = true
+                onDispose {}
+            }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when {
                     !checked -> Text(stringResource(R.string.loading))
