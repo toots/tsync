@@ -75,7 +75,8 @@ The system offers a provider's code on a code field only for an entry the provid
   `<title> — <username>` (the title alone when there is no username), and the record identifier
   `<domain>/<id>`. Never a seed or a code. A site with a port is a URL identifier, so its entry
   matches that port only; an `android://` site is skipped.
-- **Who saves it.** The app, from `passwords_list` of every domain using passwords, when its
+- **Who saves it.** The app, from `passwords_list` with `use: false` (a refresh does not keep the
+  vault from its idle lock) of every domain using passwords, when its
   menu opens and every 60 seconds; it replaces the store's whole set of entries, codes and
   passkeys, and writes only when the set changed. The system empties the store while AutoFill
   is off, so the next refresh after it is turned on writes the whole set again. A locked or unreachable domain contributes nothing, so the entries go once every
