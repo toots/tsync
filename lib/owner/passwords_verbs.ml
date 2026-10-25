@@ -168,6 +168,7 @@ let fields_arg args =
                         value;
                         secret =
                           (match secret with Some (`Bool b) -> b | _ -> false);
+                        unknown = [];
                       }
                   | _ -> Fail.invalid "a field is {name, value, secret}")
             | _ -> Fail.invalid "a field is {name, value, secret}")

@@ -30,8 +30,14 @@ val registrable : string -> string option
 val matches : site:site -> origin:string -> bool
 
 (** §2.2: a field beyond a record's fixed keys; a [secret] one is masked where
-    shown and copied like a password. *)
-type field = { name : string; value : string; secret : bool }
+    shown and copied like a password. [unknown] holds the members this version
+    does not know, kept through a rewrite. *)
+type field = {
+  name : string;
+  value : string;
+  secret : bool;
+  unknown : (string * Yojson.Safe.t) list;
+}
 
 type login = {
   title : string;

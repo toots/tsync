@@ -312,7 +312,12 @@ let matches ~site ~origin =
     | Ok (Android a), Ok (Android b) -> a = b
     | _ -> false
 
-type field = { name : string; value : string; secret : bool }
+type field = {
+  name : string;
+  value : string;
+  secret : bool;
+  unknown : (string * Yojson.Safe.t) list;
+}
 
 type login = {
   title : string;
@@ -489,7 +494,18 @@ let fields_of members =
                     | ( Some (`String name),
                         Some (`String value),
                         Some (`Bool secret) ) ->
-                        Ok ({ name; value; secret } :: acc)
+                        Ok
+                          ({
+                             name;
+                             value;
+                             secret;
+                             unknown =
+                               List.filter
+                                 (fun (k, _) ->
+                                   not (List.mem k ["name"; "value"; "secret"]))
+                                 f;
+                           }
+                          :: acc)
                     | _ -> wrong)
               | _ -> wrong)
           l (Ok [])
@@ -504,11 +520,12 @@ let fields_json fields =
           (List.map
              (fun f ->
                `Assoc
-                 [
-                   ("name", `String f.name);
-                   ("value", `String f.value);
-                   ("secret", `Bool f.secret);
-                 ])
+                 ([
+                    ("name", `String f.name);
+                    ("value", `String f.value);
+                    ("secret", `Bool f.secret);
+                  ]
+                 @ f.unknown))
              fields) );
     ]
 

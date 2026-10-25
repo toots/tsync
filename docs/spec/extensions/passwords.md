@@ -83,7 +83,9 @@ and `get`.
 an account number.
 
 - Each is `{"name", "value", "secret"}`: `name` 1 to 64 bytes, `value` at most 4 KiB, `secret` a
-  bool. Names need not be unique; the order is the user's.
+  bool. Names need not be unique; the order is the user's. A rewrite keeps a field's members
+  this version does not know, as a record's (§2); a list given to `edit` replaces the fields
+  whole.
 - A `secret` field is masked wherever it is shown and is copied like a password; it is never
   filled into a form by this version.
 - `get` answers the fields; `list` names neither fields nor their values.
