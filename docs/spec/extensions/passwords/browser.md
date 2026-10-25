@@ -140,7 +140,7 @@ the extension never turns it off again by itself.
   a new login from a changed one, and shows the extension's sheet: *Save this login in tsync?*, or
   *Update the password for `<title>`?* when tsync holds a login of that username for this exact
   site (`exact`), with **Save** or **Update**, **Not now** and, for a new one, **Never for this
-  site**. Only that click sends `save`; the owner adds nothing when the password is already the one
+  site**. Only that click sends `save`, naming for an update the domain that holds the login; the owner adds nothing when the password is already the one
   it holds, and updates only a login of the exact site (passwords §8).
 - **A suggested password's submit** shows no sheet: the content script sends `save` with
   `suggested`, the id kept at the pick, and the username submitted. The password itself is not

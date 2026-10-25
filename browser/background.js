@@ -193,8 +193,10 @@ async function offerSave(origin, username, password, incognito) {
   const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title, incognito });
   if (answer.action === "never") return chrome.storage.local.set({ never: [...never, origin] });
   if (answer.action !== "ok") return;
-  const first = await one({ type: "save", origin, username, password });
-  if (first.ok && first.update) await one({ type: "save", origin, username, password, update: first.update });
+  // The domain holding the login updated; a new one goes to the default domain.
+  const domain = same[0]?.domain;
+  const first = await one({ type: "save", origin, username, password, domain });
+  if (first.ok && first.update) await one({ type: "save", origin, username, password, update: first.update, domain });
 }
 
 // passwords §5.1: the pick is the approval; the login is saved before the form is.
