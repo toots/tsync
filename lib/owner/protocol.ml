@@ -394,7 +394,15 @@ let mutates : type a. a request -> bool = function
   | Extension e ->
       List.exists
         (fun suffix -> String.ends_with ~suffix e.action)
-        ["_add"; "_edit"; "_remove"; "_import"; "_passkey_create"; "_save"]
+        [
+          "_add";
+          "_edit";
+          "_remove";
+          "_import";
+          "_passkey_create";
+          "_save";
+          "_suggest";
+        ]
   | _ -> false
 
 let bulk : type a. a request -> bool = function
