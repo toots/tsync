@@ -79,13 +79,20 @@ let silent (domain : Tsync_domain.Domain.t) () =
   in
   mains <> [] && List.for_all Health.is_down mains
 
+(* format-merge §6: a vault verb holds the vault's folder from its read to its
+   write; a record verb an extension's before another's by name, then the
+   vault's, and a passwords verb may add or read a TOTP record. *)
+let on_vault f = Format_merge.locked Vault.folder f
+let on_records f = Format_merge.locked Totp_verbs.folder (fun () -> on_vault f)
+
+let on_passwords f =
+  Format_merge.locked Passwords_verbs.folder (fun () -> on_records f)
+
 (* vault §6.3, in the background; reading the list settles the keyring, which a
    verb rewriting it must not see change under it. *)
 let announce_machines ~domain ~engine vault =
   Rt.spawn ~name:"vault machines" (fun () ->
-      try
-        Format_merge.locked Vault.folder (fun () ->
-            ignore (Vault.announce ~domain ~engine vault))
+      try on_vault (fun () -> ignore (Vault.announce ~domain ~engine vault))
       with Fail.E f -> Log.warn "vault: new machines not read: %s" f.reason)
 
 (* vault §8.3: checked on the auto-lock watcher's period, holding the folders
@@ -99,11 +106,9 @@ let schedule_backups ~(domain : Tsync_domain.Domain.t) ~engine vault =
             | () when not (Vault.backup_due domain vault) -> loop ()
             | () ->
                 (try
-                   Format_merge.locked Passwords_verbs.folder (fun () ->
-                       Format_merge.locked Totp_verbs.folder (fun () ->
-                           Format_merge.locked Vault.folder (fun () ->
-                               Vault.backup_tick ~domain ~engine
-                                 ~lazy_tree:domain.lazy_tree vault)))
+                   on_passwords (fun () ->
+                       Vault.backup_tick ~domain ~engine
+                         ~lazy_tree:domain.lazy_tree vault)
                  with
                   | (Stop.Stopping | Rt.Cancelled) as e -> raise e
                   | e ->
@@ -168,9 +173,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       name = "vault-keyring";
       folder = Vault.folder;
       settle =
-        (fun () ->
-          Format_merge.locked Vault.folder (fun () ->
-              ignore (Vault.read ~domain engine)));
+        (fun () -> on_vault (fun () -> ignore (Vault.read ~domain engine)));
     };
   Format_merge.register t.formats
     {
@@ -178,11 +181,9 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       folder = Passwords_verbs.folder;
       settle =
         (fun () ->
-          Format_merge.locked Passwords_verbs.folder (fun () ->
-              Format_merge.locked Totp_verbs.folder (fun () ->
-                  Format_merge.locked Vault.folder (fun () ->
-                      Passwords_verbs.fold ~domain ~engine
-                        ~lazy_tree:domain.lazy_tree t.vault))));
+          on_passwords (fun () ->
+              Passwords_verbs.fold ~domain ~engine ~lazy_tree:domain.lazy_tree
+                t.vault));
     };
   Format_merge.register t.formats
     {
@@ -190,10 +191,9 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       folder = Totp_verbs.folder;
       settle =
         (fun () ->
-          Format_merge.locked Totp_verbs.folder (fun () ->
-              Format_merge.locked Vault.folder (fun () ->
-                  Totp_verbs.fold ~domain ~engine ~lazy_tree:domain.lazy_tree
-                    t.vault)));
+          on_records (fun () ->
+              Totp_verbs.fold ~domain ~engine ~lazy_tree:domain.lazy_tree
+                t.vault));
     };
   (* vault §6.3: the domain's status reports new machines from the start, the
      keystore's K included. *)
@@ -904,17 +904,6 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
   in
   let vault f =
     f ~domain:t.domain ~engine:t.engine ~lazy_tree:t.domain.lazy_tree t.vault
-  in
-  (* format-merge §6: a vault verb holds the vault's folder from its read to
-     its write; a record verb the extension's and then the vault's. *)
-  let on_vault f = Format_merge.locked Vault.folder f in
-  let on_records f =
-    Format_merge.locked Totp_verbs.folder (fun () -> on_vault f)
-  in
-  (* A passwords verb may add or read a TOTP record: the three folders, an
-     extension's before another's by name, then the vault's. *)
-  let on_passwords f =
-    Format_merge.locked Passwords_verbs.folder (fun () -> on_records f)
   in
   match req with
     | Ping -> ()
