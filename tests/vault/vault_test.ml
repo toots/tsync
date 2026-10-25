@@ -292,6 +292,34 @@ let keyring () =
     | _ -> p "union refused\n");
   let _, raced = Keyring.create ~now:3 ~secret_key other in
   check "different key ids do not fold" (Keyring.union ring raced = None);
+  (* §4.1, §7.2: retired keys *)
+  let old_id = "fedcba9876543210" and old_key = String.make 32 'o' in
+  let retiring = Keyring.retire ring ~key (old_id, old_key) in
+  check "a retired key unwraps under K"
+    (Keyring.retired_keys retiring ~key = ([(old_id, old_key)], []));
+  check "a retired key does not unwrap under another key"
+    (Keyring.retired_keys retiring ~key:(String.make 32 'x') = ([], [old_id]));
+  check "retiring it again changes nothing"
+    (Keyring.retire retiring ~key (old_id, String.make 32 'z') = retiring);
+  check "the keyring's own K is never retired"
+    (Keyring.retire ring ~key (ring.key_id, key) = ring);
+  let text = Keyring.to_string retiring in
+  check "retired keys written after the slots, and read back"
+    (contains text {|],"retired":[{"keyId":"fedcba9876543210"|}
+    && Result.map Keyring.to_string (Keyring.of_string text) = Ok text);
+  check "a K never appears in the text"
+    (not
+       (contains text (Base64.encode_string old_key) || contains text old_key));
+  let other_id = "0123456789abcdef" and other_key = String.make 32 'p' in
+  let other = Keyring.retire ring ~key (other_id, other_key) in
+  (match (Keyring.union retiring other, Keyring.union other retiring) with
+    | Some ab, Some ba ->
+        check "union holds the retired keys of both copies"
+          (List.map fst (fst (Keyring.retired_keys ab ~key))
+          = [other_id; old_id]);
+        check "union of retired keys is symmetric, bytewise"
+          (Keyring.to_string ab = Keyring.to_string ba)
+    | _ -> p "union of retired keys refused\n");
   let future = { ring with extra = [("future", `Int 1)] } in
   check "different unknown members do not fold"
     (Keyring.union ring future = None);

@@ -608,11 +608,12 @@ let () =
       settle_owner ~domain:"race" 100;
       let status label =
         let st = ask_race [("action", "vault_status")] in
-        p "  %-34s %s copies=%d" label
+        p "  %-34s %s copies=%d retired=%d" label
           (Option.get (field st "vault"))
           (match member st "copies" with
             | Some (`List l) -> List.length l
             | _ -> -1)
+          (match member st "retired" with Some (`Int n) -> n | _ -> -1)
       in
       status "status";
       answer "  list" (ask_race [("action", "totp_list")]);

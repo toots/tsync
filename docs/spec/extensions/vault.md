@@ -137,6 +137,7 @@ The keyring is the file `/.tsync-ext/vault/keyring`: one JSON object, UTF-8.
 | slot `secretKeyId` | on a `secret-key` slot: the id of the secret key it is keyed with |
 | slot `created` | epoch seconds; informative |
 | `kdf`, `nonce`, `wrapped` | the wrapping (§4.2); present on a `secret-key` slot |
+| `retired` | optional array, by `keyId` ascending: the Ks a re-key or a raced init replaced (§4.3, §7.2), each `{"keyId", "nonce", "wrapped"}` with `wrapped = XChaCha20-Poly1305-Seal(K, nonce, retired K, ad = "tsync-vault-retired/" keyId "/" retired keyId)` under the current K |
 
 - `b64url` is base64url without padding.
 - **Readers** accept members in any order and keep the members they do not know, of the keyring
@@ -148,6 +149,11 @@ The keyring is the file `/.tsync-ext/vault/keyring`: one JSON object, UTF-8.
   same keyring content then write the same bytes, which the fold relies on (§4.3).
 - A keyring that does not parse, or has no slot, is CORRUPT; the vault stays locked and status
   reports it.
+- **Retired keys** open what was sealed under them and seal nothing. Records are re-encrypted
+  instead (§4.3, §7.2) and need none; they are kept for data sealed under an old K that is not
+  rewritten, such as an export (§8.2) and encrypted files, and are carried by every export. Status
+  counts them (`retired`), and while unlocked names those that do not unwrap
+  (`retiredUnreadable`).
 
 ### 4.2 Wrapping a slot
 
@@ -198,8 +204,10 @@ fold ([README §4.2](README.md#42-the-fold)) settles it:
   old K. Until every record is re-encrypted the old K is kept: a re-encryption that fails fails
   the unlock and leaves both the old K and the vault as they were, for the next unlock. Two machines
   doing so concurrently leave conflicted copies of equal plaintext, which the extension's fold
-  settles. Once no machine holding the copy's K is left, the records under it cannot be read;
+  settles. Before it forgets its old K, it adds it to the keyring's `retired` keys under the
+  domain's K. Once no machine holding the copy's K is left, the records under it cannot be read;
   status keeps reporting them.
+- **`retired`** of copies of the same `keyId` is the union by retired key id, as slots are.
 
 A slot removed concurrently with another keyring change comes back from the union. Status lists
 the slots, so the user sees it.
@@ -401,8 +409,9 @@ change alone leaves both valid (§7).
   (`newPassphrase`, §2.2) or keeps the current one; a CLI or app SHOULD suggest a new one when a
   machine was lost.
 - It draws a new K, key id and secret key, writes a keyring holding one `secret-key` slot for
-  them, and keeps the new secret key on this machine before anything else, so whatever follows
-  fails, this machine can still unlock.
+  them and, as `retired` keys under the new K, the old K and every key the old keyring retired,
+  and keeps the new secret key on this machine before anything else, so whatever follows fails,
+  this machine can still unlock and nothing sealed under an old K is lost.
 - It then re-encrypts every record under the old key id as §4.3 does for a copy's K, in every
   extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done;
   then it keeps the new K (§6). A re-encryption that fails leaves the old K held, and is resumed
@@ -536,7 +545,10 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
 - Writing the keyring twice with the same content gives identical bytes. A keyring with an
   unknown slot kind and unknown members unlocks through its known slot, and keeps the unknown
   slot and every unknown member, its own and a known slot's, through a rewrite. Two copies whose
-  unknown members differ do not fold. The appearance and a machine entry keep an unknown member
+  unknown members differ do not fold.
+- A re-key retires the old K and carries the keys it retired; a second re-key's keyring holds
+  both. A machine holding a raced init's K that unlocks the domain's vault retires it. Copies'
+  retired keys fold by key id, and a retired key wrapped under another K is reported. The appearance and a machine entry keep an unknown member
   through a rewrite.
 - Two clients each add a slot concurrently: after both fold, the keyring holds both slots and no
   copy, and no further copy appears.

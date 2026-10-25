@@ -25,21 +25,24 @@ rekey, wrong passphrase              denied: wrong passphrase
 rekey                                secret key 5-5-5-5-6, a new one: true, pending: none
 codes, under the new key             [ACME / john] corrupt 0
 machines                             machine A (this)
-status                               unlocked enrolled
+status                               unlocked enrolled retired: 1
 owner exit status 0
 == b-after
 unlock, the old secret key           denied: wrong secret key: it is not this vault's
-status                               locked not-enrolled secret-key-replaced
+status                               locked not-enrolled secret-key-replaced retired: 1
 unlock, the new secret key           ok
-status                               unlocked enrolled
+status                               unlocked enrolled retired: 1
 codes, under the new key             [ACME / john] corrupt 0
 machines, named again                machine A; machine B (this)
 lock --forget                        ok
 owner exit status 0
 == a-last
-status                               unlocked enrolled
+status                               unlocked enrolled retired: 1
 machines                             machine A (this)
 passphrase --generate                6 words of letters: true
 lock                                 ok
 unlock, the generated passphrase     ok
+rekey again                          ok
+status, re-keyed twice               unlocked enrolled retired: 2
+codes, under the third key           [ACME / john] corrupt 0
 owner exit status 0

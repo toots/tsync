@@ -126,7 +126,7 @@ let status label =
             (List.filter_map (function `String s -> Some s | _ -> None) l)
       | _ -> ""
   in
-  p "%-36s %s%s%s%s" label
+  p "%-36s %s%s%s%s%s" label
     (Option.get (field r "vault"))
     (match member r "enrolled" with
       | Some (`Bool true) -> " enrolled"
@@ -135,6 +135,10 @@ let status label =
       | Some (`Bool true) -> " secret-key-replaced"
       | _ -> "")
     (match names "newMachines" with "" -> "" | n -> " new: " ^ n)
+    ((match member r "retired" with
+       | Some (`Int n) when n > 0 -> Printf.sprintf " retired: %d" n
+       | _ -> "")
+    ^ match names "retiredUnreadable" with "" -> "" | n -> " unreadable: " ^ n)
 
 (* 08: what the menu reads, from the domain's own status. *)
 let domain_status label =
@@ -355,7 +359,16 @@ let run = function
                       w)
                words);
           answer "lock" (ask [("action", "vault_lock")]);
-          answer "unlock, the generated passphrase" (unlock generated))
+          answer "unlock, the generated passphrase" (unlock generated);
+          (* §7.2: a second re-key carries the first one's retired key. *)
+          answer "rekey again"
+            (match
+               ask [("action", "vault_rekey"); ("passphrase", generated)]
+             with
+              | r when field r "secretKey" <> None -> `Assoc []
+              | r -> r);
+          status "status, re-keyed twice";
+          codes "codes, under the third key")
   | other -> failwith other
 
 let child phase =

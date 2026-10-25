@@ -632,6 +632,18 @@ let reencrypt ~engine ~lazy_tree ~from:(old_id, old_key) ~into:(key_id, key) t =
   in
   ignore (Format_merge.apply engine folder copies)
 
+(* §7.2: a re-key's keyring retires the old K and every key the old keyring
+   retired, so files sealed under any of them stay readable. *)
+let carry_retired ~from:(keyring, old_key) ~key next =
+  let kept, lost = Keyring.retired_keys keyring ~key:old_key in
+  if lost <> [] then
+    Log.warn "vault: retired keys that do not unwrap are left behind: %s"
+      (String.concat ", " lost);
+  List.fold_left
+    (fun next retired -> Keyring.retire next ~key retired)
+    next
+    ((keyring.Keyring.key_id, old_key) :: kept)
+
 let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
   let enrolls = secret_key <> None in
   check_uses ~domain ~engine;
@@ -643,7 +655,13 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
      failure here leaves it held for the next unlock. *)
   (match Atomic.get t.key with
     | Some ((old_id, _) as old) when old_id <> keyring.key_id ->
-        reencrypt ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key) t
+        reencrypt ~engine ~lazy_tree ~from:old ~into:(keyring.key_id, key) t;
+        (* §4.3: a raced init's K is retired before it is forgotten. *)
+        if not domain.domain.read_only then (
+          let keyring = current ~strict:true ~domain engine ~lazy_tree t in
+          let retired = Keyring.retire keyring ~key old in
+          if retired.retired <> keyring.retired then
+            write engine ~exclusive:false retired)
     | _ -> ());
   store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key;
   note_machine ~enrolls ~domain ~engine ~lazy_tree t ~key_id:keyring.key_id ~key;
@@ -811,6 +829,7 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
   in
   let secret_key = Secret_key.generate () in
   let key, next = Keyring.create ~now:(now ()) ~secret_key passphrase in
+  let next = carry_retired ~from:(keyring, old_key) ~key next in
   write engine ~exclusive:false next;
   keep_secret_key ~domain t secret_key;
   let pending =
@@ -926,6 +945,8 @@ let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       cached = None;
       slots = [];
       unusable = [];
+      retired = 0;
+      retired_unreadable = [];
       copies = found.copies;
       keystore_error = Atomic.get t.keystore_error;
       enrolled = false;
@@ -985,6 +1006,11 @@ let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
               (fun n -> (n, List.length (List.filter (( = ) n) kinds)))
               (List.sort_uniq compare kinds);
           unusable = Keyring.unusable k;
+          retired = List.length k.retired;
+          retired_unreadable =
+            (match key t k with
+              | Some key -> snd (Keyring.retired_keys k ~key)
+              | None -> []);
           enrolled =
             (match Atomic.get t.secret_key with
               | Some (id, _) -> Keyring.enrolls k ~secret_key_id:id
