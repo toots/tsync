@@ -110,6 +110,26 @@ tsync vault appearance --default-color --no-icon
 
 The colour and icon sync with the domain and show even while the vault is locked, so they are not encrypted: do not use a private image.
 
+## Exporting and importing
+
+An export is the whole vault in one file you keep: every code, login, note and passkey, the vault's keys and its appearance. It is a backup that needs neither the server nor tsync's own copy of the vault, and the way to start a vault again without losing anything.
+
+```bash
+tsync vault export --output vault.export    # asks for the passphrase
+```
+
+The file is sealed with your passphrase and this machine's secret key, as strongly as the vault itself, so it opens with those two and nothing else: keep the emergency kit that holds the secret key with it. tsync never replaces a file; choose a new name each time.
+
+To start again from an export, delete the vault, make a new one, and import into it:
+
+```bash
+tsync vault delete
+tsync vault init --kit kit.html
+tsync vault import vault.export             # asks for the export's passphrase and secret key
+```
+
+The import asks for the passphrase and secret key the export was made with, which are the old ones: the new vault has its own. It only goes into a vault with nothing in it yet. Afterwards every other machine unlocks with the new secret key, as after `tsync vault rekey`.
+
 ## Status and deleting
 
 `tsync vault status` says whether the domain has a vault, whether it is unlocked here, and whether this machine is enrolled.

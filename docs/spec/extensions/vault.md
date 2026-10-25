@@ -452,11 +452,13 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 | `machines` / `vault_machines` | yes | §6.3 |
 | `status` / `vault_status` | — | initialised or not; key id; locked or unlocked; enrolled or not; where K is cached (`keystore`, `memory`); the auto-lock policy in force and where each part comes from (§6.2), and `lockedBy`; slot count by kind; unusable slots; keyring copies; the appearance (§8.1). Each extension's `list` reports its records that do not open, under another key or CORRUPT, by id |
 | `appearance` / `vault_appearance` | yes | §8.1 |
+| `export` / `vault_export` | yes | §8.2 |
+| `import` / `vault_import` | yes | §8.2 |
 
 `vault_init`, `vault_rekey`, `vault_kit`, and `vault_passphrase` with a new secret key, are the
 only replies that carry a secret: the secret key.
 
-- `init`, `unlock`, `passphrase`, `rekey` and `kit` derive keys at up to the limits of §4.2 and init resyncs the
+- `init`, `unlock`, `passphrase`, `rekey`, `kit`, `export` and `import` derive keys at up to the limits of §4.2 and init resyncs the
   domain first, so each is a bulk action
   ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)): a reply that timed out while the work went on would lose the
   secret key init and a re-key show once.
@@ -509,6 +511,42 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
 - `vault_status` answers `appearance`: `color` (the one in force), `colorChosen`, and `icon`
   (base64) when there is one; none without a keyring.
 
+### 8.2 Export and import
+
+An export is the whole vault in one file the user keeps: a backup that needs neither the store
+nor the code that wrote it, and the way through a change of format this version cannot read
+across (export, `delete`, upgrade, `init`, import).
+
+- **What it holds:** every record of every extension's folder, whether this client uses that
+  extension or not, as its envelope opened under K or a retired key (§4.1), byte for byte; K and
+  every retired key, so data sealed under them stays readable after an import; the appearance
+  (§8.1). A record that opens under no key the vault holds is left out and named in the reply
+  (`skipped`). The keyring, its slots and the machine list are not carried: an import's vault
+  has its own.
+- **The file** is a JSON object `{"tsyncVaultExport": 1, "seal", "nonce", "sealed"}`. `seal`
+  says what opens it; for an export, `{"kind": "secret-key", "secretKeyId", "kdf"}` with the
+  `kdf` object of a slot (§4.2), and `sealed = XChaCha20-Poly1305-Seal(KEK, nonce, payload, ad =
+  "tsync-vault-export/1/secret-key/" secretKeyId)`, KEK derived from the passphrase and the
+  secret key as a slot's is. The payload is a JSON object: `created`, `domain` (informative),
+  `keys` (`{"keyId", "key"}`, K first), `appearance?` (the file's text), and `records`
+  (`{"extension", "name", "plaintext"}`, `plaintext` base64url). Nothing in the file is in clear
+  but the seal's parameters.
+- **Export** (`tsync vault export --output FILE`, action `vault_export` with `passphrase` and an
+  absolute `path`) needs an unlocked, enrolled vault and the passphrase, as `kit` does: the file
+  is as strong as the vault, and opens with that passphrase and this machine's secret key. The
+  owner creates the file with mode 0600 and never replaces one. The reply counts what it holds
+  (`records`, `keys`) and names `skipped`.
+- **Import** (`tsync vault import FILE`, action `vault_import` with an absolute `path`, and
+  `passphrase` with `secretKey` as the export was sealed) needs an unlocked vault that holds no
+  record: one just made with `init`. Any other is refused INVALID, and nothing is merged. The
+  whole file is opened and checked before anything is written; then each record is sealed
+  under this vault's K at its name in its folder, the appearance written, and the export's keys
+  added to the keyring's retired keys. A secret key other than the one the export names is
+  refused DENIED, naming the id it needs; a wrong passphrase DENIED; a file that is not an export
+  of this version, or does not read, INVALID or CORRUPT.
+- After an import every machine enrolls again with the new vault's secret key, as after a re-key
+  (§7.2).
+
 ## 9. Parameters
 
 | name | value | rule |
@@ -546,6 +584,11 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
   unknown slot kind and unknown members unlocks through its known slot, and keeps the unknown
   slot and every unknown member, its own and a known slot's, through a rewrite. Two copies whose
   unknown members differ do not fold.
+- An export holds every record that opens, K, the retired keys and the appearance, and nothing
+  of it in clear; it opens with its passphrase and secret key alone. An import into an empty vault
+  gives back every record byte for byte under the new K, and the export's keys as retired keys; a
+  passkey signs with its old key. An import into a vault holding a record, with another secret
+  key, or with a wrong passphrase writes nothing.
 - A re-key retires the old K and carries the keys it retired; a second re-key's keyring holds
   both. A machine holding a raced init's K that unlocks the domain's vault retires it. Copies'
   retired keys fold by key id, and a retired key wrapped under another K is reported. The appearance and a machine entry keep an unknown member

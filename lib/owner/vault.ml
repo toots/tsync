@@ -15,6 +15,11 @@ let appearance_path = Names.join appearance_folder "appearance"
 (* §6.3: a folder of its own, like the appearance's. *)
 let machines_folder = Names.join folder "machines"
 
+(* §8.3: the backup key's public half, sealed under K so no one without K can
+   put their own in its place. *)
+let backup_folder = Names.join folder "backup"
+let backup_key_path = Names.join backup_folder "key"
+
 (* §6.2: when K was adopted, and last used for the user. *)
 type since = { unlocked_at : float; last_use : float }
 
@@ -326,7 +331,8 @@ let check_uses ~(domain : Tsync_domain.Domain.t) ~engine =
     Fail.invalid "%s uses no extension: add one to its extensions in the config"
       (Domain_name.to_string domain.name)
 
-let vault_folders = [""; ext; folder; appearance_folder; machines_folder]
+let vault_folders =
+  [""; ext; folder; appearance_folder; machines_folder; backup_folder]
 
 (* README §4.1: a keyring write needs the current keyring; a failed pull fails
    the verb. *)
@@ -435,6 +441,29 @@ let write engine ~exclusive keyring =
     (Keyring.to_string keyring)
 
 let now () = int_of_float (Unix.time ())
+
+let backup_key engine ~key_id ~key =
+  let (module E : Engine.S) = engine in
+  if E.kind backup_key_path <> `File then None
+  else (
+    match
+      Tsync_vault.Envelope.open_ ~key ~key_id ~extension:"vault"
+        (read_file engine backup_key_path)
+    with
+      | Ok text ->
+          Result.to_option
+            (Result.map
+               (fun k -> (text, k))
+               (Tsync_vault.Export.backup_key_of_string text))
+      | Error _ -> None)
+
+let write_backup_key engine ~key_id ~key text =
+  let (module E : Engine.S) = engine in
+  List.iter
+    (fun dir -> E.mkdir dir ~exclusive:false)
+    [ext; folder; backup_folder];
+  Format_merge.write_file engine ~exclusive:false backup_key_path
+    (Tsync_vault.Envelope.seal ~key ~key_id ~extension:"vault" text)
 
 let secret ~key_id secret_key : Protocol.secret =
   { secret_key = Secret_key.to_string secret_key; key_id }
@@ -831,6 +860,9 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
   let key, next = Keyring.create ~now:(now ()) ~secret_key passphrase in
   let next = carry_retired ~from:(keyring, old_key) ~key next in
   write engine ~exclusive:false next;
+  Option.iter
+    (fun (text, _) -> write_backup_key engine ~key_id:next.key_id ~key text)
+    (backup_key engine ~key_id:keyring.key_id ~key:old_key);
   keep_secret_key ~domain t secret_key;
   let pending =
     match
@@ -932,6 +964,185 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
       if f.name <> "appearance" then
         E.delete (Names.join appearance_folder f.name))
     (files engine appearance_folder)
+
+(* §8.3: a new backup key replaces the last; its seed leaves only in the reply. *)
+let new_backup_key ~domain ~engine ~lazy_tree t () : Protocol.secret =
+  let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
+  let seed = Tsync_core.Ids.urandom 16 in
+  let k = Tsync_vault.Export.backup_key_of_seed seed in
+  write_backup_key engine ~key_id:keyring.key_id ~key
+    (Tsync_vault.Export.backup_key_to_string k ~created:(now ()));
+  { secret_key = Secret_key.to_string seed; key_id = k.id }
+
+(* §8.2: every record that opens under K or a retired key, by extension; one
+   that opens under none is named, never guessed at. *)
+let payload ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t (keyring, key)
+    =
+  let (module E : Engine.S) = engine in
+  let keys =
+    (keyring.Keyring.key_id, key) :: fst (Keyring.retired_keys keyring ~key)
+  in
+  let opened, skipped =
+    List.partition_map Fun.id
+      (List.concat_map
+         (fun (extension, dir) ->
+           List.map
+             (fun (f : Tsync_vault.Fold.file) ->
+               let under (key_id, key) =
+                 Result.to_option
+                   (Tsync_vault.Envelope.open_ ~key ~key_id ~extension f.body)
+               in
+               match List.find_map under keys with
+                 | Some plaintext ->
+                     Either.Left
+                       {
+                         Tsync_vault.Export.extension;
+                         name = f.name;
+                         plaintext;
+                       }
+                 | None -> Either.Right (Names.join extension f.name))
+             (files engine dir))
+         (extension_folders engine ~lazy_tree t))
+  in
+  ( {
+      Tsync_vault.Export.created = now ();
+      domain = Domain_name.to_string domain.name;
+      keys;
+      appearance =
+        (if E.kind appearance_path = `File then
+           Some (read_file engine appearance_path)
+         else None);
+      backup_key =
+        Option.map fst (backup_key engine ~key_id:keyring.key_id ~key);
+      records = opened;
+    },
+    skipped )
+
+(* §8.2: created, never replacing a file, readable by its owner alone. *)
+let write_new path text =
+  match Unix.openfile path [O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC] 0o600 with
+    | exception Unix.Unix_error (EEXIST, _, _) ->
+        Fail.invalid "%s exists: an export never replaces a file" path
+    | exception Unix.Unix_error (e, _, _) ->
+        Fail.invalid "%s: %s" path (Unix.error_message e)
+    | fd ->
+        Fun.protect
+          ~finally:(fun () -> Unix.close fd)
+          (fun () ->
+            let b = Bytes.unsafe_of_string text in
+            let rec go off =
+              if off < Bytes.length b then
+                go (off + Unix.write fd b off (Bytes.length b - off))
+            in
+            go 0;
+            Unix.fsync fd)
+
+let export ~domain ~engine ~lazy_tree t ~path typed : Protocol.carried =
+  let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
+  let _, _, secret_key = unwrap ~domain ~engine ~lazy_tree t typed in
+  let p, skipped = payload ~domain ~engine ~lazy_tree t (keyring, key) in
+  write_new path
+    (Tsync_vault.Export.seal_with_vault ~secret_key ~passphrase:(chosen typed) p);
+  { records = List.length p.records; keys = List.length p.keys; skipped }
+
+let opened_export text unseal =
+  let module X = Tsync_vault.Export in
+  let spelled what s =
+    match Secret_key.of_string s with
+      | Some s -> s
+      | None -> Fail.invalid "that is not a %s: 26 letters and digits" what
+  in
+  let result =
+    match (X.header text, unseal) with
+      | Error reason, _ -> Fail.invalid "not a vault export: %s" reason
+      | Ok (`Secret_key id), `Vault (typed, secret_key) ->
+          let secret_key = spelled "secret key" secret_key in
+          if Secret_key.id secret_key <> id then
+            Fail.raise_ Denied
+              "this export was sealed with another secret key (id %s): give \
+               the one in the emergency kit of the vault it came from"
+              id;
+          X.open_with_vault ~secret_key ~passphrase:(chosen typed) text
+      | Ok (`Backup_key id), `Backup_key seed ->
+          let seed = spelled "backup key" seed in
+          if (X.backup_key_of_seed seed).id <> id then
+            Fail.raise_ Denied
+              "this backup was sealed to another backup key (id %s)" id;
+          X.open_with_backup ~seed text
+      | Ok (`Secret_key _), `Backup_key _ ->
+          Fail.invalid
+            "this export opens with the passphrase and secret key, not a \
+             backup key"
+      | Ok (`Backup_key _), `Vault _ ->
+          Fail.invalid "this backup opens with its backup key"
+  in
+  match result with
+    | Ok p -> p
+    | Error `Wrong -> Fail.raise_ Denied "wrong passphrase"
+    | Error (`Corrupt reason) ->
+        Fail.corrupt "the export does not read: %s" reason
+
+(* §8.2: into an empty vault only; the whole file is read before anything is
+   written. *)
+let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
+  let (module E : Engine.S) = engine in
+  let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
+  if
+    List.exists
+      (fun (_, dir) -> files engine dir <> [])
+      (extension_folders engine ~lazy_tree t)
+  then
+    Fail.invalid
+      "this vault holds records: an import goes into a new, empty vault (vault \
+       delete, then vault init)";
+  let text =
+    try In_channel.with_open_bin path In_channel.input_all
+    with Sys_error reason -> Fail.invalid "%s" reason
+  in
+  let p = opened_export text unseal in
+  List.iter
+    (fun (r : Tsync_vault.Export.record) ->
+      if r.extension = "vault" then
+        Fail.corrupt "the export does not read: a record in the vault's folder")
+    p.records;
+  Option.iter
+    (fun a ->
+      if Result.is_error (Tsync_vault.Appearance.of_string a) then
+        Fail.corrupt "the export does not read: the appearance")
+    p.appearance;
+  Option.iter
+    (fun b ->
+      if Result.is_error (Tsync_vault.Export.backup_key_of_string b) then
+        Fail.corrupt "the export does not read: the backup key")
+    p.backup_key;
+  List.iter
+    (fun (r : Tsync_vault.Export.record) ->
+      let dir = Names.join ext r.extension in
+      List.iter (fun d -> E.mkdir d ~exclusive:false) [ext; dir];
+      Format_merge.write_file engine ~exclusive:true (Names.join dir r.name)
+        (Tsync_vault.Envelope.seal ~key ~key_id:keyring.key_id
+           ~extension:r.extension r.plaintext))
+    p.records;
+  Option.iter
+    (fun a ->
+      List.iter
+        (fun dir -> E.mkdir dir ~exclusive:false)
+        [ext; folder; appearance_folder];
+      Format_merge.write_file engine ~exclusive:false appearance_path a)
+    p.appearance;
+  Option.iter (write_backup_key engine ~key_id:keyring.key_id ~key) p.backup_key;
+  let retired =
+    List.fold_left
+      (fun k retired -> Keyring.retire k ~key retired)
+      keyring p.keys
+  in
+  if retired.retired <> keyring.retired then
+    write engine ~exclusive:false retired;
+  {
+    records = List.length p.records;
+    keys = List.length retired.retired - List.length keyring.retired;
+    skipped = [];
+  }
 
 let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;

@@ -85,6 +85,8 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync vault kit --output FILE [--stdin]` | The emergency kit, a page to print with the secret key and its QR code; asks for the passphrase |
 | `tsync vault rekey [--new-passphrase] [--generate] [--kit FILE] [--stdin]` | A new key and secret key, every record re-encrypted: shuts out every other machine until it has the new secret key |
 | `tsync vault machines [--name NAME]` | The machines that joined the vault; `--name` renames this one |
+| `tsync vault export --output FILE [--stdin]` | Every record, the vault's keys and its appearance in one file, sealed with the passphrase and this machine's secret key; asks for the passphrase |
+| `tsync vault import FILE [--stdin]` | Put an export into this domain's vault, which must be new and empty; asks for the passphrase and secret key the export was made with |
 | `tsync vault status` | Whether it exists, is unlocked here, and this machine is enrolled |
 | `tsync vault delete` | Remove the vault and every record in it, after confirming the domain's name |
 | `tsync totp add [URI \| --secret S --issuer I --account A]` | Add a two-factor code; `-` reads the link or seed from standard input |

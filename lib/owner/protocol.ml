@@ -163,6 +163,10 @@ type machine = { uuid : string; this : bool; entry : machine_entry option }
     when it did; the next unlock resumes it. *)
 type rekeyed = { secret : secret; pending : string option }
 
+(** vault §8.2: what an export or an import carried; [skipped] names the records
+    that open under no key the vault holds. *)
+type carried = { records : int; keys : int; skipped : string list }
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -299,6 +303,17 @@ type _ request =
       new_passphrase : string option;
     }
       -> rekeyed request  (** vault §7.2 *)
+  | Vault_export : { passphrase : string; path : string } -> carried request
+      (** vault §8.2: the passphrase as typed; [path] a file created there *)
+  | Vault_import : {
+      path : string;
+      unseal : [ `Vault of string * string | `Backup_key of string ];
+    }
+      -> carried request
+      (** vault §8.2: [`Vault (passphrase, secret key)] as typed, or the backup
+          key's seed as typed (§8.3) *)
+  | Vault_backup_key : secret request
+      (** vault §8.3: a new backup key; its seed, spelled, shown once *)
   | Vault_passphrase : {
       passphrase : string;
       new_secret_key : bool;
@@ -380,6 +395,9 @@ let action : type a. a request -> string = function
   | Vault_kit _ -> "vault_kit"
   | Vault_machines _ -> "vault_machines"
   | Vault_rekey _ -> "vault_rekey"
+  | Vault_export _ -> "vault_export"
+  | Vault_import _ -> "vault_import"
+  | Vault_backup_key -> "vault_backup_key"
   | Totp_add _ -> "totp_add"
   | Totp_list _ -> "totp_list"
   | Totp_code _ -> "totp_code"
@@ -392,8 +410,8 @@ let action : type a. a request -> string = function
 let mutates : type a. a request -> bool = function
   | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
   | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
-  | Vault_appearance _ | Vault_rekey _ | Totp_add _ | Totp_rename _
-  | Totp_remove _ | Totp_import _ ->
+  | Vault_appearance _ | Vault_rekey _ | Vault_import _ | Vault_backup_key
+  | Totp_add _ | Totp_rename _ | Totp_remove _ | Totp_import _ ->
       true
   (* extensions README §6: an extension's verbs that write, by name. *)
   | Extension e ->
@@ -413,7 +431,8 @@ let mutates : type a. a request -> bool = function
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
   | Job _ | Vault_init _ | Vault_unlock _ | Vault_passphrase _ | Vault_rekey _
-  | Vault_kit _ | Extension _ ->
+  | Vault_kit _ | Vault_export _ | Vault_import _ | Vault_backup_key
+  | Extension _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
@@ -528,6 +547,19 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Vault_rekey r ->
       ("passphrase", `String r.passphrase)
       :: opt "newPassphrase" (fun p -> `String p) r.new_passphrase
+  | Vault_export r ->
+      [("passphrase", `String r.passphrase); ("path", `String r.path)]
+  | Vault_import r ->
+      ("path", `String r.path)
+      ::
+        (match r.unseal with
+        | `Vault (passphrase, secret_key) ->
+            [
+              ("passphrase", `String passphrase);
+              ("secretKey", `String secret_key);
+            ]
+        | `Backup_key seed -> [("backupKey", `String seed)])
+  | Vault_backup_key -> []
   | Totp_add (`Uri uri) -> [("uri", `String uri)]
   | Totp_add (`Secret s) ->
       [
@@ -722,6 +754,22 @@ let decode j =
                secret_key = str j "secretKey";
              })
     | "vault_kit" -> Request (Vault_kit (required j "passphrase"))
+    | "vault_export" ->
+        Request
+          (Vault_export
+             { passphrase = required j "passphrase"; path = required j "path" })
+    | "vault_import" ->
+        Request
+          (Vault_import
+             {
+               path = required j "path";
+               unseal =
+                 (match str j "backupKey" with
+                   | Some seed -> `Backup_key seed
+                   | None ->
+                       `Vault (required j "passphrase", required j "secretKey"));
+             })
+    | "vault_backup_key" -> Request Vault_backup_key
     | "vault_machines" -> Request (Vault_machines (str j "name"))
     | "vault_rekey" ->
         Request
@@ -949,6 +997,24 @@ let secret_fields s =
 let secret_of j =
   { secret_key = required j "secretKey"; key_id = required j "keyId" }
 
+let carried_fields c =
+  [
+    ("records", `Int c.records);
+    ("keys", `Int c.keys);
+    ("skipped", `List (List.map (fun s -> `String s) c.skipped));
+  ]
+
+let carried_of j =
+  {
+    records = Option.value ~default:0 (int j "records");
+    keys = Option.value ~default:0 (int j "keys");
+    skipped =
+      (match member j "skipped" with
+        | Some (`List l) ->
+            List.filter_map (function `String s -> Some s | _ -> None) l
+        | _ -> []);
+  }
+
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
@@ -1002,6 +1068,9 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at)
     | Vault_init _ -> ok (secret_fields reply)
     | Vault_kit _ -> ok (secret_fields reply)
+    | Vault_backup_key -> ok (secret_fields reply)
+    | Vault_export _ -> ok (carried_fields reply)
+    | Vault_import _ -> ok (carried_fields reply)
     | Vault_rekey _ ->
         ok
           (secret_fields reply.secret
@@ -1303,6 +1372,9 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         }
     | Vault_init _ -> secret_of j
     | Vault_kit _ -> secret_of j
+    | Vault_backup_key -> secret_of j
+    | Vault_export _ -> carried_of j
+    | Vault_import _ -> carried_of j
     | Vault_rekey _ -> { secret = secret_of j; pending = str j "pending" }
     | Vault_machines _ -> (
         match member j "machines" with
