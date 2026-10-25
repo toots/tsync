@@ -5,7 +5,7 @@ keystore entries                         [aged#secret-key free free#secret-key i
 == idle, a minute of 2 s
 unlock                                   ok
 used every 0.5 s for 3 s                 true
-locked within 8 s of statuses alone      true
+locked within 8 s of background listings true
 idle                                     locked lockedBy=idle autoLock={"idleMinutes":1,"onScreenLock":true,"from":{"idleMinutes":"config","onScreenLock":"config"}}
 a use                                    locked: the vault is locked: run tsync vault unlock
 == the screen

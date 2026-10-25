@@ -250,10 +250,10 @@ let contains ~sub s =
 
 (* §6: the TOTP record ids present, read once per verb; [None] when the domain
    does not use totp. *)
-let totp_ids ~domain ~engine ~lazy_tree t =
+let totp_ids ?use ~domain ~engine ~lazy_tree t =
   if not (uses_totp ~domain ~engine) then None
   else (
-    let ctx = Totp_verbs.context ~domain ~engine ~lazy_tree t in
+    let ctx = Totp_verbs.context ?use ~domain ~engine ~lazy_tree t in
     let ok, corrupt = Totp_verbs.records ctx in
     Some (List.map fst ok @ corrupt))
 
@@ -265,7 +265,9 @@ let dangling ids totp =
 (* §10 list: logins, then passkeys, each ordered by title then username then
    id. *)
 let list ~domain ~engine ~lazy_tree t args =
-  let ctx = context ~domain ~engine ~lazy_tree t in
+  (* vault §6.2: a host's refresh in the background is no use of the vault. *)
+  let use = arg args "use" <> Some (`Bool false) in
+  let ctx = context ~use ~domain ~engine ~lazy_tree t in
   let ok, corrupt = records ctx in
   let filter = str args "filter" and site = str args "site" in
   let shown_login (l : Passwords.login) =
@@ -297,7 +299,7 @@ let list ~domain ~engine ~lazy_tree t args =
       | None -> true
   in
   let keys = passkeys ok in
-  let ids = totp_ids ~domain ~engine ~lazy_tree t in
+  let ids = totp_ids ~use ~domain ~engine ~lazy_tree t in
   (* §2.1: a note matches no site; it is listed by title alone. *)
   let note_rows =
     if site <> None then []
