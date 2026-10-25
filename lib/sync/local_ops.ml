@@ -604,17 +604,20 @@ module Make (C : Engine_ctx.S) = struct
 
   let prefetch (m : Manifest.t) off =
     let cc = Cache.cc cache in
-    if m.chunk_size > 0 && m.count > 0 then (
+    if m.chunk_size > 0 && m.count > 0 && m.link = None then (
       let i = Chunking.index ~cs:m.chunk_size off in
       let g = Cache.group_index ~cc m (min i (m.count - 1)) in
-      let groups = Cache.groups ~cc m in
-      List.iteri
-        (fun j (grp : Cache.group) ->
-          if j >= g && j <= g + 1 && not (Cache.is_whole cache grp.gkey) then
+      let last = Cache.group_index ~cc m (m.count - 1) in
+      (* Only the groups fetched are built: building all of a large file's on
+         each read costs more than the read. *)
+      List.iter
+        (fun j ->
+          let grp = Cache.group_of ~cc m j in
+          if not (Cache.is_whole cache grp.gkey) then
             Rt.spawn ~name:"prefetch" (fun () ->
                 try Cache.ensure_whole cache grp
                 with e -> Log.debug "prefetch: %s" (Printexc.to_string e)))
-        groups)
+        (List.filter (fun j -> j <= last) [g; g + 1]))
 
   let read_published (m : Manifest.t) ~off ~len =
     Manifest.check_readable m;
