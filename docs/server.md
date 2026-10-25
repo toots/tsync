@@ -86,6 +86,7 @@ If the proxy runs on another machine, the server must listen beyond localhost. T
 - For a certificate signed by your own authority, add `"ca_certificate": "/path/to/ca.pem"`.
 - The client uses the server's chunk size, so that setting lives in one place.
 - The clocks of client and server must agree within five minutes: requests are signed with the time.
+- The server decides whether the domain has a [vault](vault.md#turning-it-on): the clients follow its `extensions`, and its `vaultLock` applies to every client, which may only lock sooner. The server stores the vault's sealed records and never needs to unlock it.
 
 ## Check on a server
 

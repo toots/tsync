@@ -32,7 +32,8 @@ Both are the same program and the same config file. A server is a domain with an
 | [Keep more than one copy](copies.md) | Backend roles, replicas and backfills, `tsync mirror`, data integrity |
 | [Versions and cleanup](history.md) | Reverting files, `expire` and `gc` |
 | [Share links and export](sharing.md) | Public links, and getting files out of a domain |
-| [The vault](vault.md) | Encrypted secrets inside a domain: setting it up, unlocking machines, two-factor codes, passwords and passkeys |
+| [The vault](vault.md) | Encrypted secrets inside a domain: setting it up, unlocking machines, keys, export and import, scheduled backups, what it protects |
+| [Passwords, passkeys and codes](passwords.md) | Two-factor codes, logins, notes and passkeys: the commands, AutoFill on macOS, the Chrome extension, Android autofill |
 | [Tuning](tuning.md) | Chunk sizes, the cache, concurrency, upload pacing |
 
 ## Reference

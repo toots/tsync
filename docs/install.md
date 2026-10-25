@@ -28,10 +28,12 @@ Two optional packages for a desktop, kept apart so that a server does not pull i
 
 | Package | What it adds |
 |---|---|
-| `tsync-tray` | Sync status in the system tray |
+| `tsync-tray` | Sync status in the system tray, and the vault's two-factor codes |
 | `tsync-dolphin` | *Copy Share Link*, *Make Available Offline* and *Make Online Only* in Dolphin's context menu |
 
-Both are described under [Linux desktop](desktop.md#linux-desktop).
+Both are described under [Linux desktop](desktop.md#linux-desktop). Passwords and passkeys in Chrome come from tsync's [browser extension](passwords.md#in-chrome).
+
+Uninstall with `sudo apt remove tsync` or `sudo dnf remove tsync`. It keeps your config.
 
 ## Android
 

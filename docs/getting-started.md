@@ -53,6 +53,8 @@ The list is then shown. Enter moves on; `a` adds another backend.
 
 So on a new domain, Enter twice gives you a folder. Saying yes to the server asks for its port, secret and certificate ([run tsync as a server](server.md)). Each frontend's remaining options sit behind one more question, `other options`, which defaults to no.
 
+**Its secrets.** `use totp` and `use passwords`, both no by default, give the domain a [vault](vault.md) for two-factor codes, and for logins and passkeys. Behind a server, answer no to both and the domain follows the server's choice. Once the service runs, `tsync vault init` creates the vault.
+
 **The last menu** lists your domains:
 
 ```
