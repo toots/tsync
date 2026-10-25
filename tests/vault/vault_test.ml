@@ -471,6 +471,14 @@ let export () =
     (E.open_with_backup ~seed:(Tsync_core.Ids.urandom 16) sealed = Error `Wrong);
   check "two seals of one payload differ"
     (E.seal_to_backup backup payload <> sealed);
+  let twice = { payload with records = payload.records @ payload.records } in
+  check "a record named twice does not open"
+    (match
+       E.open_with_vault ~secret_key ~passphrase:"a passphrase"
+         (E.seal_with_vault ~secret_key ~passphrase:"a passphrase" twice)
+     with
+      | Error (`Corrupt _) -> true
+      | _ -> false);
   check "another text is no export"
     (Result.is_error (E.header {|{"tsyncVaultExport":2}|}))
 

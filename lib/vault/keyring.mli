@@ -34,6 +34,18 @@ type t = {
 (** The writers' recommended parameters, [salt] unused (§9). *)
 val recommended : kdf
 
+(** A slot's [kdf] object (§4.1), shared with what else is sealed as a slot is
+    (§8.2); [kdf_of_json] raises [Failure] or [Yojson.Safe.Util.Type_error]. *)
+val kdf_to_json : kdf -> Yojson.Safe.t
+
+val kdf_of_json : Yojson.Safe.t -> kdf
+
+(** Whether readers derive with these parameters (§9). *)
+val within_limits : kdf -> bool
+
+(** The key Argon2id derives from the passphrase with the secret key (§4.2). *)
+val kek : kdf -> secret_key:string -> string -> string
+
 (** [Error] is the reason the keyring is CORRUPT. *)
 val of_string : string -> (t, string) result
 

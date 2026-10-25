@@ -90,6 +90,7 @@ the header names the backup key                              yes
 opens with the backup key's seed                             yes
 another seed does not open it                                yes
 two seals of one payload differ                              yes
+a record named twice does not open                           yes
 another text is no export                                    yes
 == envelope
 length for 6 bytes: 58
