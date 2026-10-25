@@ -181,8 +181,9 @@ let first () =
           answer "lock" (ask "idle" [("action", "vault_lock")]);
           p "== age, a minute of 0.05 s: an hour of 3 s";
           Atomic.set Tsync_owner.Vault.minute 0.05;
-          answer "unlock" (unlock "aged");
+          (* The age counts from the unlock, which a loaded runner may answer late. *)
           let started = Unix.gettimeofday () in
+          answer "unlock" (unlock "aged");
           let rec use () =
             if field (touch "aged") "error" = None then (
               Rt.sleep 0.2;
