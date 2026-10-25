@@ -333,6 +333,7 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_vault
   unix
   yojson
   base64

@@ -167,6 +167,16 @@ type rekeyed = { secret : secret; pending : string option }
     that open under no key the vault holds. *)
 type carried = { records : int; keys : int; skipped : string list }
 
+(** vault §8.3: this machine's scheduled backups; [stale] once the last is two
+    periods old, or there is none. *)
+type backup_state = {
+  dir : string;
+  every_hours : int;
+  last : float option;
+  stale : bool;
+  error : string option;
+}
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -179,6 +189,8 @@ type vault_status = {
       (** the ids of the retired keys that do not unwrap, known while unlocked
       *)
   copies : string list;  (** keyring copies beside it *)
+  backup_key : string option;  (** §8.3: its id, known while unlocked *)
+  backup : backup_state option;  (** none unless this machine schedules them *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
@@ -216,6 +228,8 @@ type status = {
   mount : string option;
   extensions : string list;
   new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
+  vault_backup_overdue : bool;
+      (** vault §8.3, where this machine schedules them *)
 }
 
 type _ request =
@@ -1114,6 +1128,18 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
              ("retiredUnreadable", strings reply.retired_unreadable);
              ("copies", strings reply.copies);
            ]
+          @ opt "backupKey" (fun k -> `String k) reply.backup_key
+          @ opt "backup"
+              (fun (b : backup_state) ->
+                `Assoc
+                  ([
+                     ("dir", `String b.dir);
+                     ("everyHours", `Int b.every_hours);
+                     ("stale", `Bool b.stale);
+                   ]
+                  @ opt "last" (fun at -> `Int (int_of_float at)) b.last
+                  @ opt "error" (fun e -> `String e) b.error))
+              reply.backup
           @ (match reply.vault with
             | `Corrupt reason -> [("reason", `String reason)]
             | _ -> [])
@@ -1267,13 +1293,16 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
               ( "extensions",
                 `List (List.map (fun e -> `String e) reply.extensions) );
             ]
+          @ (if reply.new_machines = [] then []
+             else
+               [
+                 ( "newMachines",
+                   `List (List.map (fun n -> `String n) reply.new_machines) );
+               ])
           @
-          if reply.new_machines = [] then []
-          else
-            [
-              ( "newMachines",
-                `List (List.map (fun n -> `String n) reply.new_machines) );
-            ])
+          if reply.vault_backup_overdue then
+            [("vaultBackupOverdue", `Bool true)]
+          else [])
     | Pause _ -> ok [("paused", `Bool reply)]
     | Stats _ -> (
         match R.answer_to_yojson reply with `Assoc l -> ok l | j -> j)
@@ -1428,6 +1457,18 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
             (match member j "retired" with Some (`Int n) -> n | _ -> 0);
           retired_unreadable = strings "retiredUnreadable";
           copies = strings "copies";
+          backup_key = str j "backupKey";
+          backup =
+            Option.map
+              (fun b ->
+                {
+                  dir = Option.value ~default:"" (str b "dir");
+                  every_hours = Option.value ~default:0 (int b "everyHours");
+                  last = Option.map float_of_int (int b "last");
+                  stale = flag b "stale";
+                  error = str b "error";
+                })
+              (member j "backup");
           keystore_error = str j "keystoreError";
           enrolled = flag j "enrolled";
           new_machines = strings "newMachines";
@@ -1585,6 +1626,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               | Some (`List l) ->
                   List.filter_map (function `String s -> Some s | _ -> None) l
               | _ -> []);
+          vault_backup_overdue = flag j "vaultBackupOverdue";
         }
     | Pause _ -> flag j "paused"
     | Stats _ -> (

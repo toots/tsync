@@ -31,6 +31,7 @@ One JSON object. `tsync build-info` prints its location. Keys that are not liste
 | `cacheChunkSize` | no | 16 MiB | |
 | `maxCache` | no | unlimited | The wizard writes 1 GiB |
 | `extensions` | no | none, or the server's | The kinds of secrets the domain's [vault](vault.md) keeps. Behind an `http-proxy` backend the server's list is used; one given here may only name fewer. |
+| `vaultBackup` | no | none | Back the vault up on its own, sealed to its backup key: `dir` (absolute), `everyHours` (1 to 8760, default 24), `keep` (1 to 1000, default 14) ([vault](vault.md#scheduled-backups)). |
 | `vaultLock` | no | none, or the server's | Lock the vault on its own: `idleMinutes` (1 to 1440), `onScreenLock`, `maxHours` (1 to 720) ([vault](vault.md#locking)). The strictest of this and the server's applies. |
 
 **Backend**

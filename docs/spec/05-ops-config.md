@@ -89,6 +89,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
 | `extensions` | array | no: the main's (below), else `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
+| `vaultBackup` | object | no | `{"dir", "everyHours"?, "keep"?}`, this machine's scheduled backups of the vault ([vault §8.3](extensions/vault.md#83-scheduled-backups)): `dir` absolute, `everyHours` 1 to 8760 (24), `keep` 1 to 1000 (14); per machine, never stated by a main; unset: none |
 | `vaultLock` | object | no | `{"idleMinutes"?, "onScreenLock"?, "maxHours"?}`, the vault's auto-lock ([vault §6.2](extensions/vault.md#62-auto-lock)); *domain-wide* by rule 7 (below); unset: the main's, else none |
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |

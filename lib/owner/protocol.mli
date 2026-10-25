@@ -180,6 +180,16 @@ type rekeyed = { secret : secret; pending : string option }
     that open under no key the vault holds. *)
 type carried = { records : int; keys : int; skipped : string list }
 
+(** vault §8.3: this machine's scheduled backups; [stale] once the last is two
+    periods old, or there is none. *)
+type backup_state = {
+  dir : string;
+  every_hours : int;
+  last : float option;
+  stale : bool;
+  error : string option;
+}
+
 (** vault §8 [status]. *)
 type vault_status = {
   vault : [ `Absent | `Corrupt of string | `Locked | `Unlocked ];
@@ -192,6 +202,8 @@ type vault_status = {
       (** the ids of the retired keys that do not unwrap, known while unlocked
       *)
   copies : string list;  (** keyring copies beside it *)
+  backup_key : string option;  (** §8.3: its id, known while unlocked *)
+  backup : backup_state option;  (** none unless this machine schedules them *)
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
@@ -229,6 +241,8 @@ type status = {
   mount : string option;
   extensions : string list;  (** in force (05 §2.1 rule 5) *)
   new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
+  vault_backup_overdue : bool;
+      (** vault §8.3, where this machine schedules them *)
 }
 
 type _ request =

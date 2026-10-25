@@ -134,6 +134,19 @@ tooltip tsync — Uploading 1
         ---
         Quit tsync tray -> quit
 
+== one vault's scheduled backup is overdue
+icon    tsync-idle-symbolic
+tooltip tsync — Idle
+        docs — Idle -> open docs
+            laptop joined the vault (computer)
+            The vault's backup is overdue
+        music — Idle -> open music
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
 == two reachable domains, one paused
 icon    tsync-idle-symbolic
 tooltip tsync — Idle
@@ -447,4 +460,4 @@ tooltip tsync — Downloading 1
         d
             ? (?)
 
-38 cases
+39 cases

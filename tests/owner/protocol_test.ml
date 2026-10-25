@@ -238,6 +238,7 @@ let cases =
           mount = Some "/m";
           extensions = ["totp"];
           new_machines = ["laptop"];
+          vault_backup_overdue = true;
         } );
     Case (Pause false, false);
     Case (Stop, ());

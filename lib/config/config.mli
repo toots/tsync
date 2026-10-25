@@ -26,6 +26,10 @@ type frontend = { ftype : string; options : (string * value) list }
 (** The extensions of this release (05 §2.1). *)
 val extension_names : string list
 
+(** vault §8.3: where this machine writes the vault's scheduled backups, how
+    often, and how many it keeps. *)
+type vault_backup = { dir : string; every_hours : int; keep : int }
+
 type domain = {
   name : Domain_name.t;
   backends : backend list;  (** in read order: role, then config order *)
@@ -46,6 +50,7 @@ type domain = {
   project_quarantine : float option;
   project_settle : float option;
   vault_lock : Vault_lock.t option;
+  vault_backup : vault_backup option;
 }
 
 val default_symlinks : [ `Keep | `Follow | `Skip ]

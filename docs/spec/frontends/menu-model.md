@@ -171,6 +171,8 @@ In order:
    - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
      icon `computer`, action `Nothing`: it says so until the machines are listed
      (`tsync vault machines`);
+   - when its `vaultBackupOverdue`, a row at indent 1 `The vault's backup is overdue`, no icon,
+     action `Nothing` ([vault §8.3](../extensions/vault.md#83-scheduled-backups));
    - its upload file rows, then its download file rows (below).
 3. **Traffic**, when shown: a separator, the traffic line, then the rate line when there is one.
    - The section, separator included, is absent when it has neither line.

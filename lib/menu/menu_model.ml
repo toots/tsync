@@ -155,6 +155,7 @@ type status = {
       [@of_yojson lenient traffic_of_yojson] [@default None]
   new_machines : string list;
       [@key "newMachines"] [@of_yojson items string_of_yojson] [@default []]
+  vault_backup_overdue : flag; [@key "vaultBackupOverdue"] [@default false]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -240,6 +241,9 @@ let domain_rows (name, status) =
               (fun m ->
                 row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
               s.new_machines
+            @ (if s.vault_backup_overdue then
+                 [row ~indent:1 "The vault's backup is overdue"]
+               else [])
             @ file_rows_of name s.uploading
             @ file_rows_of name s.downloading )
   in

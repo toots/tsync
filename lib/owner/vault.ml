@@ -39,6 +39,8 @@ type t = {
   keystore_read : [ `Unread | `Read | `Failed of float ] Atomic.t;
       (** [`Failed at]: the last read failed at [at], with no K held since *)
   keystore_error : string option Atomic.t;
+  backup_error : string option Atomic.t;
+      (** §8.3: why the last scheduled backup was not written *)
   pulls : Pulls.t option;  (** on a lazy tree: reads answer the last view *)
   view : Pulls.view Atomic.t;  (** of the last read *)
 }
@@ -54,6 +56,7 @@ let create ?pulls () =
     cached = Atomic.make `Memory;
     keystore_read = Atomic.make `Unread;
     keystore_error = Atomic.make None;
+    backup_error = Atomic.make None;
     pulls;
     view = Atomic.make { Pulls.pulled_at = None; outdated = false };
   }
@@ -1144,6 +1147,94 @@ let import ~domain ~engine ~lazy_tree t ~path unseal : Protocol.carried =
     skipped = [];
   }
 
+(* §8.3: this domain's backups in [dir], oldest first; their names sort by
+   when they were written. *)
+let backups ~(domain : Tsync_domain.Domain.t) dir =
+  let prefix = Domain_name.to_string domain.name ^ "-"
+  and suffix = ".tsync-vault-backup" in
+  match Sys.readdir dir with
+    | exception Sys_error _ -> []
+    | names ->
+        List.sort compare
+          (List.filter
+             (fun n ->
+               String.starts_with ~prefix n && String.ends_with ~suffix n)
+             (Array.to_list names))
+
+let last_backup ~domain dir =
+  match List.rev (backups ~domain dir) with
+    | [] -> None
+    | newest :: _ -> (
+        try Some (Unix.stat (Filename.concat dir newest)).st_mtime
+        with Unix.Unix_error _ -> None)
+
+let backup_period (b : Tsync_config.Config.vault_backup) =
+  float_of_int b.every_hours *. 60. *. Atomic.get minute
+
+let overdue ~domain (b : Tsync_config.Config.vault_backup) =
+  match last_backup ~domain b.dir with
+    | Some at -> Unix.gettimeofday () -. at > 2. *. backup_period b
+    | None -> true
+
+let backup_overdue (domain : Tsync_domain.Domain.t) =
+  Option.fold ~none:false ~some:(overdue ~domain) domain.domain.vault_backup
+
+(* §8.3: written while K is held and the last is a period old, sealed to the
+   backup key alone; the oldest beyond [keep] are removed. *)
+let backup_tick ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t =
+  match domain.domain.vault_backup with
+    | None -> ()
+    | Some b -> (
+        let due =
+          match last_backup ~domain b.dir with
+            | Some at -> Unix.gettimeofday () -. at >= backup_period b
+            | None -> true
+        in
+        let held =
+          match (read ~domain engine).keyring with
+            | `Ok k -> Option.map (fun key -> (k, key)) (key t k)
+            | _ -> None
+        in
+        match held with
+          | Some (keyring, key) when due -> (
+              match
+                match backup_key engine ~key_id:keyring.key_id ~key with
+                  | None ->
+                      Fail.invalid
+                        "the vault has no backup key: run tsync vault \
+                         backup-key"
+                  | Some (_, backup) ->
+                      let p, skipped =
+                        payload ~domain ~engine ~lazy_tree t (keyring, key)
+                      in
+                      Fs.mkdir_p ~perm:0o700 b.dir;
+                      let now = Unix.gettimeofday () in
+                      let tm = Unix.gmtime now in
+                      write_new
+                        (Filename.concat b.dir
+                           (Printf.sprintf
+                              "%s-%04d%02d%02dT%02d%02d%02d.%03dZ.tsync-vault-backup"
+                              (Domain_name.to_string domain.name)
+                              (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                              tm.tm_hour tm.tm_min tm.tm_sec
+                              (int_of_float (Float.rem now 1. *. 1000.))))
+                        (Tsync_vault.Export.seal_to_backup backup p);
+                      let all = backups ~domain b.dir in
+                      List.iteri
+                        (fun i n ->
+                          if i < List.length all - b.keep then
+                            Fs.unlink_quiet (Filename.concat b.dir n))
+                        all;
+                      if skipped <> [] then
+                        Log.warn "vault: the backup leaves out %s"
+                          (String.concat ", " skipped)
+              with
+                | () -> Atomic.set t.backup_error None
+                | exception Fail.E f ->
+                    Log.warn "vault: no backup written: %s" f.reason;
+                    Atomic.set t.backup_error (Some f.reason))
+          | _ -> ())
+
 let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
   restore ~domain ~engine t;
@@ -1159,6 +1250,18 @@ let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       retired = 0;
       retired_unreadable = [];
       copies = found.copies;
+      backup_key = None;
+      backup =
+        Option.map
+          (fun (b : Tsync_config.Config.vault_backup) ->
+            {
+              Protocol.dir = b.dir;
+              every_hours = b.every_hours;
+              last = last_backup ~domain b.dir;
+              stale = overdue ~domain b;
+              error = Atomic.get t.backup_error;
+            })
+          domain.domain.vault_backup;
       keystore_error = Atomic.get t.keystore_error;
       enrolled = false;
       outdated = (Atomic.get t.view).outdated;
@@ -1218,6 +1321,11 @@ let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
               (List.sort_uniq compare kinds);
           unusable = Keyring.unusable k;
           retired = List.length k.retired;
+          backup_key =
+            Option.bind (key t k) (fun key ->
+                Option.map
+                  (fun (_, (b : Tsync_vault.Export.backup_key)) -> b.id)
+                  (backup_key engine ~key_id:k.key_id ~key));
           retired_unreadable =
             (match key t k with
               | Some key -> snd (Keyring.retired_keys k ~key)

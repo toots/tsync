@@ -24,6 +24,10 @@ type backend = {
 
 type frontend = { ftype : string; options : (string * value) list }
 
+(** vault §8.3: where this machine writes the vault's scheduled backups, how
+    often, and how many it keeps. *)
+type vault_backup = { dir : string; every_hours : int; keep : int }
+
 type domain = {
   name : Domain_name.t;
   backends : backend list;
@@ -42,6 +46,7 @@ type domain = {
   project_quarantine : float option;
   project_settle : float option;
   vault_lock : Vault_lock.t option;
+  vault_backup : vault_backup option;
 }
 
 let default_symlinks = `Keep
@@ -399,6 +404,7 @@ let parse_domain path j =
       "projectQuarantine";
       "projectSettle";
       "vaultLock";
+      "vaultBackup";
     ]
     l;
   let raw_name =
@@ -538,6 +544,30 @@ let parse_domain path j =
           | Error e -> fail (sub path "vaultLock") "%s" e)
       (get l "vaultLock")
   in
+  let vault_backup =
+    Option.map
+      (fun j ->
+        let path = sub path "vaultBackup" in
+        let l = assoc path j in
+        check_keys path ["dir"; "everyHours"; "keep"] l;
+        let dir =
+          required (sub path "dir") "string" (string_field path l "dir")
+        in
+        if Filename.is_relative dir then
+          fail (sub path "dir") "must be absolute";
+        let bounded k ~default lo hi =
+          match int_field path l k with
+            | None -> default
+            | Some n when n >= lo && n <= hi -> n
+            | Some _ -> fail (sub path k) "must lie between %d and %d" lo hi
+        in
+        {
+          dir;
+          every_hours = bounded "everyHours" ~default:24 1 8760;
+          keep = bounded "keep" ~default:14 1 1000;
+        })
+      (get l "vaultBackup")
+  in
   let d =
     {
       name;
@@ -565,6 +595,7 @@ let parse_domain path j =
       project_quarantine;
       project_settle;
       vault_lock;
+      vault_backup;
     }
   in
   (* 05 §2.1: behind a main that states its settings a timing left out is the

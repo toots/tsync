@@ -18,4 +18,17 @@ the passkey signs with its old key       true
 the colour                               #dc2626
 the new K kept                           true, retired 1
 import again, now not empty              tsync: this vault holds records: an import goes into a new, empty vault (vault delete, then vault init)
+no backup key yet                        overdue true, error the vault has no backup key: run tsync vault backup-key, files 0
+the backup key in status                 true
+a backup written                         true
+  mode 600                               true
+  and later ones, the oldest removed     true
+  status                                 overdue false, error none
+lock                                     ok
+locked, none written                     true
+delete                                   ok
+import a backup, another backup key      tsync: this backup was sealed to another backup key (id ID)
+import a backup with its backup key      ok
+after: the same records                  true
+the backup key kept                      true
 owner exit status 0

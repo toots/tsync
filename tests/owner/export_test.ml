@@ -1,7 +1,8 @@
-(* vault §8.2 through a real owner and the CLI given as argv 1: a vault holding
-   a code, a login linked to it, a note with a secret field and a passkey is
-   exported, deleted, made again and imported, and every record, the
-   appearance and the old K come back. *)
+(* vault §8.2 and §8.3 through a real owner and the CLI given as argv 1: a
+   vault holding a code, a login linked to it, a note with a secret field and a
+   passkey is exported, deleted, made again and imported, and every record, the
+   appearance and the old K come back; then backed up on a schedule to a backup
+   key, and restored from a backup. *)
 
 open Tsync_core
 open Tsync_ipc
@@ -26,8 +27,9 @@ let config_text =
   Printf.sprintf
     {|{"name":"test","domains":[
   {"name":"docs","symlinks":"keep","versioning":true,"extensions":["totp","passwords"],"frontends":["http-proxy"],
+   "vaultBackup":{"dir":"%s/backups","everyHours":1,"keep":2},
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
-    root
+    root root
 
 let config = Tsync_config.Config.of_string config_text
 let () = Unix.putenv "TSYNC_CONFIG_JSON" config_text
@@ -210,6 +212,66 @@ let keystore : Keystore.t =
   }
 
 let status () = ask [("action", s "vault_status")]
+let backup_dir = file "backups"
+
+let backup_files () =
+  match Sys.readdir backup_dir with
+    | names -> List.sort compare (Array.to_list names)
+    | exception Sys_error _ -> []
+
+let backup_state () =
+  match member (status ()) "backup" with
+    | Some b ->
+        Printf.sprintf "overdue %b, error %s"
+          (member b "stale" = Some (`Bool true))
+          (Option.value ~default:"none" (field b "error"))
+    | None -> "none"
+
+let rec until ?(tries = 200) f =
+  if f () || tries = 0 then f ()
+  else (
+    Rt.sleep 0.05;
+    until ~tries:(tries - 1) f)
+
+(* §8.3: a schedule needs a backup key; it writes while K is held, keeps the
+   newest [keep], and a backup restores with the backup key alone. *)
+let backups ~login ~note ~before =
+  ignore (until (fun () -> backup_state () <> "overdue true, error none"));
+  p "%-40s %s, files %d" "no backup key yet" (backup_state ())
+    (List.length (backup_files ()));
+  let made = ask [("action", s "vault_backup_key")] in
+  let seed = Option.get (field made "secretKey") in
+  p "%-40s %b" "the backup key in status"
+    (field (status ()) "backupKey" = field made "keyId");
+  p "%-40s %b" "a backup written" (until (fun () -> backup_files () <> []));
+  let first = List.hd (backup_files ()) in
+  p "%-40s %b" "  mode 600"
+    ((Unix.stat (Filename.concat backup_dir first)).st_perm land 0o777 = 0o600);
+  p "%-40s %b" "  and later ones, the oldest removed"
+    (until (fun () ->
+         let now = backup_files () in
+         List.length now = 2 && not (List.mem first now)));
+  p "%-40s %s" "  status" (backup_state ());
+  answer "lock" (ask [("action", s "vault_lock")]);
+  let locked = backup_files () in
+  Rt.sleep 0.5;
+  p "%-40s %b" "locked, none written" (backup_files () = locked);
+  let path = Filename.concat backup_dir (List.hd (List.rev locked)) in
+  let import input =
+    cli
+      ["vault"; "import"; "--domain"; "docs"; "--stdin"; "--backup-key"; path]
+      input
+  in
+  ignore (ask [("action", s "vault_unlock"); ("passphrase", s second)]);
+  answer "delete" (ask [("action", s "vault_delete"); ("confirm", s "docs")]);
+  ignore (ask [("action", s "vault_init"); ("passphrase", s passphrase)]);
+  p "%-40s %s" "import a backup, another backup key"
+    (import
+       (Tsync_vault.Secret_key.to_string (Tsync_core.Ids.urandom 16) ^ "\n"));
+  p "%-40s %s" "import a backup with its backup key" (import (seed ^ "\n"));
+  p "%-40s %b" "after: the same records" (view ~login ~note = before);
+  p "%-40s %b" "the backup key kept"
+    (field (status ()) "backupKey" = field made "keyId")
 
 let scenario () =
   let first = ask [("action", s "vault_init"); ("passphrase", s passphrase)] in
@@ -339,10 +401,13 @@ let scenario () =
       | Some (`Int n) -> string_of_int n
       | _ -> "?");
   p "%-40s %s" "import again, now not empty"
-    (import (passphrase ^ "\n" ^ secret_key ^ "\n"))
+    (import (passphrase ^ "\n" ^ secret_key ^ "\n"));
+  backups ~login ~note ~before
 
 let () =
   Keystore.register keystore;
+  (* §8.3: an hour's period in 0.6 s. *)
+  Atomic.set Tsync_owner.Vault.minute 0.01;
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
       let owner =
