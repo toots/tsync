@@ -150,6 +150,9 @@ within_deadline(work):
 
 ### 4.4 Range fill
 
+A sealed chunk is filled whole, with `get`, and opened before any byte is served
+([file-encryption §8](file-encryption.md#8-writing-reading-and-a-locked-vault)).
+
 ```
 fill(g, i, want):
   loop:

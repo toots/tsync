@@ -170,7 +170,8 @@ minted id: `3f2a9c1b7d4e-1a`.
 ### 2.6 File manifest: binary `tsyncm03`
 
 Little-endian, a fixed header then variable fields, no escaping. A body with another magic is not a
-manifest.
+manifest, but for `tsyncm04`, the manifest of an encrypted file, which
+[file-encryption §7](algorithms/file-encryption.md#7-manifest-binary-tsyncm04) owns.
 
 ```
 off  len  field

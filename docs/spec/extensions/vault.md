@@ -78,7 +78,9 @@ what a user can remember and type on every machine.
 `tsync vault init` (action `vault_init`) creates the domain's vault.
 
 1. It is refused unless this client uses an extension of the domain
-   ([README §3](README.md#3-opting-in)). A domain may already have a vault another client made;
+   ([README §3](README.md#3-opting-in)), or the domain uses `encryptFiles`
+   ([file-encryption §2](../algorithms/file-encryption.md#2-turning-it-on)), which gives it a vault
+   too. A domain may already have a vault another client made;
    this client then unlocks it (§6) instead.
 2. It brings the local tree to the main's first (a cycle on a full tree, a pull of `/.tsync-ext/`
    on a lazy one), and is refused if that fails or a keyring exists. Init is a user's one-time
@@ -137,6 +139,7 @@ The keyring is the file `/.tsync-ext/vault/keyring`: one JSON object, UTF-8.
 | slot `secretKeyId` | on a `secret-key` slot: the id of the secret key it is keyed with |
 | slot `created` | epoch seconds; informative |
 | `kdf`, `nonce`, `wrapped` | the wrapping (§4.2); present on a `secret-key` slot |
+| `retired` | optional array, by `keyId` ascending: the Ks a re-key or a raced init replaced (§4.3, §7.2), each `{"keyId", "nonce", "wrapped"}` with `wrapped = XChaCha20-Poly1305-Seal(K, nonce, retired K, ad = "tsync-vault-retired/" keyId "/" retired keyId)` under the current K |
 
 - `b64url` is base64url without padding.
 - **Readers** accept members in any order and ignore unknown members. A slot of an unknown kind
@@ -146,6 +149,10 @@ The keyring is the file `/.tsync-ext/vault/keyring`: one JSON object, UTF-8.
   same keyring content then write the same bytes, which the fold relies on (§4.3).
 - A keyring that does not parse, or has no slot, is CORRUPT; the vault stays locked and status
   reports it.
+- **Retired keys** open what was sealed under them and seal nothing: an unlock unwraps them with
+  K, and an encrypted file whose manifest names one ([file-encryption §7](../algorithms/file-encryption.md#7-manifest-binary-tsyncm04))
+  reads with it. Records are re-encrypted instead (§4.3, §7.2), and need none. A retired key
+  that does not unwrap is reported, and the files under it do not open.
 
 ### 4.2 Wrapping a slot
 
@@ -194,8 +201,10 @@ fold ([README §4.2](README.md#42-the-fold)) settles it:
   old K. Until every record is re-encrypted the old K is kept: a re-encryption that fails fails
   the unlock and leaves both the old K and the vault as they were, for the next unlock. Two machines
   doing so concurrently leave conflicted copies of equal plaintext, which the extension's fold
-  settles. Once no machine holding the copy's K is left, the records under it cannot be read;
-  status keeps reporting them.
+  settles. Before it forgets its old K, it adds it to the keyring's `retired` keys under the
+  domain's K, so files it sealed under it stay readable. Once no machine holding the copy's K is
+  left, the records under it cannot be read; status keeps reporting them.
+- **`retired`** of copies of the same `keyId` is the union by retired key id, as slots are.
 
 A slot removed concurrently with another keyring change comes back from the union. Status lists
 the slots, so the user sees it.
@@ -371,6 +380,10 @@ entries.
   start again. It is refused `invalid` unless the request names the domain again (`confirm`, the
   domain's name); the CLI asks for it on the terminal, an app asks the user to confirm in its own
   words, naming the domain and saying every record is lost.
+- While the domain holds encrypted files, it is also refused `invalid` unless `confirmFiles`
+  states how many it holds, as the refusal says: the CLI and an app ask a second confirmation
+  naming that count, since every one of them is lost with K
+  ([file-encryption §9.3](../algorithms/file-encryption.md#93-the-rest)).
 - The files go first, then this machine's entries. An entry the keystore will not remove (one an
   earlier build of the program wrote, which macOS keeps for its owner) does not undo the delete:
   the reply says which entry is left and why, and the vault is gone.
@@ -396,8 +409,9 @@ change alone leaves both valid (§7).
   (`newPassphrase`, §2.2) or keeps the current one; a CLI or app SHOULD suggest a new one when a
   machine was lost.
 - It draws a new K, key id and secret key, writes a keyring holding one `secret-key` slot for
-  them, and keeps the new secret key on this machine before anything else, so whatever follows
-  fails, this machine can still unlock.
+  them and, as `retired` keys under the new K, the old K and every key the old keyring retired,
+  and keeps the new secret key on this machine before anything else, so whatever follows fails,
+  this machine can still unlock and every encrypted file stays readable.
 - It then re-encrypts every record under the old key id as §4.3 does for a copy's K, in every
   extension's folder, pulling each first on a lazy tree, and keeps the old K until it is done;
   then it keeps the new K (§6). A re-encryption that fails leaves the old K held, and is resumed
@@ -411,8 +425,10 @@ change alone leaves both valid (§7).
   (`secretKeyReplaced`). A machine that
   wrote records under the old K before it saw the new keyring re-encrypts them at its next unlock
   (§4.3).
-- **What it protects:** every record from then on, and the current body of every record. The
-  domain's versions keep earlier bodies under the old K
+- **What it protects:** every record from then on, the current body of every record, and every
+  file version written from then on; files sealed under the old K are not re-sealed, and read
+  with it as a retired key until they are rewritten. The domain's versions keep earlier bodies
+  under the old K
   ([05 §4.8](../05-ops-config.md#48-deleted-files-and-retention)): whoever kept the old K reads
   those until retention removes them.
 - Two re-keys racing leave two keyrings of different key ids, which §4.3 settles.
@@ -432,7 +448,7 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 | `unlock` / `vault_unlock` | — | §6 |
 | `lock` / `vault_lock` | — | §6; with `reason: "screen"`, §6.2 |
 | `passphrase` / `vault_passphrase` | yes | §7 |
-| `delete` / `vault_delete` | — | §7.1 |
+| `delete` / `vault_delete` | `confirm`, `confirmFiles?` | §7.1 |
 | `rekey` / `vault_rekey` | yes | §7.2 |
 | `kit` / `vault_kit` | — | §3.1 |
 | `machines` / `vault_machines` | yes | §6.3 |

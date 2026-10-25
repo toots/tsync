@@ -90,6 +90,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
 | `extensions` | array | no: the main's (below), else `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
 | `vaultLock` | object | no | `{"idleMinutes"?, "onScreenLock"?, "maxHours"?}`, the vault's auto-lock ([vault §6.2](extensions/vault.md#62-auto-lock)); *domain-wide* by rule 7 (below); unset: the main's, else none |
+| `encryptFiles` | bool | no | *domain-wide* (below); unset: the main's, else `false`. New files are encrypted under the domain's vault ([file-encryption](algorithms/file-encryption.md)) |
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | no | *advanced*, *domain-wide* (below); unset: the main's, else `keep` |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
@@ -106,8 +107,8 @@ deployment nobody is experimenting on. A config that leaves it out is complete, 
 it unasked. The config editor asks about it only in its advanced mode
 ([07 §5.9](07-daemon-cli.md#59-config-wizard-tsync-config---edit)).
 
-**Domain-wide settings.** `chunkSize`, `symlinks`, the three projection timings and
-`maxEntryCommands` are values the clients of one main MUST share. One rule serves them all:
+**Domain-wide settings.** `chunkSize`, `symlinks`, `encryptFiles`, the three projection timings
+and `maxEntryCommands` are values the clients of one main MUST share. One rule serves them all:
 
 1. A domain that leaves the value out uses the one its main states, when the main states one, and
    the application's default otherwise.

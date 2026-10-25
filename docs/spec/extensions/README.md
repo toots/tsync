@@ -46,7 +46,9 @@ a top-level command or a frontend's CLI group
   server decides: a client can only narrow its list, and one that leaves `extensions` out (the
   Android app) decides nothing. A client that has not yet learned what the main states asks it
   before deciding: an unknown statement never reads as stating nothing, and a main that does not
-  answer fails the verb with its code (UNREACHABLE), never `invalid`. For a domain whose config lists
+  answer fails the verb with its code (UNREACHABLE), never `invalid`. A domain that uses `encryptFiles`, or whose store holds a keyring, has a vault whatever it
+  lists, for its files' keys ([file-encryption §2](../algorithms/file-encryption.md#2-turning-it-on)):
+  its vault verbs are answered as if it used an extension. For a domain whose config lists
   none, this client runs nothing of this file: it writes nothing under `/.tsync-ext/`, folds
   nothing, and refuses every vault and extension verb `invalid`. The folder still syncs, hidden,
   like any other.
