@@ -1,6 +1,11 @@
-type t = { color : string option; icon : string option; modified : int }
+type t = {
+  color : string option;
+  icon : string option;
+  modified : int;
+  unknown : (string * Yojson.Safe.t) list;
+}
 
-let none = { color = None; icon = None; modified = 0 }
+let none = { color = None; icon = None; modified = 0; unknown = [] }
 
 (* Ten hues readable on light and dark backgrounds, apart at a glance. *)
 let palette =
@@ -74,7 +79,8 @@ let to_string t =
        @ (match t.icon with
          | Some i -> [("icon", `String (Base64.encode_string i))]
          | None -> [])
-       @ [("modified", `Int t.modified)]))
+       @ [("modified", `Int t.modified)]
+       @ t.unknown))
 
 let ( let* ) = Result.bind
 
@@ -99,5 +105,14 @@ let of_string body =
         let modified =
           match List.assoc_opt "modified" l with Some (`Int m) -> m | _ -> 0
         in
-        Ok { color; icon; modified }
+        Ok
+          {
+            color;
+            icon;
+            modified;
+            unknown =
+              List.filter
+                (fun (k, _) -> not (List.mem k ["color"; "icon"; "modified"]))
+                l;
+          }
     | _ | (exception Yojson.Json_error _) -> Error "not an appearance"

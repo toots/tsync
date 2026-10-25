@@ -4,18 +4,20 @@ type t = {
   last_unlock : int;
   seen : string list;
   modified : int;
+  unknown : (string * Yojson.Safe.t) list;
 }
 
 let to_string t =
   Yojson.Safe.to_string
     (`Assoc
-       [
-         ("name", `String t.name);
-         ("enrolled", `Int t.enrolled);
-         ("lastUnlock", `Int t.last_unlock);
-         ("seen", `List (List.map (fun id -> `String id) t.seen));
-         ("modified", `Int t.modified);
-       ])
+       ([
+          ("name", `String t.name);
+          ("enrolled", `Int t.enrolled);
+          ("lastUnlock", `Int t.last_unlock);
+          ("seen", `List (List.map (fun id -> `String id) t.seen));
+          ("modified", `Int t.modified);
+        ]
+       @ t.unknown))
 
 let of_string body =
   match Yojson.Safe.from_string body with
@@ -44,6 +46,19 @@ let of_string body =
                             ids
                       | _ -> []);
                   modified;
+                  unknown =
+                    List.filter
+                      (fun (k, _) ->
+                        not
+                          (List.mem k
+                             [
+                               "name";
+                               "enrolled";
+                               "lastUnlock";
+                               "seen";
+                               "modified";
+                             ]))
+                      l;
                 }
           | _ -> Error "not a machine entry")
     | _ -> Error "not a machine entry"

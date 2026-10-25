@@ -6,6 +6,8 @@ type t = {
   color : string option;  (** [#rrggbb], lower case; [None]: the key id's *)
   icon : string option;  (** a square PNG, at most [icon_max_side] pixels *)
   modified : int;  (** seconds since the epoch *)
+  unknown : (string * Yojson.Safe.t) list;
+      (** the members this version does not know, kept through a rewrite *)
 }
 
 val none : t

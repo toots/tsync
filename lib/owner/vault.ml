@@ -497,6 +497,7 @@ let note_machine ?(enrolls = false) ~(domain : Tsync_domain.Domain.t) ~engine
                 last_unlock = now;
                 seen = List.map fst entries;
                 modified = now;
+                unknown = [];
               }
     with Fail.E f ->
       Log.warn "vault: this machine's entry is left: %s" f.reason)
@@ -845,6 +846,7 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
                 last_unlock = now;
                 seen = [me];
                 modified = now;
+                unknown = [];
               })
     with Fail.E f -> Log.warn "vault: the machine list is left: %s" f.reason);
   Atomic.set t.announced [];
@@ -898,6 +900,7 @@ let set_appearance ~domain ~engine ~lazy_tree t ~color ~icon =
       color = change current.color Tsync_vault.Appearance.check_color color;
       icon = change current.icon Tsync_vault.Appearance.check_icon icon;
       modified = max (now ()) (current.modified + 1);
+      unknown = current.unknown;
     }
   in
   List.iter

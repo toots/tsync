@@ -9,6 +9,7 @@ type t = {
   last_unlock : int;
   seen : string list;
   modified : int;
+  unknown : (string * Yojson.Safe.t) list;
 }
 
 val to_string : t -> string

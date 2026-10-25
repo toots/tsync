@@ -147,7 +147,24 @@ let round_trips () =
         (String.length s mod 256 = 0)
         (Passwords.of_string s = Ok r)
         (String.trim s))
-    [("login", Passwords.Login login); ("passkey", Passwords.Passkey passkey)];
+    [
+      ("login", Passwords.Login login);
+      ( "login with a field",
+        Passwords.Login
+          {
+            login with
+            fields =
+              [
+                {
+                  name = "PIN";
+                  value = "1234";
+                  secret = true;
+                  unknown = [("future", `Int 2)];
+                };
+              ];
+          } );
+      ("passkey", Passwords.Passkey passkey);
+    ];
   let bare =
     Passwords.Login { login with notes = String.make 300 'n'; unknown = [] }
   in
