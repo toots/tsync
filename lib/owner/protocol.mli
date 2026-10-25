@@ -176,9 +176,13 @@ type machine = { uuid : string; this : bool; entry : machine_entry option }
     when it did; the next unlock resumes it. *)
 type rekeyed = { secret : secret; pending : string option }
 
-(** vault §8.2: what an export or an import carried; [skipped] names the records
-    that open under no key the vault holds. *)
+(** vault §8.2: what an export holds; [skipped] names the records that open
+    under no key the vault holds. *)
 type carried = { records : int; keys : int; skipped : string list }
+
+(** vault §8.2: what an import wrote, and how many of its keys the keyring
+    retired. *)
+type imported = { records : int; retired : int }
 
 (** vault §8.3: this machine's scheduled backups; [stale] once the last is two
     periods old, or there is none. *)
@@ -339,7 +343,7 @@ type _ request =
       path : string;
       unseal : [ `Vault of string * string | `Backup_key of string ];
     }
-      -> carried request
+      -> imported request
       (** vault §8.2: [`Vault (passphrase, secret key)] as typed, or the backup
           key's seed as typed (§8.3) *)
   | Vault_backup_key : secret request

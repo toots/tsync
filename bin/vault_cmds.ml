@@ -220,8 +220,9 @@ let absolute path =
   if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
   else path
 
-let say_carried what (c : P.carried) =
-  say "%s %d records and %d keys" what c.records c.keys;
+let say_carried (c : P.carried) =
+  say "exported %d records and %d %s" c.records c.keys
+    (if c.keys = 1 then "key" else "keys");
   List.iter
     (say "left out: %s, which opens under no key this vault holds")
     c.skipped
@@ -240,7 +241,7 @@ let export_cmd =
        for the passphrase."
     Term.(
       const (fun output stdin dom ->
-          say_carried "exported"
+          say_carried
             (ask dom
                (P.Vault_export
                   {
@@ -284,8 +285,9 @@ let import_cmd =
               `Vault
                 (passphrase, read_passphrase ~prompt:"its secret key" ~stdin ()))
           in
-          say_carried "imported"
-            (ask dom (P.Vault_import { path = absolute file; unseal }));
+          let i = ask dom (P.Vault_import { path = absolute file; unseal }) in
+          say "imported %d records; the vault keeps %d of the export's keys"
+            i.records i.retired;
           0)
       $ file $ backup
       $ stdin_flag "the passphrase then the secret key, or the backup key,")

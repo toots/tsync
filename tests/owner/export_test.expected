@@ -2,7 +2,7 @@ a colour                                 ok
 before: codes [ACME]; login GitHub me@example.com its password linked to the code; note Wi-Fi fields [{"name":"PIN","value":"1234","secret":true}]
 export, a wrong passphrase               tsync: wrong passphrase
   and no file                            true
-export                                   ok
+export                                   ok: exported 4 records and 1 key
   the file                               mode 600
   no password, seed or title in it       true
 export again, over the file              tsync: ROOT/vault.export exists: an export never replaces a file
@@ -11,7 +11,7 @@ delete                                   ok
 import, the new vault's secret key       tsync: this export was sealed with another secret key (id ID): give the one in the emergency kit of the vault it came from
 import, a wrong passphrase               tsync: wrong passphrase
 import, as a backup                      tsync: this export opens with the passphrase and secret key, not a backup key
-import                                   ok
+import                                   ok: imported 4 records; the vault keeps 1 of the export's keys
 after: the same records                  true
 the code still answers                   true
 the passkey signs with its old key       true
@@ -29,7 +29,7 @@ lock                                     ok
 locked, none written                     true
 delete                                   ok
 import a backup, another backup key      tsync: this backup was sealed to another backup key (id ID)
-import a backup with its backup key      ok
+import a backup with its backup key      ok: imported 4 records; the vault keeps 2 of the export's keys
 after: the same records                  true
 the backup key kept                      true
 owner exit status 0

@@ -68,18 +68,19 @@ let masked line =
 let cli args input =
   let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
   let err_read, err_write = Unix.pipe ~cloexec:true () in
-  let devnull = Unix.openfile "/dev/null" [O_RDWR] 0 in
+  let out_read, out_write = Unix.pipe ~cloexec:true () in
   let pid =
     Unix.create_process tsync_bin
       (Array.of_list (tsync_bin :: args))
-      stdin_read devnull err_write
+      stdin_read out_write err_write
   in
-  List.iter Unix.close [stdin_read; devnull; err_write];
+  List.iter Unix.close [stdin_read; out_write; err_write];
   ignore (Unix.write_substring stdin_write input 0 (String.length input));
   Unix.close stdin_write;
+  let out = In_channel.input_all (Unix.in_channel_of_descr out_read) in
   let err = In_channel.input_all (Unix.in_channel_of_descr err_read) in
   match Unix.waitpid [] pid with
-    | _, WEXITED 0 -> "ok"
+    | _, WEXITED 0 -> "ok: " ^ String.trim out
     | _ -> (
         match
           List.find_opt
