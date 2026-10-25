@@ -178,14 +178,19 @@ module Make (R : RECORD) = struct
       E.pin path ~keep:Vault.record_keep;
       let body = Vault.read_file ctx.engine path in
       let record = opened ctx { Fold.name; body } in
+      (* A lock drops K before it empties the cache under [cache_lock]: one
+         during the read is seen here, or empties what this adds. *)
       Mutex.protect cache_lock (fun () ->
-          Hashtbl.replace cache (ctx.domain, name)
-            {
-              version;
-              key_id = ctx.key_id;
-              record;
-              pinned = Unix.gettimeofday ();
-            })
+          match Atomic.get ctx.vault.Vault.key with
+            | Some (id, _) when id = ctx.key_id ->
+                Hashtbl.replace cache (ctx.domain, name)
+                  {
+                    version;
+                    key_id = ctx.key_id;
+                    record;
+                    pinned = Unix.gettimeofday ();
+                  }
+            | _ -> ())
     in
     if todo <> [] then (
       let queue = Queue.of_seq (List.to_seq todo) in
