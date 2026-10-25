@@ -41,7 +41,9 @@ the secret key is not in the keyring text                    yes
 parse then write gives the same bytes                        yes
 K is not in the keyring text                                 yes
 unknown kind and members: still unlocks                      yes
-unknown member dropped                                       yes
+unknown member kept, after the known ones                    yes
+a known slot's unknown member kept, after the known ones     yes
+rewritten twice, the same bytes                              yes
 unknown slot kept as read                                    yes
 slots sorted by id, unknown first                            yes
 memKiB above the limit: skipped, not derived, and reported   yes
@@ -61,6 +63,11 @@ union holds every slot                                       yes
 union is symmetric, bytewise                                 yes
 both passphrases unlock the union                            yes
 different key ids do not fold                                yes
+different unknown members do not fold                        yes
+equal unknown members fold                                   yes
+== unknown members
+appearance: an unknown member kept through a rewrite         yes
+machine entry: an unknown member kept through a rewrite      yes
 == envelope
 length for 6 bytes: 58
 two seals differ                                             yes
