@@ -91,5 +91,13 @@ let () =
       ignore (reaches 1 5.);
       Rt.sleep 0.5;
       Printf.printf "another user's lock and a wake, then ours: %d lock\n"
+        (Atomic.get locks);
+      Atomic.set locks 0;
+      send "hint mine false";
+      send "hint other true";
+      send "hint mine true";
+      ignore (reaches 1 5.);
+      Rt.sleep 0.5;
+      Printf.printf "unlocked, another user's locker, then ours: %d lock\n"
         (Atomic.get locks));
   Fs.rm_rf dir

@@ -2,3 +2,4 @@ the double: ready
 sleep, once it listens: true
 our session locks: true
 another user's lock and a wake, then ours: 1 lock
+unlocked, another user's locker, then ours: 1 lock
