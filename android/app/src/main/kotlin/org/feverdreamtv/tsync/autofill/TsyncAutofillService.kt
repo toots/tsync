@@ -117,13 +117,13 @@ class TsyncAutofillService : AutofillService() {
             .putExtra(FillActivity.EXTRA_SITE, form.site)
             .putExtra(FillActivity.EXTRA_SUGGEST, true)
             .putExtra(FillActivity.EXTRA_TYPED_USERNAME, form.typedUsername.orEmpty())
-            .putParcelableArrayListExtra(FillActivity.EXTRA_PASSWORD, ArrayList(form.password))
+            .putParcelableArrayListExtra(FillActivity.EXTRA_PASSWORD, ArrayList(form.newPasswords))
         val sender = PendingIntent.getActivity(
             this, "suggest:${form.site}".hashCode(), pick,
             PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
         ).intentSender
         val builder = Dataset.Builder(presentation)
-        form.password.forEach { builder.setValue(it, null) }
+        form.newPasswords.forEach { builder.setValue(it, null) }
         return builder.setAuthentication(sender).build()
     }
 
