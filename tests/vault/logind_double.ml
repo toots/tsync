@@ -1,6 +1,6 @@
 (* logind on the bus at argv.(1): two sessions, [mine] of this uid and [other]
    of another, and one signal emitted per line of standard input ([lock mine],
-   [lock other], [sleep true], [sleep false]). *)
+   [lock other], [hint mine true], [sleep true], [sleep false]). *)
 
 open Tsync_core
 open Tsync_dbus
@@ -29,6 +29,21 @@ let signal = function
       Some
         (Dbus.signal ~path:(session name)
            ~interface:"org.freedesktop.login1.Session" ~member:"Lock" [])
+  | ["hint"; name; flag] ->
+      Some
+        (Dbus.signal ~path:(session name)
+           ~interface:"org.freedesktop.DBus.Properties"
+           ~member:"PropertiesChanged"
+           [
+             String "org.freedesktop.login1.Session";
+             Array
+               ( "{sv}",
+                 [
+                   Dict_entry
+                     (String "LockedHint", Variant (Bool (flag = "true")));
+                 ] );
+             Array ("s", []);
+           ])
   | ["sleep"; flag] ->
       Some
         (Dbus.signal ~path:"/org/freedesktop/login1"

@@ -260,7 +260,9 @@ These general rules are realised by the hosts, which link here: the vault keysto
   ([vault §6.2](../extensions/vault.md#62-auto-lock)). The screen lock that policy may watch is
   reported to the owner as `vault_lock` with `reason: "screen"`:
   - Linux: by the owner itself, from logind on the system bus: the `Lock` signal of each of the
-    user's sessions, and the manager's `PrepareForSleep` with `true`.
+    user's sessions, the session's `LockedHint` turning `true` (`PropertiesChanged`: a desktop's
+    own locker, Plasma's or GNOME's, sets it and sends no `Lock`), and the manager's
+    `PrepareForSleep` with `true`.
   - macOS: by the app, on the `com.apple.screenIsLocked` distributed notification and on
     `NSWorkspace.willSleepNotification`.
   - Android: by the app, on `ACTION_SCREEN_OFF`.
