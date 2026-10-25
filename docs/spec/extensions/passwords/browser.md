@@ -104,7 +104,8 @@ capability. What has been seen working is recorded in §10.
 - **A login matching by suffix only** (saved for `example.com`, asked by `login.example.com`, the
   `match` row's `exact` false) is marked so in the menu and fills only after the extension's sheet
   confirms it, naming both sites: a subdomain the user does not control never gets the parent
-  site's login on one click.
+  site's login on one click. The service worker asks the sheet on `fill`'s own `exact`, never on
+  what the content script says.
 - **Codes.** A code field's icon offers the codes of the logins matching the frame that link one;
   the pick fills the current code from `fill`. The popup also lists them with **Copy code**
   (§3.3). A two-factor code no login links is not offered in the browser: it is read from the

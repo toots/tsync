@@ -32,9 +32,9 @@ function render(item) {
       if (item.kind === "save" && !item.incognito) actions.append(button("Never for this site", () => answer({ action: "never" })));
       actions.append(button("Not now", () => answer({ action: "cancel" })), button(item.kind === "save" ? "Save" : "Update", () => answer({ action: "ok" }), true));
       break;
-    case "save-locked":
+    case "save-failed":
       main.append(el("h1", { textContent: "This login was not saved" }),
-        el("p", { className: "detail", textContent: `tsync is locked. Unlock it in tsync, then sign in to ${site} again to save it.` }));
+        el("p", { className: "detail", textContent: item.error || `tsync is locked. Unlock it in tsync, then sign in to ${site} again to save it.` }));
       actions.append(button("OK", () => answer({ action: "cancel" }), true));
       break;
     case "locked":
