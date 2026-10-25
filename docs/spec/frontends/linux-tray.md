@@ -478,8 +478,9 @@ records calls, and none; a config as a file.
   second content shown.
 - **Quit.** After Quit the process has exited 0 and every owner still answers.
 - **Codes.** With a `wl-copy` double on the `PATH` recording its arguments and standard input:
-  an opening lists the code domains' records, each row with `icon-data`; a click on one runs it
-  with `--sensitive` and the owner's code on standard input, and no argument holds the code. With
+  an opening lists the code domains' records, under a header with `icon-data` (§6.5); a click on one runs it
+  with `--sensitive` and the owner's code on standard input, its output to `/dev/null` since the
+  child it leaves serving the clipboard keeps what it inherits, and no argument holds the code. With
   no `WAYLAND_DISPLAY`, or no `wl-copy`, there is no codes row. No row has the `Add a code…`
   label.
 - **Unlock.** With a `kdialog` double answering a passphrase: the locked row's click sends
