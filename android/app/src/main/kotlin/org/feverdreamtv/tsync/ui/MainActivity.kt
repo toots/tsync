@@ -87,7 +87,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        accept(intent)
+        codeLink = savedInstanceState?.getString(STATE_CODE_LINK)
+        accept(intent, fresh = savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0)
         setContent {
             TsyncTheme {
                 App(shared, activityRequests, codeLink, onCodeLinkDone = { codeLink = null }, onShareDone = ::finish)
@@ -98,13 +99,19 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        accept(intent)
+        accept(intent, fresh = true)
     }
 
-    private fun accept(intent: Intent) {
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_CODE_LINK, codeLink)
+    }
+
+    /** [fresh]: a recreate or a launch from recents hands the same link again, which may already be added. */
+    private fun accept(intent: Intent, fresh: Boolean) {
         if (intent.getBooleanExtra(EXTRA_SHOW_ACTIVITY, false)) activityRequests++
         if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "otpauth") {
-            codeLink = intent.data.toString()
+            if (fresh) codeLink = intent.data.toString()
             return
         }
         if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
@@ -131,6 +138,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SHOW_ACTIVITY = "org.feverdreamtv.tsync.SHOW_ACTIVITY"
+        private const val STATE_CODE_LINK = "codeLink"
     }
 }
 
