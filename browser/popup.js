@@ -60,7 +60,8 @@ async function render() {
       actions.prepend(el("button", { textContent: "Copy code", onclick: async () => {
         const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
           title: login.title, username: login.username, kind: "code" });
-        if (reply.code) await navigator.clipboard.writeText(reply.code);
+        if (!reply || !reply.code) return main.append(el("p", { className: "detail", textContent: (reply && reply.error) || "tsync gave no code." }));
+        await navigator.clipboard.writeText(reply.code);
         main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
       } }));
     }
