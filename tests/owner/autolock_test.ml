@@ -29,7 +29,7 @@ let socket = Filename.concat root "data/tsync/test.sock"
 let config =
   let domain name policy =
     Printf.sprintf
-      {|{"name":"%s","symlinks":"keep","versioning":true,"extensions":["totp"],%s"frontends":["http-proxy"],
+      {|{"name":"%s","symlinks":"keep","versioning":true,"extensions":["totp","passwords"],%s"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/%s"}]}|}
       name policy root name
   in
@@ -123,10 +123,21 @@ let entries () =
       (List.sort compare (Array.to_list (Sys.readdir keystore_dir)))
   else ""
 
-(* Polls [vault], so a late lock costs time and never a wrong verdict. *)
+(* A host's refresh in the background, as macOS's AutoFill entries. *)
+let background_list domain =
+  Ipc.call socket
+    (`Assoc
+       [
+         ("domain", `String domain);
+         ("action", `String "passwords_list");
+         ("use", `Bool false);
+       ])
+
+(* Polls [vault] and lists, so a late lock costs time and never a wrong verdict. *)
 let locked_within domain seconds =
   let deadline = Unix.gettimeofday () +. seconds in
   let rec go () =
+    ignore (background_list domain);
     vault domain = "locked"
     || Unix.gettimeofday () < deadline
        &&
@@ -163,7 +174,7 @@ let first () =
             used := !used && field (touch "idle") "error" = None
           done;
           p "%-40s %b" "used every 0.5 s for 3 s" !used;
-          p "%-40s %b" "locked within 8 s of statuses alone"
+          p "%-40s %b" "locked within 8 s of background listings"
             (locked_within "idle" 8.);
           status "idle" "idle";
           answer "a use" (touch "idle");
