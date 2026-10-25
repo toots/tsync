@@ -690,7 +690,15 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
           let keyring = current ~strict:true ~domain engine ~lazy_tree t in
           let retired = Keyring.retire_all keyring ~key [old] in
           if retired.retired <> keyring.retired then
-            write engine ~exclusive:false retired)
+            write engine ~exclusive:false retired;
+          (* §8.3: a backup key made under the raced K moves to the domain's. *)
+            match
+              ( backup_key engine ~key_id:old_id ~key:(snd old),
+                backup_key engine ~key_id:keyring.key_id ~key )
+            with
+            | Some (text, _), None ->
+                write_backup_key engine ~key_id:keyring.key_id ~key text
+            | _ -> ())
     | _ -> ());
   store ~domain ~engine t ~key:(keyring.key_id, key) ~secret_key;
   note_machine ~enrolls ~domain ~engine ~lazy_tree t ~key_id:keyring.key_id ~key;
