@@ -804,7 +804,15 @@ let fill ~domain ~engine ~lazy_tree t args =
   let verified = app_sites args site (logins (fst (records ctx))) in
   match find ctx id with
     | Login l when matches_site ~verified ~origin:site l ->
-        [("username", `String l.username); ("password", `String l.password)]
+        [
+          ("username", `String l.username);
+          ("password", `String l.password);
+          ( "exact",
+            `Bool
+              (match Passwords.site_of_string site with
+                | Ok site -> List.mem site l.urls
+                | Error _ -> false) );
+        ]
         @ List.filter
             (fun (k, _) -> k = "code" || k = "secondsLeft")
             (code ~pull:(pull_of args) ~domain ~engine ~lazy_tree t l.totp)

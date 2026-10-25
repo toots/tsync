@@ -338,7 +338,7 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
 
 | action | request | answer |
 |---|---|---|
-| `passwords_fill` | `site`, `id`, `pull?` | the login's username, password, and current code with seconds left when one is linked; refused `invalid` when the login does not match `site` (§4.2) |
+| `passwords_fill` | `site`, `id`, `pull?` | the login's username, password, `exact` (whether it is a login of `site` itself rather than by suffix), and current code with seconds left when one is linked; refused `invalid` when the login does not match `site` (§4.2) |
 | `passwords_save` | `site`, `username`, `password` (absent with `suggested`), `update?`, `suggested?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` with that id updates it; one carrying `suggested` sets that record's username (§5.1) |
 | `passwords_suggest` | `site`, `username` | §5.1: the generated password and the new record's `id` |
 | `passwords_generate` | `generate` | a password (§5), saved nowhere |

@@ -202,11 +202,15 @@ let logins () =
     in
     match field r "password" with
       | Some pw ->
-          p "%-40s %s" ("fill for " ^ site)
+          p "%-40s %s, exact %s" ("fill for " ^ site)
             (if pw = "hunter2 hunter2" then "the password" else "another")
+            (match member r "exact" with
+              | Some (`Bool b) -> string_of_bool b
+              | _ -> "?")
       | None -> answer ("fill for " ^ site) r
   in
   filled "https://github.com";
+  filled "https://gist.github.com";
   filled "https://evil.example";
   let saved label fields =
     let r = ask (("action", s "passwords_save") :: fields) in
