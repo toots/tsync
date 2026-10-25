@@ -33,7 +33,7 @@ enum Identities {
     private static func current() -> [ASCredentialIdentity] {
         Tsync.domainNames().flatMap { domain -> [ASCredentialIdentity] in
             guard
-                let reply = try? OwnerClient.call(["action": "passwords_list", "domain": domain]),
+                let reply = try? OwnerClient.call(["action": "passwords_list", "domain": domain, "use": false]),
                 let rows = reply["records"] as? [[String: Any]]
             else { return [] }
             return rows.flatMap { row in entries(row, record: domain + "/" + (row["id"] as? String ?? "")) }

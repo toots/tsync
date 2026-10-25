@@ -169,7 +169,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func anyDomainUsesPasswords() -> Bool {
         Tsync.domainNames().contains { name in
             do {
-                _ = try OwnerClient.call(["action": "passwords_list", "domain": name])
+                _ = try OwnerClient.call(["action": "passwords_list", "domain": name, "use": false])
                 return true
             } catch let failure as OwnerFailure {
                 return failure.code == "locked"
