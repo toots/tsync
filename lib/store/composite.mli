@@ -138,6 +138,13 @@ val parked : t -> (string * string * Dqueue.failure_note) list
     a main is offline, as TRANSIENT/LINK naming it. *)
 val guard : t -> member -> string -> unit
 
+(** The member share links are made on and its share URL (05 §4.11,
+    frontends/http-proxy §A4.6): [name] when given, which must be the main or a
+    replica with a share URL; else the first member in read order with one,
+    never a backfill. REFUSED saying why. Both a creator and the listener ask
+    it, so they agree. *)
+val share_member : ?name:string -> t -> member * string
+
 (** Record, durably, a collection's deletions owed to one copy. *)
 val submit_collection_delete :
   t ->

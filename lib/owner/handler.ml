@@ -1026,7 +1026,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         let c =
           S.create ?expires:r.expires ?token:r.token
-            ?member:(Tsync_config.Config.share_member t.domain.domain)
+            ?member:(Tsync_config.Config.share_member_name t.domain.domain)
             (target t r.item)
         in
         (* 05 §4.11: the link is answered before any image is made. *)

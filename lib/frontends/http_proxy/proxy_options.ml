@@ -141,7 +141,7 @@ let resolve (config : Config.t) =
             domain = dom;
             secret;
             shares =
-              (match Config.share_member dom with
+              (match Config.share_member_name dom with
                 | Some m -> `Member m
                 | None ->
                     if bool (present (List.assoc_opt "shares" opts)) then `Self

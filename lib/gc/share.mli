@@ -12,7 +12,7 @@ module Make (_ : Tsync_remote.Context.S) : sig
       now. ABSENT when nothing is at [rel] or a folder is empty; REFUSED when no
       member serves share links or the object is not on the chosen one yet;
       EXISTS when [token] holds another share. [member] is the one to make it
-      on, from {!Tsync_config.Config.share_member}. *)
+      on, from {!Tsync_config.Config.share_member_name}. *)
   val create :
     ?expires:float -> ?token:string -> ?member:string -> string -> created
 
