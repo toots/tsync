@@ -127,7 +127,7 @@ let () =
   let outputs =
     {|{"stores":{"value":{
         "files":{"type":"s3","bucket":"b1","region":"eu-west-1","accessKeyId":"AK","shareUrl":"https://s"},
-        "media":{"type":"gcs","bucket":"b2"}}},
+        "media":{"type":"gcs","bucket":"b2","shareUrl":null}}},
        "store_secrets":{"sensitive":true,"value":{
         "files":{"secretAccessKey":"SK"},
         "media":{"serviceAccountKey":"{}"}}},
@@ -139,19 +139,28 @@ let () =
         (fun (name, filled) ->
           p "%s %s:%s\n" btype name
             (String.concat ""
-               (List.map (fun (k, v) -> Printf.sprintf " %s=%s" k v) filled)))
+               (List.map
+                  (fun (k, v) ->
+                    Printf.sprintf " %s=%s" k (Option.value ~default:"null" v))
+                  filled)))
         (Config_wizard.stores_of_outputs ~btype outputs))
     ["s3"; "gcs"; "local"];
   p "not json: %d\n"
     (List.length (Config_wizard.stores_of_outputs ~btype:"s3" "nope"));
   p "\n== a deployment read over a configured gcs backend\n";
-  let fake_cli outputs =
+  let with_fake_cli outputs f =
     let script = Filename.temp_file "tsync-tf" ".sh" in
-    Out_channel.with_open_text script (fun oc ->
-        Printf.fprintf oc "#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" outputs);
-    Unix.chmod script 0o700;
-    Unix.putenv "TSYNC_TF" script;
-    script
+    let previous = Option.value ~default:"" (Sys.getenv_opt "TSYNC_TF") in
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.remove script;
+        Unix.putenv "TSYNC_TF" previous)
+      (fun () ->
+        Out_channel.with_open_text script (fun oc ->
+            Printf.fprintf oc "#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" outputs);
+        Unix.chmod script 0o700;
+        Unix.putenv "TSYNC_TF" script;
+        f ())
   in
   let with_gcs_backend =
     Yojson.Safe.from_string
@@ -162,25 +171,30 @@ let () =
                        "serviceAccountKey":"{}","shareUrl":"https://old.run.app"}]}]}|}
   in
   let read_deployment label outputs =
-    let script = fake_cli outputs in
-    finish label
-      (Config_wizard.edit ~system:`Linux
-         (scripted
-            [
-              ("[w]rite", ["1"; "w"]);
-              ("backends:", ["2"; "d"]);
-              ("fill from the deployment", ["/deployment"]);
-            ])
-         (Some with_gcs_backend));
-    Sys.remove script;
-    Unix.putenv "TSYNC_TF" ""
+    with_fake_cli outputs (fun () ->
+        finish label
+          (Config_wizard.edit ~system:`Linux
+             (scripted
+                [
+                  ("[w]rite", ["1"; "w"]);
+                  ("backends:", ["2"; "d"]);
+                  ("fill from the deployment", ["/deployment"]);
+                ])
+             (Some with_gcs_backend)))
   in
   read_deployment "share url replaced"
     {|{"stores":{"value":{"media":{"type":"gcs","bucket":"b2","shareUrl":"https://share.example"}}},
        "store_secrets":{"value":{"media":{"serviceAccountKey":"{\"k\":1}"}}}}|};
   read_deployment "share url removed"
-    {|{"stores":{"value":{"media":{"type":"gcs","bucket":"b2"}}},
+    {|{"stores":{"value":{"media":{"type":"gcs","bucket":"b2","shareUrl":null}}},
        "store_secrets":{"value":{"media":{"serviceAccountKey":"{}"}}}}|};
+  read_deployment "the store holding the backend's bucket by default"
+    {|{"stores":{"value":{
+        "archive":{"type":"gcs","bucket":"b3","shareUrl":null},
+        "media":{"type":"gcs","bucket":"b2","shareUrl":"https://old.run.app"}}},
+       "store_secrets":{"value":{
+        "archive":{"serviceAccountKey":"{\"k\":3}"},
+        "media":{"serviceAccountKey":"{}"}}}}|};
   p "\n== advanced mode: a value set, one kept, two removed\n";
   finish "advanced"
     (Config_wizard.edit ~advanced:true ~system:`Linux

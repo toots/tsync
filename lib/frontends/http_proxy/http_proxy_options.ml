@@ -12,9 +12,9 @@ let fields =
       f "bind" "Bind addresses" String;
       f "max_concurrent" "Concurrent data operations" Int;
       f ~check:absolute_path
-        ~blank:"no TLS: plain HTTP on this machine only, for a reverse proxy"
+        ~blank:"no TLS: plain HTTP, on loopback unless bind is set"
         "ssl_certificate" "TLS certificate" Path;
-      f ~check:absolute_path ~blank:"no TLS, only without a certificate"
+      f ~check:absolute_path ~blank:"no TLS; required with a certificate"
         "ssl_certificate_key" "TLS key" Path;
       f ~secret:true ~check:secret_length "secret" "Shared secret" String;
       f ~default:"false" "shares" "Serve share links" Bool;

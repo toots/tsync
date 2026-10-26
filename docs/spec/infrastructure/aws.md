@@ -152,8 +152,8 @@ Beyond [11 §10](../11-infrastructure.md#10-store-options):
 
 ## 11. Outputs
 
-- `stores[N]`: `type = "s3"`, `bucket`, `region`, `accessKeyId`, and `shareUrl` with a share
-  function.
+- `stores[N]`: `type = "s3"`, `bucket`, `region`, `accessKeyId`, and `shareUrl`, null without a
+  share function.
 - `store_secrets[N]`: `secretAccessKey`.
 - `custom_domain_dns[N].records`: the validation record, and the CNAME from the domain to its
   target once the custom domain exists.
