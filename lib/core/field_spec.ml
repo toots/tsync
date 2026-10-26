@@ -8,11 +8,12 @@ type field = {
   secret : bool;
   required : bool;
   check : string -> string option;
+  blank : string option;
 }
 
 let f ?(secret = false) ?(required = false) ?default ?(check = fun _ -> None)
-    name label kind =
-  { name; label; kind; default; secret; required; check }
+    ?blank name label kind =
+  { name; label; kind; default; secret; required; check; blank }
 
 type value =
   | S of string

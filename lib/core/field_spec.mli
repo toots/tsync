@@ -13,6 +13,8 @@ type field = {
   secret : bool;
   required : bool;
   check : string -> string option;  (** a rule on the value's text, or [None] *)
+  blank : string option;
+      (** what leaving the field unset means, when it is not simply [default] *)
 }
 
 val f :
@@ -20,6 +22,7 @@ val f :
   ?required:bool ->
   ?default:string ->
   ?check:(string -> string option) ->
+  ?blank:string ->
   string ->
   string ->
   kind ->

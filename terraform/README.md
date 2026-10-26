@@ -75,8 +75,11 @@ or `gcs` backend, and at the prompt `fill from the deployment in directory` give
 path of this directory.
 
 That reads the deployment's outputs, asks which store when there are several, and
-fills in the backend's bucket, credentials and share URL. Nothing Terraform-specific
-ends up in your tsync config.
+sets the backend's bucket, credentials and share URL from them, replacing what the
+backend had: the deployment is their source of truth, so they are not asked about
+afterwards, and a store without a share function leaves the backend without a share
+URL. Run it again after changing the deployment, a custom domain for instance, to
+bring the backend up to date. Nothing Terraform-specific ends up in your tsync config.
 
 ---
 

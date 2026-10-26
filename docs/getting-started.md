@@ -38,7 +38,7 @@ On a machine with no config, the prompts go in this order. Press Enter to accept
 | `backend name` | A label of your choice, for instance `disk`. Commands use it in `--source`. |
 | `role` | `main` for the first one. The others are in [keep more than one copy](copies.md). |
 | `link` | Remote stores only. Enter. See [uplink](tuning.md#uplink). |
-| `fill from the deployment in directory` | `s3` and `gcs` only. If you provisioned the bucket with [terraform/](../terraform/README.md), give that directory and the bucket, credentials and share URL are filled in. Otherwise Enter and type them. |
+| `fill from the deployment in directory` | `s3` and `gcs` only. If you provisioned the bucket with [terraform/](../terraform/README.md), give that directory and the bucket, credentials and share URL are set from it, replacing any earlier values, and not asked. Otherwise Enter and type them. |
 | the store's own fields | A path, or a bucket and its credentials. Secrets are not echoed. |
 
 The list is then shown. Enter moves on; `a` adds another backend.

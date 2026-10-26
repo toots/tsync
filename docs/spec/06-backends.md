@@ -259,7 +259,7 @@ Looking a member up by name fails when the name is unknown, listing the configur
 - **Batched reads.** There is one way to read many keys: if the store declares `get_many`, the entries are sent in requests of at most MAX_BATCH_KEYS keys (recommended 256) and MAX_BATCH_BYTES of listed sizes (recommended 8 MiB); an entry larger than the byte budget goes alone. Otherwise each key is read with `get_opt`. A batch that fails permanently is answered key by key; a transient batch failure is raised.
 - **Batch sizes on the peer wire.** MAX_BATCH_FOLDERS (recommended 64) and MAX_BATCH_BYTES bound a `list_many` answer; both ends of the http-proxy wire use the same values ([backends/http-proxy](backends/http-proxy.md)).
 - **Drain hooks.** Background work registers a settle hook, and a process that is about to exit runs the hooks in parallel under a bound ([algorithms/replication.md](algorithms/replication.md) settling).
-- **Driver registry.** Drivers register a type name, a field specification (name, label, type, default, whether secret) and a constructor. The registry lists the available types, and a build without a driver simply lacks that type. Constructing an unknown type fails, naming the type. Building a store reaches no network and touches no file.
+- **Driver registry.** Drivers register a type name, a field specification (name, label, type, default, whether secret, and the blank note of [08 §2.1](08-frontends.md#21-frontend-descriptor)) and a constructor. The registry lists the available types, and a build without a driver simply lacks that type. Constructing an unknown type fails, naming the type. Building a store reaches no network and touches no file.
 
 The registry and the drain hooks are one per process.
 

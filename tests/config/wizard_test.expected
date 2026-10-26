@@ -19,9 +19,9 @@
 ? mount it as a folder on this machine (fuse) [yes] -> 
 ? fuse: other options [no] -> 
 ? serve it to other machines over HTTPS (http-proxy) [no] -> yes
-? Port -> 5446
-? TLS certificate -> 
-? TLS key -> 
+? Port (blank: 443 with TLS, else 80) -> 5446
+? TLS certificate (blank: no TLS: plain HTTP on this machine only, for a reverse proxy) -> 
+? TLS key (blank: no TLS, only without a certificate) -> 
 ? Shared secret -> (secret)
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
@@ -80,9 +80,9 @@ new: would write
 ? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
 ? mount it as a folder on this machine (fuse) [no] -> 
 ? serve it to other machines over HTTPS (http-proxy) [yes] -> 
-? Port -> 
-? TLS certificate -> 
-? TLS key -> 
+? Port (blank: 443 with TLS, else 80) -> 
+? TLS certificate (blank: no TLS: plain HTTP on this machine only, for a reverse proxy) -> 
+? TLS key (blank: no TLS, only without a certificate) -> 
 ? Shared secret -> 
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
@@ -150,9 +150,9 @@ edit: would write
   answer yes or no
 ? mount it as a folder on this machine (fuse) [no] -> no
 ? serve it to other machines over HTTPS (http-proxy) [yes] -> 
-? Port -> 
-? TLS certificate -> 
-? TLS key -> 
+? Port (blank: 443 with TLS, else 80) -> 
+? TLS certificate (blank: no TLS: plain HTTP on this machine only, for a reverse proxy) -> 
+? TLS key (blank: no TLS, only without a certificate) -> 
 ? Shared secret -> 
 ? Serve share links [false] -> 
 ? http-proxy: other options [no] -> 
@@ -243,6 +243,139 @@ kept: would write
 s3 files: bucket=b1 region=eu-west-1 accessKeyId=AK shareUrl=https://s secretAccessKey=SK
 gcs media: bucket=b2 serviceAccountKey={}
 not json: 0
+
+== a deployment read over a configured gcs backend
+  Domains:
+    1. files: 2 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
+? domain name [files] -> 
+? versioning [true] -> 
+? read-only [false] -> 
+? cache limit [1 GiB] -> 
+    1. main (local, main)
+    2. cloud (gcs, replica)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> 2
+? type (gcs, http-proxy, local, s3) [gcs] -> 
+? backend name [cloud] -> 
+? role (main, replica, backfill, readOnly) [replica] -> 
+? fill from the deployment in directory (blank to skip) -> /deployment
+  from the deployment: Share URL (was https://old.run.app), Service account key (JSON)
+? Endpoint -> 
+    1. main (local, main)
+    2. cloud (gcs, replica)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
+? mount it as a folder on this machine (fuse) [no] -> 
+? serve it to other machines over HTTPS (http-proxy) [yes] -> 
+? Port (blank: 443 with TLS, else 80) -> 
+? TLS certificate (blank: no TLS: plain HTTP on this machine only, for a reverse proxy) -> 
+? TLS key (blank: no TLS, only without a certificate) -> 
+? Shared secret [(kept)] -> 
+? Serve share links [false] -> 
+? http-proxy: other options [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
+  Domains:
+    1. files: 2 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
+share url replaced: would write
+{
+  "name": "box",
+  "domains": [
+    {
+      "name": "files",
+      "versioning": true,
+      "extensions": [],
+      "frontends": [
+        {
+          "type": "http-proxy",
+          "secret": "0123456789abcdef0123456789abcdef"
+        }
+      ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/files"
+        },
+        {
+          "type": "gcs",
+          "name": "cloud",
+          "role": "replica",
+          "bucket": "b2",
+          "serviceAccountKey": "{\"k\":1}",
+          "shareUrl": "https://share.example"
+        }
+      ],
+      "maxCache": "1 GiB"
+    }
+  ]
+}
+  Domains:
+    1. files: 2 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
+? domain name [files] -> 
+? versioning [true] -> 
+? read-only [false] -> 
+? cache limit [1 GiB] -> 
+    1. main (local, main)
+    2. cloud (gcs, replica)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> 2
+? type (gcs, http-proxy, local, s3) [gcs] -> 
+? backend name [cloud] -> 
+? role (main, replica, backfill, readOnly) [replica] -> 
+? fill from the deployment in directory (blank to skip) -> /deployment
+  from the deployment: Share URL removed: no share function
+? Endpoint -> 
+    1. main (local, main)
+    2. cloud (gcs, replica)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
+? mount it as a folder on this machine (fuse) [no] -> 
+? serve it to other machines over HTTPS (http-proxy) [yes] -> 
+? Port (blank: 443 with TLS, else 80) -> 
+? TLS certificate (blank: no TLS: plain HTTP on this machine only, for a reverse proxy) -> 
+? TLS key (blank: no TLS, only without a certificate) -> 
+? Shared secret [(kept)] -> 
+? Serve share links [false] -> 
+? http-proxy: other options [no] -> 
+? use totp [no] -> 
+? use passwords [no] -> 
+  Domains:
+    1. files: 2 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
+share url removed: would write
+{
+  "name": "box",
+  "domains": [
+    {
+      "name": "files",
+      "versioning": true,
+      "extensions": [],
+      "frontends": [
+        {
+          "type": "http-proxy",
+          "secret": "0123456789abcdef0123456789abcdef"
+        }
+      ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/files"
+        },
+        {
+          "type": "gcs",
+          "name": "cloud",
+          "role": "replica",
+          "bucket": "b2",
+          "serviceAccountKey": "{}"
+        }
+      ],
+      "maxCache": "1 GiB"
+    }
+  ]
+}
 
 == advanced mode: a value set, one kept, two removed
   Domains:

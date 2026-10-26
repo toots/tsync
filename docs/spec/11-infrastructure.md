@@ -208,8 +208,12 @@ be translated.
   ([object-store-common §3](backends/object-store-common.md#3-confirming-the-bucket-side-function)).
 - **The configuration wizard** ([07 §5](07-daemon-cli.md)), offered a deployment directory for an
   `s3` or `gcs` backend, reads the outputs as JSON with the CLI of §13, keeps the stores whose
-  `type` is the backend's, asks which when there are several, and fills each field the backend does
-  not have yet. Nothing about the deployment is stored in the tsync config.
+  `type` is the backend's, and asks which when there are several. The deployment is the source of
+  truth for the fields it decides: every field the store's entries give, and `shareUrl`. Each is
+  set from the outputs, replacing the backend's value, `shareUrl` is removed when the store has no
+  share function, and none of them is asked about afterwards. The wizard names the fields whose
+  value changed, without a secret's value. The backend's other fields are asked about as usual.
+  Nothing about the deployment is stored in the tsync config.
 
 ## 12. Operator state
 

@@ -57,17 +57,23 @@ let typed (kind : Field_spec.kind) s : (json, string) result =
 (* Blank keeps the current value; a required field without one is asked
    again; a check's refusal is said and asked again. A default the parser
    applies itself stays out of the file; [write_default] writes the wizard's
-   own (§5.9) and those the parser requires. *)
+   own (§5.9) and those the parser requires. A field with no value shows its
+   [blank] note: what leaving it so means. *)
 let rec field io j ?(secret = false) ?(required = false)
     ?(check = fun _ -> None) ?(write_default = false) ?(reset = false) ?default
-    name label kind =
+    ?blank name label kind =
   let current = Option.bind (get j name) show in
   let shown = if secret && current <> None then Some "(kept)" else current in
+  let prompt_label =
+    match (current, blank) with
+      | None, Some note -> Printf.sprintf "%s (blank: %s)" label note
+      | _ -> label
+  in
   let answer =
     String.trim
       (io.ask
          {
-           label;
+           label = prompt_label;
            default = (match shown with Some _ -> shown | None -> default);
            secret;
          })
@@ -84,8 +90,8 @@ let rec field io j ?(secret = false) ?(required = false)
     | Some "-" when reset -> unset j name
     | None when required && current = None ->
         io.say (label ^ " is required");
-        field io j ~secret ~required ~check ~write_default ~reset ?default name
-          label kind
+        field io j ~secret ~required ~check ~write_default ~reset ?default
+          ?blank name label kind
     | None -> j
     | Some v -> (
         match
@@ -99,7 +105,7 @@ let rec field io j ?(secret = false) ?(required = false)
           | Error e ->
               io.say (label ^ ": " ^ e);
               field io j ~secret ~required ~check ~write_default ~reset ?default
-                name label kind)
+                ?blank name label kind)
 
 (* 05 §2.1, 07 §5.9: an advanced key is asked about in the advanced mode
    only, where "-" removes it: the value is the main's or the default again. *)
@@ -112,7 +118,7 @@ let spec_fields io j (specs : Field_spec.field list) =
   List.fold_left
     (fun j (f : Field_spec.field) ->
       field io j ~secret:f.secret ~required:f.required ~check:f.check
-        ?default:f.default f.name f.label f.kind)
+        ?default:f.default ?blank:f.blank f.name f.label f.kind)
     j specs
 
 let choose io ~label ~default options =
@@ -181,6 +187,7 @@ let deployment_outputs dir =
     | Some cli when cli <> "" -> run cli
     | _ -> ( match run "tofu" with `Not_installed -> run "terraform" | r -> r)
 
+(* [None] when no deployment was read. *)
 let filled_from_deployment io ~btype =
   let dir =
     String.trim
@@ -191,26 +198,70 @@ let filled_from_deployment io ~btype =
            secret = false;
          })
   in
-  if dir = "" then []
+  if dir = "" then None
   else (
     match deployment_outputs dir with
       | `Not_installed ->
           io.say "neither tofu nor terraform is installed";
-          []
+          None
       | `Failed ->
           io.say "no outputs could be read there";
-          []
+          None
       | `Outputs outputs -> (
           match stores_of_outputs ~btype outputs with
             | [] ->
                 io.say ("that deployment has no " ^ btype ^ " store");
-                []
-            | [(_, filled)] -> filled
+                None
+            | [(_, filled)] -> Some filled
             | stores ->
                 let names = List.map fst stores in
-                List.assoc
-                  (choose io ~label:"store" ~default:(List.hd names) names)
-                  stores))
+                Some
+                  (List.assoc
+                     (choose io ~label:"store" ~default:(List.hd names) names)
+                     stores)))
+
+(* 11 §11: decided by a deployment even when its outputs do not give it. *)
+let share_url = "shareUrl"
+
+(* 11 §11: the fields a deployment decides, which are not asked once one was
+   read. *)
+let deployment_decided filled = share_url :: List.map fst filled
+
+(* 11 §11: the deployment's fields over the backend's own, and no share URL
+   without a share function; the changed ones are named, a secret without its
+   value. *)
+let from_deployment io (specs : Field_spec.field list) b filled =
+  let label name =
+    match List.find_opt (fun (f : Field_spec.field) -> f.name = name) specs with
+      | Some f -> f.label
+      | None -> name
+  in
+  let b, changed =
+    List.fold_left
+      (fun (b, changed) (k, v) ->
+        match
+          List.find_opt (fun (f : Field_spec.field) -> f.name = k) specs
+        with
+          | Some f when get b k <> Some (`String v) ->
+              let was =
+                match Option.bind (get b k) show with
+                  | Some old when not f.secret -> Printf.sprintf " (was %s)" old
+                  | _ -> ""
+              in
+              (set b k (`String v), (f.label ^ was) :: changed)
+          | _ -> (b, changed))
+      (b, []) filled
+  in
+  let b, changed =
+    if List.mem_assoc share_url filled || get b share_url = None then
+      (b, changed)
+    else
+      ( unset b share_url,
+        (label share_url ^ " removed: no share function") :: changed )
+  in
+  if changed <> [] then
+    io.say ("from the deployment: " ^ String.concat ", " (List.rev changed));
+  b
 
 let backend io ~advanced ~has_main b =
   let types = Tsync_store.Driver.names () in
@@ -239,21 +290,20 @@ let backend io ~advanced ~has_main b =
     | Some d ->
         let filled =
           if btype = "s3" || btype = "gcs" then filled_from_deployment io ~btype
-          else []
+          else None
         in
-        let b =
-          List.fold_left
-            (fun b (k, v) ->
-              if
-                get b k = None
-                && List.exists
-                     (fun (f : Field_spec.field) -> f.name = k)
-                     d.fields
-              then set b k (`String v)
-              else b)
-            b filled
+        let b, fields =
+          match filled with
+            | None -> (b, d.fields)
+            | Some filled ->
+                let decided = deployment_decided filled in
+                ( from_deployment io d.fields b filled,
+                  List.filter
+                    (fun (f : Field_spec.field) ->
+                      not (List.mem f.name decided))
+                    d.fields )
         in
-        spec_fields io b d.fields
+        spec_fields io b fields
 
 let list_of j k = match get j k with Some (`List l) -> l | _ -> []
 
