@@ -3,7 +3,7 @@
     list, the wizard prompts from them, and reports mask every field not
     declared non-secret. *)
 
-type kind = String | Bool | Int | Size | Path | List | Float
+type kind = String | Bool | Bool_or_string | Int | Size | Path | List | Float
 
 type field = {
   name : string;

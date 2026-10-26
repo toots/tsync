@@ -23,7 +23,7 @@
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret -> (secret)
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 
@@ -84,7 +84,7 @@ new: would write
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret -> 
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 
@@ -154,7 +154,7 @@ edit: would write
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret -> 
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 

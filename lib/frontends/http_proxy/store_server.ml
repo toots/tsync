@@ -11,7 +11,7 @@ type route = {
   domain_settings : Store.domain_settings;
   wake : unit -> unit;
   store : Store.t;
-  share : Share_server.t option;  (** [Some] when the route serves share links *)
+  share : [ `Off | `Self of Share_server.t | `Member of Composite.member ];
 }
 
 let default_max_concurrent = 16
@@ -369,8 +369,14 @@ let is_manifest_name name =
              (String.length name - String.length share_space))
           '/')
 
+(* §A4.3: where a route's share-space operations go. *)
+let share_store route =
+  match route.share with
+    | `Member (m : Composite.member) -> m.store
+    | `Off | `Self _ -> route.store
+
 let stored_domain route name =
-  match Option.bind (Key.of_string name) route.store.get_opt with
+  match Option.bind (Key.of_string name) (share_store route).get_opt with
     | Some b -> Share_server.manifest_domain (Bigstring.to_string b)
     | None -> None
 
@@ -381,7 +387,7 @@ let held_anywhere t name =
   List.exists
     (fun r ->
       match Key.of_string name with
-        | Some k -> r.store.head_opt k <> None
+        | Some k -> (share_store r).head_opt k <> None
         | None -> false)
     t.routes
 
@@ -561,6 +567,27 @@ let read_within t (r : Server.request) read_body limit =
                   answer (text 413 "too large")
               | Rt.Timeout -> answer (text 408 "body too slow"))
 
+(* §A4.6: a link is handed out only once the member holds what it shares. *)
+let on_member t route k body =
+  match route.share with
+    | `Member (m : Composite.member) when is_manifest_name (Key.to_string k) ->
+        let share =
+          match Share_server.manifest_share (Bigstring.to_string body) with
+            | Some share -> share
+            | None -> bad_request t
+        in
+        let held, name =
+          match share.target with
+            | `File key -> (m.store.head_opt key <> None, share.filename)
+            | `Dir id ->
+                ( m.store.list_prefix ~max_keys:1 (Key.namespace route.domain id)
+                  <> [],
+                  Filename.remove_extension share.filename )
+        in
+        if not held then
+          Fail.raise_ Fail.Refused "%s is not on %s yet" name m.name
+    | _ -> ()
+
 (* §A4.5: a share manifest may be written on a read-only route. *)
 let writable route k =
   if route.read_only && not (Key.under Key.shares k) then
@@ -671,10 +698,12 @@ let execute ?(partial = false) t route op body =
           | None -> empty 404)
     | Put k ->
         writable route k;
+        on_member t route k body;
         s.put k body;
         empty 200
     | Claim k -> (
         writable route k;
+        on_member t route k body;
         match s.put_if_absent k body with
           | Won ->
               (* publication §4.6: the serving owner projects the entry. *)
@@ -684,6 +713,7 @@ let execute ?(partial = false) t route op body =
           | Held b -> { Server.status = 200; headers = []; body = Bigstring b })
     | Put_if_unchanged (k, etag) -> (
         writable route k;
+        on_member t route k body;
         let expected =
           Option.map
             (fun etag ->
@@ -781,12 +811,16 @@ let execute ?(partial = false) t route op body =
           body =
             Bigstring (bs (W.listing_to_json (Option.to_list (s.head_opt k))));
         }
-    | Share_url p ->
-        if route.share <> None then json (`Assoc [("self", `Bool true)])
-        else (
-          match (s.capabilities p).share_url with
+    | Share_url p -> (
+        let url (store : Store.t) =
+          match (store.capabilities p).share_url with
             | Some u -> json (`Assoc [("url", `String u)])
-            | None -> text 404 "no share endpoint")
+            | None -> text 404 "no share endpoint"
+        in
+        match route.share with
+          | `Self _ -> json (`Assoc [("self", `Bool true)])
+          | `Member m -> url m.store
+          | `Off -> url s)
     | Domain_settings _ ->
         json (Store.domain_settings_to_json route.domain_settings)
     | Max_concurrency _ -> json (`Assoc [("maxConcurrency", `Int t.bound)])
@@ -851,7 +885,11 @@ let presented t route : Tsync_status.Status_report.presented =
         bytes_written = Option.map (fun c -> Atomic.get c.written) traffic;
         shared = true;
         read_only = Some route.read_only;
-        shares = Some (route.share <> None);
+        shares =
+          Some
+            (match route.share with
+              | `Self _ -> true
+              | `Off | `Member _ -> false);
         unanswered = false;
       };
   }
@@ -1027,7 +1065,12 @@ let self_url (l : Proxy_options.listener) =
 (* §A9.1: with several share-serving routes, the one whose domain the token's
    manifest names answers, else the first, so its refusal is the answer. *)
 let serve_share t (r : Server.request) params rest =
-  let sharing = List.filter_map (fun route -> route.share) t.routes in
+  let sharing =
+    List.filter_map
+      (fun route ->
+        match route.share with `Self s -> Some s | `Off | `Member _ -> None)
+      t.routes
+  in
   if sharing = [] then (
     count t "notFound";
     answer (text 404 "not found"));
@@ -1131,17 +1174,24 @@ let handle t (r : Server.request) read_body =
             in
             (* The body is read and its signature checked before a data slot
                is taken, so an unsigned body cannot hold one while it drips. *)
-            let route, body =
+            let route, body, names =
               match op with
                 | Get_multi | Children_multi | Delete_multi ->
                     let body = read_within t r read_body limit in
-                    (authorised body (bulk_names t body), body)
+                    let names = bulk_names t body in
+                    (authorised body names, body, names)
                 | _ ->
                     (match names with
                       | first :: _ when in_share_space first -> ()
                       | _ -> if route_for t names = None then unauthorized t);
                     let body = read_within t r read_body limit in
-                    (authorised body names, body)
+                    (authorised body names, body, names)
+            in
+            let route =
+              match names with
+                | first :: _ when in_share_space first ->
+                    { route with store = share_store route }
+                | _ -> route
             in
             let go () =
               let partial =
@@ -1152,6 +1202,61 @@ let handle t (r : Server.request) read_body =
             in
             if is_data op then admitted t go else go ())
   with Answer response -> response
+
+(* replication §4.9: a share written to a copy directly waits for the main. *)
+let guarded composite (m : Composite.member) =
+  let guard () = Composite.guard composite m "share" in
+  let s = m.store in
+  {
+    s with
+    put =
+      (fun ?mode k b ->
+        guard ();
+        s.put ?mode k b);
+    put_if_absent =
+      (fun k b ->
+        guard ();
+        s.put_if_absent k b);
+    put_if_unchanged =
+      (fun k b e ->
+        guard ();
+        s.put_if_unchanged k b e);
+    delete =
+      (fun k ->
+        guard ();
+        s.delete k);
+    delete_multi =
+      (fun ks ->
+        guard ();
+        s.delete_multi ks);
+    copy =
+      (fun a b ->
+        guard ();
+        s.copy a b);
+  }
+
+(* §A3: a [shares] name is the domain's main or a replica, with a share URL. *)
+let share_member (domain : Tsync_domain.Domain.t) name =
+  let refuse why =
+    raise
+      (Tsync_config.Config.Invalid
+         (Printf.sprintf "http-proxy for %s: shares names %s, %s"
+            (Domain_name.to_string domain.name)
+            name why))
+  in
+  match
+    List.find_opt
+      (fun (m : Composite.member) -> m.name = name)
+      (Composite.members domain.composite)
+  with
+    | None -> refuse "which is not a backend of the domain"
+    | Some { role = Backfill; _ } ->
+        refuse "a backfill, which is not guaranteed to be in sync"
+    | Some { role = Read_only; _ } -> refuse "a read-only backend"
+    | Some m -> (
+        match (m.store.capabilities Key.shares).share_url with
+          | Some _ -> { m with store = guarded domain.composite m }
+          | None -> refuse "which does not serve share links")
 
 (* frontends/http-proxy §A3, [maxEntryCommands] with [projectCommits]. *)
 let projected_entry_commands = 4096
@@ -1286,11 +1391,13 @@ let run config =
                    else ignore);
                 store = Tsync_domain.Domain.store domain;
                 share =
-                  (if b.shares then
-                     Some
-                       (Share_server.of_context
-                          (Tsync_domain.Domain.context domain))
-                   else None);
+                  (match b.shares with
+                    | `Off -> `Off
+                    | `Self ->
+                        `Self
+                          (Share_server.of_context
+                             (Tsync_domain.Domain.context domain))
+                    | `Member name -> `Member (share_member domain name));
               })
             bindings
         in

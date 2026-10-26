@@ -7,6 +7,7 @@ let p = Contract.p
 let secret = String.make 40 's'
 let d = Domain_name.v "d"
 let ro_secret = String.make 40 'r'
+let m_secret = String.make 40 'm'
 
 let () =
   let root =
@@ -18,7 +19,8 @@ let () =
   Rt.run_sync (fun () ->
       let local name = Local.create ~name (Filename.concat root name) in
       let woken = Atomic.make 0 in
-      let route ?(read_only = false) ?(secret = secret) name domain store =
+      let route ?(read_only = false) ?(secret = secret) ?(share = `Off) name
+          domain store =
         {
           P.name;
           domain = Domain_name.v domain;
@@ -37,7 +39,7 @@ let () =
               vault_lock = Tsync_core.Vault_lock.none;
             };
           store;
-          share = None;
+          share;
           wake = (fun () -> Atomic.incr woken);
         }
       in
@@ -54,12 +56,26 @@ let () =
               inner.get_opt k);
         }
       in
+      (* A copy whose bucket function serves its share links. *)
+      let cloud =
+        let inner = local "cloud" in
+        {
+          inner with
+          capabilities =
+            (fun _ ->
+              { Store.no_caps with share_url = Some "https://cloud.example" });
+        }
+      in
       let proxy =
         P.create ~max_concurrent:4
           [
             route "d" "d" (local "d");
             route "throttled" "throttled" throttled;
             route "ro" "ro" ~read_only:true ~secret:ro_secret (local "ro");
+            route "m" "m" (local "m") ~secret:m_secret
+              ~share:
+                (`Member
+                   { Composite.name = "cloud"; role = Replica; store = cloud });
           ]
       in
       (* The largest answer to a batch read, as the server built it. *)
@@ -193,6 +209,31 @@ let () =
       let first = s.delete image in
       let again = s.delete image in
       p "deleted once the manifest is gone: %b, then again: %b\n" first again;
+      p "== shares on a member (§A4.6)\n";
+      let m = client ~secret:m_secret "m" and dm = Domain_name.v "m" in
+      p "share url: %s\n"
+        (Option.value ~default:"none"
+           (m.capabilities (Key.domain_prefix dm)).share_url);
+      let file = Key.child dm Folder_id.root "f" in
+      let link = Option.get (Key.share (String.make 32 'b')) in
+      let manifest =
+        Printf.sprintf
+          {|{"v":1,"domain":"m","type":"file","key":"%s","filename":"f.mkv"}|}
+          (Key.to_string file)
+      in
+      let file_body = (Manifest.symlink ~name:"f" ~mtime:0. "t").body in
+      Contract.put m file file_body;
+      p "a link before the member holds its file: %s\n"
+        (match Contract.put m link manifest with
+          | () -> "ok"
+          | exception Fail.E f -> Fail.kind_name f.kind ^ ": " ^ f.reason);
+      cloud.put file (body file_body);
+      p "once it does: %s\n" (kind (fun () -> Contract.put m link manifest));
+      p "the manifest on the member %b, on the main %b\n"
+        (cloud.head_opt link <> None)
+        ((local "m").head_opt link <> None);
+      p "read back through the listener: %b\n"
+        (Contract.get m link = Some manifest);
       p "== a backend that throttles for two seconds\n";
       let slow = client "throttled" in
       Contract.put slow (Key.v "tsync/throttled/a") "a";

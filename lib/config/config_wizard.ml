@@ -38,6 +38,11 @@ let typed (kind : Field_spec.kind) s : (json, string) result =
         match Config.bool_of_string_opt s with
           | Some b -> Ok (`Bool b)
           | None -> Error "answer yes or no")
+    | Bool_or_string ->
+        Ok
+          (match Config.bool_of_string_opt s with
+            | Some b -> `Bool b
+            | None -> `String s)
     | Int -> (
         match int_of_string_opt s with
           | Some i -> Ok (`Int i)

@@ -11,8 +11,10 @@ module Make (_ : Tsync_remote.Context.S) : sig
   (** [rel] is a domain path ([""] the whole domain); [expires] seconds from
       now. ABSENT when nothing is at [rel] or a folder is empty; REFUSED when no
       member serves share links or the object is not on the chosen one yet;
-      EXISTS when [token] holds another share. *)
-  val create : ?expires:float -> ?token:string -> string -> created
+      EXISTS when [token] holds another share. [member] is the one to make it
+      on, from {!Tsync_config.Config.share_member}. *)
+  val create :
+    ?expires:float -> ?token:string -> ?member:string -> string -> created
 
   (** A token or a link; whether a share of this domain was there. Another
       domain's share is left alone. *)

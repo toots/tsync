@@ -195,6 +195,15 @@ let spec_value path (fs : Field_spec.field) l =
           (fun s -> S s)
           (match string_field path l fs.name with Some "" -> None | x -> x)
     | Bool -> Option.map (fun b -> B b) (bool_field path l fs.name)
+    | Bool_or_string -> (
+        match get l fs.name with
+          | None | Some (`String "") -> None
+          | Some (`Bool b) -> Some (B b)
+          | Some (`String s) -> (
+              match bool_of_string_opt s with
+                | Some b -> Some (B b)
+                | None -> Some (S s))
+          | Some _ -> fail p "expected a boolean or a name")
     | Int -> Option.map (fun i -> I i) (int_field path l fs.name)
     | Float -> Option.map (fun f -> F f) (float_field path l fs.name)
     | Size -> Option.map (fun i -> I i) (size_field path l fs.name)
@@ -837,6 +846,14 @@ let link_settings t name =
   match List.assoc_opt name t.links with Some l -> l | None -> t.uplink
 
 let frontend d ftype = List.find_opt (fun f -> f.ftype = ftype) d.frontends
+
+let share_member d =
+  match frontend d "http-proxy" with
+    | Some f -> (
+        match List.assoc_opt "shares" f.options with
+          | Some (S m) when m <> "" -> Some m
+          | _ -> None)
+    | None -> None
 
 let find_domain t name =
   List.find_opt (fun d -> Domain_name.to_string d.name = name) t.domains

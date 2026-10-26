@@ -1,6 +1,12 @@
 == the object must be on the member serving links
 a.txt: refused (refused/other): a.txt is not on copy yet
 
+== a backfill never serves links
+a.txt: refused (refused/other): Sharing is not available for d.
+
+== a named member
+on main: refused (refused/other): Sharing is not available for d.
+
 == by kind
 a.txt: https://s.example/d/<token>, in 7 days
   {"v":1,"expires":<exp>,"domain":"d","type":"file","key":"tsync/d/manifests/.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75","filename":"a.txt"}
