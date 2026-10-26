@@ -33,6 +33,7 @@ changed: exported 1, already there 0, failed 0
 == refusals
 missing: refused: nowhere: no such file or folder in docs
 clash: refused: two paths land on clash/a.txt
+a lone argument names a domain path: folder true, file true, other false
 
 == unpublished edits are listed
 pending: exported 2 (40005 bytes), already there 0, failed 0

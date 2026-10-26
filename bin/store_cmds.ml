@@ -304,6 +304,21 @@ let export args source jobs name verbose =
               Tsync_sync.Export.Make
                 ((val Tsync_domain.Domain.context ?reading_from:source
                         ?reading_at_most:jobs dom)) in
+            (* 07 §5.3: a lone argument naming a domain path is a forgotten
+               DIR, not a request for the whole domain. *)
+            if rpaths = [] then (
+              match Tsync_config.Domain_path.in_domain config dir with
+                | Ok (domain, rel)
+                  when (domain = None
+                       || domain
+                          = Some (Tsync_core.Domain_name.to_string dom.name))
+                       && X.names_path rel ->
+                    refuse
+                      "export: %s is a path in %s; give a destination \
+                       directory after it"
+                      dir
+                      (Tsync_core.Domain_name.to_string dom.name)
+                | _ -> ());
             let r =
               X.export ~narrate:(Display.narrate ()) ~cancelled:Stop.requested
                 ~cache_root:dom.cache_root ~dst paths

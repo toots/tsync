@@ -54,6 +54,11 @@ module Make (C : Context.S) = struct
                          :: acc)
                [])
 
+  let names_path path =
+    match T.find Folder_id.root (segs path) with
+      | `Missing -> false
+      | `File _ | `Folder _ -> true
+
   let check_names ~dst files =
     let seen = Hashtbl.create 64 in
     List.iter

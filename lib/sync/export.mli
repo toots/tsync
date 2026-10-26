@@ -28,6 +28,9 @@ val record_grace : float
 val sweep_records : cache_root:string -> Domain_name.t -> int
 
 module Make (_ : Tsync_remote.Context.S) : sig
+  (** Whether a domain-relative path names a file or folder. *)
+  val names_path : string -> bool
+
   (** [paths] are domain-relative ([""] is the root); [dst] must be absolute. A
       missing path, a [.] or [..] segment, or two paths landing on one
       destination fails the run before anything is written. *)

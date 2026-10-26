@@ -156,6 +156,8 @@ let () =
       p "\n== refusals\n";
       export "missing" ["nowhere"];
       export "clash" ["notes/a.txt"; "notes/a.txt"];
+      p "a lone argument names a domain path: folder %b, file %b, other %b\n"
+        (X.names_path "notes") (X.names_path "top.txt") (X.names_path "out");
       p "\n== unpublished edits are listed\n";
       A.set_paused true;
       A.create "notes/a.txt" ~exclusive:false;
