@@ -3,7 +3,7 @@
   "name": "tsync",
   "description": "Logins, two-factor codes and passkeys from your tsync vault.",
   "version": "1.0.0",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq21xITG6h0VlmOBUaw6Ul3LhIDkZjaqEwyhvppcKhT1jzyXAvj8LGhdy+moJLcFPTRh+2jHpJ2fIGNniWWU3Hj6qR+RHzVrtO2cnPU36L9dx68h6z9g8v7UC9pgwdqh/D9cT76o43Bg/tIJA8W1OH2t6b5uiNicqFbmxK4prqE2Yxa8ZnHZcLip+GbCnsPpuL2KDQZC5f6Bmv5Ta8cYZkO8ZRLYRRmf2IJs4XHNdzyKl5Shw2VyQT+UGGHWNjy0f58vTGml0xoBRdpdZuueLZo9v2sL0ZZouhaaq8BKzhkLu9SWYPgULc+y3dKcba8ukoccysJrjEMDuqP09Ltp4CwIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt4EREFvbV6cKDup6pnC48wyq966NpHeb97dRLMUUCkTNqLeSOQlkHp1Rng15WQVVyvXGXgjFhnZnbaprP+jv0OUtNn8OwWyrTwPr205Dyxww25hxfSbqzkoEkjpYeVJWVQx/8SmFTWKf5erE+kOsdIvoq5nnPTX8Y1V87hCSHntAq59WOKsyVDtq8I7c/1T+ojwu9XSFGT3rBlNCxolwOPikKw1SWcaCBqZGDcGHxXfCFntNJYuIHhylXskiVipCorS4LaeMTbYFasBVLlebEPFFqhQ5IMCiLgR9zyOYy7bg2EJm9amsQbGjbx2X5iZBYMEuRLxnVgAEH0JVnCVPKQIDAQAB",
   "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon-16.png",

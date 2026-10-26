@@ -706,7 +706,7 @@ let browser_host_cmd =
 
 (* browser §2: the extension's id, fixed by the public key its manifest
    carries. *)
-let extension_id = "cdnflbhllfjagecmodmfhaidolcjlpga"
+let extension_id = "gmmpfhbhmepahmjbbbnbmcljonleeifl"
 let host_name = "org.feverdreamtv.tsync"
 
 (* The per-user directories of the Chromium-family browsers, by host. *)
