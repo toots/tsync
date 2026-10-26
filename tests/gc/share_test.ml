@@ -131,10 +131,14 @@ let () =
         | exception Fail.E f ->
             p "a.txt: refused (%s): %s\n" (Fail.kind_name f.kind) f.reason);
       p "\n== a named member\n";
-      (match S.create ~member:"main" "a.txt" with
-        | _ -> p "on main: created\n"
-        | exception Fail.E f ->
-            p "on main: refused (%s): %s\n" (Fail.kind_name f.kind) f.reason);
+      List.iter
+        (fun member ->
+          match S.create ~member "a.txt" with
+            | _ -> p "on %s: created\n" member
+            | exception Fail.E f ->
+                p "on %s: refused (%s): %s\n" member (Fail.kind_name f.kind)
+                  f.reason)
+        ["main"; "clod"];
       p "\n== by kind\n";
       let file = create "a.txt" "a.txt" in
       ignore (create "docs" ~expires:3600. "docs");

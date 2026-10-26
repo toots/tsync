@@ -5,7 +5,8 @@ a.txt: refused (refused/other): a.txt is not on copy yet
 a.txt: refused (refused/other): Sharing is not available for d.
 
 == a named member
-on main: refused (refused/other): Sharing is not available for d.
+on main: refused (refused/other): main does not serve share links
+on clod: refused (refused/other): clod is not a backend of d
 
 == by kind
 a.txt: https://s.example/d/<token>, in 7 days

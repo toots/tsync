@@ -1022,6 +1022,35 @@ let parked t =
 
 let guard t (m : member) what = guard t.core m.role what
 
+let share_member ?name t =
+  let refuse fmt = Fail.raise_ Fail.Refused fmt in
+  let url (m : member) = (m.store.capabilities Key.shares).share_url in
+  match name with
+    | None -> (
+        match
+          List.find_map
+            (fun (m : member) ->
+              if m.role = Backfill then None
+              else Option.map (fun u -> (m, u)) (url m))
+            (in_read_order t)
+        with
+          | Some chosen -> chosen
+          | None ->
+              refuse "Sharing is not available for %s."
+                (Domain_name.to_string t.core.domain))
+    | Some n -> (
+        match List.find_opt (fun (m : member) -> m.name = n) (members t) with
+          | None ->
+              refuse "%s is not a backend of %s" n
+                (Domain_name.to_string t.core.domain)
+          | Some { role = Backfill; _ } ->
+              refuse "%s is a backfill, which is not guaranteed to be in sync" n
+          | Some { role = Read_only; _ } -> refuse "%s is a read-only backend" n
+          | Some m -> (
+              match url m with
+                | Some u -> (m, u)
+                | None -> refuse "%s does not serve share links" n))
+
 let submit_collection_delete t (m : member) ~keys ~run ~shard ~generation =
   List.iter
     (fun c ->

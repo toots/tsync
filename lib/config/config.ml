@@ -202,7 +202,7 @@ let spec_value path (fs : Field_spec.field) l =
           | Some (`String s) -> (
               match bool_of_string_opt s with
                 | Some b -> Some (B b)
-                | None -> Some (S s))
+                | None -> Some (S (String.trim s)))
           | Some _ -> fail p "expected a boolean or a name")
     | Int -> Option.map (fun i -> I i) (int_field path l fs.name)
     | Float -> Option.map (fun f -> F f) (float_field path l fs.name)
@@ -847,7 +847,7 @@ let link_settings t name =
 
 let frontend d ftype = List.find_opt (fun f -> f.ftype = ftype) d.frontends
 
-let share_member d =
+let share_member_name d =
   match frontend d "http-proxy" with
     | Some f -> (
         match List.assoc_opt "shares" f.options with

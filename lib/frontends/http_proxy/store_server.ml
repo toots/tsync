@@ -1235,28 +1235,16 @@ let guarded composite (m : Composite.member) =
         s.copy a b);
   }
 
-(* §A3: a [shares] name is the domain's main or a replica, with a share URL. *)
+(* §A3: a [shares] name that cannot serve links fails startup. *)
 let share_member (domain : Tsync_domain.Domain.t) name =
-  let refuse why =
-    raise
-      (Tsync_config.Config.Invalid
-         (Printf.sprintf "http-proxy for %s: shares names %s, %s"
-            (Domain_name.to_string domain.name)
-            name why))
-  in
-  match
-    List.find_opt
-      (fun (m : Composite.member) -> m.name = name)
-      (Composite.members domain.composite)
-  with
-    | None -> refuse "which is not a backend of the domain"
-    | Some { role = Backfill; _ } ->
-        refuse "a backfill, which is not guaranteed to be in sync"
-    | Some { role = Read_only; _ } -> refuse "a read-only backend"
-    | Some m -> (
-        match (m.store.capabilities Key.shares).share_url with
-          | Some _ -> { m with store = guarded domain.composite m }
-          | None -> refuse "which does not serve share links")
+  match Composite.share_member ~name domain.composite with
+    | m, _ -> { m with store = guarded domain.composite m }
+    | exception Fail.E f ->
+        raise
+          (Tsync_config.Config.Invalid
+             (Printf.sprintf "http-proxy for %s: shares: %s"
+                (Domain_name.to_string domain.name)
+                f.reason))
 
 (* frontends/http-proxy §A3, [maxEntryCommands] with [projectCommits]. *)
 let projected_entry_commands = 4096

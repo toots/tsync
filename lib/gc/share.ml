@@ -17,28 +17,10 @@ module Make (C : Context.S) = struct
   let d = C.domain
   let name = Domain_name.to_string d
 
-  (* 05 §4.11: [member] when named, else the first in read order with a share
-     URL; never a backfill; the write guard on it. *)
   let chosen ?member () =
-    let members =
-      List.filter
-        (fun (m : Composite.member) ->
-          m.role <> Backfill
-          && Option.fold ~none:true ~some:(( = ) m.name) member)
-        (Composite.in_read_order C.composite)
-    in
-    match
-      List.find_map
-        (fun (m : Composite.member) ->
-          Option.map
-            (fun url -> (m, url))
-            (m.store.capabilities Key.shares).share_url)
-        members
-    with
-      | None -> Fail.raise_ Fail.Refused "Sharing is not available for %s." name
-      | Some (m, url) ->
-          Composite.guard C.composite m "share";
-          (m, url)
+    let m, url = Composite.share_member ?name:member C.composite in
+    Composite.guard C.composite m "share";
+    (m, url)
 
   let segs p = if p = "" then [] else String.split_on_char '/' p
 
