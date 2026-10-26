@@ -44,6 +44,7 @@ Both are the same program and the same config file. A server is a domain with an
 | [Command reference](commands.md) | Every command, the status report, logs |
 | [macOS and the Linux desktop](desktop.md) | Finder and the menu bar; the tray and the Dolphin plugin |
 | [Troubleshooting](troubleshooting.md) | Symptoms and what to try |
+| [Privacy](privacy.md) | What tsync sends where, and what it never collects |
 
 Provisioning a bucket for tsync on AWS or Google Cloud: [terraform/README.md](../terraform/README.md).
 
