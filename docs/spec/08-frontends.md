@@ -67,7 +67,9 @@ holds:
   (`linux`, `macos`), the yes-or-no **question** that adds it to a domain, and the **options asked**
   on a yes; the remaining options sit behind one more question. Whether the answer defaults to yes
   on a new domain follows from the kind (presenting: yes).
-- **option spec**: each option's name, label, type, default and secret flag. The config parser
+- **option spec**: each option's name, label, type, default and secret flag, and optionally a
+  **blank** note: what leaving the option unset means, when that is not simply the default (a
+  value that depends on other options, or a behaviour). The config parser
   refuses keys not in the spec ([05 §2.1](05-ops-config.md)); the wizard prompts from it; secrets
   are masked in reports.
 

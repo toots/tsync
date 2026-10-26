@@ -8,11 +8,14 @@ let port p =
 let fields =
   Field_spec.
     [
-      f ~check:port "port" "Port" Int;
+      f ~check:port ~blank:"443 with TLS, else 80" "port" "Port" Int;
       f "bind" "Bind addresses" String;
       f "max_concurrent" "Concurrent data operations" Int;
-      f ~check:absolute_path "ssl_certificate" "TLS certificate" Path;
-      f ~check:absolute_path "ssl_certificate_key" "TLS key" Path;
+      f ~check:absolute_path
+        ~blank:"no TLS: plain HTTP on this machine only, for a reverse proxy"
+        "ssl_certificate" "TLS certificate" Path;
+      f ~check:absolute_path ~blank:"no TLS, only without a certificate"
+        "ssl_certificate_key" "TLS key" Path;
       f ~secret:true ~check:secret_length "secret" "Shared secret" String;
       f ~default:"false" "shares" "Serve share links" Bool;
       f ~default:"false" "readOnly" "Read-only" Bool;

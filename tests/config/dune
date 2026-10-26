@@ -36,7 +36,7 @@
 (executable
  (name wizard_test)
  (modules wizard_test)
- (libraries tsync_core tsync_config tsync_catalog yojson))
+ (libraries tsync_core tsync_config tsync_catalog yojson unix))
 
 (rule
  (enabled_if %{lib-available:tsync_fuse})

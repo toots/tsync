@@ -812,7 +812,9 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
   has them. In advanced mode the answer `-` to an optional key removes it from the file, so that the
   value is again the main's or the application's default; the prompt shows which of the two that is.
 - Prompts: blank keeps the current value; required fields are asked again; secrets are read without
-  echo; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
+  echo; a field with no value whose spec says what leaving it unset means (its **blank** note,
+  [08 §2.1](08-frontends.md#21-frontend-descriptor)) shows that note in the prompt, e.g.
+  `Port (blank: 443 with TLS, else 80)`; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
   blank answer to a field with no value writes nothing when the parser applies that default itself,
   and writes the wizard's own defaults (`versioning`, `maxCache`, a backend's `role`).
 - On write: drop per-link settings no backend uses; validate with the parser's own rules
