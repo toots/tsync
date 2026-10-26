@@ -1,27 +1,24 @@
 # Member names are the backend's own field names, so a store's entry here and in
-# store_secrets merge into a tsync backend with nothing translated.
+# store_secrets merge into a tsync backend with nothing translated. shareUrl is
+# null without a share function, which the backends read as none.
 output "stores" {
   description = "Per store: its backend type and every non-secret backend field the deployment decides."
   value = merge(
     {
-      for name, store in module.store : name => merge(
-        {
-          type        = "s3"
-          bucket      = store.bucket
-          region      = store.region
-          accessKeyId = store.access_key_id
-        },
-        store.share_url == null ? {} : { shareUrl = store.share_url },
-      )
+      for name, store in module.store : name => {
+        type        = "s3"
+        bucket      = store.bucket
+        region      = store.region
+        accessKeyId = store.access_key_id
+        shareUrl    = store.share_url
+      }
     },
     {
-      for name, store in module.store_gcs : name => merge(
-        {
-          type   = "gcs"
-          bucket = store.bucket
-        },
-        store.share_url == null ? {} : { shareUrl = store.share_url },
-      )
+      for name, store in module.store_gcs : name => {
+        type     = "gcs"
+        bucket   = store.bucket
+        shareUrl = store.share_url
+      }
     },
   )
 }

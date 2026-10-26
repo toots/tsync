@@ -140,7 +140,7 @@ Beyond [11 §10](../11-infrastructure.md#10-store-options):
 
 ## 11. Outputs
 
-- `stores[N]`: `type = "gcs"`, `bucket`, and `shareUrl` with a share function.
+- `stores[N]`: `type = "gcs"`, `bucket`, and `shareUrl`, null without a share function.
 - `store_secrets[N]`: `serviceAccountKey`, the key's JSON text.
 - `custom_domain_dns[N].records`: the records the domain mapping reports.
 

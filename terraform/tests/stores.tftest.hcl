@@ -81,8 +81,8 @@ run "both_providers" {
     error_message = "Every store is reported with its backend type."
   }
   assert {
-    condition     = !contains(keys(output.stores["bare"]), "shareUrl")
-    error_message = "A store without a share function reports no shareUrl."
+    condition     = output.stores["bare"].shareUrl == null
+    error_message = "A store without a share function reports a null shareUrl."
   }
   assert {
     condition     = keys(output.custom_domain_dns) == ["media"]

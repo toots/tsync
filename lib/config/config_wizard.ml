@@ -141,7 +141,7 @@ let choose io ~label ~default options =
   go ()
 
 (* 11 §11: the stores of one backend type in a deployment's outputs, each with
-   the backend fields it decides. *)
+   the backend fields it decides, [None] for a null: there is none. *)
 let stores_of_outputs ~btype outputs =
   match Yojson.Safe.from_string outputs with
     | exception Yojson.Json_error _ -> []
@@ -149,7 +149,10 @@ let stores_of_outputs ~btype outputs =
         let value name = Option.bind (get j name) (fun o -> get o "value") in
         let strings j =
           List.filter_map
-            (function k, `String s -> Some (k, s) | _ -> None)
+            (function
+              | k, `String s -> Some (k, Some s)
+              | k, `Null -> Some (k, None)
+              | _ -> None)
             (fields j)
         in
         let secrets = Option.value ~default:`Null (value "store_secrets") in
@@ -187,8 +190,21 @@ let deployment_outputs dir =
     | Some cli when cli <> "" -> run cli
     | _ -> ( match run "tofu" with `Not_installed -> run "terraform" | r -> r)
 
+(* 11 §11: the store holding the backend's bucket, else the first. *)
+let default_store b stores =
+  match
+    List.find_opt
+      (fun (_, filled) ->
+        match (List.assoc_opt "bucket" filled, get b "bucket") with
+          | Some (Some bucket), Some (`String current) -> bucket = current
+          | _ -> false)
+      stores
+  with
+    | Some (name, _) -> name
+    | None -> fst (List.hd stores)
+
 (* [None] when no deployment was read. *)
-let filled_from_deployment io ~btype =
+let filled_from_deployment io ~btype b =
   let dir =
     String.trim
       (io.ask
@@ -214,51 +230,32 @@ let filled_from_deployment io ~btype =
                 None
             | [(_, filled)] -> Some filled
             | stores ->
-                let names = List.map fst stores in
+                let default = default_store b stores in
                 Some
                   (List.assoc
-                     (choose io ~label:"store" ~default:(List.hd names) names)
+                     (choose io ~label:"store" ~default (List.map fst stores))
                      stores)))
 
-(* 11 §11: decided by a deployment even when its outputs do not give it. *)
-let share_url = "shareUrl"
-
-(* 11 §11: the fields a deployment decides, which are not asked once one was
-   read. *)
-let deployment_decided filled = share_url :: List.map fst filled
-
-(* 11 §11: the deployment's fields over the backend's own, and no share URL
-   without a share function; the changed ones are named, a secret without its
-   value. *)
+(* 11 §11: the deployment's fields over the backend's own, a null removing
+   one; the changed ones are named, a secret without its value. *)
 let from_deployment io (specs : Field_spec.field list) b filled =
-  let label name =
-    match List.find_opt (fun (f : Field_spec.field) -> f.name = name) specs with
-      | Some f -> f.label
-      | None -> name
+  let change (b, changed) (k, v) =
+    match List.find_opt (fun (f : Field_spec.field) -> f.name = k) specs with
+      | None -> (b, changed)
+      | Some f -> (
+          let current = get b k in
+          let was =
+            match Option.bind current show with
+              | Some old when not f.secret -> Printf.sprintf " (was %s)" old
+              | _ -> ""
+          in
+          match v with
+            | None when current = None -> (b, changed)
+            | None -> (unset b k, (f.label ^ " removed" ^ was) :: changed)
+            | Some v when current = Some (`String v) -> (b, changed)
+            | Some v -> (set b k (`String v), (f.label ^ was) :: changed))
   in
-  let b, changed =
-    List.fold_left
-      (fun (b, changed) (k, v) ->
-        match
-          List.find_opt (fun (f : Field_spec.field) -> f.name = k) specs
-        with
-          | Some f when get b k <> Some (`String v) ->
-              let was =
-                match Option.bind (get b k) show with
-                  | Some old when not f.secret -> Printf.sprintf " (was %s)" old
-                  | _ -> ""
-              in
-              (set b k (`String v), (f.label ^ was) :: changed)
-          | _ -> (b, changed))
-      (b, []) filled
-  in
-  let b, changed =
-    if List.mem_assoc share_url filled || get b share_url = None then
-      (b, changed)
-    else
-      ( unset b share_url,
-        (label share_url ^ " removed: no share function") :: changed )
-  in
+  let b, changed = List.fold_left change (b, []) filled in
   if changed <> [] then
     io.say ("from the deployment: " ^ String.concat ", " (List.rev changed));
   b
@@ -289,14 +286,15 @@ let backend io ~advanced ~has_main b =
     | None -> b
     | Some d ->
         let filled =
-          if btype = "s3" || btype = "gcs" then filled_from_deployment io ~btype
+          if btype = "s3" || btype = "gcs" then
+            filled_from_deployment io ~btype b
           else None
         in
         let b, fields =
           match filled with
             | None -> (b, d.fields)
             | Some filled ->
-                let decided = deployment_decided filled in
+                let decided = List.map fst filled in
                 ( from_deployment io d.fields b filled,
                   List.filter
                     (fun (f : Field_spec.field) ->

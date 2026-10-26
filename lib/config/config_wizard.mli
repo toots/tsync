@@ -27,6 +27,7 @@ val edit :
 val prepare : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 (** The stores of backend type [btype] in a deployment's outputs, as JSON text
-    (spec 11 §11): each store's name with the backend fields it decides. *)
+    (spec 11 §11): each store's name with the backend fields it decides, [None]
+    for a field it decides there is none of. *)
 val stores_of_outputs :
-  btype:string -> string -> (string * (string * string) list) list
+  btype:string -> string -> (string * (string * string option) list) list
