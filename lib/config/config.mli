@@ -128,6 +128,12 @@ val bool_of_string_opt : string -> bool option
 val link_settings : t -> string -> link
 val uplink_settings : link -> Tsync_store.Uplink.settings
 val frontend : domain -> string -> frontend option
+
+(** The member a domain's share links are made on, when its http-proxy [shares]
+    names one (frontends/http-proxy §A4.6). Read by the listener and by a
+    creator on the same host, so both hand out the same member's links. *)
+val share_member : domain -> string option
+
 val find_domain : t -> string -> domain option
 
 (** An explicit name, else the default domain if configured, else the only one.

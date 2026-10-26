@@ -17,7 +17,8 @@ let fields =
       f ~check:absolute_path ~blank:"no TLS; required with a certificate"
         "ssl_certificate_key" "TLS key" Path;
       f ~secret:true ~check:secret_length "secret" "Shared secret" String;
-      f ~default:"false" "shares" "Serve share links" Bool;
+      f ~default:"false" "shares" "Share links (yes, no, or a backend name)"
+        Bool_or_string;
       f ~default:"false" "readOnly" "Read-only" Bool;
       f ~default:"true" "projectCommits" "Project the commits it receives" Bool;
       f "maxEntryCommands" "Changes in one log entry" Int;

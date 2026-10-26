@@ -398,6 +398,7 @@ let () =
              "F";
            domain ~frontends:(proxy {|,"readOnly":true|}) "G";
            domain ~frontends:(proxy "") "H";
+           domain ~frontends:(proxy {|,"shares":"cloud"|}) "I";
          ])
   in
   match Tsync_http_proxy.Proxy_options.resolve c with
@@ -405,9 +406,14 @@ let () =
     | Some (_, bindings) ->
         List.iter
           (fun (b : Tsync_http_proxy.Proxy_options.binding) ->
-            p "%s: secret inherited %b, shares %b, read-only %b\n"
+            p "%s: secret inherited %b, shares %s, read-only %b\n"
               (Tsync_core.Domain_name.to_string b.domain.name)
-              (b.secret = secret) b.shares b.read_only)
+              (b.secret = secret)
+              (match b.shares with
+                | `Off -> "off"
+                | `Self -> "self"
+                | `Member m -> "member " ^ m)
+              b.read_only)
           bindings
 
 let () =

@@ -17,10 +17,16 @@ module Make (C : Context.S) = struct
   let d = C.domain
   let name = Domain_name.to_string d
 
-  (* 05 §4.11: readable members first, backfills last; the first with a share
-     URL, the write guard on it. *)
-  let chosen () =
-    let members = Composite.in_read_order C.composite in
+  (* 05 §4.11: [member] when named, else the first in read order with a share
+     URL; never a backfill; the write guard on it. *)
+  let chosen ?member () =
+    let members =
+      List.filter
+        (fun (m : Composite.member) ->
+          m.role <> Backfill
+          && Option.fold ~none:true ~some:(( = ) m.name) member)
+        (Composite.in_read_order C.composite)
+    in
     match
       List.find_map
         (fun (m : Composite.member) ->
@@ -47,10 +53,10 @@ module Make (C : Context.S) = struct
          @ target
          @ [("filename", `String filename)]))
 
-  let create ?(expires = default_expiry) ?token rel =
+  let create ?(expires = default_expiry) ?token ?member rel =
     if not (expires > 0. && Float.is_finite expires) then
       Fail.raise_ Fail.Invalid "a share's lifetime must be finite and positive";
-    let m, url = chosen () in
+    let m, url = chosen ?member () in
     let target, filename, present =
       match T.find Folder_id.root (segs rel) with
         | `Missing ->

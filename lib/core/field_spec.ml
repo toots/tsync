@@ -1,4 +1,4 @@
-type kind = String | Bool | Int | Size | Path | List | Float
+type kind = String | Bool | Bool_or_string | Int | Size | Path | List | Float
 
 type field = {
   name : string;

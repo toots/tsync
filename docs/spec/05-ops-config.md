@@ -685,8 +685,11 @@ Token, expiry, overwrite and revocation rules are
 [02](02-remote-model.md).
 
 - **Store choice**: when a non-main member exists, the write guard first (fail fast rather than
-  climbing a dead main's retry ladder). Then members readable-first, backfill last; the first whose
-  capabilities give a share URL is chosen (write guard on it). None → `Share_unavailable "Sharing is
+  climbing a dead main's retry ladder). Then the member the domain's http-proxy `shares` names
+  ([frontends/http-proxy §A4.6](frontends/http-proxy.md#a46-shares-on-a-member)), else the members in
+  read order; never a backfill (it is not guaranteed to be in sync,
+  [replication §3.1](algorithms/replication.md#31-roles)); the first whose capabilities give a share
+  URL is chosen (write guard on it). None → `Share_unavailable "Sharing is
   not available for <domain>."`.
 - **`create(rel, expires, token?)`**: resolve `rel` through the composite: a file manifest → a file
   share (filename = its leaf); a folder (marker, else the local folder-id index, never minted) with at
@@ -850,8 +853,8 @@ Token, expiry, overwrite and revocation rules are
   UNMARKED, and a record overwritten with another value, or deleted, UNACCOUNTED when a retained
   entry names its key. The report writes nothing.
 - **Share**: manifest fields for a file and a folder; root share named `<domain>.zip`; refused when no
-  member advertises a share URL; a missing path or an empty folder → not found; a read-only domain can share; a backfill-only share store is used
-  when it is the only one with a URL, and refused while it lacks the object; a given token that
+  member advertises a share URL; a missing path or an empty folder → not found; a read-only domain can share; a backfill with a share URL is never
+  chosen; a named member is used, and a named member without a share URL is refused; a given token that
   exists is refused; revoke removes the link; `clear_cache` removes only cached artifacts, counts
   correctly, and is idempotent.
 

@@ -13,7 +13,7 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
 |---|---|
 | Descriptor, process (§A2) | `Http_proxy_options` registers `http-proxy` with `presenting = None`. `Supervisor.assign` adds one `store-server` child; `Daemon_cmds.store_server` runs `Store_server.run`. |
 | Configuration (§A3) | `Proxy_options.resolve` answers a `listener` and a `binding` per domain; `listener_value` (one distinct value across bindings) and `inherited` (the secret) raise `Config.Invalid` naming the option. |
-| Routes (§A4.1) | `Store_server.route`, built in `run` from `Domain.build ~owner:false ~poke`, `Domain.store` and, for shares, `Share_server.of_context (Domain.context domain)`. |
+| Routes (§A4.1) | `Store_server.route`, built in `run` from `Domain.build ~owner:false ~poke`, `Domain.store` and, for shares, `` `Self (Share_server.of_context (Domain.context domain)) `` or `` `Member `` from `share_member`, which raises `Config.Invalid` (§A4.6). |
 | Pipeline (§A4.2) | `Store_server.handle`: `serve_share` and `listener_endpoint` first, then `parse_op`, `fresh`, `read_within`, `verifies`, `admitted`, `execute`. |
 | Route selection (§A4.3) | `key_names`, `bulk_names`, `route_for`, `within`, `share_candidates`. |
 | Endpoints, read-only (§A4.4, §A4.5) | the `op` variant; `execute`, `writable`. |

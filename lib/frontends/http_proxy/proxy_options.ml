@@ -16,7 +16,7 @@ type listener = {
 type binding = {
   domain : Config.domain;
   secret : string;
-  shares : bool;
+  shares : [ `Off | `Self | `Member of string ];
   read_only : bool;
   project_commits : bool;
   max_entry_commands : int option;
@@ -140,7 +140,12 @@ let resolve (config : Config.t) =
           {
             domain = dom;
             secret;
-            shares = bool (present (List.assoc_opt "shares" opts));
+            shares =
+              (match Config.share_member dom with
+                | Some m -> `Member m
+                | None ->
+                    if bool (present (List.assoc_opt "shares" opts)) then `Self
+                    else `Off);
             read_only =
               dom.read_only || bool (present (List.assoc_opt "readOnly" opts));
             project_commits =

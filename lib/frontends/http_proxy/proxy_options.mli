@@ -18,10 +18,13 @@ type listener = {
   limits : Tsync_http.Server.limits;
 }
 
+(** [shares]: [`Self] serves [/s/]; [`Member m] hands out the share links of the
+    domain's member [m], checked against the domain when routes are built
+    (§A4.6). *)
 type binding = {
   domain : Config.domain;
   secret : string;
-  shares : bool;
+  shares : [ `Off | `Self | `Member of string ];
   read_only : bool;
   project_commits : bool;
   max_entry_commands : int option;

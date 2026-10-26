@@ -13,7 +13,7 @@ One tsync host holds a domain's stores (a local disk, a NAS, a bucket it has cre
 The http-proxy frontend is an HTTP(S) server that does both:
 
 - **Store server.** An authenticated, admission-bounded re-export of each served domain's *composite store*. Bytes in, bytes out. It does not present the checkout, the mirror or item references; a remote client runs its own core against it as an ordinary `http-proxy` backend.
-- **Share server.** `/s/<token>…`, unauthenticated, token as credential: file download with ranges, viewer page for a media file, folder browse page, folder listing JSON, per-child bytes, streamed ZIP of a folder.
+- **Share server.** With `shares: true`, `/s/<token>…`, unauthenticated, token as credential: file download with ranges, viewer page for a media file, folder browse page, folder listing JSON, per-child bytes, streamed ZIP of a folder.
 - **Status page.** `/` serves a static login page that signs `/stats` requests in the browser.
 
 It is not a presenter of files: it installs no request-handler hooks, answers no item references and keeps no view that change notices refresh.
@@ -51,7 +51,7 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `ssl_certificate`, `ssl_certificate_key` | paths | blank = plaintext | listener | same uniqueness; both or neither |
 | limit options of [security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener) | sizes, durations, counts | as listed there | listener | same uniqueness; positive |
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
-| `shares` | bool | false | per domain | never inherited; serve `/s/` for this domain |
+| `shares` | bool, or a backend name | false | per domain | never inherited. `true`: serve `/s/` for this domain. A name: the domain's links are that member's (§A4.6), and `/s/` is not served for it. The name MUST be the domain's main or one of its replicas, whose capabilities give a `share_url`: never a backfill, which is not guaranteed to be in sync, nor an archive, which is never written. Otherwise startup fails naming the option |
 | `readOnly` | bool | false | per domain | never inherited |
 | `projectCommits` | bool | true | per domain | *advanced*; never inherited. The serving host's owner of the domain projects the entries created through this listener ([publication §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)): the listener states that owner as the domain's projector and wakes its cycle when a create of a log entry is won. `false` leaves each entry to its author. With it on, every writer of the domain's main MUST reach it through this listener: the serving owner then projects every entry of the domain |
 | `maxEntryCommands` | int ≥ 1 | 4096 with `projectCommits` on a domain whose main is a local store, else the domain's | per domain | *advanced*; never inherited. The entry size the listener states to its clients ([05 §2.1](../05-ops-config.md#21-schema-and-validation), domain-wide settings): a projection that crosses no network takes thousands of commands in the time a remote one takes a few hundred |
@@ -78,7 +78,7 @@ At start the server builds one route per served domain:
 | `domain_settings` | the domain-wide settings in force for the domain: configured, else the default; `maxEntryCommands` from the option of that name; the `projector` with `projectCommits` |
 | `wake` | with `projectCommits`, a call that asks the domain's owner on this host for a cycle that projects, without asking it to push; made when a create under the domain's log prefix is won, beside the answer and never awaited by it |
 | `store` | the domain's composite store |
-| `shares` | whether the route serves `/s/` |
+| `shares` | none, `self` (the route serves `/s/`), or a member of the domain (§A4.6) |
 | `peers`, `traffic` | peer sockets; per-domain byte counters |
 
 ### A4.2 Request pipeline
@@ -99,7 +99,7 @@ A request refused at any step releases its slot and its reservation.
 Given the operation's first key or prefix `k`:
 
 1. If `k` is under one route's `roots`: that route (roots are disjoint because domain names are validated).
-2. If `k` is under the share space `tsync/shares/`: among the routes whose secret verifies the request, the one whose domain the share manifest names (the request body for a PUT, the stored manifest for a GET or DELETE). A cache artifact or a listing of the share space goes to the first route whose secret verifies. Share-space rules: [security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener).
+2. If `k` is under the share space `tsync/shares/`: among the routes whose secret verifies the request, the one whose domain the share manifest names (the request body for a PUT, the stored manifest for a GET or DELETE). A cache artifact or a listing of the share space goes to the first route whose secret verifies. The route's share-space operations, and the stored manifests it reads to decide, are its **share store**'s: its member with `shares` naming one (§A4.6), else `B`. Share-space rules: [security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener).
 3. Else no route: answered as a failed signature.
 
 ### A4.4 Behaviour per endpoint
@@ -123,7 +123,7 @@ Given the operation's first key or prefix `k`:
 | copy | none | writable check on `dst`; `B.copy` server-side → 200 |
 | list | none | `B.list_prefix`; listing JSON with etags and checksums. On the share space, manifest keys are filtered out ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)) |
 | max-concurrency | none | the listener's bound (§A5), else 404 |
-| share-url | none | route serves shares → `{"self":true}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
+| share-url | none | `shares` is `self` → `{"self":true}`; a member `M` → `M.capabilities(prefix).share_url` → `{"url":u}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
 | verified | none | `{"verified": B.capabilities(prefix).verified}` |
 
 **Garbage collection.** Every write into the log, the manifest area or the version area (put, conditional put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). A remote client creates a log entry with a claim, so its commit is gated here like a local one. During a run, chunk reads (get, range, head, checksum, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
@@ -131,6 +131,14 @@ Given the operation's first key or prefix `k`:
 ### A4.5 Read-only
 
 `writable(k)` holds iff the route is not read-only, or `k` is a share manifest key (publishing or revoking a link changes no domain content). A write that fails it is 403 `read-only domain`. Reads are unaffected.
+
+### A4.6 Shares on a member
+
+A domain whose links are served by a share endpoint beside one of its copies (a bucket's share function) names that member in `shares`. Its clients then get that endpoint's links, and the listener carries no share traffic.
+
+- A creator on this host makes its links on the same member ([05 §4.11](../05-ops-config.md#411-share)), so the host and its clients hand out one endpoint's links.
+- Every share-space operation of the route goes to the member's store directly, not through `B`, as a creator on this host writes it ([05 §4.11](../05-ops-config.md#411-share)). Its writes pass the write guard first ([replication §4.9](../algorithms/replication.md#49-write-guard)).
+- A manifest write is accepted only once its target is on the member: for a file share, a head of its `key`; for a folder share, a non-empty listing of its folder's namespace. Otherwise 409, kind `other`, reason `<name> is not on <member> yet`, where `<name>` is the manifest's `filename`, without its extension for a folder. A client cannot ask the member itself: its reads of the domain reach the main.
 
 ---
 
@@ -310,7 +318,7 @@ A store write that is not a valid preview image is refused ([security §6.4](../
 - **`GET /`**: the static status login page. The user types a secret; the page keeps it in memory only, signs `GET /stats[?totals=1|exact][&reload=1]` with Web Crypto, polls every 10 s while visible (a hidden tab does not poll; showing it again polls at once), and on 401 forgets it ("wrong secret, or clock off by more than 5 minutes"). Outside a secure context it refuses the secret ([security §10.4](../algorithms/security-model.md#104-in-a-browser)).
 - **`/domains`, `/stats`, `/api/v1/stats`**: authorised and filtered per [security §12](../algorithms/security-model.md#12-status-and-discovery-authorisation). `totals=1` asks for a sampled estimate, `totals=exact` for a full count, `reload=1` (with totals) recounts.
 - **Report content**, for the verified domains only:
-  - per route, the domain's diagnostics section with this listener as a frontend entry `{"type":"http-proxy","shared":true,"reachable":true,"readOnly","shares","options"(masked),"traffic"}`;
+  - per route, the domain's diagnostics section with this listener as a frontend entry `{"type":"http-proxy","shared":true,"reachable":true,"readOnly","shares"(whether it serves `/s/`),"options"(masked),"traffic"}`;
   - for every peer socket of those routes, the peer's own frontend-only `stats` answer, each ask bounded by the status collector's deadline (a silent peer is reported unreachable);
   - a process block: `frontend:"http-proxy"`, `port`, `tls`, `serves` (the verified domains), `requests` (§A12), `bytesRead`, `bytesWritten`, their rates, and the generic process fields.
 
@@ -370,6 +378,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - Admission: never more data operations in flight than the bound, and the bound is reached; excess waits up to the queue bound; exactly the overflow beyond it is refused 503; metadata is never held; the budget is intact after a flood. The bound is the minimum of store opinions, ignoring none, else the default.
 - A body over its limit is refused without being read; a client that stops sending releases its slot after the idle timeout; a stale timestamp is refused before the body is read.
 - Watch: only a cursor key is watchable; `wait` is validated and clamped; a client behind is answered 200 with the header after one store read; an up-to-date one gets 204 with the header at the deadline without further reads; N waiters on one key cost N + 1 reads for one change; gates of two routes never share a loop.
+- Shares on a member: `share-url` answers the member's URL; a manifest written through the listener lands on the member and not on the main; a manifest naming a target the member lacks is refused 409 `is not on <member> yet`; `/s/` is not served for the domain; an unknown name, a backfill, an archive, or a member without a share URL fails startup.
 - Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""` to a request accepting `text/html` and its bytes as an attachment to any other, both with `vary: accept`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a removed shared folder is no longer served; the share page renders a hostile folder or file name as text; a `User-Agent` naming a link-preview fetcher with `Accept: */*` gets the page; the page's `og:image` is the absolute `preview` URL built from the forwarded headers, else `Host` and the listener's scheme; `preview` answers a stored image as `image/jpeg`, and the generic PNG for a folder, a PDF, a share without one on a server without a thumbnailer, and a stored image above the cap; with a thumbnailer, the first `preview` of a video share stores a JPEG within the size cap and the second answers it without making another.
 - Preview images on a listener: never listed; read or written only through a route of the manifest's domain; a write refused when it is not a valid preview image: above the byte cap, longest side other than `SHARE_PREVIEW_SIZE`, shortest side below `SHARE_PREVIEW_MIN_SIDE`, not a JPEG, a truncated segment, an arithmetic or lossless frame; a stored invalid image answered as the generic one; deleted after the manifest by revocation; left by the age rule of expiry.
 - ZIP: `download` streams an archive with no content length whose members are rooted at the folder's name (`<domain>/` for a whole-domain share), directories included; `unzip -t` accepts it and extraction is byte-exact.

@@ -14,6 +14,14 @@ val claims : t -> string -> bool
 (** The manifest's domain, when the body parses as one. *)
 val manifest_domain : string -> Domain_name.t option
 
+type share = {
+  target : [ `File of Key.t | `Dir of Folder_id.t ];
+  filename : string;
+}
+
+(** What the manifest body shares, when it parses as a valid one. *)
+val manifest_share : string -> share option
+
 (** [self] is where a thumbnailer reaches this listener's own share links; [tls]
     picks the scheme of the page's absolute URLs when no proxy names one. *)
 val handle :

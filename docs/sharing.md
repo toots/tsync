@@ -33,7 +33,9 @@ Something has to answer those links. Two options:
   "shareUrl": "https://share.example.org" }
 ```
 
-The function, and everything it needs, comes from the [Terraform config](../terraform/README.md), for S3 and for GCS, and `tsync config --edit` fills `shareUrl` from it. With several backends, the first that can serve links does.
+The function, and everything it needs, comes from the [Terraform config](../terraform/README.md), for S3 and for GCS, and `tsync config --edit` fills `shareUrl` from it. With several backends, the first that can serve links does. A backfill never serves links: it may lag behind the main.
+
+**Both.** A server whose domain also has a replica (not a backfill) with a `shareUrl` can send its clients' links there: set `"shares"` on its `http-proxy` frontend to that backend's name, e.g. `"shares": "cloud"`. The links then point at the function, and the files never cross the server's uplink. A link can only be made once the file has reached the replica.
 
 `tsync share` answers "Sharing is not available" when neither is set up.
 

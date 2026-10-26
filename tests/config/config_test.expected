@@ -98,9 +98,10 @@ chunk size out of range                  refused: domains[0].chunkSize: must lie
 "x"        refused
 
 == http-proxy bindings
-F: secret inherited true, shares true, read-only false
-G: secret inherited true, shares false, read-only true
-H: secret inherited true, shares false, read-only false
+F: secret inherited true, shares self, read-only false
+G: secret inherited true, shares off, read-only true
+H: secret inherited true, shares off, read-only false
+I: secret inherited true, shares member cloud, read-only false
 
 == a config other users can read (security-model §10.2)
 no file: absent

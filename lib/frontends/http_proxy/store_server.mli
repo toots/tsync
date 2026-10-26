@@ -4,6 +4,8 @@
     no domain state; deferred work its writes cause lands in the owners' logs.
 *)
 
+(** A route's [share]: [`Self] serves [/s/]; [`Member] hands out that member's
+    links and takes the share space to its store (§A4.6). *)
 type route = {
   name : string;
   domain : Tsync_core.Domain_name.t;
@@ -14,7 +16,8 @@ type route = {
       (** asks the domain's owner on this host for a cycle: it projects the
           entries created here *)
   store : Tsync_store.Store.t;
-  share : Share_server.t option;  (** [Some] when the route serves share links *)
+  share :
+    [ `Off | `Self of Share_server.t | `Member of Tsync_store.Composite.member ];
 }
 
 type t

@@ -59,6 +59,37 @@ let manifest_domain body =
         | Some (`String d) -> Result.to_option (Domain_name.of_string d)
         | _ -> None)
 
+(* 02 §2.14: what a manifest of [domain] shares, or the 502 reason. *)
+let target_of domain f =
+  let str k =
+    match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None
+  in
+  match str "type" with
+    | Some "file" -> (
+        match Option.bind (str "key") Key.of_string with
+          | Some k
+            when Key.under (Key.manifests domain) k
+                 && Key.folder_of_namespace_key domain k <> None ->
+              Ok (`File k)
+          | _ -> Error "corrupt share manifest")
+    | Some "dir" -> (
+        match Option.bind (str "folderId") Folder_id.of_string with
+          | Some id -> Ok (`Dir id)
+          | None -> Error "corrupt share manifest")
+    | _ -> Error "unknown share type"
+
+let filename_of f =
+  match List.assoc_opt "filename" f with Some (`String s) -> s | _ -> "share"
+
+let manifest_share body =
+  match (parse_manifest body, manifest_domain body) with
+    | Some f, Some d ->
+        Result.to_option
+          (Result.map
+             (fun target -> { target; filename = filename_of f })
+             (target_of d f))
+    | _ -> None
+
 (* 02 §2.14, security §6.3: an invalid manifest is 502, another domain's is
    absent. *)
 let load t token =
@@ -94,21 +125,9 @@ let load t token =
   in
   if expires < Unix.gettimeofday () then refuse 410 "link expired";
   let target =
-    match str "type" with
-      | Some "file" -> (
-          match Option.bind (str "key") Key.of_string with
-            | Some k
-              when Key.under (Key.manifests domain) k
-                   && Key.folder_of_namespace_key domain k <> None ->
-                `File k
-            | _ -> refuse 502 "corrupt share manifest")
-      | Some "dir" -> (
-          match Option.bind (str "folderId") Folder_id.of_string with
-            | Some id -> `Dir id
-            | None -> refuse 502 "corrupt share manifest")
-      | _ -> refuse 502 "unknown share type"
+    match target_of domain f with Ok t -> t | Error m -> refuse 502 m
   in
-  { target; filename = Option.value ~default:"share" (str "filename") }
+  { target; filename = filename_of f }
 
 let claims t token =
   match load t token with _ -> true | exception Refused _ -> false

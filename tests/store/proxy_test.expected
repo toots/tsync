@@ -73,6 +73,12 @@ listed: false
 named in a batch read: refused/denied
 another domain deletes it: refused/denied
 deleted once the manifest is gone: true, then again: false
+== shares on a member (§A4.6)
+share url: https://cloud.example
+a link before the member holds its file: refused/other: proxy-m put: HTTP 409: f.mkv is not on cloud yet
+once it does: ok
+the manifest on the member true, on the main false
+read back through the listener: true
 == a backend that throttles for two seconds
 a read through it: ok; the peer's breaker tripped: false
 == a batch read of more than the answer budget

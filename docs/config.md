@@ -130,7 +130,7 @@ The mount calls itself `fuse.sshfs` on purpose. File managers generate a thumbna
 | `port` | 443 with TLS, else 80 | |
 | `ssl_certificate`, `ssl_certificate_key` | none | PEM files, absolute paths. Both or neither. |
 | `bind` | every address with TLS, localhost without | Comma-separated addresses to listen on |
-| `shares` | `false` | Serve share links for this domain |
+| `shares` | `false` | `true` serves share links for this domain; a backend's name hands out that backend's links instead |
 | `readOnly` | `false` | Refuse writes from clients for this domain |
 | `max_concurrent` | from the stores, else 16 | Reads and writes of data in progress at once |
 | `max_connections` | | Open connections |

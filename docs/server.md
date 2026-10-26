@@ -37,7 +37,7 @@ Add an `http-proxy` frontend to the domain on the machine that has the disk or t
 
 Two options per domain:
 
-- `"shares": true` makes the server answer public share links itself ([share links](sharing.md#share-links)).
+- `"shares": true` makes the server answer public share links itself ([share links](sharing.md#share-links)). `"shares": "<backend>"` instead hands out the links of that backend's share function, so clients' links skip the server.
 - `"readOnly": true` refuses writes from clients, while the server's own mount still writes.
 
 **One way in.** Give the other machines the server's address, not the bucket or the disk: a server expects to be the only way to its storage. A setup where a machine also uses that storage directly needs `projectCommits` turned off ([advanced settings](tuning.md#advanced-settings)).

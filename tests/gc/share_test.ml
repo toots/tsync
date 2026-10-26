@@ -57,10 +57,10 @@ let () =
   let put (s : Store.t) =
     List.iter (fun (k, b) -> s.put k (Bigstring.of_string b))
   in
-  let context members =
+  let context ?(data = "data") members =
     let composite =
       Composite.create ~domain:d
-        ~data_dir:(Filename.concat root "data")
+        ~data_dir:(Filename.concat root data)
         ~owner:true ~poke:ignore
         ~knowledge:
           { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
@@ -118,6 +118,23 @@ let () =
       p "== the object must be on the member serving links\n";
       ignore (create "a.txt" "a.txt");
       put copy objects;
+      p "\n== a backfill never serves links\n";
+      (let module B =
+         Share.Make
+           ((val context ~data:"data-backfill"
+                   [
+                     { name = "main"; role = Main; store = main };
+                     { name = "copy"; role = Backfill; store = copy };
+                   ])) in
+      match B.create "a.txt" with
+        | _ -> p "a.txt: created\n"
+        | exception Fail.E f ->
+            p "a.txt: refused (%s): %s\n" (Fail.kind_name f.kind) f.reason);
+      p "\n== a named member\n";
+      (match S.create ~member:"main" "a.txt" with
+        | _ -> p "on main: created\n"
+        | exception Fail.E f ->
+            p "on main: refused (%s): %s\n" (Fail.kind_name f.kind) f.reason);
       p "\n== by kind\n";
       let file = create "a.txt" "a.txt" in
       ignore (create "docs" ~expires:3600. "docs");
