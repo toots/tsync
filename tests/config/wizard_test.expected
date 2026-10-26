@@ -270,7 +270,7 @@ not json: 0
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret [(kept)] -> 
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 
@@ -336,7 +336,7 @@ share url replaced: would write
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret [(kept)] -> 
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 
@@ -401,7 +401,7 @@ share url removed: would write
 ? TLS certificate (blank: no TLS: plain HTTP, on loopback unless bind is set) -> 
 ? TLS key (blank: no TLS; required with a certificate) -> 
 ? Shared secret [(kept)] -> 
-? Serve share links [false] -> 
+? Share links (yes, no, or a backend name) [false] -> 
 ? http-proxy: other options [no] -> 
 ? use totp [no] -> 
 ? use passwords [no] -> 
