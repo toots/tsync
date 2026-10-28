@@ -126,10 +126,10 @@ let fsync fd = sys (fun () -> fsync_ fd)
 (* Windows cannot open a directory to flush it, and has nothing to flush: NTFS
    journals metadata and renames are written through (cloud-files §5.1). *)
 let fsync_dir d =
-  if not Sys.win32 then
+  if not Sys.win32 then (
     match opt (fun () -> Unix.openfile d [O_RDONLY; O_CLOEXEC] 0) with
       | None -> ()
-      | Some fd -> with_fd fd fsync
+      | Some fd -> with_fd fd fsync)
 
 let mkdir_p ?(perm = 0o700) ?(durable = true) d =
   let rec go d =
@@ -333,7 +333,10 @@ let lifetime_lock path =
         Unix.close fd;
         raise e
 
-let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+(* Windows has no SIGPIPE: a write to a closed socket fails with an error. *)
+let ignore_sigpipe () =
+  if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+
 let rename_noreplace a b = sys (fun () -> rename_noreplace_ a b)
 let clone a b = sys (fun () -> clone_ a b)
 

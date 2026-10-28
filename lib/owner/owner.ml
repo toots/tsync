@@ -76,21 +76,31 @@ let release fd =
   Unix.close fd
 
 let stop_on_signals ?second () =
-  let signals = [Sys.sigterm; Sys.sigint] in
-  ignore (Thread.sigmask SIG_BLOCK signals);
-  ignore
-    (Thread.create
-       (fun () ->
-         while true do
-           let s = Thread.wait_signal signals in
-           match second with
-             | Some f when Stop.requested () -> f ()
-             | _ ->
-                 Log.info "received %s; stopping"
-                   (if s = Sys.sigterm then "SIGTERM" else "SIGINT");
-                 Stop.request ()
-         done)
-       ())
+  let stop what =
+    match second with
+      | Some f when Stop.requested () -> f ()
+      | _ ->
+          Log.info "received %s; stopping" what;
+          Stop.request ()
+  in
+  if Sys.win32 then
+    (* No signal masks on Windows: a console interrupt runs SIGINT's handler,
+       which may interrupt code holding a lock, so the stop runs elsewhere. *)
+    Sys.set_signal Sys.sigint
+      (Sys.Signal_handle
+         (fun _ -> ignore (Thread.create stop "a console interrupt")))
+  else begin
+    let signals = [Sys.sigterm; Sys.sigint] in
+    ignore (Thread.sigmask SIG_BLOCK signals);
+    ignore
+      (Thread.create
+         (fun () ->
+           while true do
+             let s = Thread.wait_signal signals in
+             stop (if s = Sys.sigterm then "SIGTERM" else "SIGINT")
+           done)
+         ())
+  end
 
 type present =
   Tsync_domain.Domain.t ->
