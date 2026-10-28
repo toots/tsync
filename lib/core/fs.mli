@@ -94,6 +94,17 @@ val unix_rename : string -> string -> unit
 
 val rename : ?op:string -> string -> string -> unit
 
+(** Whether only this process's user can reach the file or directory: owned by
+    it with no group or other mode bits, or on Windows owned by its SID with a
+    protected access list allowing no one else (security-model §7.1). Raises
+    [Unix_error]. *)
+val is_private : string -> bool
+
+(** Makes a file or directory private to this process's user: mode 0600 or 0700,
+    or on Windows the access list of {!is_private}, which a directory passes on
+    to what is created in it. Raises [Unix_error]. *)
+val make_private : string -> unit
+
 (** EEXIST when the target exists. *)
 val rename_noreplace : string -> string -> unit
 

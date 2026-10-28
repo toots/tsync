@@ -141,14 +141,8 @@ let check_length path =
       path max_path
 
 let check_dir dir =
-  Fs.mkdir_p (Filename.dirname dir);
-  (try Unix.mkdir dir 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
-  let st = Unix.lstat dir in
-  if
-    st.st_kind <> S_DIR
-    || st.st_uid <> Unix.getuid ()
-    || st.st_perm land 0o077 <> 0
-  then
+  Fs.mkdir_p ~perm:0o700 dir;
+  if (Unix.lstat dir).st_kind <> S_DIR || not (Fs.is_private dir) then
     Fail.raise_ Fail.Denied
       "%s must be a directory owned by this user with mode 0700; refusing to \
        serve"
