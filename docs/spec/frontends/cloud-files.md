@@ -61,7 +61,10 @@ edits, logs), which is there to work offline.
   and other tsync machines (`http-proxy` backend), as main, replica, backfill or archive. The host
   fills the remote copies it configures with its own writes, as any client does
   ([replication.md](../algorithms/replication.md)). Config validation refuses `local` and the
-  `http-proxy` frontend ([05 §2.1](../05-ops-config.md#21-schema-and-validation)).
+  `http-proxy` frontend ([05 §2.1](../05-ops-config.md#21-schema-and-validation)) in a config the
+  user writes: the config file, `$TSYNC_CONFIG_JSON` and the wizard's. A configuration built in
+  code, as tests build theirs ([09 §5.1](../09-tests.md#51-domain-configuration-as-a-value)), is not
+  refused, so the suites keep their local store doubles.
 - **Store maintenance runs elsewhere.** The commands that maintain a store's data rather than the
   user's files, which [07 §5.3](../07-daemon-cli.md#53-commands) marks *not on Windows*, exit 2
   with `<command> is not run on Windows` before reading anything. Publication of the host's own
@@ -774,6 +777,12 @@ An implementation MUST exhibit these properties; [09](../09-tests.md) says how t
   leave the user an empty file while its content left the domain.
 - **The case-group member on disk stays.** Choosing by name alone would swap the user's file for a
   peer's when the peer adds a name that differs only in case.
+- **No local store.** It relies on what Windows does not give it: a collection renames the whole
+  chunk space aside, which Windows refuses while any file in it is open, so one reader could
+  hold collection off; the collection interlock relies on advisory locks the kernel drops with
+  their holder, where Windows locks are mandatory byte ranges; a mapped store file cannot be
+  deleted; a directory cannot be flushed; and the cursor wait has no directory watch. A store
+  that is never collected only grows.
 - **No core pin for pinned files.** The sync root holds a pinned file's bytes; a core pin would keep
   them a second time.
 - Rejected: a kernel filesystem (a third-party driver, and no Explorer integration); a full MSIX
