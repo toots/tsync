@@ -146,7 +146,16 @@ let stop_children children =
         Option.iter (fun pid -> try Unix.kill pid s with _ -> ()) r.pid)
       children
   in
-  signal Sys.sigterm;
+  if Sys.win32 then
+    (* No SIGTERM on Windows: each child is asked through its socket, all at
+        once (cloud-files §5.2). *)
+    List.iter
+      (fun r ->
+        if r.pid <> None then
+          Rt.spawn ~name:"stop child" (fun () ->
+              Ipc.advisory r.child.socket (`Assoc [("action", `String "stop")])))
+      children
+  else signal Sys.sigterm;
   let deadline = Rt.now () +. Stop.grace +. reap_margin in
   let alive () = List.exists (fun r -> r.pid <> None) children in
   while alive () && Rt.now () < deadline do
