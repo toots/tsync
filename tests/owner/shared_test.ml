@@ -30,6 +30,8 @@ let () =
   Unix.putenv "XDG_DATA_HOME" (Filename.concat root "data");
   Unix.putenv "XDG_CACHE_HOME" (Filename.concat root "cache")
 
+let json_path p = Yojson.Safe.to_string (`String p)
+
 let config =
   Tsync_config.Config.of_string
     (if mode = "empty" then {|{"domains":[]}|}
@@ -37,10 +39,11 @@ let config =
        Printf.sprintf
          {|{"name":"test","domains":[
   {"name":"docs","symlinks":"keep","versioning":true,"extensions":["totp"],"frontends":["http-proxy"],
-   "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
+   "backends":[{"type":"local","name":"main","role":"main","path":%s}]},
   {"name":"pics","symlinks":"keep","versioning":true,"extensions":[],"frontends":["http-proxy"],
-   "backends":[{"type":"local","name":"main","role":"main","path":"%s/store2"}]}]}|}
-         root root)
+   "backends":[{"type":"local","name":"main","role":"main","path":%s}]}]}|}
+         (json_path (root ^ "/store"))
+         (json_path (root ^ "/store2")))
 
 (* Event ids and folder ids vary from run to run. *)
 let rec scrub = function
