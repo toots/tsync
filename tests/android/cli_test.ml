@@ -149,8 +149,8 @@ let () =
     (Printf.sprintf
        {|{"name":"phone","domains":[{"name":"docs","symlinks":"skip","versioning":true,
           "extensions":[],"frontends":["android"],
-          "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
-       root);
+          "backends":[{"type":"local","name":"main","role":"main","path":%s}]}]}|}
+       (Yojson.Safe.to_string (`String (root ^ "/store"))));
   ignore (run ["stat"; "root"]);
   ignore (run ["list"; "root"]);
   let dir = item_ref (run ["mkdir"; "root"; "photos"]) in
