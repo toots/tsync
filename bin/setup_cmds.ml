@@ -168,12 +168,27 @@ let default_domain_cmd =
   cmd "default-domain" ~doc:"Set, clear or print the default domain."
     Term.(const default_domain $ name $ clear)
 
-(* 07 §2.7: the platform's reader of the service log, shared by [logs] and
-   [build-info]. *)
-let log_reader () =
-  if Fs.is_macos then
-    ["tail"; Filename.concat (Paths.home ()) "Library/Logs/tsync-daemon.log"]
-  else ["journalctl"; "-t"; "tsync"]
+(* 07 §2.7: the platform's reader of the service log, as [logs] runs it and
+   [build-info] names it. *)
+let log_reader ?lines ?(follow = false) () =
+  let opt flag =
+    Option.fold ~none:[] ~some:(fun n -> [flag; string_of_int n])
+  in
+  match Paths.service_log () with
+    | Some file when Sys.win32 ->
+        ["powershell"; "-NoProfile"; "-Command"; "Get-Content"]
+        @ opt "-Tail" lines
+        @ (if follow then ["-Wait"] else [])
+        @ [
+            (* -Command joins its words into one line of PowerShell. *)
+            "'" ^ String.concat "''" (String.split_on_char '\'' file) ^ "'";
+          ]
+    | Some file ->
+        ("tail" :: opt "-n" lines) @ (if follow then ["-f"] else []) @ [file]
+    | None ->
+        ("journalctl" :: opt "-n" lines)
+        @ (if follow then ["-f"] else [])
+        @ ["-t"; "tsync"]
 
 let build_info () =
   say "frontends: %s" (String.concat ", " (Frontend.names ()));
@@ -201,14 +216,7 @@ let build_info_cmd =
     Term.(const build_info $ const ())
 
 let logs follow lines =
-  let args =
-    match log_reader () with
-      | reader :: target ->
-          reader :: "-n" :: string_of_int lines
-          :: (if follow then ["-f"] else [])
-          @ target
-      | [] -> []
-  in
+  let args = log_reader ~lines ~follow () in
   try Unix.execvp (List.hd args) (Array.of_list args)
   with Unix.Unix_error (e, _, _) ->
     Printf.eprintf "tsync: cannot run %s: %s\n" (List.hd args)

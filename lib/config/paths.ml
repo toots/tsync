@@ -82,6 +82,13 @@ let ownership_lock domain =
 
 let default_domain_file () = Filename.concat (data_dir ()) "default-domain"
 
+let service_log () =
+  if Fs.is_macos then
+    Some (Filename.concat (home ()) "Library/Logs/tsync-daemon.log")
+  else if Sys.win32 then
+    Some (local_appdata (Filename.concat "logs" "tsync.log"))
+  else None
+
 let mount_point domain =
   Filename.concat
     (Filename.concat (home ()) "tsync")
