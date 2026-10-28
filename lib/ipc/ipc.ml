@@ -300,7 +300,7 @@ let hang_up c = try Unix.shutdown c.line.fd SHUTDOWN_ALL with _ -> ()
 (* 01 §11: at the bound, the connection idle the longest makes room; with none
    idle the newcomer is refused. *)
 let admit t fd ~execution handler =
-  if (try Fs.peer_uid fd with _ -> -1) <> Unix.getuid () then (
+  if not (try Fs.peer_same_user fd with _ -> false) then (
     Unix.close fd;
     Rt.within `Threaded (fun () ->
         Log.once ("ipc peer " ^ t.path) Log.Warn

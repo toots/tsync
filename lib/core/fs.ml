@@ -20,7 +20,7 @@ external is_network_fs_ : string -> bool = "tsync_is_network_fs"
 external pid_alive_ : int -> bool = "tsync_pid_alive"
 external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
 external is_macos_ : unit -> bool = "tsync_is_macos"
-external peer_uid : Unix.file_descr -> int = "tsync_peer_uid"
+external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
 
 let is_macos = is_macos_ ()
