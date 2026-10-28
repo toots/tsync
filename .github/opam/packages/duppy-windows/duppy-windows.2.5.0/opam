@@ -1,0 +1,21 @@
+opam-version: "2.0"
+synopsis: "Task scheduler for OCaml 5 domains (Windows cross-compilation)"
+maintainer: "romain.beauxis@gmail.com"
+authors: "The Savonet Team <contact@liquidsoap.info>"
+license: "GPL-2.0-or-later"
+homepage: "https://github.com/savonet/liquidsoap"
+bug-reports: "https://github.com/savonet/liquidsoap/issues"
+depends: [
+  "ocaml-windows"
+  "dune" {>= "3.23"}
+  "re-windows" {>= "1.11.0"}
+]
+build: [
+  ["dune" "build" "-p" "duppy" "-x" "windows" "-j" jobs "@install"]
+  ["rm" "duppy.install"]
+]
+install: ["dune" "install" "-x" "windows" "-p" "duppy"]
+dev-repo: "git+https://github.com/savonet/liquidsoap.git"
+url {
+  src: "git+https://github.com/savonet/liquidsoap.git#main"
+}
