@@ -202,7 +202,8 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
 
 ## 8. Where the workflows depart
 
-- `release-windows` and the gate's Windows job do not exist yet: no Windows build has run.
+- The Windows job (§3.1 item 6) runs in its own workflow, `test-windows`, outside the gate, and its
+  test suites do not fail it, until they pass on Windows. `release-windows` does not exist yet.
 
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.
