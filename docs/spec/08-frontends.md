@@ -11,6 +11,7 @@ to all frontends. Where frontends run and how processes are arranged is
 | `file_provider` | [frontends/file-provider.md](frontends/file-provider.md) | macOS File Provider: app, sandboxed extension, daemon side |
 | `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
 | `android` | [frontends/android.md](frontends/android.md) | The owner embedded in a host process on Android; the app is [frontends/android-app.md](frontends/android-app.md) |
+| `cloud_files` | [frontends/cloud-files.md](frontends/cloud-files.md) | Windows Cloud Files sync roots, the Windows host and its tray |
 
 Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
@@ -39,9 +40,9 @@ getattr of a missing name costs a local lookup (≈0.3 ms), not a store round tr
 Each frontend registers under a name; registration is compiled in or out per build. A descriptor
 holds:
 
-- **name**: `fuse`, `file_provider`, `http-proxy`, `android`. The CLI group defaults to the name
-  (`file_provider` uses `fileprovider`).
-- **kind**: `presenting` (shows the domain's files to a user: `fuse`, `file_provider`, `android`) or
+- **name**: `fuse`, `file_provider`, `cloud_files`, `http-proxy`, `android`. The CLI group defaults
+  to the name (`file_provider` uses `fileprovider`, `cloud_files` uses `cloudfiles`).
+- **kind**: `presenting` (shows the domain's files to a user: `fuse`, `file_provider`, `cloud_files`, `android`) or
   `store-serving` (serves the domain's stores to other machines: `http-proxy`). A presenting
   frontend runs inside the domain's owner ([07 §2.4](07-daemon-cli.md)); a store-serving frontend
   runs in the store server and owns no domain state.
@@ -64,7 +65,7 @@ holds:
 - **wizard**: how `tsync config --edit` offers the frontend
   ([07 §5.9](07-daemon-cli.md#59-config-wizard-tsync-config---edit)), or nothing for a frontend its
   host configures itself, which the wizard never offers. It holds the **systems** it is offered on
-  (`linux`, `macos`), the yes-or-no **question** that adds it to a domain, and the **options asked**
+  (`linux`, `macos`, `windows`), the yes-or-no **question** that adds it to a domain, and the **options asked**
   on a yes; the remaining options sit behind one more question. Whether the answer defaults to yes
   on a new domain follows from the kind (presenting: yes).
 - **option spec**: each option's name, label, type, default and secret flag, and optionally a
@@ -78,6 +79,7 @@ holds:
 | fuse | presenting | per-domain | Daemon | Replicated | linux; "mount it as a folder on this machine"; asks nothing | — |
 | file_provider | presenting | shared | Daemon | Replicated | macos; "show it in Finder on this machine"; asks nothing | reimport, reset, purge |
 | http-proxy | store-serving | — | Daemon | — | linux, macos; "serve it to other machines over HTTPS"; asks `port`, `secret`, `ssl_certificate`, `ssl_certificate_key`, `shares` | — |
+| cloud_files | presenting | per-domain | Daemon | Replicated | windows; "show it in Explorer on this machine"; asks nothing | reimport, reset, purge |
 | android | presenting | per-domain | Commands | Pulled | never offered: the app writes its own config | stat, list, read, open, residency, fetch, write-whole, create, mkdir, delete, rmdir, rename, share, request, status |
 
 Availability is computed by the core ([04 §3.6](04-checkout-cache.md#36-stat-and-availability));
@@ -250,11 +252,11 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length, item` (served length, short only at end of file; the row of the version served) | B |
 | `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
 | `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
-| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
-| `mkdir` | `parentRef`, `name`, `exclusive?` | `item`; without `exclusive`, an existing folder is answered as is | M |
+| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
+| `mkdir` | `parentRef`, `name`, `exclusive?`, `aside?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
-| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id, a file its file id | M |
-| `delete` | `ref`\|`rel` (a file or symlink) | `{}`; a folder target → `invalid` | M |
+| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`), `dstBase?` | `item` at the destination; a folder keeps its id, a file its file id | M |
+| `delete` | `ref`\|`rel` (a file or symlink), `base?` | `{}`, or `{kept:true}` when a stale `base` left the file in place; a folder target → `invalid` | M |
 | `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture): `remove_tree` of [04 §4.5](04-checkout-cache.md#45-namespace-operations) | M |
 | `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
 | `share` | `ref`\|`rel`, `expires?` (seconds from now), `token?` | `url`, `expires` (epoch seconds) | P (it writes a store) |
@@ -302,6 +304,14 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
   destination answers `exists`, carrying the occupant's `item` when it can be named, and nothing
   changes; the check and the change are one step. A rename onto the item's own current place is a
   no-op answered with its item, `noreplace` notwithstanding.
+- `aside` (on `write` and `mkdir` by `parentRef` and `name`) declares a creation made without
+  seeing what the domain holds at its place. What the owner does with it is
+  [conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base);
+  the check and the creation are one step.
+- `base` on `delete` and `dstBase` on `rename` declare the version the caller saw; what a stale
+  one does is [conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base).
+- A `write`, `mkdir` or `rename` whose item landed at `aside(key)`, through `aside`, a stale `base`
+  or a stale `dstBase`, carries `aside`: the row of the item made there. `item` still names the key as it now resolves.
 - `stat` by `parentRef` and `name` names the child of that folder with that leaf, whichever kind it
   is.
 - `write` by `ref` replaces that file's content in place; by `parentRef` and `name` it writes the
