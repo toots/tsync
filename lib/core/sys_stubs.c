@@ -426,8 +426,11 @@ CAMLprim value tsync_unlink(value path) {
   int directory = 0;
   if (ok) {
     FILE_BASIC_INFO info;
+    /* A link to a directory carries the directory attribute too, and unlink
+       removes a link. */
     directory = GetFileInformationByHandleEx(h, FileBasicInfo, &info, sizeof info) &&
-                (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+                (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                !(info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
     if (!directory) {
       ok = SetFileInformationByHandle(h, FILE_DISPOSITION_INFO_EX, &flags, sizeof flags);
       err = ok ? 0 : GetLastError();
