@@ -277,12 +277,10 @@ CAMLprim value tsync_end_with_this_process(value pid) {
     if (InterlockedCompareExchangePointer((PVOID *)&children_job, created, NULL) != NULL)
       CloseHandle(created);
   }
-  HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, (DWORD)Int_val(pid));
-  if (child == NULL) win_fail(GetLastError(), "job", Nothing);
-  BOOL ok = AssignProcessToJobObject(children_job, child);
-  DWORD err = ok ? 0 : GetLastError();
-  CloseHandle(child);
-  if (!ok) win_fail(err, "job", Nothing);
+  /* What Unix.create_process returns on Windows is the child's handle, which
+     Unix.waitpid closes later. */
+  if (!AssignProcessToJobObject(children_job, (HANDLE)Long_val(pid)))
+    win_fail(GetLastError(), "job", Nothing);
   CAMLreturn(Val_unit);
 }
 
