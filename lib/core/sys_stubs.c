@@ -7,11 +7,342 @@
 #include <caml/threads.h>
 #include <caml/unixsupport.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+/* Bigstring helpers: no allocation, so the runtime lock stays held. */
+CAMLprim value tsync_bigstring_memcmp(value a, value aoff, value b, value boff, value len) {
+  return Val_int(memcmp((char *)Caml_ba_data_val(a) + Long_val(aoff),
+                        (char *)Caml_ba_data_val(b) + Long_val(boff), Long_val(len)));
+}
+
+CAMLprim value tsync_bigstring_blit_from_bytes(value src, value soff, value dst, value doff, value len) {
+  memcpy((char *)Caml_ba_data_val(dst) + Long_val(doff), Bytes_val(src) + Long_val(soff), Long_val(len));
+  return Val_unit;
+}
+
+CAMLprim value tsync_bigstring_blit_to_bytes(value src, value soff, value dst, value doff, value len) {
+  memcpy(Bytes_val(dst) + Long_val(doff), (char *)Caml_ba_data_val(src) + Long_val(soff), Long_val(len));
+  return Val_unit;
+}
+
+/* The errnos the OCaml Unix library does not name, as this platform numbers
+   them: ESTALE, EDQUOT, ETXTBSY, ENOLINK, EREMOTEIO (-1 when absent). */
+CAMLprim value tsync_errno_numbers(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal1(res);
+  res = caml_alloc_tuple(5);
+#ifdef ESTALE
+  Store_field(res, 0, Val_int(ESTALE));
+#else
+  Store_field(res, 0, Val_int(-1));
+#endif
+#ifdef EDQUOT
+  Store_field(res, 1, Val_int(EDQUOT));
+#else
+  Store_field(res, 1, Val_int(-1));
+#endif
+#ifdef ETXTBSY
+  Store_field(res, 2, Val_int(ETXTBSY));
+#else
+  Store_field(res, 2, Val_int(-1));
+#endif
+#ifdef ENOLINK
+  Store_field(res, 3, Val_int(ENOLINK));
+#else
+  Store_field(res, 3, Val_int(-1));
+#endif
+#ifdef EREMOTEIO
+  Store_field(res, 4, Val_int(EREMOTEIO));
+#else
+  Store_field(res, 4, Val_int(-1));
+#endif
+  CAMLreturn(res);
+}
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+#include <windows.h>
+#include <afunix.h>
+#include <malloc.h>
+
+static void win_fail(DWORD err, const char *what, value arg) {
+  win32_maperr(err);
+  uerror(what, arg);
+}
+
+static wchar_t *wide_path(value path) {
+  int n = MultiByteToWideChar(CP_UTF8, 0, String_val(path), -1, NULL, 0);
+  if (n <= 0) { errno = EINVAL; uerror("path", path); }
+  wchar_t *w = caml_stat_alloc(n * sizeof(wchar_t));
+  MultiByteToWideChar(CP_UTF8, 0, String_val(path), -1, w, n);
+  return w;
+}
+
+static DWORD io_length(value len) {
+  intnat n = Long_val(len);
+  return n > 0x7fffffff ? 0x7fffffff : (DWORD)n;
+}
+
+static OVERLAPPED at_offset(int64_t off) {
+  OVERLAPPED o = {0};
+  o.Offset = (DWORD)off;
+  o.OffsetHigh = (DWORD)(off >> 32);
+  return o;
+}
+
+CAMLprim value tsync_pread(value fd, value buf, value boff, value len, value foff) {
+  CAMLparam5(fd, buf, boff, len, foff);
+  HANDLE h = Handle_val(fd);
+  char *p = (char *)Caml_ba_data_val(buf) + Long_val(boff);
+  DWORD n = io_length(len), done = 0;
+  OVERLAPPED o = at_offset(Int64_val(foff));
+  caml_release_runtime_system();
+  BOOL ok = ReadFile(h, p, n, &done, &o);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok && err != ERROR_HANDLE_EOF) win_fail(err, "pread", Nothing);
+  CAMLreturn(Val_long(done));
+}
+
+CAMLprim value tsync_pwrite(value fd, value buf, value boff, value len, value foff) {
+  CAMLparam5(fd, buf, boff, len, foff);
+  HANDLE h = Handle_val(fd);
+  char *p = (char *)Caml_ba_data_val(buf) + Long_val(boff);
+  DWORD n = io_length(len), done = 0;
+  OVERLAPPED o = at_offset(Int64_val(foff));
+  caml_release_runtime_system();
+  BOOL ok = WriteFile(h, p, n, &done, &o);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok) win_fail(err, "pwrite", Nothing);
+  CAMLreturn(Val_long(done));
+}
+
+CAMLprim value tsync_statvfs(value path) {
+  CAMLparam1(path);
+  CAMLlocal1(res);
+  wchar_t *p = wide_path(path);
+  ULARGE_INTEGER avail, total, free_bytes;
+  caml_release_runtime_system();
+  BOOL ok = GetDiskFreeSpaceExW(p, &avail, &total, &free_bytes);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (!ok) win_fail(err, "statvfs", path);
+  res = caml_alloc_tuple(3);
+  Store_field(res, 0, caml_copy_int64((int64_t)avail.QuadPart));
+  Store_field(res, 1, caml_copy_int64((int64_t)free_bytes.QuadPart));
+  Store_field(res, 2, caml_copy_int64((int64_t)total.QuadPart));
+  CAMLreturn(res);
+}
+
+/* Windows byte-range locks are mandatory, so the lock covers one byte far past
+   the end of the file: readers of the holder record are never refused. */
+#define LOCK_OFFSET 0x4000000000000000LL
+
+CAMLprim value tsync_flock(value fd, value exclusive, value block) {
+  CAMLparam3(fd, exclusive, block);
+  HANDLE h = Handle_val(fd);
+  DWORD flags = (Bool_val(exclusive) ? LOCKFILE_EXCLUSIVE_LOCK : 0) |
+                (Bool_val(block) ? 0 : LOCKFILE_FAIL_IMMEDIATELY);
+  OVERLAPPED o = at_offset(LOCK_OFFSET);
+  caml_release_runtime_system();
+  BOOL ok = LockFileEx(h, flags, 0, 1, 0, &o);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok) {
+    if (err == ERROR_LOCK_VIOLATION || err == ERROR_IO_PENDING) CAMLreturn(Val_false);
+    win_fail(err, "flock", Nothing);
+  }
+  CAMLreturn(Val_true);
+}
+
+CAMLprim value tsync_funlock(value fd) {
+  OVERLAPPED o = at_offset(LOCK_OFFSET);
+  UnlockFileEx(Handle_val(fd), 0, 1, 0, &o);
+  return Val_unit;
+}
+
+static int is_link(HANDLE h) {
+  FILE_ATTRIBUTE_TAG_INFO info;
+  if (!GetFileInformationByHandleEx(h, FileAttributeTagInfo, &info, sizeof info)) return 0;
+  return (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+         (info.ReparseTag == IO_REPARSE_TAG_SYMLINK || info.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT);
+}
+
+CAMLprim value tsync_open_nofollow(value path) {
+  CAMLparam1(path);
+  wchar_t *p = wide_path(path);
+  caml_release_runtime_system();
+  HANDLE h = CreateFileW(p, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING,
+                         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  DWORD err = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+  int link = h != INVALID_HANDLE_VALUE && is_link(h);
+  if (link) CloseHandle(h);
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (h == INVALID_HANDLE_VALUE) win_fail(err, "open", path);
+  if (link) { errno = ELOOP; uerror("open", path); }
+  CAMLreturn(win_alloc_handle(h));
+}
+
+CAMLprim value tsync_pid_alive(value pid) {
+  HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)Int_val(pid));
+  if (h == NULL) return Val_bool(GetLastError() == ERROR_ACCESS_DENIED);
+  DWORD r = WaitForSingleObject(h, 0);
+  CloseHandle(h);
+  return Val_bool(r == WAIT_TIMEOUT);
+}
+
+CAMLprim value tsync_raise_nofile(value target) { return target; }
+
+CAMLprim value tsync_fsync(value fd) {
+  CAMLparam1(fd);
+  HANDLE h = Handle_val(fd);
+  caml_release_runtime_system();
+  BOOL ok = FlushFileBuffers(h);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok) win_fail(err, "fsync", Nothing);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_reserve(value fd, value len) {
+  CAMLparam2(fd, len);
+  HANDLE h = Handle_val(fd);
+  FILE_ALLOCATION_INFO alloc;
+  FILE_END_OF_FILE_INFO eof;
+  LARGE_INTEGER size;
+  alloc.AllocationSize.QuadPart = Int64_val(len);
+  eof.EndOfFile.QuadPart = Int64_val(len);
+  caml_release_runtime_system();
+  BOOL ok = SetFileInformationByHandle(h, FileAllocationInfo, &alloc, sizeof alloc) &&
+            GetFileSizeEx(h, &size);
+  if (ok && size.QuadPart < eof.EndOfFile.QuadPart)
+    ok = SetFileInformationByHandle(h, FileEndOfFileInfo, &eof, sizeof eof);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok) win_fail(err, "fallocate", Nothing);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_rename_noreplace(value src, value dst) {
+  CAMLparam2(src, dst);
+  wchar_t *s = wide_path(src), *d = wide_path(dst);
+  caml_release_runtime_system();
+  BOOL ok = MoveFileExW(s, d, MOVEFILE_WRITE_THROUGH);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  if (!ok) win_fail(err, "rename", dst);
+  CAMLreturn(Val_unit);
+}
+
+/* Flushing a volume needs administrator rights; durability rests on the
+   per-file flushes (cloud-files §5.1). */
+CAMLprim value tsync_syncfs(value fd) { return Val_unit; }
+
+static int process_user(HANDLE process, char *buf, DWORD size) {
+  HANDLE token;
+  DWORD needed;
+  if (!OpenProcessToken(process, TOKEN_QUERY, &token)) return 0;
+  BOOL ok = GetTokenInformation(token, TokenUser, buf, size, &needed);
+  CloseHandle(token);
+  return ok;
+}
+
+CAMLprim value tsync_peer_same_user(value fd) {
+  CAMLparam1(fd);
+  ULONG pid = 0;
+  DWORD out = 0;
+  char mine[256], theirs[256];
+  if (WSAIoctl(Socket_val(fd), SIO_AF_UNIX_GETPEERPID, NULL, 0, &pid, sizeof pid, &out, NULL, NULL) != 0)
+    win_fail(WSAGetLastError(), "getpeerpid", Nothing);
+  HANDLE peer = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (peer == NULL) CAMLreturn(Val_false);
+  int same = process_user(peer, theirs, sizeof theirs) &&
+             process_user(GetCurrentProcess(), mine, sizeof mine) &&
+             EqualSid(((TOKEN_USER *)theirs)->User.Sid, ((TOKEN_USER *)mine)->User.Sid);
+  CloseHandle(peer);
+  CAMLreturn(Val_bool(same));
+}
+
+CAMLprim value tsync_clone(value src, value dst) {
+  CAMLparam2(src, dst);
+  errno = EOPNOTSUPP;
+  uerror("clone", dst);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_is_network_fs(value path) {
+  CAMLparam1(path);
+  wchar_t *p = wide_path(path);
+  wchar_t root[MAX_PATH + 1];
+  BOOL ok = GetVolumePathNameW(p, root, MAX_PATH + 1);
+  DWORD err = ok ? 0 : GetLastError();
+  caml_stat_free(p);
+  if (!ok) win_fail(err, "statfs", path);
+  CAMLreturn(Val_bool(GetDriveTypeW(root) == DRIVE_REMOTE));
+}
+
+CAMLprim value tsync_is_macos(value unit) { return Val_false; }
+
+CAMLprim value tsync_memory_split(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal1(res);
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, Val_long(-1));
+  Store_field(res, 1, Val_long(-1));
+  CAMLreturn(res);
+}
+
+CAMLprim value tsync_malloc_trim(value unit) {
+  _heapmin();
+  return Val_unit;
+}
+
+/* No watch here: its only consumer, the local store, is refused on Windows
+   (cloud-files §2), so the consumer polls as on macOS. */
+CAMLprim value tsync_watch_open(value path) {
+  CAMLparam1(path);
+  errno = ENOSYS;
+  uerror("watch", path);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_watch_drain(value vfd) {
+  CAMLparam1(vfd);
+  CAMLlocal1(res);
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, Val_emptylist);
+  Store_field(res, 1, Val_true);
+  CAMLreturn(res);
+}
+
+CAMLprim value tsync_terminal_columns(value fd) {
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (Descr_kind_val(fd) != KIND_HANDLE || !GetConsoleScreenBufferInfo(Handle_val(fd), &info))
+    return Val_int(0);
+  return Val_int(info.srWindow.Right - info.srWindow.Left + 1);
+}
+
+CAMLprim value tsync_drop_mapped_pages(value v) { return Val_unit; }
+
+/* Seconds on a clock that counts time spent asleep (publication A7). */
+CAMLprim value tsync_boottime(value unit) {
+  return caml_copy_double((double)GetTickCount64() / 1000.0);
+}
+
+#else
+
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -112,44 +443,6 @@ CAMLprim value tsync_pid_alive(value pid) {
   return Val_bool(errno == EPERM);
 }
 
-/* The errnos the OCaml Unix library does not name, as this platform numbers
-   them: ESTALE, EDQUOT, ETXTBSY, ENOLINK, EREMOTEIO (-1 when absent). */
-CAMLprim value tsync_errno_numbers(value unit) {
-  CAMLparam1(unit);
-  CAMLlocal1(res);
-  res = caml_alloc_tuple(5);
-  Store_field(res, 0, Val_int(ESTALE));
-  Store_field(res, 1, Val_int(EDQUOT));
-  Store_field(res, 2, Val_int(ETXTBSY));
-#ifdef ENOLINK
-  Store_field(res, 3, Val_int(ENOLINK));
-#else
-  Store_field(res, 3, Val_int(-1));
-#endif
-#ifdef EREMOTEIO
-  Store_field(res, 4, Val_int(EREMOTEIO));
-#else
-  Store_field(res, 4, Val_int(-1));
-#endif
-  CAMLreturn(res);
-}
-
-/* Bigstring helpers: no allocation, so the runtime lock stays held. */
-CAMLprim value tsync_bigstring_memcmp(value a, value aoff, value b, value boff, value len) {
-  return Val_int(memcmp((char *)Caml_ba_data_val(a) + Long_val(aoff),
-                        (char *)Caml_ba_data_val(b) + Long_val(boff), Long_val(len)));
-}
-
-CAMLprim value tsync_bigstring_blit_from_bytes(value src, value soff, value dst, value doff, value len) {
-  memcpy((char *)Caml_ba_data_val(dst) + Long_val(doff), Bytes_val(src) + Long_val(soff), Long_val(len));
-  return Val_unit;
-}
-
-CAMLprim value tsync_bigstring_blit_to_bytes(value src, value soff, value dst, value doff, value len) {
-  memcpy(Bytes_val(dst) + Long_val(doff), (char *)Caml_ba_data_val(src) + Long_val(soff), Long_val(len));
-  return Val_unit;
-}
-
 /* Raise the soft descriptor limit toward the hard one, capped at target, never
    lowering it; answers the soft limit in force. */
 CAMLprim value tsync_raise_nofile(value target) {
@@ -224,12 +517,12 @@ CAMLprim value tsync_syncfs(value fd) {
   CAMLreturn(Val_unit);
 }
 
-CAMLprim value tsync_peer_uid(value fd) {
+CAMLprim value tsync_peer_same_user(value fd) {
   CAMLparam1(fd);
   struct ucred c;
   socklen_t l = sizeof(c);
   if (getsockopt(Int_val(fd), SOL_SOCKET, SO_PEERCRED, &c, &l) < 0) uerror("getsockopt", Nothing);
-  CAMLreturn(Val_int(c.uid));
+  CAMLreturn(Val_bool(c.uid == getuid()));
 }
 
 CAMLprim value tsync_clone(value src, value dst) {
@@ -424,12 +717,12 @@ CAMLprim value tsync_syncfs(value fd) {
   CAMLreturn(Val_unit);
 }
 
-CAMLprim value tsync_peer_uid(value fd) {
+CAMLprim value tsync_peer_same_user(value fd) {
   CAMLparam1(fd);
   uid_t u;
   gid_t g;
   if (getpeereid(Int_val(fd), &u, &g) < 0) uerror("getpeereid", Nothing);
-  CAMLreturn(Val_int(u));
+  CAMLreturn(Val_bool(u == getuid()));
 }
 
 CAMLprim value tsync_clone(value src, value dst) {
@@ -531,3 +824,5 @@ CAMLprim value tsync_boottime(value unit) {
 #endif
   return caml_copy_double((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
 }
+
+#endif

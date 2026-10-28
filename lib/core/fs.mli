@@ -141,8 +141,9 @@ val is_network_fs : string -> bool
 (** Built for macOS. *)
 val is_macos : bool
 
-(** The uid of a connected Unix socket's peer, from the kernel. *)
-val peer_uid : Unix.file_descr -> int
+(** Whether a connected Unix socket's peer runs as this process's user, from
+    the kernel. *)
+val peer_same_user : Unix.file_descr -> bool
 
 (** Raises the soft descriptor limit toward the hard one, capped at the target
     and never lowered; the soft limit in force. *)
