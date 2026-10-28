@@ -25,6 +25,7 @@ external raise_nofile : int -> int = "tsync_raise_nofile"
 external unix_rename : string -> string -> unit = "tsync_rename"
 external unix_unlink : string -> unit = "tsync_unlink"
 external is_private : string -> bool = "tsync_is_private"
+external owned_by_this_user : string -> bool = "tsync_owned_by_this_user"
 external end_with_this_process : int -> unit = "tsync_end_with_this_process"
 external make_private : string -> unit = "tsync_make_private"
 
