@@ -462,13 +462,15 @@ module Client = struct
     let rec attempt () =
       match Unix.connect fd (ADDR_UNIX path) with
         | () -> ()
+        (* On POSIX it is a full backlog; on Windows, a connection under way. *)
         | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
-          when Rt.now () < deadline ->
+          when (not Sys.win32) && Rt.now () < deadline ->
             Rt.sleep 0.05;
             attempt ()
-        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
+        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
+          when not Sys.win32 ->
             Fail.raise_ Fail.Deadline "%s accepts no connection" path
-        | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+        | exception Unix.Unix_error ((EINPROGRESS | EWOULDBLOCK), _, _) -> (
             (try Rt.wait_writable ~timeout:(deadline -. Rt.now ()) fd
              with Rt.Timeout ->
                Fail.raise_ Fail.Deadline "%s accepts no connection" path);
