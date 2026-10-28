@@ -5,6 +5,7 @@ open Tsync_core
 open Tsync_store
 
 let () =
+  set_binary_mode_out stdout true;
   let root = Sys.argv.(1) and d = Domain_name.v Sys.argv.(2) in
   match
     Chunk_spaces.with_run_lock (Chunk_spaces.create root) d (fun () ->
