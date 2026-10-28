@@ -85,7 +85,7 @@ let load ?candidate name =
     match
       match candidate with Some _ -> candidate | None -> Paths.read_config ()
     with
-      | Some text -> Config.of_string text
+      | Some text -> Config.of_user_string text
       | None -> Fail.absent "no config at %s" (Paths.config_file ())
   in
   let dom =
