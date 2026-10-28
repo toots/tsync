@@ -50,6 +50,9 @@ let grant rate =
     }
 
 let () =
+  if Array.length Sys.argv > 1 && Sys.argv.(1) = "print-pid" then (
+    print_int (Unix.getpid ());
+    exit 0);
   Rt.run_sync (fun () ->
       let wan = Uplink.link "wan" settings
       and lan = Uplink.link "lan" settings in
@@ -121,12 +124,20 @@ let () =
                 | Some g -> Printf.sprintf "%.0f of %.0f" g.rate (256. *. 1024.)
                 | None -> "no grant")
         | None -> p "refused");
+      (* The child reports its own pid: on Windows, create_process answers a
+         handle rather than a pid. *)
       let dead =
-        let pid =
-          Unix.create_process "true" [| "true" |] Unix.stdin Unix.stdout
-            Unix.stderr
+        let out, into = Unix.pipe () in
+        let child =
+          Unix.create_process Sys.executable_name
+            [| Sys.executable_name; "print-pid" |]
+            Unix.stdin into Unix.stderr
         in
-        ignore (Unix.waitpid [] pid);
+        Unix.close into;
+        let ic = Unix.in_channel_of_descr out in
+        let pid = int_of_string (String.trim (input_line ic)) in
+        close_in ic;
+        ignore (Unix.waitpid [] child);
         pid
       in
       ignore (Uplink.renewal (report dead));
