@@ -123,10 +123,13 @@ let write_all fd s =
 
 let fsync fd = sys (fun () -> fsync_ fd)
 
+(* Windows cannot open a directory to flush it, and has nothing to flush: NTFS
+   journals metadata and renames are written through (cloud-files §5.1). *)
 let fsync_dir d =
-  match opt (fun () -> Unix.openfile d [O_RDONLY; O_CLOEXEC] 0) with
-    | None -> ()
-    | Some fd -> with_fd fd fsync
+  if not Sys.win32 then
+    match opt (fun () -> Unix.openfile d [O_RDONLY; O_CLOEXEC] 0) with
+      | None -> ()
+      | Some fd -> with_fd fd fsync
 
 let mkdir_p ?(perm = 0o700) ?(durable = true) d =
   let rec go d =
@@ -405,6 +408,7 @@ let resolve_parent p =
           leaf
 
 let syncfs dir =
-  Option.iter
-    (fun fd -> with_fd fd (fun fd -> sys (fun () -> syncfs_ fd)))
-    (opt (fun () -> Unix.openfile dir [O_RDONLY; O_CLOEXEC] 0))
+  if not Sys.win32 then
+    Option.iter
+      (fun fd -> with_fd fd (fun fd -> sys (fun () -> syncfs_ fd)))
+      (opt (fun () -> Unix.openfile dir [O_RDONLY; O_CLOEXEC] 0))
