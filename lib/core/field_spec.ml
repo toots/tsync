@@ -63,10 +63,9 @@ let secret_length s =
   else None
 
 let absolute_path p =
-  if String.starts_with ~prefix:"/" p then None
-  else Some "must be an absolute path"
+  if not (Filename.is_relative p) then None else Some "must be an absolute path"
 
 let absolute_or_home p =
-  if String.starts_with ~prefix:"/" p || String.starts_with ~prefix:"~/" p then
+  if (not (Filename.is_relative p)) || String.starts_with ~prefix:"~/" p then
     None
   else Some "must be absolute or start with ~/"
