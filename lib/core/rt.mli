@@ -1,5 +1,5 @@
 (** The runtime every concurrent part of tsync is written against (spec 01 §6):
-    direct-style fibers on the vendored duppy scheduler.
+    direct-style fibers on liquidsoap's duppy scheduler.
 
     Fibers run on a pool of domains and may resume on any of them, so shared
     state is guarded by a lock or an atomic, never by confinement. A system call
