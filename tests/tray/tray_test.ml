@@ -272,7 +272,7 @@ let configure w names =
 let owner ?(mode = "scripted") ?(status = {|{"ok":true}|}) w name =
   Fs.mkdir_p ~perm:0o700 (path w ("o-" ^ name));
   write (script w name "status") status;
-  let null = Unix.openfile "/dev/null" [O_WRONLY] 0 in
+  let null = Unix.openfile Filename.null [O_WRONLY] 0 in
   ignore
     (spawn ~out:null owner_double [mode; socket w name; path w ("o-" ^ name)]);
   Unix.close null;
