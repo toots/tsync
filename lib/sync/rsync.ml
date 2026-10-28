@@ -302,7 +302,7 @@ module Make (C : Engine_ctx.S) = struct
                             done;
                             Fs.fsync fd);
                         Unix.utimes tmp m.mtime m.mtime;
-                        Unix.rename tmp path);
+                        Fs.unix_rename tmp path);
                     succeed rel m.size
                 | Patch_local (m, indices) ->
                     let sent = ref 0 in

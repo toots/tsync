@@ -989,7 +989,7 @@ module Make (C : Engine_ctx.S) = struct
             Staged.body_path staged b
           else Staged.whole_path staged b
         in
-        match Fs.opt (fun () -> Unix.openfile p [O_RDONLY; O_CLOEXEC] 0) with
+        match Fs.opt (fun () -> Fs.unix_openfile p [O_RDONLY] 0) with
           | Some fd -> Fs.with_fd fd Fs.fsync
           | None -> ())
       (Staged.bodies_named e);
@@ -1704,7 +1704,7 @@ module Make (C : Engine_ctx.S) = struct
   let create_dest dst =
     match
       Fs.eintr (fun () ->
-          Unix.openfile dst [O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC] 0o600)
+          Fs.unix_openfile dst [O_WRONLY; O_CREAT; O_EXCL] 0o600)
     with
       | fd -> fd
       | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
