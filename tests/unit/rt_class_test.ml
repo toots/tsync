@@ -25,7 +25,7 @@ let () =
   let hold, release = Unix.pipe () in
   let released = Atomic.make 0 in
   let dir = Filename.temp_dir "tsync-class" "" in
-  Unix.chmod dir 0o700;
+  Fs.make_private dir;
   let socket = Filename.concat dir "s" in
   let action a = `Assoc [("action", `String a)] in
   Rt.run_sync (fun () ->
