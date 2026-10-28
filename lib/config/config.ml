@@ -842,6 +842,37 @@ let of_string s =
     | j -> of_json j
     | exception Yojson.Json_error e -> raise (Invalid ("not valid JSON: " ^ e))
 
+(* cloud-files §2: Windows holds no store and serves none. *)
+let refused_on_this_host t =
+  if Sys.win32 then
+    List.iteri
+      (fun i d ->
+        List.iter
+          (fun b ->
+            if b.btype = "local" then
+              raise
+                (Invalid
+                   (Printf.sprintf
+                      "domains[%d].backends: %s is a local store, which \
+                       Windows does not hold"
+                      i b.bname)))
+          d.backends;
+        List.iteri
+          (fun j f ->
+            if f.ftype = "http-proxy" then
+              raise
+                (Invalid
+                   (Printf.sprintf
+                      "domains[%d].frontends[%d]: Windows does not serve \
+                       stores (http-proxy)"
+                      i j)))
+          d.frontends)
+      t.domains;
+  t
+
+let of_user_json j = refused_on_this_host (of_json j)
+let of_user_string s = refused_on_this_host (of_string s)
+
 let link_settings t name =
   match List.assoc_opt name t.links with Some l -> l | None -> t.uplink
 

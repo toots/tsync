@@ -639,6 +639,6 @@ let prepare j =
           if l = [] then unset j "links" else set j "links" (`Assoc l)
       | _ -> j
   in
-  match Config.of_json j with
+  match Config.of_user_json j with
     | _ -> Ok j
     | exception Config.Invalid e -> Error e
