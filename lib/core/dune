@@ -10,7 +10,8 @@
     (cat %{mime})
     (echo "|tsync_asset}\n")))))
 
-; The system random generator is bcrypt's on Windows.
+; The system random generator is bcrypt's on Windows, and the session's
+; notifications wtsapi32's.
 
 (rule
  (target c_library_flags.sexp)
@@ -21,7 +22,7 @@
  (action
   (with-stdout-to
    %{target}
-   (echo "(-lbcrypt)"))))
+   (echo "(-lbcrypt -lwtsapi32)"))))
 
 (rule
  (target c_library_flags.sexp)

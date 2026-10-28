@@ -83,12 +83,13 @@ let stop_on_signals ?second () =
           Log.info "received %s; stopping" what;
           Stop.request ()
   in
-  if Sys.win32 then
+  if Sys.win32 then (
     (* No signal masks on Windows: a console interrupt runs SIGINT's handler,
        which may interrupt code holding a lock, so the stop runs elsewhere. *)
     Sys.set_signal Sys.sigint
       (Sys.Signal_handle
-         (fun _ -> ignore (Thread.create stop "a console interrupt")))
+         (fun _ -> ignore (Thread.create stop "a console interrupt")));
+    Session.on_end (fun () -> stop "the end of the session"))
   else begin
     let signals = [Sys.sigterm; Sys.sigint] in
     ignore (Thread.sigmask SIG_BLOCK signals);
