@@ -64,17 +64,18 @@ let mount_point domain =
 (* security-model §10.2: the config holds secrets. *)
 let private_config ~interactive path =
   match Fs.stat_opt path with
-    | Some { st_perm; _ } when st_perm land 0o077 <> 0 ->
+    | Some { st_perm; _ } when not (Fs.is_private path) ->
+        let mode = if Sys.win32 then "" else Printf.sprintf " (mode %o)" st_perm
+        and now = if Sys.win32 then "private to you" else "600" in
         if interactive then (
-          Unix.chmod path 0o600;
+          Fs.make_private path;
           Printf.eprintf
-            "tsync: %s was readable by other users (mode %o); it is now 600\n%!"
-            path st_perm)
+            "tsync: %s was readable by other users%s; it is now %s\n%!" path
+            mode now)
         else
           Fail.raise_ Fail.Denied
-            "%s holds secrets and is readable by other users (mode %o): chmod \
-             600 it"
-            path st_perm
+            "%s holds secrets and is readable by other users%s: %s" path mode
+            (if Sys.win32 then "make it private to you" else "chmod 600 it")
     | _ -> ()
 
 let read_config ?(interactive = Unix.isatty Unix.stderr) () =

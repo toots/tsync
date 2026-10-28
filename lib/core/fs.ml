@@ -23,6 +23,8 @@ external is_macos_ : unit -> bool = "tsync_is_macos"
 external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
 external unix_rename : string -> string -> unit = "tsync_rename"
+external is_private : string -> bool = "tsync_is_private"
+external make_private : string -> unit = "tsync_make_private"
 
 let is_macos = is_macos_ ()
 let rec eintr f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> eintr f
@@ -144,7 +146,10 @@ let mkdir_p ?(perm = 0o700) ?(durable = true) d =
         | None -> (
             go (Filename.dirname d);
             match eintr (fun () -> Unix.mkdir d perm) with
-              | () -> if durable then fsync_dir (Filename.dirname d)
+              | () ->
+                  (* Windows ignores the mode, so a private one is applied. *)
+                  if Sys.win32 && perm land 0o077 = 0 then make_private d;
+                  if durable then fsync_dir (Filename.dirname d)
               | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ()
               | exception Unix.Unix_error (e, fn, a) ->
                   raise (Fail.E (Fail.of_unix e fn a))))

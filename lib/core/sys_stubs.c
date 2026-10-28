@@ -66,6 +66,7 @@ CAMLprim value tsync_errno_numbers(value unit) {
 
 #include <winsock2.h>
 #include <windows.h>
+#include <aclapi.h>
 #include <afunix.h>
 #include <bcrypt.h>
 #include <malloc.h>
@@ -339,6 +340,72 @@ CAMLprim value tsync_peer_same_user(value fd) {
   CAMLreturn(Val_bool(same));
 }
 
+/* security-model §7.1: owned by the user, with a protected access list that
+   allows no one else. */
+CAMLprim value tsync_is_private(value path) {
+  CAMLparam1(path);
+  wchar_t *p = wide_path(path);
+  PSID owner = NULL;
+  PACL dacl = NULL;
+  PSECURITY_DESCRIPTOR sd = NULL;
+  char me[256];
+  DWORD err = GetNamedSecurityInfoW(p, SE_FILE_OBJECT,
+                                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                    &owner, NULL, &dacl, NULL, &sd);
+  caml_stat_free(p);
+  if (err != ERROR_SUCCESS) win_fail(err, "is_private", path);
+  SECURITY_DESCRIPTOR_CONTROL control = 0;
+  DWORD revision;
+  int private_ = dacl != NULL && process_user(GetCurrentProcess(), me, sizeof me) &&
+                 GetSecurityDescriptorControl(sd, &control, &revision) &&
+                 (control & SE_DACL_PROTECTED) &&
+                 EqualSid(owner, ((TOKEN_USER *)me)->User.Sid);
+  for (DWORD i = 0; private_ && i < dacl->AceCount; i++) {
+    ACE_HEADER *ace;
+    if (!GetAce(dacl, i, (void **)&ace)) private_ = 0;
+    else if (ace->AceType == ACCESS_ALLOWED_ACE_TYPE)
+      private_ = EqualSid((PSID)&((ACCESS_ALLOWED_ACE *)ace)->SidStart,
+                          ((TOKEN_USER *)me)->User.Sid);
+    else if (ace->AceType != ACCESS_DENIED_ACE_TYPE)
+      private_ = 0;
+  }
+  LocalFree(sd);
+  CAMLreturn(Val_bool(private_));
+}
+
+CAMLprim value tsync_make_private(value path) {
+  CAMLparam1(path);
+  char me[256];
+  if (!process_user(GetCurrentProcess(), me, sizeof me))
+    win_fail(GetLastError(), "make_private", path);
+  PSID user = ((TOKEN_USER *)me)->User.Sid;
+  wchar_t *p = wide_path(path);
+  DWORD attributes = GetFileAttributesW(p);
+  EXPLICIT_ACCESSW access = {0};
+  access.grfAccessPermissions = GENERIC_ALL;
+  access.grfAccessMode = SET_ACCESS;
+  access.grfInheritance =
+      attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)
+          ? SUB_CONTAINERS_AND_OBJECTS_INHERIT
+          : NO_INHERITANCE;
+  access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+  access.Trustee.ptstrName = (LPWSTR)user;
+  PACL acl = NULL;
+  DWORD err = attributes == INVALID_FILE_ATTRIBUTES ? GetLastError()
+                                                    : SetEntriesInAclW(1, &access, NULL, &acl);
+  if (err == ERROR_SUCCESS) {
+    err = SetNamedSecurityInfoW(p, SE_FILE_OBJECT,
+                                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION |
+                                    PROTECTED_DACL_SECURITY_INFORMATION,
+                                user, NULL, acl, NULL);
+    LocalFree(acl);
+  }
+  caml_stat_free(p);
+  if (err != ERROR_SUCCESS) win_fail(err, "make_private", path);
+  CAMLreturn(Val_unit);
+}
+
 CAMLprim value tsync_clone(value src, value dst) {
   CAMLparam2(src, dst);
   errno = EOPNOTSUPP;
@@ -507,6 +574,21 @@ CAMLprim value tsync_open_nofollow(value path) {
 CAMLprim value tsync_pid_alive(value pid) {
   if (kill(Int_val(pid), 0) == 0) return Val_true;
   return Val_bool(errno == EPERM);
+}
+
+CAMLprim value tsync_is_private(value path) {
+  CAMLparam1(path);
+  struct stat s;
+  if (lstat(String_val(path), &s) < 0) uerror("lstat", path);
+  CAMLreturn(Val_bool(s.st_uid == getuid() && (s.st_mode & 077) == 0));
+}
+
+CAMLprim value tsync_make_private(value path) {
+  CAMLparam1(path);
+  struct stat s;
+  if (lstat(String_val(path), &s) < 0) uerror("lstat", path);
+  if (chmod(String_val(path), S_ISDIR(s.st_mode) ? 0700 : 0600) < 0) uerror("chmod", path);
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value tsync_rename(value src, value dst) {
