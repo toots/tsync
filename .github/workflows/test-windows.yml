@@ -55,19 +55,19 @@ jobs:
           echo "$info"
           echo "$info" | grep -Eq '^tls:.*\bnative\b'
 
-      # The binary with the non-system DLLs it loads, for the ARM job. API set
-      # names are resolved by the loader; a copy of one beside the binary
-      # overrides that, with the architecture of wherever it was found.
+      # The binary with the DLLs of the toolchain that built it, for the ARM
+      # job; every other DLL it loads is the system's. The first copy on the
+      # PATH can belong to another install, of another architecture.
       - name: Package the binary
         run: |
           mkdir dist
           cp _build/default/bin/tsync.exe dist/
-          for dll in $(opam exec -- x86_64-w64-mingw32-objdump -p dist/tsync.exe | sed -n 's/^[[:space:]]*DLL Name: //p' | grep -viE '^(api|ext)-ms-'); do
-            path=$(opam exec -- sh -c "command -v '$dll'" || true)
-            case "$path" in
-              ''|/c/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]/*|/cygdrive/c/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]/*) ;;
-              *) cp "$path" dist/ ;;
-            esac
+          toolchain="$(opam exec -- x86_64-w64-mingw32-gcc -print-sysroot)/mingw/bin"
+          for dll in $(opam exec -- x86_64-w64-mingw32-objdump -p dist/tsync.exe | sed -n 's/^[[:space:]]*DLL Name: //p'); do
+            if [ -f "$toolchain/$dll" ]; then cp "$toolchain/$dll" dist/; fi
+          done
+          for f in dist/*; do
+            opam exec -- x86_64-w64-mingw32-objdump -f "$f" | grep -q 'pei-x86-64' || { echo "$f is not x86-64"; exit 1; }
           done
           ls dist
 
