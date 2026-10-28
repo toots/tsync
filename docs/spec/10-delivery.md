@@ -25,7 +25,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 |---|---|---|---|
 | `test`, the gate (§3) | every push, every pull request, the merge queue | merging, every release | nothing |
 | `conformance` (§3.3) | manual dispatch | nothing automatically | nothing |
-| `release-deb`, `release-rpm`, `release-macos`, `release-android`, `release-browser` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
+| `release-deb`, `release-rpm`, `release-macos`, `release-windows`, `release-android`, `release-browser` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
 | `test-android-device` (§3.4) | manual dispatch; a pull request labelled `android-device` | nothing automatically | nothing |
 | `release-repo` | a package release publishing; manual dispatch on `main` | — | the apt and dnf repositories |
 
@@ -62,7 +62,11 @@ it is published, which artifacts are released and how, and how a build obtains i
    per call, the lazy tree, the bridge called from foreign threads). Then run the app's JVM suites
    ([android-app §12](frontends/android-app.md#12-build)), the wire suite against that binary. No
    device and no cross toolchain: the gate stays fast and runs on forks.
-6. **User install**: in a separate job, install `tsync` as a user would (`opam install tsync`) and
+6. **Windows**: on a Windows runner, build the binary with the `cloud_files` frontend, both
+   programs (`tsync.exe`, `tsyncd.exe`) and the tray, assert them from `tsync build-info`, and run
+   the hermetic tiers and the Windows Platform tier (09 §5.9) unsigned. The sync root is registered
+   with a test identity package signed by a throwaway certificate the job trusts.
+7. **User install**: in a separate job, install `tsync` as a user would (`opam install tsync`) and
    assert the default resolution of the TLS alternative.
 
 ### 3.2 What it does not run
@@ -94,7 +98,7 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 - One script, `scripts/opam_deps.sh <packages>`, installs tsync's OCaml dependencies: it pins the
   checkout, updates and upgrades the switch, and installs the named packages' dependencies. Every
   job that builds tsync calls it with its package list, the container release build included; the
-  only exception is the gate's user-install job (§3.1 item 6), whose point is to not use it.
+  only exception is the gate's user-install job (§3.1 item 7), whose point is to not use it.
 - The Android cross switch is installed by the same script, from the cross-compilation repository
   the workflow registers first; the package list lives in the repository (the dependencies of the
   `tsync-android` package), not in the workflow.
@@ -132,6 +136,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 | `.deb` (`tsync`, `tsync-tray`, `tsync-dolphin`) | Debian stable and Ubuntu latest, amd64 and arm64, in containers | install the three packages on the image they were built for, run the binary and the tray, and make the package checks of [linux-desktop.md §6.3](frontends/linux-desktop.md#63-packages) |
 | `.rpm` | the latest Fedora release, amd64 and arm64, in containers | as for `.deb` |
 | `tsync.pkg` | macOS, Apple silicon | check the package signature, that Gatekeeper accepts the notarized package, and that its payload carries the native-messaging manifests of [passwords/browser §2](extensions/passwords/browser.md#2-installing), naming the app's `tsync` |
+| `tsync-setup.exe` | Windows, x86-64 | check the installer's and the identity package's signatures (§5.5), install it as a standard user, check the scheduled task, the autostart value and `tsync build-info`, register a sync root and read a file through it, then uninstall and check that no registration remains |
 | `tsync-arm64-v8a.apk` | Linux, cross-compiled | check that the package holds the core library for its ABI, aligned for 16 KB pages, and that its signer is the tsync key (§5.4) |
 | `tsync-browser-extension.zip` | Linux | check that the manifest carries no `key` and the build's version, that no test is packed and that every script parses; uploaded to the Chrome Web Store by hand ([passwords/browser §2](extensions/passwords/browser.md#2-installing)) |
 
@@ -170,6 +175,15 @@ runs the same checks except the signer's, and reports the signing half "not run"
 artifact of a public repository can be downloaded by others; this is accepted, as for the macOS
 package of a pull request (§5.3).
 
+### 5.5 Windows signing
+
+The installer, the programs and the identity package are signed with the tsync code-signing
+certificate, timestamped. The identity package's publisher MUST equal the certificate's subject, or
+Windows refuses to register it. The certificate comes from secrets; without them (a fork) the job
+signs with a throwaway certificate, runs every check but the signer's, and reports the signing half
+"not run". The package version is the build's version with the run number as its last field, so each
+build outranks the one before.
+
 ## 6. Secrets
 
 - Every secret a workflow needs is provisioned by a script in `scripts/`: `setup_ci_secrets.sh` for
@@ -187,6 +201,8 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
 [§6.3](frontends/linux-desktop.md#63-packages)).
 
 ## 8. Where the workflows depart
+
+- `release-windows` and the gate's Windows job do not exist yet: no Windows build has run.
 
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.

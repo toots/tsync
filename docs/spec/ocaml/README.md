@@ -40,6 +40,7 @@ by state ([algorithms/publication.md](algorithms/publication.md),
 | Linux desktop clients: the menu model, mount discovery and its shared object, the D-Bus binding, the tray on the runtime, the plugin build | [frontends/linux-desktop.md](frontends/linux-desktop.md) |
 | http-proxy server | [frontends/http-proxy.md](frontends/http-proxy.md) |
 | macOS (the File Provider host) | [frontends/file-provider.md](frontends/file-provider.md) |
+| Windows (the Cloud Files host): where each part goes and what stands in the way | [frontends/cloud-files.md](frontends/cloud-files.md) |
 | Android (cross-compilation, JNI, embedding the runtime) | [frontends/android.md](frontends/android.md) |
 | Backend and local data models | [data-model/backend.md](data-model/backend.md), [data-model/local-cache.md](data-model/local-cache.md) |
 | Algorithms: how the code maps onto each, and where it departs | [publication](algorithms/publication.md), [conflict-resolution](algorithms/conflict-resolution.md), [durable-queue](algorithms/durable-queue.md), [failure-model](algorithms/failure-model.md), [replication](algorithms/replication.md), [read-path-and-cache](algorithms/read-path-and-cache.md), [gc](algorithms/gc.md), [uplink-governor](algorithms/uplink-governor.md), [security-model](algorithms/security-model.md) |

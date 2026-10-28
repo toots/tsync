@@ -85,7 +85,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 
 | key | type | required | rule |
 |---|---|---|---|
-| `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)) |
+| `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)); on Windows, two `cloud_files` domains whose sync root ids collide ([cloud-files.md §4.3](frontends/cloud-files.md#43-sync-root-identifier)) |
 | `backends` | array | yes | each per the backend object below; then role validation |
 | `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
 | `extensions` | array | no: the main's (below), else `[]` | each `"<name>"` or `{"type":"<name>", …options}`, an extension of [extensions](extensions/README.md), at most once; `[]` for none. Listing any extension gives the domain a vault ([vault](extensions/vault.md)). No extension has options yet |
@@ -152,7 +152,7 @@ it unasked. The config editor asks about it only in its advanced mode
 
 | key | rule |
 |---|---|
-| `type` | required; a known backend type |
+| `type` | required; a known backend type; on Windows, not `local` ([cloud-files.md §2](frontends/cloud-files.md#2-what-a-windows-host-holds)) |
 | `name` | required, non-empty, not `.` or `..`, no `/`; unique within the domain **ignoring case** (it names the target's deferred log directory and its counters) |
 | `role` | required: `"main"`, `"replica"`, `"backfill"` or `"readOnly"` ([replication.md](algorithms/replication.md)) |
 | `link` | *advanced*; optional non-blank string, trimmed; default `"wan"`; refused on `type: local` (a local store has no link) |
@@ -165,6 +165,8 @@ truth"); a `backfill` is refused ("nothing to fill it from"); no `readOnly` eith
 **Frontends.**
 
 - Each type at most once per domain.
+- On Windows, the `http-proxy` frontend is refused: a Windows host serves no store
+  ([cloud-files.md §2](frontends/cloud-files.md#2-what-a-windows-host-holds)).
 - At most one **presenting** frontend per domain ([08 §2.1](08-frontends.md)): one owner process
   hosts it ([07 §2.4](07-daemon-cli.md)).
 - Options are checked against the frontend's option spec, by type, and against the rules its spec
@@ -782,6 +784,9 @@ Token, expiry, overwrite and revocation rules are
 
 ## 7. Conformance
 
+- **Windows**: a `local` backend in any role and the `http-proxy` frontend are refused naming the
+  JSON path; an `s3`, `gcs` or `http-proxy` backend is accepted as main, replica, backfill and
+  archive.
 - **Config**: unknown keys refused at every level including frontend and backend objects; roles
   limited to the four spellings and the read order following role then config order; a domain with
   two mains refused; a domain with no main valid only when all its stores are `readOnly`, and then
