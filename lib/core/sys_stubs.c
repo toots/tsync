@@ -261,21 +261,49 @@ CAMLprim value tsync_reserve(value fd, value len) {
 #endif
 #define FILE_RENAME_INFO_EX ((FILE_INFO_BY_HANDLE_CLASS)22)
 
+/* The rename call takes the destination as an extended-length path, which
+   names a local drive as \\?\C:\ and a share as \\?\UNC\server\. */
+static wchar_t *extended_path(const wchar_t *path, DWORD *length) {
+  DWORD full = GetFullPathNameW(path, 0, NULL, NULL);
+  wchar_t *absolute = full ? caml_stat_alloc_noexc(full * sizeof(wchar_t)) : NULL;
+  if (absolute == NULL || GetFullPathNameW(path, full, absolute, NULL) == 0) {
+    caml_stat_free(absolute);
+    return NULL;
+  }
+  const wchar_t *prefix = L"\\\\?\\", *rest = absolute;
+  if (wcsncmp(absolute, L"\\\\?\\", 4) == 0) prefix = L"";
+  else if (wcsncmp(absolute, L"\\\\", 2) == 0) {
+    prefix = L"\\\\?\\UNC\\";
+    rest = absolute + 2;
+  }
+  *length = (DWORD)(wcslen(prefix) + wcslen(rest));
+  wchar_t *extended = caml_stat_alloc_noexc((*length + 1) * sizeof(wchar_t));
+  if (extended != NULL) {
+    wcscpy(extended, prefix);
+    wcscat(extended, rest);
+  }
+  caml_stat_free(absolute);
+  return extended;
+}
+
 /* POSIX semantics replace a destination that is open; the request's flags
    word sits where older headers declare only ReplaceIfExists. */
 CAMLprim value tsync_rename(value src, value dst) {
   CAMLparam2(src, dst);
   wchar_t *s = wide_path(src), *d = wide_path(dst);
-  DWORD full = GetFullPathNameW(d, 0, NULL, NULL);
-  size_t size = sizeof(FILE_RENAME_INFO) + full * sizeof(wchar_t);
-  FILE_RENAME_INFO *info = caml_stat_calloc_noexc(1, size);
-  if (full == 0 || info == NULL) {
+  DWORD length = 0;
+  wchar_t *target = extended_path(d, &length);
+  size_t size = sizeof(FILE_RENAME_INFO) + length * sizeof(wchar_t);
+  FILE_RENAME_INFO *info = target ? caml_stat_calloc_noexc(1, size) : NULL;
+  if (info == NULL) {
+    DWORD err = target ? ERROR_NOT_ENOUGH_MEMORY : GetLastError();
     caml_stat_free(s);
     caml_stat_free(d);
-    caml_stat_free(info);
-    win_fail(full == 0 ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY, "rename", src);
+    caml_stat_free(target);
+    win_fail(err ? err : ERROR_NOT_ENOUGH_MEMORY, "rename", src);
   }
-  DWORD length = GetFullPathNameW(d, full, info->FileName, NULL);
+  memcpy(info->FileName, target, (length + 1) * sizeof(wchar_t));
+  caml_stat_free(target);
   DWORD flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
   memcpy(info, &flags, sizeof flags);
   info->FileNameLength = length * sizeof(wchar_t);
