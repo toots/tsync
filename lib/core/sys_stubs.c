@@ -409,6 +409,40 @@ CAMLprim value tsync_rename(value src, value dst) {
   CAMLreturn(Val_unit);
 }
 
+#define FILE_DISPOSITION_INFO_EX ((FILE_INFO_BY_HANDLE_CLASS)21)
+#define DISPOSITION_DELETE 0x1
+#define DISPOSITION_POSIX_SEMANTICS 0x2
+#define DISPOSITION_IGNORE_READONLY 0x10
+
+/* POSIX semantics take the name away at once, open handles or not. */
+CAMLprim value tsync_unlink(value path) {
+  CAMLparam1(path);
+  wchar_t *p = wide_path(path);
+  DWORD flags = DISPOSITION_DELETE | DISPOSITION_POSIX_SEMANTICS | DISPOSITION_IGNORE_READONLY;
+  caml_release_runtime_system();
+  HANDLE h = CreateFileW(p, DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                         NULL);
+  BOOL ok = h != INVALID_HANDLE_VALUE;
+  DWORD err = ok ? 0 : GetLastError();
+  int directory = 0;
+  if (ok) {
+    FILE_BASIC_INFO info;
+    directory = GetFileInformationByHandleEx(h, FileBasicInfo, &info, sizeof info) &&
+                (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+    if (!directory) {
+      ok = SetFileInformationByHandle(h, FILE_DISPOSITION_INFO_EX, &flags, sizeof flags);
+      err = ok ? 0 : GetLastError();
+    }
+    CloseHandle(h);
+  }
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (directory) { errno = EISDIR; uerror("unlink", path); }
+  if (!ok) win_fail(err, "unlink", path);
+  CAMLreturn(Val_unit);
+}
+
 CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLparam2(src, dst);
   wchar_t *s = wide_path(src), *d = wide_path(dst);
@@ -688,6 +722,19 @@ CAMLprim value tsync_pid_alive(value pid) {
 }
 
 CAMLprim value tsync_end_with_this_process(value pid) { return Val_unit; }
+
+CAMLprim value tsync_unlink(value path) {
+  CAMLparam1(path);
+  char *p = caml_stat_strdup(String_val(path));
+  int r;
+  caml_release_runtime_system();
+  do { r = unlink(p); } while (r < 0 && errno == EINTR);
+  int e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (r < 0) { errno = e; uerror("unlink", path); }
+  CAMLreturn(Val_unit);
+}
 
 CAMLprim value tsync_session_event(value unit) {
   CAMLparam1(unit);

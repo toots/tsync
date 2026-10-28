@@ -23,6 +23,7 @@ external is_macos_ : unit -> bool = "tsync_is_macos"
 external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
 external unix_rename : string -> string -> unit = "tsync_rename"
+external unix_unlink : string -> unit = "tsync_unlink"
 external is_private : string -> bool = "tsync_is_private"
 external end_with_this_process : int -> unit = "tsync_end_with_this_process"
 external make_private : string -> unit = "tsync_make_private"
@@ -157,11 +158,11 @@ let mkdir_p ?(perm = 0o700) ?(durable = true) d =
   in
   go d
 
-let unlink_quiet p = try eintr (fun () -> Unix.unlink p) with _ -> ()
+let unlink_quiet p = try eintr (fun () -> unix_unlink p) with _ -> ()
 
 (* Answers whether something was removed; any error but absence is raised. *)
 let release p =
-  match opt (fun () -> Unix.unlink p) with Some () -> true | None -> false
+  match opt (fun () -> unix_unlink p) with Some () -> true | None -> false
 
 let temp_in dir = Filename.concat dir (Names.temp_name ())
 
