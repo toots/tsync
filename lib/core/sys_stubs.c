@@ -518,6 +518,22 @@ CAMLprim value tsync_is_private(value path) {
   CAMLreturn(Val_bool(private_));
 }
 
+CAMLprim value tsync_owned_by_this_user(value path) {
+  CAMLparam1(path);
+  wchar_t *p = wide_path(path);
+  PSID owner = NULL;
+  PSECURITY_DESCRIPTOR sd = NULL;
+  char me[256];
+  DWORD err = GetNamedSecurityInfoW(p, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner,
+                                    NULL, NULL, NULL, &sd);
+  caml_stat_free(p);
+  if (err != ERROR_SUCCESS) win_fail(err, "owner", path);
+  int mine = process_user(GetCurrentProcess(), me, sizeof me) &&
+             EqualSid(owner, ((TOKEN_USER *)me)->User.Sid);
+  LocalFree(sd);
+  CAMLreturn(Val_bool(mine));
+}
+
 CAMLprim value tsync_make_private(value path) {
   CAMLparam1(path);
   char me[256];
@@ -748,6 +764,13 @@ CAMLprim value tsync_is_private(value path) {
   struct stat s;
   if (lstat(String_val(path), &s) < 0) uerror("lstat", path);
   CAMLreturn(Val_bool(s.st_uid == getuid() && (s.st_mode & 077) == 0));
+}
+
+CAMLprim value tsync_owned_by_this_user(value path) {
+  CAMLparam1(path);
+  struct stat s;
+  if (lstat(String_val(path), &s) < 0) uerror("lstat", path);
+  CAMLreturn(Val_bool(s.st_uid == getuid()));
 }
 
 CAMLprim value tsync_make_private(value path) {

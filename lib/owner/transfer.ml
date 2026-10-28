@@ -51,6 +51,6 @@ let check_dest ~roots path =
 let check_staging ~roots path =
   check_under ~roots path;
   match Unix.lstat path with
-    | { st_kind = S_REG; st_uid; _ } when st_uid = Unix.getuid () -> ()
+    | { st_kind = S_REG; _ } when Fs.owned_by_this_user path -> ()
     | _ -> denied path "not a regular file owned by this user"
     | exception Unix.Unix_error _ -> denied path "missing"

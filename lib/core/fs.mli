@@ -104,6 +104,10 @@ val rename : ?op:string -> string -> string -> unit
     [Unix_error]. *)
 val is_private : string -> bool
 
+(** Whether the file or directory belongs to this process's user: its uid, or on
+    Windows its owner SID (security-model §7.3). Raises [Unix_error]. *)
+val owned_by_this_user : string -> bool
+
 (** On Windows, ties the process [pid] to this one's life: it is ended when this
     process ends, however it ends (cloud-files §5.2). Elsewhere nothing. Raises
     [Unix_error]. *)
