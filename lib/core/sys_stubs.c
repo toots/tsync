@@ -203,6 +203,35 @@ CAMLprim value tsync_pid_alive(value pid) {
 
 CAMLprim value tsync_raise_nofile(value target) { return target; }
 
+/* One job per process, which ends its members when its last handle closes:
+   the children end with this process, however it ends. */
+static HANDLE children_job;
+
+CAMLprim value tsync_end_with_this_process(value pid) {
+  CAMLparam1(pid);
+  if (children_job == NULL) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {0};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    HANDLE created = CreateJobObjectW(NULL, NULL);
+    if (created == NULL ||
+        !SetInformationJobObject(created, JobObjectExtendedLimitInformation, &limits,
+                                 sizeof limits)) {
+      DWORD err = GetLastError();
+      if (created) CloseHandle(created);
+      win_fail(err, "job", Nothing);
+    }
+    if (InterlockedCompareExchangePointer((PVOID *)&children_job, created, NULL) != NULL)
+      CloseHandle(created);
+  }
+  HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, (DWORD)Int_val(pid));
+  if (child == NULL) win_fail(GetLastError(), "job", Nothing);
+  BOOL ok = AssignProcessToJobObject(children_job, child);
+  DWORD err = ok ? 0 : GetLastError();
+  CloseHandle(child);
+  if (!ok) win_fail(err, "job", Nothing);
+  CAMLreturn(Val_unit);
+}
+
 CAMLprim value tsync_system_random(value len) {
   CAMLparam1(len);
   CAMLlocal1(res);
@@ -603,6 +632,8 @@ CAMLprim value tsync_pid_alive(value pid) {
   if (kill(Int_val(pid), 0) == 0) return Val_true;
   return Val_bool(errno == EPERM);
 }
+
+CAMLprim value tsync_end_with_this_process(value pid) { return Val_unit; }
 
 CAMLprim value tsync_is_private(value path) {
   CAMLparam1(path);

@@ -100,6 +100,11 @@ val rename : ?op:string -> string -> string -> unit
     [Unix_error]. *)
 val is_private : string -> bool
 
+(** On Windows, ties the process [pid] to this one's life: it is ended when this
+    process ends, however it ends (cloud-files §5.2). Elsewhere nothing. Raises
+    [Unix_error]. *)
+val end_with_this_process : int -> unit
+
 (** Makes a file or directory private to this process's user: mode 0600 or 0700,
     or on Windows the access list of {!is_private}, which a directory passes on
     to what is created in it. Raises [Unix_error]. *)
