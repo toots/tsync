@@ -1,14 +1,34 @@
 open Tsync_core
 
+let absolute_env var =
+  match Sys.getenv_opt var with
+    | Some d when d <> "" && not (Filename.is_relative d) -> Some d
+    | _ -> None
+
 let home () =
   match Sys.getenv_opt "HOME" with
     | Some h when h <> "" -> h
-    | _ -> Fail.raise_ Fail.Invalid "HOME is not set"
+    | _ -> (
+        match if Sys.win32 then absolute_env "USERPROFILE" else None with
+          | Some h -> h
+          | None -> Fail.raise_ Fail.Invalid "HOME is not set")
 
 let env_dir var default =
-  match Sys.getenv_opt var with
-    | Some d when d <> "" && String.starts_with ~prefix:"/" d -> d
-    | _ -> Filename.concat (home ()) default
+  match absolute_env var with
+    | Some d -> d
+    | None -> Filename.concat (home ()) default
+
+(* 07 §2.7: Windows keeps tsync's files in the user's Local AppData; the XDG
+   variables still redirect them, as the tests do. *)
+let local_appdata sub =
+  match absolute_env "LOCALAPPDATA" with
+    | Some d -> Filename.concat (Filename.concat d "tsync") sub
+    | None -> Fail.raise_ Fail.Invalid "LOCALAPPDATA is not set"
+
+let windows_dir var sub =
+  match absolute_env var with
+    | Some d -> Filename.concat d "tsync"
+    | None -> local_appdata sub
 
 (* file-provider §3.1: on macOS the host asks the system for the group
    container before the program touches it; elsewhere nothing. *)
@@ -22,6 +42,10 @@ let group () =
 
 let config_file () =
   if Fs.is_macos then Filename.concat (group ()) "config.json"
+  else if Sys.win32 then (
+    match absolute_env "XDG_CONFIG_HOME" with
+      | Some d -> Filename.concat (Filename.concat d "tsync") "config.json"
+      | None -> local_appdata "config.json")
   else
     Filename.concat
       (Filename.concat (env_dir "XDG_CONFIG_HOME" ".config") "tsync")
@@ -29,10 +53,12 @@ let config_file () =
 
 let data_dir () =
   if Fs.is_macos then Filename.concat (group ()) "tsync"
+  else if Sys.win32 then windows_dir "XDG_DATA_HOME" "data"
   else Filename.concat (env_dir "XDG_DATA_HOME" ".local/share") "tsync"
 
 let cache_root () =
   if Fs.is_macos then Filename.concat (data_dir ()) "cache"
+  else if Sys.win32 then windows_dir "XDG_CACHE_HOME" "cache"
   else Filename.concat (env_dir "XDG_CACHE_HOME" ".cache") "tsync"
 
 let service_socket () = Filename.concat (data_dir ()) "tsync.sock"
