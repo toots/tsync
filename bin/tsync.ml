@@ -10,6 +10,9 @@ let argv =
     | _ -> Sys.argv
 
 let () =
+  (* Output ends lines in LF on Windows too, as it does elsewhere. *)
+  set_binary_mode_out stdout true;
+  set_binary_mode_out stderr true;
   Tsync_config.Paths.claim_group ();
   exit
     (Cmd.eval' ~argv
