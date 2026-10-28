@@ -53,7 +53,7 @@ let tsync_bin =
 (* The CLI's [vault kit], the passphrase on its standard input; its exit code. *)
 let cli_kit path passphrase =
   let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
-  let devnull = Unix.openfile "/dev/null" [O_WRONLY] 0 in
+  let devnull = Unix.openfile Filename.null [O_WRONLY] 0 in
   let pid =
     Unix.create_process tsync_bin
       [|
@@ -78,7 +78,7 @@ let cli_kit path passphrase =
 (* The CLI's standard output for [args], its standard error discarded. *)
 let cli args =
   let out_read, out_write = Unix.pipe ~cloexec:true () in
-  let devnull = Unix.openfile "/dev/null" [O_RDWR] 0 in
+  let devnull = Unix.openfile Filename.null [O_RDWR] 0 in
   let pid =
     Unix.create_process tsync_bin
       (Array.of_list (tsync_bin :: args))
