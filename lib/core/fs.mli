@@ -23,6 +23,12 @@ val is_dir : string -> bool
 (** The kind of what is at a path, without following a link. *)
 val kind : string -> [ `Absent | `Dir | `File | `Link | `Other ]
 
+(** [Unix.openfile], sharing deletion on Windows so that an open file never
+    stops its replacement or removal (cloud-files §5.1). Raises [Unix_error]
+    like it, for callers that sort errors themselves. *)
+val unix_openfile :
+  string -> Unix.open_flag list -> Unix.file_perm -> Unix.file_descr
+
 val openfile : ?perm:int -> string -> Unix.open_flag list -> Unix.file_descr
 val close : Unix.file_descr -> unit
 val with_fd : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
@@ -81,6 +87,10 @@ val create_new : ?perm:int -> string -> string -> unit
 
 (** Remove a tree without following symbolic links. *)
 val rm_rf : string -> unit
+
+(** [Unix.rename] with POSIX semantics on Windows too: the destination is
+    replaced even while it is open. Raises [Unix_error] like it. *)
+val unix_rename : string -> string -> unit
 
 val rename : ?op:string -> string -> string -> unit
 
