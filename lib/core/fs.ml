@@ -92,7 +92,7 @@ let read_fd_all fd =
   Buffer.contents buf
 
 let read_file_opt p =
-  match opt (fun () -> Unix.openfile p [O_RDONLY; O_CLOEXEC] 0) with
+  match opt (fun () -> unix_openfile p [O_RDONLY] 0) with
     | None -> None
     | Some fd -> Some (with_fd fd read_fd_all)
 
@@ -335,7 +335,7 @@ let funlock fd = funlock_ fd
 
 let lifetime_lock path =
   mkdir_p ~perm:0o700 (Filename.dirname path);
-  let fd = Unix.openfile path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
+  let fd = unix_openfile path [O_RDWR; O_CREAT] 0o600 in
   match flock ~exclusive:true ~block:false fd with
     | true -> Some fd
     | false ->
