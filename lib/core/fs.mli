@@ -108,9 +108,9 @@ val is_private : string -> bool
     Windows its owner SID (security-model §7.3). Raises [Unix_error]. *)
 val owned_by_this_user : string -> bool
 
-(** On Windows, ties the process [pid] to this one's life: it is ended when this
-    process ends, however it ends (cloud-files §5.2). Elsewhere nothing. Raises
-    [Unix_error]. *)
+(** On Windows, ties a child, as {!Unix.create_process} returned it, to this
+    process's life: it is ended when this process ends, however it ends
+    (cloud-files §5.2). Elsewhere nothing. Raises [Unix_error]. *)
 val end_with_this_process : int -> unit
 
 (** Makes a file or directory private to this process's user: mode 0600 or 0700,
