@@ -77,7 +77,7 @@ let start mount tls verbose =
         prerr_endline "tsync: no config; serving the menu until one exists";
         macos_service tls (no_domains ())
     | Some text when Fs.is_macos -> (
-        match Config.of_string text with
+        match Config.of_user_string text with
           | exception Config.Invalid e ->
               prerr_endline ("tsync: " ^ e);
               78
@@ -86,7 +86,7 @@ let start mount tls verbose =
         prerr_endline "tsync: no config; nothing to start";
         0
     | Some text -> (
-        match Config.of_string text with
+        match Config.of_user_string text with
           | exception Config.Invalid e ->
               prerr_endline ("tsync: " ^ e);
               78

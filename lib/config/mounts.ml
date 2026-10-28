@@ -116,5 +116,5 @@ let mount_points ?(table = "/proc/self/mountinfo") () =
                   if List.mem mount_point mounted then
                     Some (mount_point, Paths.owner_socket d.name)
                   else None))
-            (Config.of_string text).domains
+            (Config.of_user_string text).domains
   with _ -> []

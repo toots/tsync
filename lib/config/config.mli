@@ -118,6 +118,15 @@ val of_string : string -> t
 
 val of_json : Yojson.Safe.t -> t
 
+(** {!of_string} for a config the user wrote, by hand or through the wizard,
+    with this host's refusals: on Windows a local store and the http-proxy
+    frontend (05 §2.1). Configs built in code, as tests build theirs (09 §5.1),
+    use {!of_string}. *)
+val of_user_string : string -> t
+
+(** {!of_json}, with the refusals of {!of_user_string}. *)
+val of_user_json : Yojson.Safe.t -> t
+
 (** The client name when the config gives none. *)
 val hostname : unit -> string
 

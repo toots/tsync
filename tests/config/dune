@@ -60,3 +60,18 @@
  (action
   (echo
    "wizard_test: not run, it lists the fuse frontend, not in this build\n")))
+
+(executable
+ (name host_refusal_test)
+ (modules host_refusal_test)
+ (libraries tsync_config tsync_catalog tsync_http_proxy))
+
+(rule
+ (with-stdout-to
+  host_refusal_test.output
+  (run ./host_refusal_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff host_refusal_test.expected host_refusal_test.output)))
