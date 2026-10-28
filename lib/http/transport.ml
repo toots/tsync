@@ -106,7 +106,9 @@ let connect_fd ~host ~port =
           Unix.set_nonblock fd;
           match Unix.connect fd a.ai_addr with
             | () -> None
-            | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+            (* Windows reports a connection under way as EWOULDBLOCK. *)
+            | exception Unix.Unix_error (e, _, _)
+              when e = EINPROGRESS || (Sys.win32 && e = EWOULDBLOCK) -> (
                 match Rt.wait_writable ~timeout:connect_timeout fd with
                   | exception Rt.Timeout ->
                       Some (Unix.Unix_error (ETIMEDOUT, "connect", host))
