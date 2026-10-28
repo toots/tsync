@@ -90,7 +90,7 @@ let serve mode dir connection fd =
           Unix.close fd)
 
 let () =
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let mode = Sys.argv.(1) and socket = Sys.argv.(2) in
   let dir = if Array.length Sys.argv > 3 then Sys.argv.(3) else "" in
   (try Unix.unlink socket with Unix.Unix_error _ -> ());
