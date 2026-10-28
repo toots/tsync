@@ -60,15 +60,19 @@ jobs:
         with:
           ocaml-compiler: "5.4.1"
 
-      - name: The cross-compilation repository
-        run: opam repository add android git+https://github.com/ocaml-cross/opam-cross-android.git
+      # .github/opam carries the cross packages opam-cross-android does not
+      # have yet.
+      - name: The cross-compilation repositories
+        run: |
+          opam repository add android git+https://github.com/ocaml-cross/opam-cross-android.git
+          opam repository add tsync-cross "$GITHUB_WORKSPACE/.github/opam"
 
       - name: Restore the opam switch
         id: opam-switch
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh') }}
+          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
 
       # 10 §4.1: the package list is tsync-android.opam.
       - name: The cross switch
@@ -79,7 +83,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh') }}
+          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
 
       # The context's path, not the bare target: the native context would want
       # every desktop dependency.

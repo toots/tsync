@@ -13,6 +13,8 @@ depends: [
   "cmdliner"
   "digestif"
   "domain-name"
+  # liquidsoap's scheduler; opam-repository's older duppy (0.9) is another API.
+  "duppy" {>= "2.5.0"}
   "eqaf"
   "mem_usage"
   "mirage-crypto-ec"
@@ -31,6 +33,10 @@ depends: [
   # anywhere, where OpenSSL is faster but wants a system libssl. With both,
   # OpenSSL is the default and `tsync start --tls` chooses.
   ("tsync-tls" | "tsync-ssl")
+]
+# duppy is released from liquidsoap's repository; until a release, its main.
+pin-depends: [
+  ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#main"]
 ]
 # Each rebuilds tsync when it appears, which links its library in. The TLS
 # libraries stand for their packages, which may not appear in both lists.
