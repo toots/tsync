@@ -1,8 +1,6 @@
-let urandom n =
-  let ic = open_in_bin "/dev/urandom" in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic n)
+external system_random : int -> string = "tsync_system_random"
+
+let urandom n = system_random n
 
 let hex s =
   String.concat ""

@@ -10,10 +10,36 @@
     (cat %{mime})
     (echo "|tsync_asset}\n")))))
 
+; The system random generator is bcrypt's on Windows.
+
+(rule
+ (target c_library_flags.sexp)
+ (enabled_if
+  (or
+   (= %{ocaml-config:system} mingw64)
+   (= %{ocaml-config:system} win64)))
+ (action
+  (with-stdout-to
+   %{target}
+   (echo "(-lbcrypt)"))))
+
+(rule
+ (target c_library_flags.sexp)
+ (enabled_if
+  (and
+   (<> %{ocaml-config:system} mingw64)
+   (<> %{ocaml-config:system} win64)))
+ (action
+  (with-stdout-to
+   %{target}
+   (echo "()"))))
+
 (library
  (name tsync_core)
  (libraries mem_usage unix threads.posix duppy yojson digestif base64)
  (foreign_stubs
   (language c)
   (include_dirs ../../vendor/xxhash)
-  (names xxh_stubs sys_stubs)))
+  (names xxh_stubs sys_stubs))
+ (c_library_flags
+  (:include c_library_flags.sexp)))

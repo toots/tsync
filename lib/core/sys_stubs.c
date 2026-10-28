@@ -67,6 +67,7 @@ CAMLprim value tsync_errno_numbers(value unit) {
 #include <winsock2.h>
 #include <windows.h>
 #include <afunix.h>
+#include <bcrypt.h>
 #include <malloc.h>
 
 static void win_fail(DWORD err, const char *what, value arg) {
@@ -200,6 +201,16 @@ CAMLprim value tsync_pid_alive(value pid) {
 }
 
 CAMLprim value tsync_raise_nofile(value target) { return target; }
+
+CAMLprim value tsync_system_random(value len) {
+  CAMLparam1(len);
+  CAMLlocal1(res);
+  res = caml_alloc_string(Long_val(len));
+  NTSTATUS status = BCryptGenRandom(NULL, (PUCHAR)Bytes_val(res), (ULONG)Long_val(len),
+                                    BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+  if (!BCRYPT_SUCCESS(status)) caml_failwith("BCryptGenRandom failed");
+  CAMLreturn(res);
+}
 
 CAMLprim value tsync_fsync(value fd) {
   CAMLparam1(fd);
@@ -441,6 +452,29 @@ CAMLprim value tsync_open_nofollow(value path) {
 CAMLprim value tsync_pid_alive(value pid) {
   if (kill(Int_val(pid), 0) == 0) return Val_true;
   return Val_bool(errno == EPERM);
+}
+
+CAMLprim value tsync_system_random(value len) {
+  CAMLparam1(len);
+  CAMLlocal1(res);
+  size_t wanted = Long_val(len), got = 0;
+  res = caml_alloc_string(wanted);
+  int fd;
+  do { fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC); } while (fd < 0 && errno == EINTR);
+  if (fd < 0) uerror("open", Nothing);
+  while (got < wanted) {
+    ssize_t r = read(fd, (char *)Bytes_val(res) + got, wanted - got);
+    if (r < 0 && errno == EINTR) continue;
+    if (r <= 0) {
+      int e = r < 0 ? errno : EIO;
+      close(fd);
+      errno = e;
+      uerror("read", Nothing);
+    }
+    got += r;
+  }
+  close(fd);
+  CAMLreturn(res);
 }
 
 /* Raise the soft descriptor limit toward the hard one, capped at target, never
