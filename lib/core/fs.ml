@@ -24,6 +24,7 @@ external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
 external unix_rename : string -> string -> unit = "tsync_rename"
 external is_private : string -> bool = "tsync_is_private"
+external end_with_this_process : int -> unit = "tsync_end_with_this_process"
 external make_private : string -> unit = "tsync_make_private"
 
 let is_macos = is_macos_ ()

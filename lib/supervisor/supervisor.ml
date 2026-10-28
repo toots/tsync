@@ -68,6 +68,10 @@ let spawn exe r =
       (Array.of_list (exe :: r.child.args))
       Unix.stdin Unix.stdout Unix.stderr
   in
+  (try Fs.end_with_this_process pid
+   with Unix.Unix_error (e, _, _) ->
+     Log.warn "pid %d will outlive this supervisor: %s" pid
+       (Unix.error_message e));
   Log.info "started %s (pid %d)" (String.concat " " r.child.args) pid;
   r.pid <- Some pid;
   r.started <- Rt.now ()
