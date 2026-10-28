@@ -32,7 +32,7 @@ let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime
         role;
         serves;
       };
-    usage = usage ~cpu:1.25 ~private_:(mib 61) ~heap:(mib 18);
+    usage = usage ~cpu:1.24 ~private_:(mib 61) ~heap:(mib 18);
     uplinks;
     traffic;
     recent_errors = recent;
