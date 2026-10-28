@@ -70,6 +70,7 @@ CAMLprim value tsync_errno_numbers(value unit) {
 #include <afunix.h>
 #include <bcrypt.h>
 #include <malloc.h>
+#include <wtsapi32.h>
 
 static void win_fail(DWORD err, const char *what, value arg) {
   win32_maperr(err);
@@ -202,6 +203,59 @@ CAMLprim value tsync_pid_alive(value pid) {
 }
 
 CAMLprim value tsync_raise_nofile(value target) { return target; }
+
+/* A message the window handles arrives inside GetMessage, which does not
+   return for it: the procedure posts an empty message to end the wait. */
+static int session_pending = -1;
+static HWND session_window;
+
+static LRESULT CALLBACK session_procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
+  int event = -1;
+  if (message == WM_QUERYENDSESSION) return TRUE;
+  if (message == WM_ENDSESSION && w) event = 0;
+  if (message == WM_WTSSESSION_CHANGE && w == WTS_SESSION_LOCK) event = 1;
+  if (message == WM_WTSSESSION_CHANGE && w == WTS_SESSION_UNLOCK) event = 2;
+  if (event >= 0) {
+    session_pending = event;
+    PostMessageW(window, WM_NULL, 0, 0);
+    return 0;
+  }
+  return DefWindowProcW(window, message, w, l);
+}
+
+/* A top-level window, since a message-only one is not told the session ends. */
+CAMLprim value tsync_session_event(value unit) {
+  CAMLparam1(unit);
+  if (session_window == NULL) {
+    WNDCLASSW class = {0};
+    class.lpfnWndProc = session_procedure;
+    class.hInstance = GetModuleHandleW(NULL);
+    class.lpszClassName = L"tsync-session";
+    if (!RegisterClassW(&class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+      win_fail(GetLastError(), "session", Nothing);
+    session_window = CreateWindowExW(0, L"tsync-session", L"tsync", 0, 0, 0, 0, 0, NULL, NULL,
+                                     class.hInstance, NULL);
+    if (session_window == NULL) win_fail(GetLastError(), "session", Nothing);
+    WTSRegisterSessionNotification(session_window, NOTIFY_FOR_THIS_SESSION);
+  }
+  int event = -1;
+  BOOL got = TRUE;
+  caml_release_runtime_system();
+  while (event < 0 && got > 0) {
+    MSG message;
+    got = GetMessageW(&message, NULL, 0, 0);
+    if (got > 0) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+      event = session_pending;
+      session_pending = -1;
+    }
+  }
+  DWORD err = got < 0 ? GetLastError() : 0;
+  caml_acquire_runtime_system();
+  if (got < 0) win_fail(err, "session", Nothing);
+  CAMLreturn(Val_int(got == 0 ? 0 : event));
+}
 
 /* One job per process, which ends its members when its last handle closes:
    the children end with this process, however it ends. */
@@ -634,6 +688,13 @@ CAMLprim value tsync_pid_alive(value pid) {
 }
 
 CAMLprim value tsync_end_with_this_process(value pid) { return Val_unit; }
+
+CAMLprim value tsync_session_event(value unit) {
+  CAMLparam1(unit);
+  errno = ENOSYS;
+  uerror("session", Nothing);
+  CAMLreturn(Val_unit);
+}
 
 CAMLprim value tsync_is_private(value path) {
   CAMLparam1(path);
