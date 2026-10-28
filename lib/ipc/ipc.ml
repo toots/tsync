@@ -449,18 +449,15 @@ module Client = struct
   let connect ?(timeout = connect_timeout) path =
     Tsync_core.Fs.ignore_sigpipe ();
     check_length path;
-    let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-    Tsync_core.Fs.or_close fd @@ fun fd ->
-    Unix.set_nonblock fd;
     let deadline = Rt.now () +. timeout in
-    let rec attempt () =
+    let rec attempt fd =
       match Unix.connect fd (ADDR_UNIX path) with
         | () -> ()
         (* On POSIX it is a full backlog; on Windows, a connection under way. *)
         | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
           when (not Sys.win32) && Rt.now () < deadline ->
             Rt.sleep 0.05;
-            attempt ()
+            attempt fd
         | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
           when not Sys.win32 ->
             Fail.raise_ Fail.Deadline "%s accepts no connection" path
@@ -472,8 +469,25 @@ module Client = struct
               | None -> ()
               | Some e -> raise (Unix.Unix_error (e, "connect", path)))
     in
-    match attempt () with
-      | () -> Line.make fd
+    (* Windows answers a full backlog with ENOBUFS, which spends the socket. *)
+    let rec on_fresh_socket () =
+      let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+      match
+        Tsync_core.Fs.or_close fd (fun fd ->
+            Unix.set_nonblock fd;
+            attempt fd;
+            Line.make fd)
+      with
+        | line -> line
+        | exception Unix.Unix_error (ENOBUFS, _, _)
+          when Sys.win32 && Rt.now () < deadline ->
+            Rt.sleep 0.05;
+            on_fresh_socket ()
+        | exception Unix.Unix_error (ENOBUFS, _, _) when Sys.win32 ->
+            Fail.raise_ Fail.Deadline "%s accepts no connection" path
+    in
+    match on_fresh_socket () with
+      | line -> line
       | exception Unix.Unix_error ((ENOENT | ECONNREFUSED | ENOTSOCK), _, _) ->
           raise (Not_serving path)
 
