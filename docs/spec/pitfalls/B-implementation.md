@@ -170,7 +170,7 @@ This file collects the traps that came from the implementation medium rather tha
 
 ### B-3.6 `select` cannot watch descriptors past FD_SETSIZE
 - **Pitfall** — Android ran on a select-based engine, which cannot watch an fd number above FD_SETSIZE (1024); macOS hit the same.
-- **Check** — The scheduler's poller (vendored duppy included) uses poll, epoll or kqueue, never `Unix.select`, on every platform. A test opens more than 1024 fds and still serves.
+- **Check** — The scheduler's poller (duppy's included) uses poll, epoll or kqueue, never `Unix.select`, on every platform. A test opens more than 1024 fds and still serves.
 - **Seen** — 47040bc1, rewrite notes (frontends/file-provider); recurred ×2.
 
 ### B-3.7 Per-connection errors killed the accept loop

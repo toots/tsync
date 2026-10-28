@@ -4,7 +4,7 @@ These notes describe the OCaml implementation of tsync: how it maps onto the spe
 departs from it, and what it learned. They are descriptive, not normative; the spec is in the
 parent directory, and each note names the spec concept it implements.
 
-The code is direct style on OCaml 5: fibers on the vendored `duppy` scheduler, run by a pool of
+The code is direct style on OCaml 5: fibers on liquidsoap's `duppy` scheduler, run by a pool of
 domains (`lib/core/rt.ml`). It has its own HTTP client and server (`lib/http`) over OpenSSL or
 ocaml-tls, store drivers that register themselves (`lib/store`), bigstring bodies, and a typed
 request protocol between a domain's owner and its clients (`lib/owner/protocol.ml`). Every module

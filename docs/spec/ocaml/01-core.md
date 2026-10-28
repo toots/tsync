@@ -1,8 +1,8 @@
 # 01 — Foundation: lib/core — OCaml implementation notes
 
 Companion to the spec [../01-core.md](../01-core.md); not normative. The foundation is one library,
-`tsync_core` (`lib/core`), over the vendored scheduler (`vendor/duppy`) and the vendored xxHash
-header (`vendor/xxhash`). The HTTP discipline (§10) is `lib/http`, the IPC framing (§11) `lib/ipc`.
+`tsync_core` (`lib/core`), over liquidsoap's `duppy` scheduler (an opam package, pinned to
+liquidsoap's repository until its release) and the vendored xxHash header (`vendor/xxhash`). The HTTP discipline (§10) is `lib/http`, the IPC framing (§11) `lib/ipc`.
 Bodies and memory are in [memory.md](memory.md).
 
 ## C.1 Where each spec concept lives
