@@ -22,6 +22,7 @@ external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
 external is_macos_ : unit -> bool = "tsync_is_macos"
 external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
+external unix_rename : string -> string -> unit = "tsync_rename"
 
 let is_macos = is_macos_ ()
 let rec eintr f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> eintr f
@@ -58,8 +59,11 @@ let kind p =
 let is_dir p =
   match stat_opt p with Some { st_kind = S_DIR; _ } -> true | _ -> false
 
+let unix_openfile p flags perm =
+  Unix.openfile p (Unix.O_CLOEXEC :: Unix.O_SHARE_DELETE :: flags) perm
+
 let openfile ?(perm = 0o600) p flags =
-  sys (fun () -> Unix.openfile p (Unix.O_CLOEXEC :: flags) perm)
+  sys (fun () -> unix_openfile p flags perm)
 
 let close fd = try Unix.close fd with _ -> ()
 let with_fd fd f = Fun.protect ~finally:(fun () -> close fd) (fun () -> f fd)
@@ -170,7 +174,7 @@ let write_temp_with ?(perm = 0o600) dir write =
 let write_temp ?perm dir data =
   write_temp_with ?perm dir (fun fd -> write_all fd data)
 
-let rename ?(op = "") a b = sys ~op (fun () -> Unix.rename a b)
+let rename ?(op = "") a b = sys ~op (fun () -> unix_rename a b)
 
 (* Written aside and linked into place, so [p] is whole or absent, and a link
    never replaces a file. *)

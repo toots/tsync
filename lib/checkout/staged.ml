@@ -315,9 +315,7 @@ let body_links t id =
 (* A staged slot whose body does not exist is CORRUPT; bytes past a body's end
    within the edit's size are zeros (a staged body is sparse). *)
 let read_body t id ~off ~len =
-  match
-    Fs.opt (fun () -> Unix.openfile (body_path t id) [O_RDONLY; O_CLOEXEC] 0)
-  with
+  match Fs.opt (fun () -> Fs.unix_openfile (body_path t id) [O_RDONLY] 0) with
     | None -> Fail.corrupt "staged body %s is missing" id
     | Some fd ->
         Fs.with_fd fd (fun fd ->

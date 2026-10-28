@@ -254,6 +254,49 @@ CAMLprim value tsync_reserve(value fd, value len) {
   CAMLreturn(Val_unit);
 }
 
+#ifndef FILE_RENAME_FLAG_REPLACE_IF_EXISTS
+#define FILE_RENAME_FLAG_REPLACE_IF_EXISTS 0x1
+#define FILE_RENAME_FLAG_POSIX_SEMANTICS 0x2
+#endif
+#define FILE_RENAME_INFO_EX ((FILE_INFO_BY_HANDLE_CLASS)22)
+
+/* POSIX semantics replace a destination that is open; the request's flags
+   word sits where older headers declare only ReplaceIfExists. */
+CAMLprim value tsync_rename(value src, value dst) {
+  CAMLparam2(src, dst);
+  wchar_t *s = wide_path(src), *d = wide_path(dst);
+  DWORD full = GetFullPathNameW(d, 0, NULL, NULL);
+  size_t size = sizeof(FILE_RENAME_INFO) + full * sizeof(wchar_t);
+  FILE_RENAME_INFO *info = caml_stat_calloc_noexc(1, size);
+  if (full == 0 || info == NULL) {
+    caml_stat_free(s);
+    caml_stat_free(d);
+    caml_stat_free(info);
+    win_fail(full == 0 ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY, "rename", src);
+  }
+  DWORD length = GetFullPathNameW(d, full, info->FileName, NULL);
+  DWORD flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+  memcpy(info, &flags, sizeof flags);
+  info->FileNameLength = length * sizeof(wchar_t);
+  caml_release_runtime_system();
+  HANDLE h = CreateFileW(s, DELETE | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                         NULL);
+  BOOL ok = h != INVALID_HANDLE_VALUE;
+  DWORD err = ok ? 0 : GetLastError();
+  if (ok) {
+    ok = SetFileInformationByHandle(h, FILE_RENAME_INFO_EX, info, (DWORD)size);
+    err = ok ? 0 : GetLastError();
+    CloseHandle(h);
+  }
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  caml_stat_free(info);
+  if (!ok) win_fail(err, "rename", src);
+  CAMLreturn(Val_unit);
+}
+
 CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLparam2(src, dst);
   wchar_t *s = wide_path(src), *d = wide_path(dst);
@@ -464,6 +507,20 @@ CAMLprim value tsync_open_nofollow(value path) {
 CAMLprim value tsync_pid_alive(value pid) {
   if (kill(Int_val(pid), 0) == 0) return Val_true;
   return Val_bool(errno == EPERM);
+}
+
+CAMLprim value tsync_rename(value src, value dst) {
+  CAMLparam2(src, dst);
+  char *s = caml_stat_strdup(String_val(src)), *d = caml_stat_strdup(String_val(dst));
+  int r;
+  caml_release_runtime_system();
+  do { r = rename(s, d); } while (r < 0 && errno == EINTR);
+  int e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  if (r < 0) { errno = e; uerror("rename", src); }
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value tsync_system_random(value len) {

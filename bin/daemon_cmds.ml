@@ -18,9 +18,9 @@ let log_to_service_file () =
     in
     mkdir_p dir;
     let fd =
-      Unix.openfile
+      Fs.unix_openfile
         (Filename.concat dir "tsync-daemon.log")
-        [O_WRONLY; O_APPEND; O_CREAT; O_CLOEXEC]
+        [O_WRONLY; O_APPEND; O_CREAT]
         0o644
     in
     Fs.with_fd fd (fun fd ->
