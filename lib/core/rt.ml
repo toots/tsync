@@ -78,8 +78,7 @@ let rank = function `Immediate -> 0 | `Direct -> 1 | `Threaded -> 2
 let scheduler : execution Duppy.scheduler =
   Duppy.create
     ~on_error:(fun exn bt -> !task_error exn bt)
-    ~compare:(fun a b -> Int.compare (rank a) (rank b))
-    ~classify:Fun.id ()
+    ~rank ~classify:Fun.id ()
 
 let start_lock = Mutex.create ()
 

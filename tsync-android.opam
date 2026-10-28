@@ -21,6 +21,8 @@ depends: [
   "ca-certs-android"
   "digestif-android"
   "domain-name-android"
+  # From .github/opam until opam-cross-android has it.
+  "duppy-android"
   "eqaf-android"
   "mem_usage-android"
   "mirage-crypto-ec-android"
