@@ -6,26 +6,24 @@ open Tsync_owner
 open Cli
 
 (* 07 §2.7: the service log. An agent registered through SMAppService cannot
-   name a path under the user's home for its output, so the service opens the
-   log itself when it is not run from a terminal. *)
+   name a path under the user's home for its output, and a Windows service has
+   no console, so the service opens the log itself when it is not run from a
+   terminal. *)
 let log_to_service_file () =
-  if not (Unix.isatty Unix.stderr) then (
-    let dir = Filename.concat (Paths.home ()) "Library/Logs" in
-    let rec mkdir_p d =
-      if not (Sys.file_exists d) then (
-        mkdir_p (Filename.dirname d);
-        try Unix.mkdir d 0o755 with Unix.Unix_error (EEXIST, _, _) -> ())
-    in
-    mkdir_p dir;
-    let fd =
-      Fs.unix_openfile
-        (Filename.concat dir "tsync-daemon.log")
-        [O_WRONLY; O_APPEND; O_CREAT]
-        0o644
-    in
-    Fs.with_fd fd (fun fd ->
-        Unix.dup2 ~cloexec:false fd Unix.stdout;
-        Unix.dup2 ~cloexec:false fd Unix.stderr))
+  match Paths.service_log () with
+    | Some file when not (Unix.isatty Unix.stderr) ->
+        let dir = Filename.dirname file in
+        let rec mkdir_p d =
+          if not (Sys.file_exists d) then (
+            mkdir_p (Filename.dirname d);
+            try Unix.mkdir d 0o755 with Unix.Unix_error (EEXIST, _, _) -> ())
+        in
+        mkdir_p dir;
+        let fd = Fs.unix_openfile file [O_WRONLY; O_APPEND; O_CREAT] 0o644 in
+        Fs.with_fd fd (fun fd ->
+            Unix.dup2 ~cloexec:false fd Unix.stdout;
+            Unix.dup2 ~cloexec:false fd Unix.stderr)
+    | _ -> ()
 
 (* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
    governor, starts the store server as its child when a domain is served over
@@ -69,7 +67,7 @@ let no_domains () = Config.of_string {|{"domains":[]}|}
 
 (* 07 §3.1 *)
 let start mount tls verbose =
-  if Fs.is_macos then log_to_service_file ();
+  log_to_service_file ();
   set_verbose verbose;
   Atomic.set Log.min_level Log.Debug;
   match Paths.read_config () with
