@@ -154,9 +154,13 @@
   (diff spaces_test.expected spaces_test.output)))
 
 ; Which library sources know the collection exists (gc.md §5.8, §10 "Scoped
-; access"): a new name in this list is a caller that learned about GC.
+; access"): a new name in this list is a caller that learned about GC. The
+; check is of the sources, so Windows, whose cmd.exe runs no such pipeline,
+; leaves it to the other platforms.
 
 (rule
+ (enabled_if
+  (<> %{os_type} Win32))
  (deps
   (source_tree %{workspace_root}/lib))
  (action
@@ -167,6 +171,8 @@
 
 (rule
  (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
  (action
   (diff gc_scoping.expected gc_scoping.output)))
 
