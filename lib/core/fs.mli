@@ -92,6 +92,10 @@ val rm_rf : string -> unit
     replaced even while it is open. Raises [Unix_error] like it. *)
 val unix_rename : string -> string -> unit
 
+(** [Unix.unlink] with POSIX semantics on Windows too: the name goes at once,
+    though the file is open. Raises [Unix_error] like it. *)
+val unix_unlink : string -> unit
+
 val rename : ?op:string -> string -> string -> unit
 
 (** Whether only this process's user can reach the file or directory: owned by

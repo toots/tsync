@@ -372,7 +372,7 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
   Tsync_core.Fs.ignore_sigpipe ();
   check_dir (Filename.dirname path);
   check_length path;
-  (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
+  (try Fs.unix_unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
   let lfd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
   (* The accept fiber owns the socket once spawned. *)
   Tsync_core.Fs.or_close lfd @@ fun lfd ->
@@ -400,7 +400,7 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
         ~finally:(fun () ->
           Unix.close lfd;
           Rt.within `Threaded (fun () ->
-              try Unix.unlink path with Unix.Unix_error _ -> ());
+              try Fs.unix_unlink path with Unix.Unix_error _ -> ());
           Rt.Promise.resolve t.finished ())
         (fun () -> accept_loop t ~execution handler));
   t

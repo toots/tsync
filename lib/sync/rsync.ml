@@ -282,7 +282,7 @@ module Make (C : Engine_ctx.S) = struct
               match d with
                 | Rsync_plan.Assemble ({ link = Some target; _ } : Manifest.t)
                   ->
-                    (try Unix.unlink path
+                    (try Fs.unix_unlink path
                      with Unix.Unix_error (ENOENT, _, _) -> ());
                     Unix.symlink target path;
                     succeed rel 0
@@ -346,7 +346,8 @@ module Make (C : Engine_ctx.S) = struct
             List.iter
               (fun (rel, _) ->
                 ignore
-                  (attempt rel (fun () -> Unix.unlink (local_path src.path rel))))
+                  (attempt rel (fun () ->
+                       Fs.unix_unlink (local_path src.path rel))))
               drops
         | Domain ->
             List.iter

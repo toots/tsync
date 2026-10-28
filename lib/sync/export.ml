@@ -122,7 +122,7 @@ module Make (C : Context.S) = struct
           let existing = Fs.read_file_opt record in
           match m.link with
             | Some target ->
-                (try Unix.unlink f.dest
+                (try Fs.unix_unlink f.dest
                  with Unix.Unix_error (ENOENT, _, _) -> ());
                 Unix.symlink target f.dest;
                 Fs.unlink_quiet record;
@@ -173,7 +173,7 @@ module Make (C : Context.S) = struct
                           Fs.write_all lock header;
                           Fs.fsync lock;
                           Fs.fsync_dir dir;
-                          (try Unix.unlink f.dest
+                          (try Fs.unix_unlink f.dest
                            with Unix.Unix_error (ENOENT, _, _) -> ());
                           let fd =
                             Fs.openfile ~perm:0o644 f.dest
