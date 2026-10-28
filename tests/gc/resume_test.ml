@@ -20,15 +20,17 @@ let live = Chunk_key.of_body "live"
 and junk = Chunk_key.of_body "junk"
 
 let case root name setup =
-  let main_root = Filename.concat root name in
+  (* The description names the case's directory; Windows refuses a ':' in it. *)
+  let dir = String.map (function ':' -> '-' | c -> c) name in
+  let main_root = Filename.concat root dir in
   let file key = Filename.concat main_root (Key.to_string key) in
   let main = Local.create ~name:"main" main_root
   and replica =
-    Local.create ~name:"replica" (Filename.concat root (name ^ "-replica"))
+    Local.create ~name:"replica" (Filename.concat root (dir ^ "-replica"))
   in
   let c =
     Composite.create ~domain:d
-      ~data_dir:(Filename.concat root (name ^ "-data"))
+      ~data_dir:(Filename.concat root (dir ^ "-data"))
       ~owner:true ~poke:ignore
       ~knowledge:
         { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
