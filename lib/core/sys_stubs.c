@@ -212,12 +212,24 @@ CAMLprim value tsync_system_random(value len) {
   CAMLreturn(res);
 }
 
+/* A flush needs a handle that may write, where POSIX flushes through any
+   descriptor: a read-only one is reopened for the flush. */
 CAMLprim value tsync_fsync(value fd) {
   CAMLparam1(fd);
   HANDLE h = Handle_val(fd);
   caml_release_runtime_system();
   BOOL ok = FlushFileBuffers(h);
   DWORD err = ok ? 0 : GetLastError();
+  if (err == ERROR_ACCESS_DENIED) {
+    HANDLE writable = ReOpenFile(h, GENERIC_WRITE,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+    if (writable == INVALID_HANDLE_VALUE) err = GetLastError();
+    else {
+      ok = FlushFileBuffers(writable);
+      err = ok ? 0 : GetLastError();
+      CloseHandle(writable);
+    }
+  }
   caml_acquire_runtime_system();
   if (!ok) win_fail(err, "fsync", Nothing);
   CAMLreturn(Val_unit);
