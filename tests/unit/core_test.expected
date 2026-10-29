@@ -146,3 +146,6 @@ listed back: true
 removed one: true, 99999 held
 cleared a shard: its key gone true, the count follows true
 25 keys into a set of at most 10: 5 held, emptied 2 times
+
+== a file created with the default mode is private
+private: true
