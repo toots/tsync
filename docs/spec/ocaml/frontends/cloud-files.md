@@ -43,7 +43,12 @@ code and what is known to stand in the way.
   identity: the gate registers a test identity package whose external location is the build's
   output directory (10 §3.1).
 - **Build.** The natural route is the Windows cross switch of opam-cross-windows, built on Linux;
-  `tsyncd.exe` is the same `main` linked with `-subsystem windows`. The WinRT registration
+  `tsyncd.exe` is the same `main` linked with `-subsystem windows`: `bin/` is the `tsync_cli`
+  library with two entry points, and `tsyncd` passes the option to flexlink, which refuses
+  `-mwindows`. A windowed process has no standard handles, so `Entry.main` puts the null device in
+  each one Windows did not give (`Fs.std_handle_missing`): without it a print raises and
+  `Unix.create_process` fails on the missing handle. The supervisor runs its owners as the
+  `tsyncd.exe` beside it, which also keeps a console interrupt to the supervisor. The WinRT registration
   (`StorageProviderSyncRootManager`) is called from C through its COM interfaces, so no C++/WinRT
   toolchain is needed.
 - **TLS.** Both implementations must read the Windows root stores (spec §5.4); check that the
