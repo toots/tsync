@@ -183,8 +183,6 @@ val peer_same_user : Unix.file_descr -> bool
     and never lowered; the soft limit in force. *)
 val raise_nofile : int -> int
 
-val pid_alive : int -> bool
-
 (** Open for reading without following a final symbolic link (ELOOP); [None]
     when absent. *)
 val open_nofollow : string -> Unix.file_descr option

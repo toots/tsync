@@ -671,7 +671,7 @@ let host ~mount domains ~run =
             Some
               {
                 Tsync_status.Status_report.kind = "fuse";
-                pid = Some (Unix.getpid ());
+                pid = Some (Pid.self ());
                 mount = Some mount_point;
                 port = None;
                 open_handles = Some (Atomic.get t.open_handles);

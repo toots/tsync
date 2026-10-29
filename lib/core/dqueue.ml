@@ -20,7 +20,7 @@ let submission_id () =
   let us = Int64.of_float (Unix.gettimeofday () *. 1e6) in
   Printf.sprintf "%020Ld-%08d-%d" us
     (Atomic.fetch_and_add seq 1 mod 100000000)
-    (Unix.getpid ())
+    (Pid.self ())
 
 let submitter_pid id =
   match String.split_on_char '-' id with

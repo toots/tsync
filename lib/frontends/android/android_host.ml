@@ -126,7 +126,7 @@ let frontend () : R.frontend option =
   Some
     {
       kind = "android";
-      pid = Some (Unix.getpid ());
+      pid = Some (Pid.self ());
       mount = None;
       port = None;
       open_handles =

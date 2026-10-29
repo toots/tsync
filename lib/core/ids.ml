@@ -18,7 +18,7 @@ let state = ref None
 
 let short () =
   Mutex.protect m (fun () ->
-      let pid = Unix.getpid () in
+      let pid = Pid.self () in
       let st =
         match !state with
           | Some (p, st) when p = pid -> st

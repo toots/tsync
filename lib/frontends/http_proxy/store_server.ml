@@ -876,7 +876,7 @@ let presented t route : Tsync_status.Status_report.presented =
     frontend =
       {
         kind = "http-proxy";
-        pid = Some (Unix.getpid ());
+        pid = Some (Pid.self ());
         mount = None;
         port =
           Option.map (fun (l : Proxy_options.listener) -> l.port) t.listener;
