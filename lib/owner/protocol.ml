@@ -226,6 +226,7 @@ type status = {
   uploading : transfer list;
   downloading : transfer list;
   pending_bytes : int;
+  failing : string option;  (** why the domain's sync fails, while it does *)
   subscribers : int;
   unnamed : int;
   traffic : R.traffic;
@@ -1294,6 +1295,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
            ]
           @ (if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else [])
           @ opt "mount" (fun m -> `String m) reply.mount
+          @ opt "failing" (fun f -> `String f) reply.failing
           @ [
               ( "extensions",
                 `List (List.map (fun e -> `String e) reply.extensions) );
@@ -1621,6 +1623,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           uploading = transfers "uploading";
           downloading = transfers "downloading";
           pending_bytes = count "pendingBytes" j;
+          failing = str j "failing";
           subscribers = count "subscribers" j;
           unnamed = count "unnamed" j;
           traffic;

@@ -52,6 +52,7 @@ the model reads:
 | `uploading` | `uploading`: list of `{name, rel, size?}` | empty |
 | `downloading` | `downloading`: list of `{name, rel, bytes?, size?, rate?}` | empty |
 | `pendingBytes` | `pendingBytes` (integer) | unknown |
+| `failing` | `failing` (string): the domain's sync fails | not failing |
 | `sentBytes` | `traffic.upBytes` (integer) | unknown |
 | `sendRate` | `traffic.upRate` (number) | unknown |
 | `newMachines` | `newMachines`: list of strings, the machines that joined the domain's vault ([vault §6.3](../extensions/vault.md#63-machines)) | empty |
@@ -142,7 +143,7 @@ Only generic names are used: a specific name that a theme lacks draws nothing.
 
 **Icon**, first match:
 
-1. all unreachable (including no domains) → `tsync-error-symbolic`
+1. all unreachable (including no domains), or any domain failing → `tsync-error-symbolic`
 2. all paused → `tsync-paused-symbolic`
 3. any domain transferring → `tsync-sync-symbolic`
 4. else → `tsync-idle-symbolic`
@@ -151,7 +152,8 @@ Only generic names are used: a specific name that a theme lacks draws nothing.
 
 1. no domains → `No domains configured`
 2. all unreachable → `Daemon not running`
-3. with U = the sum of `uploads` and D = the sum of download counts, over reachable domains:
+3. any domain failing → `Sync failing`
+4. with U = the sum of `uploads` and D = the sum of download counts, over reachable domains:
    - U = 0 and D = 0 → `Paused` when all paused, else `Idle`
    - else join with ` · `: `Uploading U` (when U > 0), `Downloading D` (when D > 0), `paused`
      (when all paused)
@@ -165,7 +167,8 @@ In order:
 1. **Header**, only when there are no domains: `tsync — <summary>`.
 2. **Per domain**, in input order:
    - the domain row: `<name> — <detail>`, action `OpenFolder(name)`. `<detail>` is, first match:
-     `not answering` (unreachable); `Paused` (paused, nothing moving); `Idle` (nothing moving);
+     `not answering` (unreachable); `Sync failing` (failing); `Paused` (paused, nothing moving);
+     `Idle` (nothing moving);
      else `Uploading U`, `Downloading D` or `Uploading U · Downloading D` from this domain's own
      counts, followed by ` · paused` when the domain is paused;
    - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
@@ -420,6 +423,8 @@ someone agrees to; and both functions are total.
 - nothing answering: no traffic or rate line, the switch disabled;
 - one domain paused and one unreachable: the switch checked, the paused icon, the unreachable
   row `not answering`;
+- one domain failing with pending uploads beside one uploading: the error icon, `Sync failing` in
+  the tooltip and on the failing domain's row, the other domain's own count on its row;
 - two reachable domains, one paused: the switch unchecked, the paused domain's own row says so;
 - paused with more uploads than `FILE_ROWS`: the overflow row, no rate line at rate zero;
 - a fetch count of nine above two download rows, then of zero above one row: the number equals

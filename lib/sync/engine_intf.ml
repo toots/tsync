@@ -201,6 +201,9 @@ module type S = sig
   (** The keys changed here and not committed yet. *)
   val pending_changes : unit -> int
 
+  (** Why the last cycle failed, until one runs. *)
+  val failing : unit -> string option
+
   (** The uploads running now; cheap: reads only their records. *)
   val uploads : unit -> transfer list
 

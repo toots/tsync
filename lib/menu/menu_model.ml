@@ -151,6 +151,7 @@ type status = {
   downloading : transfer list;
       [@of_yojson items transfer_of_yojson] [@default []]
   pending_bytes : count; [@key "pendingBytes"] [@default None]
+  failing : string option; [@default None]
   traffic : traffic option;
       [@of_yojson lenient traffic_of_yojson] [@default None]
   new_machines : string list;
@@ -232,11 +233,15 @@ let domain_rows (name, status) =
     match status with
       | None -> ("not answering", [])
       | Some s ->
-          ( (match
-               activity ~uploads:(uploads s) ~downloads:(download_count s)
-             with
-              | [] -> if s.paused then "Paused" else "Idle"
-              | parts -> join (parts @ if s.paused then ["paused"] else [])),
+          ( (match s.failing with
+              | Some _ -> "Sync failing"
+              | None -> (
+                  match
+                    activity ~uploads:(uploads s) ~downloads:(download_count s)
+                  with
+                    | [] -> if s.paused then "Paused" else "Idle"
+                    | parts -> join (parts @ if s.paused then ["paused"] else [])
+                  )),
             List.map
               (fun m ->
                 row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
@@ -256,9 +261,11 @@ let render ?quit ?(codes = []) domains =
     (not all_unreachable) && List.for_all (fun s -> s.paused) reachable
   in
   let total f = List.fold_left (fun n s -> n + f s) 0 reachable in
+  let any_failing = List.exists (fun s -> s.failing <> None) reachable in
   let summary =
     if domains = [] then "No domains configured"
     else if all_unreachable then "Daemon not running"
+    else if any_failing then "Sync failing"
     else (
       match
         activity ~uploads:(total uploads) ~downloads:(total download_count)
@@ -268,7 +275,7 @@ let render ?quit ?(codes = []) domains =
   in
   let tooltip = "tsync — " ^ summary in
   let icon =
-    if all_unreachable then "tsync-error-symbolic"
+    if all_unreachable || any_failing then "tsync-error-symbolic"
     else if all_paused then "tsync-paused-symbolic"
     else if List.exists moving reachable then "tsync-sync-symbolic"
     else "tsync-idle-symbolic"

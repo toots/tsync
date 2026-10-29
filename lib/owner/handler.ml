@@ -1002,6 +1002,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           uploading;
           downloading;
           pending_bytes = pending_bytes t now;
+          failing = E.failing ();
           subscribers = t.subscribers ();
           unnamed = Atomic.get t.unnamed;
           traffic = t.traffic ();

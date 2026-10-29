@@ -342,6 +342,7 @@ module Make (C : Engine_ctx.S) = struct
 
   let pending_uploads () = Dqueue.pending uploads
   let pending_changes () = Sync_state.pending_count sync_state
+  let failing () = Atomic.get cycle_failing
 
   let upload_of id =
     match Dqueue.Records.read upload_log id with

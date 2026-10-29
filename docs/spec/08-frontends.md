@@ -272,7 +272,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `poll` | — | `{}` at once; the owner rescans its logs for submitted records and ends the cycle's wait, so a cycle runs now ([03 §3.4](03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)) | |
 | `notify_reset` | — | `{delivered: N}` after publishing a `reset` event to the domain's subscribers | |
 | `ping` | — | `{}` from memory: the liveness probe | |
-| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, subscribers, unnamed?, newMachines?, extensions`, traffic, hook fields; `newMachines` the names of the machines that joined the domain's vault ([vault §6.3](extensions/vault.md#63-machines)), absent when none or locked | |
+| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, failing?, subscribers, unnamed?, newMachines?, extensions`, traffic, hook fields; `failing` why the domain's last cycle failed, absent once a cycle runs; `newMachines` the names of the machines that joined the domain's vault ([vault §6.3](extensions/vault.md#63-machines)), absent when none or locked | |
 | `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
 | `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
 | `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
