@@ -141,6 +141,11 @@
   read-only B: f="abcd"; the tree head 0, takeovers 0
   C, which writes: the tree head 1, takeovers 1
 
+== a read-only client whose tree lost a folder the main holds
+  B, having lost movies/signs: movies/
+  B: arrived by state, 0 committed, 0 pending
+  B: movies/  movies/signs/  movies/signs/new="abcd"; position 2, 0 pending
+
 == a poll leaves a change to its batch delay
   A, a second after a poll: position 0, 1 pending
   A, asked to sync: 0 entries merged, 1 committed, 0 pending

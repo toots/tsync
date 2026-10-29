@@ -299,6 +299,11 @@ ARRIVE():
   frontend holds answers stale, and the frontend lists again.
 - **An arrival with nothing pending** takes the first row of the merge on every key: $L$ becomes
   $M$ on the keys the entries name.
+- **Entries that do not fit $R$.** The main commits only well-formed batches (change-algebra
+  Definition 6), so the commands fetched are one over $R$ whenever $R$ is the main's tree at $h$.
+  When they are not, $R$ has drifted from the main's tree, and a merge would repair what only this
+  client lacks, inventing conflicted copies the main never had: the client arrives by state
+  instead (§4.7), and logs which entries did not fit.
 
 ### 4.5 Push
 
@@ -515,7 +520,7 @@ STATE() → M at some head:
   ([data-model/backend.md](../data-model/backend.md) §5.2).
 
 A client **arrives by state** when its fetch answers PRUNED, when it has no position (a new client),
-and on request (`tsync sync --full`). It is an ordinary
+when the entries fetched do not fit its $R$ (§4.4), and on request (`tsync sync --full`). It is an ordinary
 arrival whose $M$ is read whole: the merge of §4.4 runs with the client's own $R$ and $L$, so
 pending changes are kept, guarded and merged as in any arrival. There is no state in which a client
 applies nothing, and no operation that discards pending work.
@@ -789,7 +794,9 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
 - **State read.** A state read taken while entries are being projected equals the tree at the head
   it reports. A new client, a client whose position was pruned, and `--full` arrive by state; a
   client with pending changes that arrives by state keeps them pending, and a pending change that
-  clashes becomes a conflicted copy.
+  clashes becomes a conflicted copy. A client whose tree lost a folder the main holds, then
+  fetches an entry that changes a file in it, arrives by state and ends with the main's tree and
+  nothing pending.
 - **Retention.** Expiry never deletes the head entry, an entry above the tree head, nor an entry
   younger than `LOG_RETENTION`.
 - **Gate.** On a collectable main, an entry naming a chunk the main lacks is refused; the client uploads the chunk again

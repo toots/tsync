@@ -121,6 +121,15 @@ module Make (C : Engine_ctx.S) = struct
         | `Folder (i, before, _) -> `Folder (i, before, local_folder i))
       (Sync_state.pending sync_state)
 
+  (* [R]: [L] with the given pending commands undone. *)
+  let r_of (pending : Log_entry.command list) =
+    Algebra.apply (Algebra.of_base l_base)
+      (List.map
+         (function
+           | `File (p, before, _) -> `File (p, None, before)
+           | `Folder (i, before, _) -> `Folder (i, None, before))
+         pending)
+
   let aside ~taken ~is_dir name =
     Conflict.free ~client:C.client_name ~is_dir ~taken name
 
@@ -1064,12 +1073,28 @@ module Make (C : Engine_ctx.S) = struct
                         "log entry %d cannot be followed: fetching and pushing \
                          stop until it is voided or this client is upgraded"
                         s.n
-                  | None ->
+                  | None -> (
                       Atomic.set stuck None;
-                      ( `Entries (List.length entries),
-                        merge_and_enact
-                          ~head:(h + List.length entries)
-                          (theirs_of entries) )))
+                      let theirs = theirs_of entries in
+                      let head = h + List.length entries in
+                      (* publication §4.4: entries that are no batch over [R]
+                         mean [R] is not the main's tree at [h], and merging
+                         them would invent conflicts. *)
+                        match
+                          with_meta (fun () ->
+                              Algebra.well_formed
+                                (Algebra.apply (r_of (pending ())) theirs)
+                                (List.map Algebra.key_of theirs))
+                        with
+                        | Ok () ->
+                            ( `Entries (List.length entries),
+                              merge_and_enact ~head theirs )
+                        | Error why ->
+                            Log.warn
+                              "%s: entries %d to %d do not apply to the local \
+                               tree (%s); reading the main's tree"
+                              (Domain_name.to_string d) (h + 1) head why;
+                            arrive_by_state ?narrate ())))
 
   (* The commands a pull of one folder merges (publication §4.11): the last
      value the entries give every key that any of them touched in the folder,
@@ -1211,14 +1236,7 @@ module Make (C : Engine_ctx.S) = struct
     let held_back c =
       match removed c with Some x -> List.mem x inherited | None -> false
     in
-    let r =
-      Algebra.apply (Algebra.of_base l_base)
-        (List.map
-           (function
-             | `File (p, before, _) -> `File (p, None, before)
-             | `Folder (i, before, _) -> `Folder (i, None, before))
-           all)
-    in
+    let r = r_of all in
     let fits batch =
       List.length batch <= 1
       || String.length (Log_entry.encode (entry_of batch))

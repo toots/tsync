@@ -916,6 +916,25 @@ let () =
           p "  C, which writes: the tree head %d, takeovers %d\n"
             (Log_store.tree_head (log root))
             (fst (Log_store.takeover (log root) 1)));
+      scenario "a read-only client whose tree lost a folder the main holds"
+        (fun root ->
+          let a = started root "A" in
+          let (module A) = a in
+          A.mkdir "movies" ~exclusive:false;
+          A.mkdir "movies/signs" ~exclusive:false;
+          write a "movies/signs/old" "abcd";
+          settled a;
+          let b = started ~read_only:true root "B" in
+          let (module B) = b in
+          ignore (sync b);
+          Tsync_checkout.Mirror.remove_file B.mirror "movies/signs/old";
+          Tsync_checkout.Mirror.remove_folder B.mirror "movies/signs";
+          p "  B, having lost movies/signs: %s\n" (tree b);
+          A.rename ~src:"movies/signs/old" ~dst:"movies/signs/new"
+            ~exclusive:true;
+          settled a;
+          p "  B: %s\n" (sync b);
+          p "  B: %s; %s\n" (tree b) (status b));
       (* From here on the cycles run in the background, until the process
          stops. *)
       scenario "a poll leaves a change to its batch delay" (fun root ->
