@@ -76,14 +76,13 @@ jobs:
           name: tsync-windows-x86-64
           path: dist/
 
-      # Informational while the port is under way: its failures do not fail
-      # the job.
       - name: Timing-sensitive tests
-        continue-on-error: true
+        id: serial
         run: opam exec -- dune build @runtest-serial -j1
 
+      # Also after a failure of the step above, so one run reports both.
       - name: Tests
-        continue-on-error: true
+        if: ${{ !cancelled() && steps.serial.conclusion != 'skipped' }}
         run: opam exec -- dune build @runtest --force
 
   arm64:
