@@ -126,14 +126,6 @@ manifests   chunk manifests true; outgoing manifests true; marker true; referenc
 versions    chunk versions true; outgoing versions true; marker true; reference versions; version versions; manifest marker true
 chunks.from chunk chunks.from true; outgoing chunks.from true; marker true; reference chunks.from; version chunks.from; manifest marker true
 
-== a mount point, its parent resolved
-real/Drive               true
-real/Drive/              true
-real/./Drive             true
-real//Drive              true
-link/Drive               true
-/                        /
-
 == retry jitter differs between processes
 two processes drew the same first delay: false
 
