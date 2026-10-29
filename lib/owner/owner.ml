@@ -499,15 +499,9 @@ let one_shot ~what config dom f =
       in
       f handler)
 
-let alive pid =
-  match Unix.kill pid 0 with
-    | () -> true
-    | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
-    | exception Unix.Unix_error _ -> false
-
 let served name =
   match holder name with
-    | Some { socket = Some _; pid; _ } -> alive pid
+    | Some { socket = Some _; pid; _ } -> Pid.alive pid
     | _ -> false
 
 (* 07 §2.5: a refused connection is not an absent owner, since a full backlog
