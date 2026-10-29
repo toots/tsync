@@ -23,13 +23,14 @@ let finish root =
    this user reading the data, or a directory's listing. *)
 let icacls path change =
   let command =
-    Printf.sprintf "icacls %s %s \"%%USERNAME%%:(RD)\" >NUL 2>&1"
-      (Filename.quote path) change
+    Printf.sprintf "icacls %s %s >NUL 2>&1" (Filename.quote path) change
   in
   if Sys.command command <> 0 then failwith ("icacls failed: " ^ command)
 
 let set_unreadable path =
-  if Sys.win32 then icacls path "/deny" else Unix.chmod path 0
+  if Sys.win32 then icacls path "/deny \"%USERNAME%:(RD)\""
+  else Unix.chmod path 0
 
 let set_readable ~perm path =
-  if Sys.win32 then icacls path "/remove:d" else Unix.chmod path perm
+  if Sys.win32 then icacls path "/remove:d \"%USERNAME%\""
+  else Unix.chmod path perm
