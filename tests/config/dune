@@ -18,7 +18,7 @@
    (run ./config_test.exe))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if %{lib-available:tsync_fuse})
  (action
   (diff config_test.expected config_test.output)))
@@ -26,7 +26,7 @@
 ; 09 §10.1: reported, not silently skipped, where it cannot run.
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (not %{lib-available:tsync_fuse}))
  (action
@@ -46,7 +46,7 @@
    (run ./wizard_test.exe))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if %{lib-available:tsync_fuse})
  (action
   (diff wizard_test.expected wizard_test.output)))
@@ -54,7 +54,7 @@
 ; 09 §10.1: reported, not silently skipped, where it cannot run.
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (not %{lib-available:tsync_fuse}))
  (action

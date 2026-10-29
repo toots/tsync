@@ -29,14 +29,14 @@
     %{exe:../desktop/owner_double.exe}))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (= %{system} linux))
  (action
   (diff tray_test.expected tray_test.output)))
 
 (rule
- (alias runtest-serial)
+ (alias runtest-linux-serial)
  (enabled_if
   (= %{system} linux))
  (action

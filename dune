@@ -1,5 +1,6 @@
 ; A plain `dune build` builds the code and the manual benchmarks, which no
-; test runs; tests run under @runtest.
+; test runs; tests run under @runtest, and a platform's own under
+; @runtest-<platform> (09 §5.9).
 
 (rule
  (alias default)
@@ -9,3 +10,14 @@
   (alias_rec tests/bench/all)
   (alias_rec vendor/all))
  (action (progn)))
+
+; 09 §10.1: the Linux suite started elsewhere fails rather than passing empty.
+
+(rule
+ (alias runtest-linux)
+ (enabled_if
+  (<> %{system} linux))
+ (action
+  (progn
+   (echo "runtest-linux: not run, this host is not Linux\n")
+   (system "exit 1"))))

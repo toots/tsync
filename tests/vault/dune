@@ -121,7 +121,7 @@
    (run ./secret_service_test.exe %{exe:secret_service_double.exe}))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (= %{system} linux))
  (action
@@ -150,7 +150,7 @@
    (run ./logind_test.exe %{exe:logind_double.exe}))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (= %{system} linux))
  (action
@@ -179,7 +179,7 @@
    (run ./polkit_test.exe %{exe:polkit_double.exe}))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (= %{system} linux))
  (action
