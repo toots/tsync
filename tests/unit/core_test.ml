@@ -198,21 +198,29 @@ let () =
     members;
   Zip.finish z;
   close_out oc;
-  (* Windows has no unzip; its own tar reads ZIP archives, where another on the
-     PATH may not. *)
-  let run unzip tar =
+  (* Windows has no unzip, and its tar cannot write a name outside the legacy
+     code page; PowerShell reads ZIP archives through .NET. *)
+  let run unzip powershell =
     Sys.command
       (if Sys.win32 then
          Printf.sprintf
-           "cd /d %s && \"%%SystemRoot%%\\System32\\tar.exe\" %s a.zip >NUL \
-            2>&1"
-           (Filename.quote dir) tar
+           "cd /d %s && powershell -NoProfile -Command \
+            \"$ErrorActionPreference = 'Stop'; %s\" >NUL 2>&1"
+           (Filename.quote dir) powershell
        else
          Printf.sprintf "cd %s && unzip %s a.zip >/dev/null 2>&1"
            (Filename.quote dir) unzip)
   in
-  let test = run "-tqq" "-tf" in
-  let extract = run "-qq" "-xf" in
+  let test =
+    run "-tqq"
+      "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z = \
+       [IO.Compression.ZipFile]::OpenRead((Resolve-Path a.zip)); foreach ($e \
+       in $z.Entries) { $s = $e.Open(); $s.CopyTo([IO.Stream]::Null); \
+       $s.Close() }; $z.Dispose()"
+  in
+  let extract =
+    run "-qq" "Expand-Archive -LiteralPath a.zip -DestinationPath . -Force"
+  in
   p "unzip -t: %s, extract: %s\n"
     (if test = 0 then "ok" else "FAIL")
     (if extract = 0 then "ok" else "FAIL");
