@@ -35,7 +35,7 @@ let () =
   Unix.symlink "photos" (Filename.concat src "photos-link");
   dir "locked";
   file "locked/hidden" "9";
-  Unix.chmod (Filename.concat src "locked") 0;
+  Test_support.set_unreadable (Filename.concat src "locked");
   let show label ?only ?exclude symlinks =
     let plan = Import_plan.plan ?only ?exclude ~symlinks src in
     p "== %s: %d files, %d bytes\n" label plan.files plan.bytes;
@@ -62,5 +62,5 @@ let () =
     ~exclude:["**/.git"; "*.txt"] `Skip;
   show "only photos/** and **/*.ml, links followed"
     ~only:["photos/**"; "**/*.ml"] `Follow;
-  Unix.chmod (Filename.concat src "locked") 0o755;
+  Test_support.set_readable ~perm:0o755 (Filename.concat src "locked");
   Test_support.finish root
