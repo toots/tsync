@@ -273,7 +273,8 @@ replaces what the user has on disk.
 - Unpresentable leaves (§7.1), the unpresented members of case groups (§7.2), and everything below
   an unpresented folder.
 - **Symlinks.** A placeholder cannot be a link. A domain symlink is not presented; a link the user
-  makes in the sync root is never taken (§9.1).
+  makes in the sync root is never taken (§9.1), and neither is a link `tsync import` or `rsync`
+  meets on the disk: a `keep` policy is read as `skip` there, with a warning.
 
 Every item not presented is counted in `status.unpresented`, and each is logged once per owner run
 with its domain path and the reason. Its repair is a rename on another machine, or `tsync rsync`

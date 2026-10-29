@@ -12,6 +12,18 @@ module Make (C : Engine_ctx.S) = struct
     type run = Algebra.key list ref
 
     let run () : run = ref []
+
+    (* cloud-files §7.3: Windows takes no link into a domain, so a link met on
+       its disk is skipped where the policy keeps links. *)
+    let local_symlinks () =
+      match symlinks () with
+        | `Keep when Sys.win32 ->
+            Log.once "bulk: local links" Log.Warn
+              "links are not kept on Windows (cloud-files §7.3): they are \
+               skipped";
+            `Skip
+        | policy -> policy
+
     let note (run : run) key = run := key :: !run
     let note_file run rel = note run (`File (place_of rel))
 
