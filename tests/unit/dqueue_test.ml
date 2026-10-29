@@ -163,8 +163,10 @@ let () =
       p "\n== an unreadable record waits, and its worker survives\n";
       let unreadable r id f =
         let path = Filename.concat (Dqueue.Records.dir r) id in
-        Unix.chmod path 0;
-        Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) f
+        Test_support.set_unreadable path;
+        Fun.protect
+          ~finally:(fun () -> Test_support.set_readable ~perm:0o644 path)
+          f
       in
       log := [];
       let r = Dqueue.Records.open_ (Filename.concat dir "unreadable-start") in
