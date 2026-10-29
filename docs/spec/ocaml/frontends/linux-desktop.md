@@ -20,7 +20,7 @@ the spec differ, the spec is what to build.
 
 The tray is its own opam package (`tsync-tray`, Linux only) so that libdbus (`conf-dbus`, a package
 of this repository: opam's has none) stays off the main one. Everything under `linux/` is outside
-the default alias: a plain `dune build` does not need libdbus, `dune build @runtest` does.
+the default alias: a plain `dune build` does not need libdbus, `dune build @runtest-linux` does.
 
 ## 2. The menu model
 
