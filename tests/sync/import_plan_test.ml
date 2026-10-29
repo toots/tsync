@@ -35,7 +35,14 @@ let () =
   Unix.symlink "photos" (Filename.concat src "photos-link");
   dir "locked";
   file "locked/hidden" "9";
-  Test_support.set_unreadable (Filename.concat src "locked");
+  let locked = Filename.concat src "locked" in
+  Test_support.set_unreadable locked;
+  (* An administrator lists past a deny entry on Windows, so there the case
+     cannot be set up. *)
+  if Array.length (try Sys.readdir locked with Sys_error _ -> [||]) > 0 then (
+    p "unreadable folder: not run, this account lists it despite the deny\n";
+    Test_support.set_readable ~perm:0o755 locked;
+    Fs.rm_rf locked);
   let show label ?only ?exclude symlinks =
     let plan = Import_plan.plan ?only ?exclude ~symlinks src in
     p "== %s: %d files, %d bytes\n" label plan.files plan.bytes;
@@ -64,5 +71,5 @@ let () =
     ~exclude:["**/.git"; "*.txt"] `Skip;
   show "only photos/** and **/*.ml, links followed"
     ~only:["photos/**"; "**/*.ml"] `Follow;
-  Test_support.set_readable ~perm:0o755 (Filename.concat src "locked");
+  if Sys.file_exists locked then Test_support.set_readable ~perm:0o755 locked;
   Test_support.finish root
