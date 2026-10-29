@@ -19,11 +19,12 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 - The tests whose snapshot states a time bound have a second diff rule under their suite's serial
   alias (one rule with `(aliases runtest runtest-serial)` would pull the directory's whole `runtest`
   into it): `runtest-serial` for `dqueue_test`, `proxy_test`, `http_test`, `rt_test`, `rt_fd_test`,
-  `rt_class_test`, `ipc_test`, `remote_test`, `uplink_test`, `owner_test`; `runtest-linux-serial`
-  for `tray_test`, `watch_test`, `wedged_test`; `runtest-android-serial` for `lazy_test`. CI builds
-  the serial aliases `-j1` first, so each runs with the runner to itself, then the suites, which diff
-  the outputs they left: `--force` re-runs a diff, not the rule that made its output. Each remains a
-  defect of the check under §10.3 until its bound is gone, and leaves the alias then.
+  `rt_class_test`, `ipc_test`, `remote_test`, `uplink_test`, `owner_test`, `passwords_scale_test`;
+  `runtest-linux-serial` for `tray_test`, `watch_test`, `wedged_test`; `runtest-android-serial`
+  for `lazy_test`. CI builds the serial aliases `-j1` first, so each runs with the runner to itself,
+  then the suites, which diff the outputs they left: `--force` re-runs a diff, not the rule that made
+  its output. Each remains a defect of the check under §10.3 until its bound is gone, and leaves the
+  alias then.
 - A change of behaviour reads as a diff of the snapshot. `dune build @runtest --auto-promote` writes
   the new `.expected`, which is the review artefact.
 - Only stdout is captured. A test that expects a failure prints its kind (`Fail.kind_name`) or the
