@@ -296,7 +296,7 @@ let step g ~owner =
         g.lessee_timeouts <- 0;
         Hashtbl.filter_map_inplace
           (fun pid l ->
-            if Fs.pid_alive pid && now -. l.seen <= lease_ttl () then Some l
+            if Pid.alive pid && now -. l.seen <= lease_ttl () then Some l
             else None)
           g.lessees;
         if own_timeouts + lt > 0 then Law.timed_out g.law ~now;
@@ -350,7 +350,7 @@ let renew gates reports =
     | None -> set_mode Local
     | Some call ->
         let request =
-          { Lease.pid = Unix.getpid (); links = reports; flat = false }
+          { Lease.pid = Pid.self (); links = reports; flat = false }
         in
         (match
            Rt.within `Direct (fun () ->

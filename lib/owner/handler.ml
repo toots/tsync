@@ -765,7 +765,7 @@ let send_report t ~kind ~state ~error ~progress ~step =
   match
     Tsync_status.Status_report.job_to_yojson
       {
-        pid = Unix.getpid ();
+        pid = Pid.self ();
         kind;
         domain = Some (domain_name t);
         state;

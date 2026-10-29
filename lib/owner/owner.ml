@@ -60,7 +60,7 @@ let acquire ?socket ~role ~what d =
           match
             let record =
               Yojson.Safe.to_string
-                (holder_json { pid = Unix.getpid (); role; what; socket })
+                (holder_json { pid = Pid.self (); role; what; socket })
             in
             Unix.ftruncate fd 0;
             ignore (Unix.lseek fd 0 SEEK_SET);

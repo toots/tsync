@@ -204,6 +204,8 @@ CAMLprim value tsync_pid_alive(value pid) {
 
 CAMLprim value tsync_raise_nofile(value target) { return target; }
 
+CAMLprim value tsync_getpid(value unit) { return Val_long(GetCurrentProcessId()); }
+
 /* A message the window handles arrives inside GetMessage, which does not
    return for it: the procedure posts an empty message to end the wait. */
 static int session_pending = -1;
@@ -739,6 +741,8 @@ CAMLprim value tsync_pid_alive(value pid) {
 }
 
 CAMLprim value tsync_end_with_this_process(value pid) { return Val_unit; }
+
+CAMLprim value tsync_getpid(value unit) { return Val_long(getpid()); }
 
 CAMLprim value tsync_unlink(value path) {
   CAMLparam1(path);

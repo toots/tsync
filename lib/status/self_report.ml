@@ -47,7 +47,7 @@ let self ?traffic ?listener ~role ~serves () : Status_report.self =
     server =
       {
         hostname = Unix.gethostname ();
-        pid = Unix.getpid ();
+        pid = Pid.self ();
         started_at;
         uptime = now -. started_at;
         load_avg = load_avg ();

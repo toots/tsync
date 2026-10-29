@@ -51,7 +51,7 @@ let grant rate =
 
 let () =
   if Array.length Sys.argv > 1 && Sys.argv.(1) = "print-pid" then (
-    print_int (Unix.getpid ());
+    print_int (Tsync_core.Pid.self ());
     exit 0);
   Rt.run_sync (fun () ->
       let wan = Uplink.link "wan" settings
@@ -99,7 +99,7 @@ let () =
          until (fun () -> !calls > c) && mode "wan" = "local");
       p "== owner";
       Uplink.own (fun _ -> settings);
-      let me = Unix.getpid () in
+      let me = Tsync_core.Pid.self () in
       let report pid =
         {
           Uplink_lease.pid;

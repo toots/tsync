@@ -17,7 +17,6 @@ external clone_ : string -> string -> unit = "tsync_clone"
 external terminal_columns_ : Unix.file_descr -> int = "tsync_terminal_columns"
 external drop_mapped_pages : bigstring -> unit = "tsync_drop_mapped_pages"
 external is_network_fs_ : string -> bool = "tsync_is_network_fs"
-external pid_alive_ : int -> bool = "tsync_pid_alive"
 external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
 external is_macos_ : unit -> bool = "tsync_is_macos"
 external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
@@ -360,8 +359,6 @@ let rec is_network_fs p =
         is_network_fs (Filename.dirname p)
     | exception _ -> true
 
-let pid_alive pid = pid_alive_ pid
-
 (* ELOOP means the last component is a symbolic link. *)
 let open_nofollow p = opt (fun () -> open_nofollow_ p)
 
@@ -393,7 +390,7 @@ let sweep_temps ?(older_than = 0.) dir =
         let p = Filename.concat dir n in
         let dead =
           match Names.temp_owner n with
-            | Some pid -> not (pid_alive pid)
+            | Some pid -> not (Pid.alive pid)
             | None -> (
                 match lstat_opt p with
                   | Some st -> Unix.gettimeofday () -. st.st_mtime > older_than

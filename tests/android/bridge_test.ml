@@ -79,7 +79,7 @@ let () =
   p "%d foreign threads × %d reads           %d failures" threads reads
     (stress ref_ ~threads ~reads ~size);
   let code, said = spawned tsync ["android"; "stat"; "root"] in
-  let pid = string_of_int (Unix.getpid ()) in
+  let pid = string_of_int (Tsync_core.Pid.self ()) in
   let said =
     (* The holder's pid is this process's. *)
     let n = String.length pid in

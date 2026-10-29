@@ -210,7 +210,7 @@ let live_jobs () =
     (fun j ->
       if j.report.state = `Running then
         now -. j.at < Float.max job_stale_min (4. *. job_report_interval)
-        || Fs.pid_alive j.report.pid
+        || Pid.alive j.report.pid
       else now -. j.at < job_keep)
     (Atomic.get jobs)
 
@@ -270,7 +270,7 @@ let machine_report arg children : R.machine =
   let processes =
     {
       R.role = "supervisor";
-      pid = Some (Unix.getpid ());
+      pid = Some (Pid.self ());
       serves = [];
       error = None;
       self = Some own;
