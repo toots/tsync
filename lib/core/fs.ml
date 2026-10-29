@@ -26,6 +26,13 @@ external unix_unlink : string -> unit = "tsync_unlink"
 external is_private : string -> bool = "tsync_is_private"
 external owned_by_this_user : string -> bool = "tsync_owned_by_this_user"
 external end_with_this_process : int -> unit = "tsync_end_with_this_process"
+external std_handle_missing_ : int -> bool = "tsync_std_handle_missing"
+
+let std_handle_missing = function
+  | `Stdin -> std_handle_missing_ 0
+  | `Stdout -> std_handle_missing_ 1
+  | `Stderr -> std_handle_missing_ 2
+
 external make_private : string -> unit = "tsync_make_private"
 
 let is_macos = is_macos_ ()
