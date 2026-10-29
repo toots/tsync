@@ -25,6 +25,13 @@ let log_to_service_file () =
             Unix.dup2 ~cloexec:false fd Unix.stderr)
     | _ -> ()
 
+(* cloud-files §5.2: Windows runs each owner as the windowed program beside
+   this one, so none shows a console or takes a console interrupt. *)
+let child_exe () =
+  if Sys.win32 then
+    Filename.concat (Filename.dirname Sys.executable_name) "tsyncd.exe"
+  else Sys.executable_name
+
 (* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
    governor, starts the store server as its child when a domain is served over
    HTTP, and owns every domain on one socket, which it serves even with no
@@ -114,7 +121,7 @@ let start mount tls verbose =
                     ignore (Fs.raise_nofile 65536);
                     Owner.stop_on_signals ();
                     run (fun () ->
-                        Tsync_supervisor.Supervisor.run ~exe:Sys.executable_name
+                        Tsync_supervisor.Supervisor.run ~exe:(child_exe ())
                           config
                           (Tsync_supervisor.Supervisor.assign ?mount ?tls config))
               ))
