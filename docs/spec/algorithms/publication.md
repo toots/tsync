@@ -424,7 +424,9 @@ PROJECT():                                                     # one entry
 ```
 
 - **Who.** A client of a read-only domain ([05](../05-ops-config.md) §2.1) writes nothing to the
-  main: it projects no entry and takes none over, and `projectCommits` has no effect there. The
+  main: it pushes no entry, projects none and takes none over, and `projectCommits` has no effect
+  there. A pending change it holds, left from a time the domain was writable, fails the cycle
+  with REFUSED/read_only before any request ([failure-model.md](failure-model.md) §3.1). The
   projector of an entry at generation 0 is the client its `projector` field names, and
   its author when it has none. The projector at generation $g \ge 1$ is the client whose takeover
   object $(n, g)$ exists. A voided entry (§4.3) has no author and is projected through a takeover.
@@ -797,6 +799,8 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
   clashes becomes a conflicted copy. A client whose tree lost a folder the main holds, then
   fetches an entry that changes a file in it, arrives by state and ends with the main's tree and
   nothing pending.
+- **Read-only.** A read-only client restarted with a change in flight sends no entry: its cycle
+  fails with REFUSED/read_only and the main's log is unchanged.
 - **Retention.** Expiry never deletes the head entry, an entry above the tree head, nor an entry
   younger than `LOG_RETENTION`.
 - **Gate.** On a collectable main, an entry naming a chunk the main lacks is refused; the client uploads the chunk again
