@@ -206,6 +206,12 @@ CAMLprim value tsync_raise_nofile(value target) { return target; }
 
 CAMLprim value tsync_getpid(value unit) { return Val_long(GetCurrentProcessId()); }
 
+CAMLprim value tsync_std_handle_missing(value stream) {
+  static const DWORD streams[] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+  HANDLE handle = GetStdHandle(streams[Int_val(stream)]);
+  return Val_bool(handle == NULL || handle == INVALID_HANDLE_VALUE);
+}
+
 /* A message the window handles arrives inside GetMessage, which does not
    return for it: the procedure posts an empty message to end the wait. */
 static int session_pending = -1;
@@ -743,6 +749,8 @@ CAMLprim value tsync_pid_alive(value pid) {
 CAMLprim value tsync_end_with_this_process(value pid) { return Val_unit; }
 
 CAMLprim value tsync_getpid(value unit) { return Val_long(getpid()); }
+
+CAMLprim value tsync_std_handle_missing(value stream) { return Val_false; }
 
 CAMLprim value tsync_unlink(value path) {
   CAMLparam1(path);

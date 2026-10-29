@@ -46,7 +46,7 @@ jobs:
           key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
 
       - name: Build
-        run: opam exec -- dune build bin/tsync.exe
+        run: opam exec -- dune build bin/tsync.exe bin/tsyncd.exe
 
       - name: The binary runs and has the native TLS implementation
         run: |
@@ -55,13 +55,33 @@ jobs:
           echo "$info"
           echo "$info" | grep -Eq '^tls:.*\bnative\b'
 
+      # cloud-files §14.2: the service and its owners show no console.
+      - name: tsync is a console program, tsyncd a windowed one
+        run: |
+          subsystem() { opam exec -- x86_64-w64-mingw32-objdump -p "_build/default/bin/$1.exe" | sed -n 's/^Subsystem[[:space:]]*//p'; }
+          subsystem tsync; subsystem tsyncd
+          subsystem tsync | grep -q '(Windows CUI)'
+          subsystem tsyncd | grep -q '(Windows GUI)'
+
+      # A windowed program has no standard handles: with no config, the
+      # service's start must still exit 0 and say why in the service log.
+      - name: tsyncd starts without a console and logs
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log'
+          Remove-Item -ErrorAction Ignore $log
+          $p = Start-Process -FilePath _build\default\bin\tsyncd.exe -ArgumentList start -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "tsyncd start exited $($p.ExitCode)" }
+          Get-Content $log
+          if (-not (Select-String -Quiet -Path $log -Pattern 'no config; nothing to start')) { throw 'the service log lacks the no-config line' }
+
       # The binary with the DLLs of the toolchain that built it, for the ARM
       # job; every other DLL it loads is the system's. The first copy on the
       # PATH can belong to another install, of another architecture.
       - name: Package the binary
         run: |
           mkdir dist
-          cp _build/default/bin/tsync.exe dist/
+          cp _build/default/bin/tsync.exe _build/default/bin/tsyncd.exe dist/
           toolchain="$(opam exec -- x86_64-w64-mingw32-gcc -print-sysroot)/mingw/bin"
           for dll in $(opam exec -- x86_64-w64-mingw32-objdump -p dist/tsync.exe | sed -n 's/^[[:space:]]*DLL Name: //p'); do
             if [ -f "$toolchain/$dll" ]; then cp "$toolchain/$dll" dist/; fi

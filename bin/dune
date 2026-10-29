@@ -1,9 +1,10 @@
 ; tsync_catalog links every driver and frontend this build has.
 
-(executable
- (name tsync)
- (public_name tsync)
- (package tsync)
+(library
+ (name tsync_cli)
+ (wrapped false)
+ (modules
+  (:standard \ tsync tsyncd))
  (libraries
   cmdliner
   tsync_core
@@ -30,3 +31,19 @@
    from
    (tsync_secret_service tsync_logind tsync_polkit -> platform.linux.ml)
    (-> platform.none.ml))))
+
+(executable
+ (name tsync)
+ (public_name tsync)
+ (package tsync)
+ (modules tsync)
+ (libraries tsync_cli))
+
+(executable
+ (name tsyncd)
+ (modules tsyncd)
+ (enabled_if
+  (= %{os_type} Win32))
+ (link_flags
+  (-cclib "-subsystem windows"))
+ (libraries tsync_cli))
