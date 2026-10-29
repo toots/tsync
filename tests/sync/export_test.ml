@@ -64,7 +64,7 @@ let listing dir =
     let path = if rel = "" then dir else Filename.concat dir rel in
     if Sys.is_directory path then
       List.concat_map
-        (fun n -> walk (if rel = "" then n else Filename.concat rel n))
+        (fun n -> walk (if rel = "" then n else rel ^ "/" ^ n))
         (List.sort compare (Array.to_list (Sys.readdir path)))
     else [Printf.sprintf "%s (%d)" rel (Unix.stat path).st_size]
   in
@@ -100,7 +100,10 @@ let () =
           | r -> report ?bytes dst r
           | exception Fail.E f ->
               p "%s: refused: %s\n" dst
-                (Text.replace_all ~sub:(root ^ "/") ~by:"" f.reason)
+                (let slashes = String.map (function '\\' -> '/' | c -> c) in
+                 Text.replace_all
+                   ~sub:(slashes root ^ "/")
+                   ~by:"" (slashes f.reason))
       in
       p "== landing: the root, a file, a folder\n";
       export "all" [""];
