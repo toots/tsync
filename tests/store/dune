@@ -116,20 +116,36 @@
   tsync_http_proxy
   unix))
 
+; The proxy serves a local store, and Windows holds neither (cloud-files §2).
+
 (rule
- (with-stdout-to
-  proxy_test.output
-  (run ./proxy_test.exe)))
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   proxy_test.output
+   (run ./proxy_test.exe))))
 
 (rule
  (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
  (action
   (diff proxy_test.expected proxy_test.output)))
 
 (rule
  (alias runtest-serial)
+ (enabled_if
+  (<> %{os_type} Win32))
  (action
   (diff proxy_test.expected proxy_test.output)))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (echo "proxy_test: not run, Windows serves no local store\n")))
 
 (executable
  (name share_test)
