@@ -198,16 +198,18 @@ let () =
     members;
   Zip.finish z;
   close_out oc;
-  let test =
+  (* Windows has no unzip; its own tar reads ZIP archives. *)
+  let run unzip tar =
     Sys.command
-      (Printf.sprintf "cd %s && unzip -tqq a.zip >/dev/null 2>&1"
-         (Filename.quote dir))
+      (if Sys.win32 then
+         Printf.sprintf "cd /d %s && tar %s a.zip >NUL 2>&1"
+           (Filename.quote dir) tar
+       else
+         Printf.sprintf "cd %s && unzip %s a.zip >/dev/null 2>&1"
+           (Filename.quote dir) unzip)
   in
-  let extract =
-    Sys.command
-      (Printf.sprintf "cd %s && unzip -qq a.zip >/dev/null 2>&1"
-         (Filename.quote dir))
-  in
+  let test = run "-tqq" "-tf" in
+  let extract = run "-qq" "-xf" in
   p "unzip -t: %s, extract: %s\n"
     (if test = 0 then "ok" else "FAIL")
     (if extract = 0 then "ok" else "FAIL");
