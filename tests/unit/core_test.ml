@@ -366,3 +366,17 @@ let () =
   done;
   p "25 keys into a set of at most 10: %d held, emptied %d times\n"
     (Chunk_set.cardinal small) !overflowed
+
+let () =
+  p "\n== a file created with the default mode is private\n";
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "tsync-private-%d" (Pid.self ()))
+  in
+  Fs.rm_rf dir;
+  Fs.mkdir_p dir;
+  let path = Filename.concat dir "kit" in
+  Fs.create_new path "secret";
+  p "private: %b\n" (Fs.is_private path);
+  Fs.rm_rf dir

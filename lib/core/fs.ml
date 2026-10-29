@@ -170,6 +170,8 @@ let write_temp_with ?(perm = 0o600) dir write =
   let tmp = temp_in dir in
   let fd = openfile ~perm tmp [O_WRONLY; O_CREAT; O_EXCL] in
   (try
+     (* Windows ignores the mode, so a private one is applied before any byte. *)
+     if Sys.win32 && perm land 0o077 = 0 then make_private tmp;
      with_fd fd (fun fd ->
          write fd;
          fsync fd)
