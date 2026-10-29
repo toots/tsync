@@ -95,7 +95,10 @@ let rec scrub = function
                    let r = String.length root in
                    let s =
                      if String.length s >= r && String.sub s 0 r = root then
-                       "<root>" ^ String.sub s r (String.length s - r)
+                       "<root>"
+                       ^ String.map
+                           (function '\\' when Sys.win32 -> '/' | c -> c)
+                           (String.sub s r (String.length s - r))
                      else s
                    in
                    (k, `String (scrub_string s))
