@@ -275,6 +275,11 @@
  (action
   (diff passwords_scale_test.expected passwords_scale_test.output)))
 
+(rule
+ (alias runtest-serial)
+ (action
+  (diff passwords_scale_test.expected passwords_scale_test.output)))
+
 (executable
  (name autolock_test)
  (modules autolock_test)
