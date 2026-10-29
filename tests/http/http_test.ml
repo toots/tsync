@@ -299,7 +299,14 @@ let () =
       let server =
         Server.serve [Unix.ADDR_INET (Unix.inet_addr_loopback, port)] handler
       in
-      show (Client.request e ~meth:"GET" "/echo?after=restart");
+      let made = ref 0 in
+      show
+        (Client.request e
+           ~headers:(fun () ->
+             incr made;
+             [])
+           ~meth:"GET" "/echo?after=restart");
+      p "  headers made for each attempt: %d" !made;
       Server.close server;
       p "== nothing listening";
       match Client.request e ~meth:"GET" "/echo" with
