@@ -44,6 +44,8 @@ let () =
         | Import_plan.Folder r -> p "  folder %s\n" r
         | File { rel; size; _ } -> p "  file   %s (%d)\n" rel size
         | Link { rel; target; size; _ } ->
+            (* Windows reads a link's target back with its own separator. *)
+            let target = String.map (function '\\' -> '/' | c -> c) target in
             p "  link   %s -> %s (%d)\n" rel target size)
       plan.entries;
     (* Unreadable folders are named by their resolved path, and /tmp is a
