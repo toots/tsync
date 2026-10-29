@@ -198,11 +198,14 @@ let () =
     members;
   Zip.finish z;
   close_out oc;
-  (* Windows has no unzip; its own tar reads ZIP archives. *)
+  (* Windows has no unzip; its own tar reads ZIP archives, where another on the
+     PATH may not. *)
   let run unzip tar =
     Sys.command
       (if Sys.win32 then
-         Printf.sprintf "cd /d %s && tar %s a.zip >NUL 2>&1"
+         Printf.sprintf
+           "cd /d %s && \"%%SystemRoot%%\\System32\\tar.exe\" %s a.zip >NUL \
+            2>&1"
            (Filename.quote dir) tar
        else
          Printf.sprintf "cd %s && unzip %s a.zip >/dev/null 2>&1"
