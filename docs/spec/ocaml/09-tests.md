@@ -12,7 +12,7 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
   counter.
 - `runtest` is the common suite (§5.9). A platform's suite is `runtest-<platform>`: `runtest-linux`
   holds FUSE mounts and their discovery, the tray, the D-Bus vault services, `watch_test`,
-  `mapped_pages_test`, `config_test` and `wizard_test` (their configs name the `fuse` frontend);
+  `mapped_pages_test`, `mount_point_test`, `config_test` and `wizard_test` (their configs name the `fuse` frontend);
   `runtest-android` holds `tests/android`. The root `dune` fails `runtest-linux` on another system.
   Linux CI builds `@runtest @runtest-linux`, the android job `@runtest-android`, macOS and Windows
   `@runtest`.
