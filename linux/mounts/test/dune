@@ -86,7 +86,7 @@
      "config refused by validation")))))
 
 (rule
- (alias runtest)
+ (alias runtest-linux)
  (enabled_if
   (= %{system} linux))
  (action

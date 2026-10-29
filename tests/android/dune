@@ -23,12 +23,12 @@
   (run ./lazy_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-android)
  (action
   (diff lazy_test.expected lazy_test.output)))
 
 (rule
- (alias runtest-serial)
+ (alias runtest-android-serial)
  (action
   (diff lazy_test.expected lazy_test.output)))
 
@@ -58,7 +58,7 @@
   (run ./bridge_test.exe %{exe:../../bin/tsync.exe})))
 
 (rule
- (alias runtest)
+ (alias runtest-android)
  (action
   (diff bridge_test.expected bridge_test.output)))
 
@@ -75,6 +75,6 @@
   (run ./cli_test.exe %{exe:../../bin/tsync.exe})))
 
 (rule
- (alias runtest)
+ (alias runtest-android)
  (action
   (diff cli_test.expected cli_test.output)))
