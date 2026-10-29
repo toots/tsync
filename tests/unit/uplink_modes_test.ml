@@ -126,7 +126,7 @@ let () =
         | None -> p "refused");
       (* The child reports its own pid: on Windows, create_process answers a
          handle rather than a pid. *)
-      let dead =
+      let dead, child =
         let out, into = Unix.pipe () in
         let child =
           Unix.create_process Sys.executable_name
@@ -137,8 +137,10 @@ let () =
         let ic = Unix.in_channel_of_descr out in
         let pid = int_of_string (String.trim (input_line ic)) in
         close_in ic;
-        ignore (Unix.waitpid [] child);
-        pid
+        (* Windows gives a freed pid to the next process at once, so there the
+           child is reaped after the check, its handle keeping the pid taken. *)
+        if not Sys.win32 then ignore (Unix.waitpid [] child);
+        (pid, child)
       in
       ignore (Uplink.renewal (report dead));
       let lessees () =
@@ -149,6 +151,7 @@ let () =
       p "two lessees recorded: %d" (lessees ());
       p "the row of a gone pid is dropped at the next step: %b"
         (until (fun () -> lessees () = 1));
+      if Sys.win32 then ignore (Unix.waitpid [] child);
       p "a flat report of an older build is answered with a top-level rate: %b"
         (match
            Option.bind
