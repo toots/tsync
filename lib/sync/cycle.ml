@@ -999,7 +999,12 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> ())
       batch
 
+  (* publication §4.6, "Who": a read-only client writes nothing to the main. *)
   let commit n body batch =
+    if C.read_only then
+      Fail.raise_ Fail.Read_only
+        "%d changes cannot be published: this domain is read-only"
+        (List.length batch);
     match Log_store.create_entry log n body with
       | `Won ->
           won n batch;

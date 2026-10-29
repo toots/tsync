@@ -935,6 +935,17 @@ let () =
           settled a;
           p "  B: %s\n" (sync b);
           p "  B: %s; %s\n" (tree b) (status b));
+      scenario "a change left in flight, the domain then read-only" (fun root ->
+          let link = { (link ()) with create = `Fails } in
+          let a = started ~link root "A" in
+          ignore (sync a);
+          write a "f" "one";
+          settle a;
+          p "  A after the failed push: %s\n" (status a);
+          link.create <- `Through;
+          let a = started ~link ~read_only:true root "A" in
+          p "  restarted read-only: %s\n" (sync a);
+          p "  A: %s; entries on the main: %d\n" (status a) (entries root));
       (* From here on the cycles run in the background, until the process
          stops. *)
       scenario "a poll leaves a change to its batch delay" (fun root ->
