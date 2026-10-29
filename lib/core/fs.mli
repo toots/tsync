@@ -114,6 +114,10 @@ val owned_by_this_user : string -> bool
     (cloud-files §5.2). Elsewhere nothing. Raises [Unix_error]. *)
 val end_with_this_process : int -> unit
 
+(** Whether Windows gave this process no handle for the stream, as it does a
+    windowed program. Elsewhere false. *)
+val std_handle_missing : [ `Stdin | `Stdout | `Stderr ] -> bool
+
 (** Makes a file or directory private to this process's user: mode 0600 or 0700,
     or on Windows the access list of {!is_private}, which a directory passes on
     to what is created in it. Raises [Unix_error]. *)
