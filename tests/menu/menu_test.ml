@@ -198,6 +198,17 @@ let () =
          ("music", idle);
        ]);
 
+  case "one domain's sync failing with changes it cannot publish";
+  show
+    (menu
+       [
+         ( "media",
+           {|{"ok":true,"pendingUploads":5,
+              "failing":"5 changes cannot be published: this domain is read-only"}|}
+         );
+         ("music", {|{"ok":true,"pendingUploads":1}|});
+       ]);
+
   case "two reachable domains, one paused";
   show (menu [("photos", {|{"ok":true,"paused":true}|}); ("music", idle)]);
 

@@ -147,6 +147,17 @@ tooltip tsync — Idle
         ---
         Quit tsync tray -> quit
 
+== one domain's sync failing with changes it cannot publish
+icon    tsync-error-symbolic
+tooltip tsync — Sync failing
+        media — Sync failing -> open media
+        music — Uploading 1 -> open music
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
 == two reachable domains, one paused
 icon    tsync-idle-symbolic
 tooltip tsync — Idle
@@ -460,4 +471,4 @@ tooltip tsync — Downloading 1
         d
             ? (?)
 
-39 cases
+40 cases

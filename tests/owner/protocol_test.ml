@@ -231,6 +231,7 @@ let cases =
               };
             ];
           pending_bytes = 9;
+          failing = Some "this domain is read-only";
           subscribers = 2;
           unnamed = 1;
           traffic =

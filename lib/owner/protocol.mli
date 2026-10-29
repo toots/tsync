@@ -239,6 +239,7 @@ type status = {
   uploading : transfer list;
   downloading : transfer list;
   pending_bytes : int;
+  failing : string option;  (** why the domain's sync fails, while it does *)
   subscribers : int;
   unnamed : int;
   traffic : R.traffic;
