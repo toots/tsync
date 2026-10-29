@@ -203,15 +203,16 @@ let exchange ~max_body e c ~progress ~meth ~target ~headers ~body ~reused =
   ({ status; headers; body }, keep)
 
 (* A pooled connection the server closed while idle fails on write or answers
-   nothing at all; only then is the request sent again, on a fresh one. *)
+   nothing at all; only then is the request sent again, on a fresh one, with
+   headers made again so that a signature is as fresh as the attempt. *)
 let request ?(stall = default_stall) ?(max_body = max_int)
     ?(headers = fun () -> []) ?body e ~meth target =
   Rt.Semaphore.with_slot e.slots (fun () ->
       try
         Rt.with_stall_timeout stall (fun progress ->
-            let headers = headers () in
-            progress ();
             let attempt c ~reused =
+              let headers = headers () in
+              progress ();
               match
                 exchange ~max_body e c ~progress ~meth ~target ~headers ~body
                   ~reused

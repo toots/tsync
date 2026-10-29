@@ -33,6 +33,7 @@ host header carries the port: true
   ten cancelled connects leave fewer than 5 descriptors: true
 == redial after the server dropped an idle connection
   200 "GET after=restart \"\"\n"
+  headers made for each attempt: 2
 == nothing listening
   transient/link
 == TLS listener

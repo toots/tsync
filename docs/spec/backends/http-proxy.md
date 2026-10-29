@@ -32,7 +32,7 @@ One driver instance serves one domain; the domain's prefix is fixed at construct
 ## 2. Transport
 
 - HTTP/1.1 over TCP, or TLS for `https`, verified per [security §9](../algorithms/security-model.md#9-tls).
-- Keep-alive connections MAY be reused. A client MUST close an idle connection before the server's `keepalive_timeout` ([security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener)), and redials once a reused connection found dead before the request left.
+- Keep-alive connections MAY be reused. A client MUST close an idle connection before the server's `keepalive_timeout` ([security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener)), and redials once a reused connection found dead before the request left, signing the request again for that attempt: the first signature may be older than the clock-skew window, as after a suspend that held the request.
 - **Stall timeout** `stall_timeout` (300 s): a request whose body upload or answer goes that long without a byte moving is abandoned as TRANSIENT/LINK. It is not a latency budget; a slow but moving transfer never trips it.
 - Request headers: `x-tsync-timestamp`, `x-tsync-signature`, `host`, `content-length`. Clients MUST send `content-length` (never a chunked request body) so a server can refuse an oversized body before reading it.
 - Answers may use `content-length` or chunked encoding. A client MUST accept both.
