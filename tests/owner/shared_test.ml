@@ -45,21 +45,6 @@ let config =
          (json_path (root ^ "/store"))
          (json_path (root ^ "/store2")))
 
-(* Event ids and folder ids vary from run to run. *)
-let rec scrub = function
-  | `Assoc l ->
-      `Assoc
-        (List.map
-           (fun (k, v) ->
-             match k with
-               | "id" -> (k, `String "<n>")
-               | "ref" | "parentRef" | "etag" | "contentId" | "mtime" ->
-                   (k, `String "<x>")
-               | _ -> (k, scrub v))
-           l)
-  | `List l -> `List (List.map scrub l)
-  | j -> j
-
 let mask s =
   List.fold_left
     (fun s dir ->
@@ -79,7 +64,30 @@ let mask s =
     s
     [Unix.realpath sock_dir; sock_dir]
 
-let show label j = p "%-28s %s" label (mask (Yojson.Safe.to_string (scrub j)))
+(* A path under the directory names it with Windows separators there. *)
+let mask s =
+  let s = mask s in
+  if Sys.win32 && String.starts_with ~prefix:"<dir>" s then
+    String.map (function '\\' -> '/' | c -> c) s
+  else s
+
+(* Event ids and folder ids vary from run to run. *)
+let rec scrub = function
+  | `Assoc l ->
+      `Assoc
+        (List.map
+           (fun (k, v) ->
+             match k with
+               | "id" -> (k, `String "<n>")
+               | "ref" | "parentRef" | "etag" | "contentId" | "mtime" ->
+                   (k, `String "<x>")
+               | _ -> (k, scrub v))
+           l)
+  | `List l -> `List (List.map scrub l)
+  | `String s -> `String (mask s)
+  | j -> j
+
+let show label j = p "%-28s %s" label (Yojson.Safe.to_string (scrub j))
 
 let call fields =
   Ipc.call socket (`Assoc (List.map (fun (k, v) -> (k, `String v)) fields))
