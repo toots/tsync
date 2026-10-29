@@ -228,6 +228,12 @@ labelled step.
 
 ### 5.9 Platforms
 
+Checks are sorted into a common suite, which every platform runs, and one suite per platform, holding
+the checks of what exists on that platform alone: its frontend, its desktop services, its kernel
+facilities. A host's conformance is the common suite plus its own platform's. A platform suite runs
+where that platform's code builds, which for Android is a desktop host, and started anywhere else it
+fails rather than passing empty (§10.1).
+
 - **FUSE**: a real mount over a local store, driven by ordinary file-system calls.
 - **macOS**: the extension-side client, item mapping and change-batch logic against a real owner
   process started from the build, with the home directory redirected and a short scratch root (the

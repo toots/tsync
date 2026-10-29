@@ -7,17 +7,23 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 ## T.1 The harness: one executable, one snapshot
 
 - A test is an executable that prints what it checked. Its `dune` file holds two rules: one runs it
-  with stdout to `<name>.output`, one diffs that against the committed `<name>.expected` under the
-  `runtest` alias. The diff is the verdict (§4, §10.5); there is no assertion library and no check
+  with stdout to `<name>.output`, one diffs that against the committed `<name>.expected` under its
+  suite's alias. The diff is the verdict (§4, §10.5); there is no assertion library and no check
   counter.
-- The tests whose snapshot states a time bound have a second diff rule under `runtest-serial` (one
-  rule with `(aliases runtest runtest-serial)` would pull the directory's whole `runtest` into it): `tray_test`,
-  `dqueue_test`, `proxy_test`, `http_test`, `lazy_test`, `rt_test`, `rt_fd_test`, `rt_class_test`,
-  `watch_test`, `ipc_test`, `remote_test`, `uplink_test`, `wedged_test`, `owner_test`.
-  CI builds `@runtest-serial -j1` first, so each runs with the runner to itself, then `@runtest`,
-  which diffs the outputs they left: `--force` re-runs a diff, not the rule that made its output.
-  `runtest` stays the whole suite everywhere else. Each remains a defect of the check under §10.3
-  until its bound is gone, and leaves the alias then.
+- `runtest` is the common suite (§5.9). A platform's suite is `runtest-<platform>`: `runtest-linux`
+  holds FUSE mounts and their discovery, the tray, the D-Bus vault services, `watch_test`,
+  `mapped_pages_test`, `config_test` and `wizard_test` (their configs name the `fuse` frontend);
+  `runtest-android` holds `tests/android`. The root `dune` fails `runtest-linux` on another system.
+  Linux CI builds `@runtest @runtest-linux`, the android job `@runtest-android`, macOS and Windows
+  `@runtest`.
+- The tests whose snapshot states a time bound have a second diff rule under their suite's serial
+  alias (one rule with `(aliases runtest runtest-serial)` would pull the directory's whole `runtest`
+  into it): `runtest-serial` for `dqueue_test`, `proxy_test`, `http_test`, `rt_test`, `rt_fd_test`,
+  `rt_class_test`, `ipc_test`, `remote_test`, `uplink_test`, `owner_test`; `runtest-linux-serial`
+  for `tray_test`, `watch_test`, `wedged_test`; `runtest-android-serial` for `lazy_test`. CI builds
+  the serial aliases `-j1` first, so each runs with the runner to itself, then the suites, which diff
+  the outputs they left: `--force` re-runs a diff, not the rule that made its output. Each remains a
+  defect of the check under §10.3 until its bound is gone, and leaves the alias then.
 - A change of behaviour reads as a diff of the snapshot. `dune build @runtest --auto-promote` writes
   the new `.expected`, which is the review artefact.
 - Only stdout is captured. A test that expects a failure prints its kind (`Fail.kind_name`) or the
@@ -27,9 +33,9 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
   (`formats_test`, `plan_test`, `uplink_law_test`) do not. A test with local state builds its scratch
   root under the temporary directory with its pid in the name, so concurrent runs do not share it
   (§10.6, pitfall B-12.11).
-- A test that cannot run on a platform is reported, not skipped (§10.1): its rules carry `enabled_if`,
-  and a second `runtest` rule echoes "`<name>`: not run, …" where the first is disabled
-  (`mapped_pages_test`, `config_test`, `wizard_test`; pitfall B-12.12).
+- A test that cannot run in its suite's build is reported, not skipped (§10.1): its rules carry
+  `enabled_if`, and a second rule echoes "`<name>`: not run, …" where the first is disabled
+  (`config_test` and `wizard_test` without `tsync_fuse`; pitfall B-12.12).
 
 | Directory | Subject |
 |---|---|
@@ -97,8 +103,8 @@ that the output never shows, so every driver is diffed against the same lines.
 ## T.5 Traps that are real in this tree
 
 - **A plain `dune build` compiles no test.** The root `default` alias builds `bin`, `lib`, `vendor`
-  and `tests/bench`. After touching a library signature, build `@runtest` (or one directory's alias,
-  `@tests/sync/runtest`) and read that command's exit status, not a pipe's (pitfall B-12.3).
+  and `tests/bench`. After touching a library signature, build `@runtest` and on Linux `@runtest-linux` (or one directory's
+  alias, `@tests/sync/runtest`) and read that command's exit status, not a pipe's (pitfall B-12.3).
 - **`--force` replays a cached `.output`.** The run rule has a target, so forcing the alias re-runs
   the diff, not the executable. An environment variable that is not a declared dependency does not
   invalidate it either (pitfall B-12.3).
