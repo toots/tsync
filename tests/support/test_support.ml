@@ -31,6 +31,6 @@ let set_unreadable path =
   if Sys.win32 then icacls path "/deny \"%USERNAME%:(RD)\""
   else Unix.chmod path 0
 
+(* Windows restores the user-only list a private file is created with. *)
 let set_readable ~perm path =
-  if Sys.win32 then icacls path "/remove:d \"%USERNAME%\""
-  else Unix.chmod path perm
+  if Sys.win32 then Fs.make_private path else Unix.chmod path perm
