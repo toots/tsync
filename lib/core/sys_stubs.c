@@ -508,11 +508,9 @@ CAMLprim value tsync_is_private(value path) {
                                     &owner, NULL, &dacl, NULL, &sd);
   caml_stat_free(p);
   if (err != ERROR_SUCCESS) win_fail(err, "is_private", path);
-  SECURITY_DESCRIPTOR_CONTROL control = 0;
-  DWORD revision;
+  /* security-model §7.1: what counts is that no entry, inherited or not,
+     grants anyone else; a file in a private folder inherits its one entry. */
   int private_ = dacl != NULL && process_user(GetCurrentProcess(), me, sizeof me) &&
-                 GetSecurityDescriptorControl(sd, &control, &revision) &&
-                 (control & SE_DACL_PROTECTED) &&
                  EqualSid(owner, ((TOKEN_USER *)me)->User.Sid);
   for (DWORD i = 0; private_ && i < dacl->AceCount; i++) {
     ACE_HEADER *ace;
