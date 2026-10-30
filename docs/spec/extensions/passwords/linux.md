@@ -43,7 +43,8 @@ keystore at the first look after that.
 
 The [browser extension](browser.md) on Linux comes from the Chrome Web Store, as on every host;
 the packages carry none, and loading `browser/` unpacked is for development only.
-`tsync passwords browser install` writes the native-messaging host.
+The `tsync` package installs the native-messaging manifest
+([browser §2](browser.md#2-installing)).
 
 **User verification.** A passkey request asking for user verification
 ([browser §5](browser.md#5-passkeys)) is verified by **polkit**, the desktop's own
