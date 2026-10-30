@@ -585,6 +585,79 @@ let () =
            ]);
       show "rmdir t" (ask [("action", "rmdir"); ("ref", t)]);
       show "stat t after" (ask [("action", "stat"); ("rel", "t")]);
+      p "== creations and removals against what the caller saw";
+      let call fields =
+        Ipc.call socket (`Assoc (("domain", `String "docs") :: fields))
+      in
+      let k = mk "root" "k" in
+      let x =
+        call
+          [
+            ("action", `String "write");
+            ("parentRef", `String k);
+            ("name", `String "x.txt");
+            ("staging", `String (staging "kx" "peer"));
+          ]
+      in
+      show "write aside onto a file"
+        (call
+           [
+             ("action", `String "write");
+             ("parentRef", `String k);
+             ("name", `String "x.txt");
+             ("staging", `String (staging "ka" "local"));
+             ("aside", `Bool true);
+           ]);
+      show "mkdir aside onto a file"
+        (call
+           [
+             ("action", `String "mkdir");
+             ("parentRef", `String k);
+             ("name", `String "x.txt");
+             ("aside", `Bool true);
+           ]);
+      ignore (mk k "sub");
+      show "mkdir aside onto a folder"
+        (call
+           [
+             ("action", `String "mkdir");
+             ("parentRef", `String k);
+             ("name", `String "sub");
+             ("aside", `Bool true);
+           ]);
+      let y =
+        call
+          [
+            ("action", `String "write");
+            ("parentRef", `String k);
+            ("name", `String "y.txt");
+            ("staging", `String (staging "ky" "mine"));
+          ]
+      in
+      show "rename onto a stale dstBase"
+        (call
+           [
+             ("action", `String "rename");
+             ("ref", `String (item_ref y));
+             ("parentRef", `String k);
+             ("name", `String "x.txt");
+             ("dstBase", `String "stale");
+           ]);
+      show "delete on a stale base"
+        (call
+           [
+             ("action", `String "delete");
+             ("ref", `String (item_ref x));
+             ("base", `String "stale");
+           ]);
+      show "delete on its base"
+        (call
+           [
+             ("action", `String "delete");
+             ("ref", `String (item_ref x));
+             ("base", `String (content_id x));
+           ]);
+      show "list_dir k" (ask [("action", "list_dir"); ("ref", k)]);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

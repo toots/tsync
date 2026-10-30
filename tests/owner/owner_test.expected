@@ -17,7 +17,7 @@ stat by parent and name            {"ok":true,"ref":"i:<file-1>","parentRef":"d:
 write by ref, same content         {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
   uploads queued by it: 0
 write by ref on its base           {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
-write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"},"aside":{"ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt","kind":"file","size":10,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id4>","availability":"cached"}}
   uploads left when it answers: 0
   a now holds: f (conflicted copy from test).txt, f.txt
 create onto a file, exclusive      {"ok":false,"code":"exists","error":"a/f.txt exists","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
@@ -49,7 +49,7 @@ not a cursor                       {"ok":true,"stale":true}
 revert to the latest version       {"ok":true}
   content after revert             "first"
 revert to no such version          {"ok":false,"code":"not_found","error":"r.txt: no such version"}
-symlink                            {"ok":true,"item":{"ref":"i:<file-3>","parentRef":"root","name":"l","kind":"symlink","size":5,"mtime":"<t>","etag":"<id4>","isUploaded":true,"contentId":"<id4>","symlinkTarget":"c.txt"}}
+symlink                            {"ok":true,"item":{"ref":"i:<file-3>","parentRef":"root","name":"l","kind":"symlink","size":5,"mtime":"<t>","etag":"<id5>","isUploaded":true,"contentId":"<id5>","symlinkTarget":"c.txt"}}
 == refusals
 malformed ref                      {"ok":false,"code":"invalid","error":"malformed item reference \"x:1\""}
 storage key                        {"ok":false,"code":"invalid","error":"malformed item reference \"tsync/docs/x\""}
@@ -95,6 +95,14 @@ reports the supervisor got, in order:
 == rmdir of a folder holding folders
 rmdir t                            {"ok":true}
 stat t after                       {"ok":false,"code":"not_found","error":"t: not found"}
+== creations and removals against what the caller saw
+write aside onto a file            {"ok":true,"size":4,"mtime":"<t>","item":{"ref":"i:<file-4>","parentRef":"d:<id6>","name":"x.txt","kind":"file","size":4,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id7>","availability":"cached"},"aside":{"ref":"i:<file-5>","parentRef":"d:<id6>","name":"x (conflicted copy from test).txt","kind":"file","size":5,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id8>","availability":"cached"}}
+mkdir aside onto a file            {"ok":true,"item":{"ref":"i:<file-4>","parentRef":"d:<id6>","name":"x.txt","kind":"file","size":4,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id7>","availability":"cached"},"aside":{"ref":"d:<id9>","parentRef":"d:<id6>","name":"x.txt (conflicted copy from test)","kind":"dir","size":0,"mtime":"<t>","etag":"<id9>","isUploaded":true}}
+mkdir aside onto a folder          {"ok":true,"item":{"ref":"d:<id10>","parentRef":"d:<id6>","name":"sub","kind":"dir","size":0,"mtime":"<t>","etag":"<id10>","isUploaded":true}}
+rename onto a stale dstBase        {"ok":true,"item":{"ref":"i:<file-4>","parentRef":"d:<id6>","name":"x.txt","kind":"file","size":4,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id7>","availability":"cached"},"aside":{"ref":"i:<file-6>","parentRef":"d:<id6>","name":"x (conflicted copy 2 from test).txt","kind":"file","size":4,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id11>","availability":"cached"}}
+delete on a stale base             {"ok":true,"kept":true}
+delete on its base                 {"ok":true}
+list_dir k                         {"ok":true,"items":[{"ref":"d:<id10>","parentRef":"d:<id6>","name":"sub","kind":"dir","size":0,"mtime":"<t>","etag":"<id10>","isUploaded":true},{"ref":"i:<file-6>","parentRef":"d:<id6>","name":"x (conflicted copy 2 from test).txt","kind":"file","size":4,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id11>","availability":"cached"},{"ref":"i:<file-5>","parentRef":"d:<id6>","name":"x (conflicted copy from test).txt","kind":"file","size":5,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id8>","availability":"cached"},{"ref":"d:<id9>","parentRef":"d:<id6>","name":"x.txt (conflicted copy from test)","kind":"dir","size":0,"mtime":"<t>","etag":"<id9>","isUploaded":true}]}
 == stop
 stop                               {"ok":true}
 exit status 0
