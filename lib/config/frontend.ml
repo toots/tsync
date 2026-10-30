@@ -7,7 +7,7 @@ type command = {
 }
 
 type wizard = {
-  systems : [ `Linux | `Macos ] list;
+  systems : [ `Linux | `Macos | `Windows ] list;
   question : string;
   asks : string list;
 }
