@@ -1,0 +1,23 @@
+; Windows only, and the Windows build requires it (cloud-files §6).
+; linkall: the frontend registers itself when linked.
+
+(library
+ (name tsync_cloud_files)
+ (enabled_if
+  (= %{os_type} Win32))
+ (library_flags (-linkall))
+ (foreign_stubs
+  (language c)
+  (names cf_stubs sync_root_stubs))
+ (c_library_flags
+  (-lruntimeobject -lole32 -ladvapi32))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_domain
+  tsync_sync
+  tsync_owner
+  tsync_status
+  tsync_cloud_files_rules
+  threads.posix
+  unix))
