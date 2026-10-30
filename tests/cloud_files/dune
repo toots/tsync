@@ -1,0 +1,13 @@
+(executable
+ (name rules_test)
+ (libraries tsync_core tsync_cloud_files_rules))
+
+(rule
+ (with-stdout-to
+  rules_test.output
+  (run ./rules_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rules_test.expected rules_test.output)))
