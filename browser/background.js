@@ -4,7 +4,7 @@
 "use strict";
 
 const HOST = "org.feverdreamtv.tsync";
-const missingHost = "tsync is not installed for this browser: run tsync passwords browser install";
+const missingHost = "tsync is not installed for this browser: install tsync, or run tsync passwords browser install";
 
 // --- the bridge -------------------------------------------------------------
 

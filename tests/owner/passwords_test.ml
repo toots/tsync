@@ -138,15 +138,14 @@ let verifies ~key ~authenticator_data ~client_data_hash signature =
   in
   Mirage_crypto_ec.P256.Dsa.verify ~key (rs_of_der signature) digest
 
-(* §9.1: the bridge as a browser runs it, length-prefixed JSON both ways. *)
+(* §9.1: the bridge as a browser runs it, started by the manifest's path with
+   the caller's origin (browser §2), length-prefixed JSON both ways. *)
 let bridge_session messages =
   let to_bridge_r, to_bridge_w = Unix.pipe ~cloexec:true ()
   and from_bridge_r, from_bridge_w = Unix.pipe ~cloexec:true () in
   let pid =
     Unix.create_process Sys.argv.(1)
-      [|
-        Sys.argv.(1); "passwords"; "browser-host"; "chrome-extension://test/";
-      |]
+      [| Sys.argv.(1); "chrome-extension://test/"; "--parent-window=0" |]
       to_bridge_r from_bridge_w Unix.stderr
   in
   Unix.close to_bridge_r;

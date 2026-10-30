@@ -739,26 +739,12 @@ let browser_dirs () =
         "vivaldi";
       ])
 
-(* A browser starts the host with arguments of its own: a script names this
-   program by its resolved path. *)
-let launcher () =
-  let home = Sys.getenv "HOME" in
-  let dir =
-    if Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" then
-      Filename.concat home "Library/Application Support/tsync"
-    else
-      Filename.concat
-        (match Sys.getenv_opt "XDG_DATA_HOME" with
-          | Some d when d <> "" -> d
-          | _ -> Filename.concat home ".local/share")
-        "tsync"
-  in
-  Filename.concat dir "browser-host"
-
 let manifest_path dir =
   Filename.concat dir ("NativeMessagingHosts/" ^ host_name ^ ".json")
 
-let browser_install ids =
+(* browser §2: the one place the manifest's form is written; packages print it
+   with [browser manifest] and [install] writes it per user. *)
+let manifest ~path ids =
   List.iter
     (fun id ->
       if
@@ -766,27 +752,25 @@ let browser_install ids =
         || not (String.for_all (function 'a' .. 'p' -> true | _ -> false) id)
       then Fail.invalid "%s is not an extension id: 32 letters a to p" id)
     ids;
-  let program = Unix.realpath Sys.executable_name in
-  let script = launcher () in
-  Fs.mkdir_p (Filename.dirname script);
-  Fs.replace ~perm:0o755 script
-    (Printf.sprintf "#!/bin/sh\nexec %s passwords browser-host \"$@\"\n"
-       (Filename.quote program));
-  let manifest =
-    Yojson.Safe.pretty_to_string
-      (`Assoc
-         [
-           ("name", `String host_name);
-           ("description", `String "tsync passwords");
-           ("path", `String script);
-           ("type", `String "stdio");
-           ( "allowed_origins",
-             `List
-               (List.map
-                  (fun id -> `String ("chrome-extension://" ^ id ^ "/"))
-                  (extension_id :: ids)) );
-         ])
-  in
+  if Filename.is_relative path then
+    Fail.invalid "%s is not an absolute path" path;
+  Yojson.Safe.pretty_to_string
+    (`Assoc
+       [
+         ("name", `String host_name);
+         ("description", `String "tsync passwords");
+         ("path", `String path);
+         ("type", `String "stdio");
+         ( "allowed_origins",
+           `List
+             (List.map
+                (fun id -> `String ("chrome-extension://" ^ id ^ "/"))
+                (extension_id :: ids)) );
+       ])
+  ^ "\n"
+
+let browser_install ids =
+  let manifest = manifest ~path:(Unix.realpath Sys.executable_name) ids in
   let installed =
     List.filter_map
       (fun dir ->
@@ -794,7 +778,7 @@ let browser_install ids =
         else (
           let path = manifest_path dir in
           Fs.mkdir_p (Filename.dirname path);
-          Fs.replace ~perm:0o644 path (manifest ^ "\n");
+          Fs.replace ~perm:0o644 path manifest;
           Some path))
       (browser_dirs ())
   in
@@ -810,8 +794,7 @@ let browser_uninstall () =
       if Sys.file_exists path then (
         Sys.remove path;
         say "removed %s" path))
-    (browser_dirs ());
-  if Sys.file_exists (launcher ()) then Sys.remove (launcher ())
+    (browser_dirs ())
 
 let browser_cmd =
   let ids =
@@ -833,6 +816,21 @@ let browser_cmd =
               Cli.run @@ fun () ->
               browser_install ids;
               0)
+          $ ids);
+      Cli.cmd "manifest"
+        ~doc:
+          "Print the native-messaging manifest naming the bridge at $(i,PATH), \
+           for a package to install."
+        Term.(
+          const (fun path ids ->
+              Cli.run @@ fun () ->
+              print_string (manifest ~path ids);
+              0)
+          $ Arg.(
+              required
+              & opt (some string) None
+              & info ["path"] ~docv:"PATH"
+                  ~doc:"The absolute path tsync is installed at.")
           $ ids);
       Cli.cmd "uninstall" ~doc:"Remove what install wrote."
         Term.(

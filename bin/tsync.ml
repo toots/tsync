@@ -1,9 +1,18 @@
 open Cmdliner
 
+(* passwords/browser §2: a browser starts the manifest's path with the caller's
+   origin first, and on Windows a --parent-window the bridge does not use. *)
+let argv =
+  match Array.to_list Sys.argv with
+    | program :: origin :: _
+      when String.starts_with ~prefix:"chrome-extension://" origin ->
+        [| program; "passwords"; "browser-host"; origin |]
+    | _ -> Sys.argv
+
 let () =
   Tsync_config.Paths.claim_group ();
   exit
-    (Cmd.eval'
+    (Cmd.eval' ~argv
        (Cmd.group
           (Cmd.info "tsync" ~doc:"Synchronise folders through object stores.")
           (Daemon_cmds.cmds @ Status_cmd.cmds @ Domain_cmds.cmds
