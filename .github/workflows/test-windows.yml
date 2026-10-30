@@ -96,6 +96,71 @@ jobs:
           name: tsync-windows-x86-64
           path: dist/
 
+      # cloud-files §14: the programs and the identity package signed with the
+      # certificate windows/publisher names, then the installer around them.
+      - name: Sign and build the installer
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.TSYNC_WINDOWS_PFX }}
+          PFX_PASSWORD: ${{ secrets.TSYNC_WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX) { throw 'the TSYNC_WINDOWS_PFX secret is not set' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX))
+          $kit = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1).DirectoryName
+          $timestamp = 'http://timestamp.digicert.com'
+          function Sign($file) {
+            & "$kit\signtool.exe" sign /fd SHA256 /f $pfx /p $env:PFX_PASSWORD /tr $timestamp /td SHA256 $file
+            if ($LASTEXITCODE) { throw "signing $file failed" }
+          }
+          Sign dist\tsync.exe
+          Sign dist\tsyncd.exe
+          $version = "0.0.$env:GITHUB_RUN_NUMBER.0"
+          $publisher = Get-Content windows\publisher -TotalCount 1
+          $package = Join-Path $env:RUNNER_TEMP 'identity'
+          Copy-Item -Recurse windows\package $package
+          $manifest = Join-Path $package 'AppxManifest.xml'
+          (Get-Content $manifest -Raw).Replace('@PUBLISHER@', $publisher).Replace('@VERSION@', $version) | Set-Content $manifest -Encoding utf8
+          & "$kit\makeappx.exe" pack /d $package /p dist\tsync-identity.msix /nv /o
+          if ($LASTEXITCODE) { throw 'packing the identity package failed' }
+          Sign dist\tsync-identity.msix
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /Q "/DVersion=$version" "/DSource=$PWD\dist" "/DOutput=$PWD\installer" /DSign `
+            "/Stsync=`$q$kit\signtool.exe`$q sign /fd SHA256 /f `$q$pfx`$q /p $env:PFX_PASSWORD /tr $timestamp /td SHA256 `$f" `
+            windows\tsync.iss
+          if ($LASTEXITCODE) { throw 'building the installer failed' }
+          Copy-Item windows\tsync-development.cer installer\
+
+      # The certificate is trusted as on a test machine; then each step of
+      # install.ps1 and uninstall.ps1 is checked for what it leaves behind.
+      - name: The installer installs and uninstalls
+        shell: pwsh
+        run: |
+          Import-Certificate -FilePath windows\tsync-development.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
+          $p = Start-Process installer\tsync-setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$env:RUNNER_TEMP\setup.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log"; throw "setup exited $($p.ExitCode)" }
+          $package = Get-AppxPackage -Name org.feverdreamtv.tsync
+          if (-not $package) { throw 'the identity package is not registered' }
+          "identity package: $($package.PackageFullName) at $($package.InstallLocation)"
+          if ($package.InstallLocation -ne $programs) { throw "its external location is $($package.InstallLocation)" }
+          $publisher = Get-Content windows\publisher -TotalCount 1
+          $signer = (Get-AuthenticodeSignature "$programs\tsyncd.exe").SignerCertificate.Subject
+          if ($signer -ne $publisher) { throw "tsyncd.exe is signed by '$signer'" }
+          if (-not (Get-ScheduledTask -TaskPath '\tsync\' -TaskName service -ErrorAction SilentlyContinue)) { throw 'the scheduled task is missing' }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -notcontains $programs) { throw 'the programs folder is not on the PATH' }
+          $p = Start-Process "$programs\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited $($p.ExitCode)" }
+          if (Get-AppxPackage -Name org.feverdreamtv.tsync) { throw 'the identity package is still registered' }
+          if (Get-ScheduledTask -TaskPath '\tsync\' -TaskName service -ErrorAction SilentlyContinue) { throw 'the scheduled task is still there' }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $programs) { throw 'the programs folder is still on the PATH' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-windows-installer
+          path: installer/
+
       - name: Timing-sensitive tests
         id: serial
         run: opam exec -- dune build @runtest-serial -j1
