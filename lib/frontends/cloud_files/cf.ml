@@ -154,3 +154,5 @@ let register ~id ~path ~display_name ~version ~icon =
 external unregister : string -> unit = "tsync_cf_unregister"
 external user_sid : unit -> string = "tsync_cf_user_sid"
 external upcase : string -> string = "tsync_cf_upcase"
+external identity : string -> string option = "tsync_cf_identity"
+external hydrate : string -> unit = "tsync_cf_hydrate"
