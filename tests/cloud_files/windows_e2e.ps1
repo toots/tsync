@@ -55,6 +55,9 @@ try {
   } | ConvertTo-Json -Depth 6
   $configPath = Join-Path $env:LOCALAPPDATA 'tsync\config.json'
   New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
+  # security-model §7.1: the config's folder grants the user alone.
+  icacls (Split-Path $configPath) /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
+  Check 'the config folder is private' ($LASTEXITCODE -eq 0)
   Set-Content -Path $configPath -Value $config -Encoding utf8
 
   Step 'installing'
