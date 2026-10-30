@@ -3,7 +3,14 @@ open Tsync_owner
 open Tsync_cloud_files_rules
 module Domain = Tsync_domain.Domain
 
-type t = { root : string; handler : Handler.t; connection : Cf.connection }
+type t = {
+  engine : (module Tsync_sync.Engine.S);
+  root : string;
+  handler : Handler.t;
+  connection : Cf.connection;
+}
+
+exception Failed_with of Cf.status * exn
 
 (* cloud-files §12 *)
 let status_of_failure = function
@@ -95,13 +102,73 @@ let fetch_placeholders t (r : Cf.request) =
                      else Some (placeholder row name))
                    presented))
 
+(* §9.1: transfers start at a multiple of this and are a multiple of it long,
+   except the one that ends at end of file. *)
+let alignment = 4096
+let piece = 1 lsl 20
+
+(* §9.1: the version served is the placeholder's, held for the whole fetch; a
+   content changed since answers not in sync, never new bytes under the old
+   identity. *)
+let fetch_data t (r : Cf.request) =
+  let (module E : Tsync_sync.Engine.S) = t.engine in
+  match Identity.decode r.identity with
+    | None -> raise (Failed_with (`Invalid, Failure "a foreign placeholder"))
+    | Some id -> (
+        let held =
+          try
+            Rt.run_sync (fun () ->
+                let path = Handler.path_of_ref t.handler id.ref_ in
+                E.atomically (fun () ->
+                    if (E.stat path).content_id = Some id.content_id then
+                      Some (E.retain path)
+                    else None))
+          with e -> raise (Failed_with (status_of_failure e, e))
+        in
+        match held with
+          | None ->
+              raise
+                (Failed_with
+                   (`Not_in_sync, Failure "its content changed in the domain"))
+          | Some h ->
+              Fun.protect
+                ~finally:(fun () -> Rt.run_sync (fun () -> E.release h))
+                (fun () ->
+                  let start = r.offset / alignment * alignment in
+                  let stop =
+                    min r.file_size
+                      ((r.offset + r.length + alignment - 1)
+                      / alignment * alignment)
+                  in
+                  let rec send off =
+                    if off < stop then (
+                      let len = min piece (stop - off) in
+                      let bytes =
+                        try Rt.run_sync (fun () -> E.read h ~off ~len)
+                        with e -> raise (Failed_with (status_of_failure e, e))
+                      in
+                      let got = Bigstring.length bytes in
+                      if got = 0 then
+                        raise
+                          (Failed_with
+                             ( `Unsuccessful,
+                               Failure "the content ended before its size" ));
+                      Cf.transfer_data t.connection r `Success bytes ~offset:off
+                        ~length:got;
+                      send (off + got))
+                  in
+                  send start))
+
 let handle t (r : Cf.request) =
   try
     match r.kind with
       | `Fetch_placeholders -> fetch_placeholders t r
-      | `Fetch_data ->
-          Cf.transfer_data t.connection r `Unsuccessful (Bigstring.create 0)
-            ~offset:r.offset ~length:r.length
+      | `Fetch_data -> (
+          try fetch_data t r
+          with Failed_with (status, e) ->
+            Log.warn "cloud_files: reading %s: %s" r.path (Printexc.to_string e);
+            Cf.transfer_data t.connection r status (Bigstring.create 0)
+              ~offset:r.offset ~length:r.length)
       | `Delete -> Cf.ack t.connection r `Delete `Access_denied
       | `Rename -> Cf.ack t.connection r `Rename `Access_denied
       | `Dehydrate -> Cf.ack t.connection r `Dehydrate `Success
@@ -115,14 +182,14 @@ let handle t (r : Cf.request) =
 (* §8.3: the shell's cloud icon until the programs carry their own. *)
 let icon = "%SystemRoot%\\system32\\imageres.dll,-1043"
 
-let start (domain : Domain.t) root handler =
+let start (domain : Domain.t) engine root handler =
   Fs.mkdir_p root;
   let name = Domain_name.to_string domain.name in
   Cf.register
     ~id:(Sync_root_id.id ~sid:(Cf.user_sid ()) domain.name)
     ~path:root ~display_name:name ~version:"1" ~icon;
   let connection = Cf.connect root in
-  let t = { root; handler; connection } in
+  let t = { engine; root; handler; connection } in
   Cf.on_callback (handle t);
   Log.info "cloud_files: %s presented at %s" name root;
   let (_unregister : unit -> unit) =
@@ -134,7 +201,7 @@ let start (domain : Domain.t) root handler =
   in
   ()
 
-let present root (domain : Domain.t) _engine ~publish:_ =
+let present root (domain : Domain.t) engine ~publish:_ =
   let hooks =
     {
       Handler.no_hooks with
@@ -156,7 +223,7 @@ let present root (domain : Domain.t) _engine ~publish:_ =
             });
     }
   in
-  (hooks, fun handler -> start domain root handler)
+  (hooks, fun handler -> start domain engine root handler)
 
 let host ~mount:_ domains ~run =
   match domains with
