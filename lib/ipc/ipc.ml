@@ -490,6 +490,9 @@ module Client = struct
       | line -> line
       | exception Unix.Unix_error ((ENOENT | ECONNREFUSED | ENOTSOCK), _, _) ->
           raise (Not_serving path)
+      (* Windows answers a path no socket is bound to with ENETDOWN. *)
+      | exception Unix.Unix_error (ENETDOWN, _, _) when Sys.win32 ->
+          raise (Not_serving path)
 
   let read ?timeout t =
     let deadline = Option.map (( +. ) (Rt.now ())) timeout in
