@@ -82,6 +82,8 @@ jobs:
         run: |
           mkdir dist
           cp _build/default/bin/tsync.exe _build/default/bin/tsyncd.exe dist/
+          # dune's outputs are read-only, and signing rewrites the file.
+          chmod u+w dist/*.exe
           toolchain="$(opam exec -- x86_64-w64-mingw32-gcc -print-sysroot)/mingw/bin"
           for dll in $(opam exec -- x86_64-w64-mingw32-objdump -p dist/tsync.exe | sed -n 's/^[[:space:]]*DLL Name: //p'); do
             if [ -f "$toolchain/$dll" ]; then cp "$toolchain/$dll" dist/; fi
