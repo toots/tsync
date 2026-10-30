@@ -75,7 +75,7 @@
     menu.style.maxHeight = "";
     const above = r.top - 6, below = innerHeight - r.bottom - 6;
     const up = menu.offsetHeight <= above || above >= below;
-    menu.style.maxHeight = `${Math.max(up ? above : below, 80)}px`;
+    menu.style.maxHeight = `${Math.max(up ? above : below, 0)}px`;
     menu.style.left = `${Math.max(4, Math.min(r.left, innerWidth - menu.offsetWidth - 4))}px`;
     if (up) {
       menu.style.top = "";
