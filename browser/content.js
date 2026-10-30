@@ -9,6 +9,8 @@
   window.__tsyncContent = true;
 
   const ICON = chrome.runtime.getURL("icons/field.svg");
+  const CLOSED = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
+  const OPENED = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 6.5 5 3.5 8 6.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
   const kinds = new WeakMap();
   let conditional = null; // a passkey request waiting for a pick (§5)
 
@@ -18,12 +20,14 @@
   const shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `<style>
     :host { all: initial; }
-    .icon { position: fixed; width: 20px; height: 20px; cursor: pointer; z-index: 2147483646;
-            background: url("${ICON}") center / 20px no-repeat; border: 0; padding: 0; border-radius: 50%; }
+    .icon { position: fixed; width: 34px; height: 20px; cursor: pointer; z-index: 2147483646; border: 0; padding: 0;
+            border-radius: 10px; background: url("${ICON}") left center / 20px no-repeat, url("${CLOSED}") right 4px center / 10px no-repeat, #2563eb; }
+    .icon.open { background: url("${ICON}") left center / 20px no-repeat, url("${OPENED}") right 4px center / 10px no-repeat, #2563eb; }
     .icon:hover { box-shadow: 0 0 0 3px #2563eb33; }
     .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px;
             background: Canvas; color: CanvasText; border: 1px solid #8884; border-radius: 8px;
-            box-shadow: 0 4px 16px #0003; font: 13px system-ui, sans-serif; padding: 4px; }
+            box-shadow: 0 4px 16px #0003; font: 13px system-ui, sans-serif; padding: 4px;
+            box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
     .row { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit;
            padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
     .row:hover, .row:focus { background: #8882; }
@@ -59,17 +63,21 @@
 
   function placeIcon(el, node) {
     const r = el.getBoundingClientRect();
-    node.style.left = `${r.right - 28}px`;
+    node.style.left = `${r.right - 42}px`;
     node.style.top = `${r.top + (r.height - 20) / 2}px`;
   }
 
   // §3.2: Chrome draws its own autofill dropdown below the field, above anything a
   // page holds, so the menu opens above the field and grows upward; below only
-  // when there is no room above.
+  // when there is more room there. It scrolls when taller than its side's room.
   function placeMenu(el) {
     const r = el.getBoundingClientRect();
-    menu.style.left = `${r.left}px`;
-    if (r.top >= menu.offsetHeight + 4) {
+    menu.style.maxHeight = "";
+    const above = r.top - 6, below = innerHeight - r.bottom - 6;
+    const up = menu.offsetHeight <= above || above >= below;
+    menu.style.maxHeight = `${Math.max(up ? above : below, 80)}px`;
+    menu.style.left = `${Math.max(4, Math.min(r.left, innerWidth - menu.offsetWidth - 4))}px`;
+    if (up) {
       menu.style.top = "";
       menu.style.bottom = `${innerHeight - r.top + 2}px`;
     } else {
@@ -124,7 +132,8 @@
     b.className = "icon";
     b.title = "tsync";
     b.addEventListener("mousedown", (e) => e.preventDefault());
-    b.addEventListener("click", (e) => seen(e) && open(el));
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", (e) => seen(e) && (openFor === el ? close() : open(el)));
     shadow.insertBefore(b, menu);
     painted.observe(b);
     return b;
@@ -177,11 +186,13 @@
   new MutationObserver(rescan).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["type", "autocomplete", "hidden", "style", "class"] });
   scan();
 
-  window.addEventListener("scroll", () => { menu.hidden = true; refollow(); }, true);
+  window.addEventListener("scroll", (e) => { if (e.target !== host) { close(); refollow(); } }, true);
   window.addEventListener("resize", refollow);
   document.addEventListener("transitionend", refollow, true);
   document.addEventListener("focusin", refollow, true);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }, true);
+  // Clicks inside the overlay reach the page retargeted to its host.
+  document.addEventListener("mousedown", (e) => { if (e.target !== host && e.target !== openFor) close(); }, true);
 
   // --- filling (§3.2): on a gesture only -------------------------------------
 
@@ -227,8 +238,25 @@
     return d;
   }
 
+  // The field whose menu is open, its badge showing the open state.
+  let openFor = null;
+  function showOpen(el, opened) {
+    const b = badges.get(el);
+    if (!b) return;
+    b.classList.toggle("open", opened);
+    b.setAttribute("aria-expanded", String(opened));
+  }
+  function close() {
+    menu.hidden = true;
+    if (openFor) showOpen(openFor, false);
+    openFor = null;
+  }
+
   async function open(el) {
     const kind = kinds.get(el);
+    close();
+    openFor = el;
+    showOpen(el, true);
     menu.replaceChildren(note("…"));
     menu.hidden = false;
     placeMenu(el);
@@ -263,7 +291,7 @@
   // included; the form remembers the login it went to, for its submit.
   const suggested = new WeakMap();
   async function suggest(el) {
-    menu.hidden = true;
+    close();
     const scope = el.form || document;
     let username = "";
     for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "username" && input.value) username = input.value;
@@ -279,7 +307,7 @@
   }
 
   async function pick(el, login, kind) {
-    menu.hidden = true;
+    close();
     let values;
     try {
       values = await chrome.runtime.sendMessage({ type: "fill", domain: login.domain, id: login.id,
@@ -392,7 +420,7 @@
 
   // §5: the pick itself is in the extension's sheet, like a modal request's.
   async function usePasskey() {
-    menu.hidden = true;
+    close();
     const request = conditional;
     conditional = null;
     const reply = await chrome.runtime.sendMessage({ type: "webauthn", kind: "get", publicKey: request.publicKey }).catch(() => ({ error: unreachable }));

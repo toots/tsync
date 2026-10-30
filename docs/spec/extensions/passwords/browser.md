@@ -79,9 +79,11 @@ capability. What has been seen working is recorded in §10.
 - On the gesture the service worker asks `match` with the **origin of the frame**, taken from the
   browser (`MessageSender.origin` of the content script's message), never from the page. It shows
   the logins it answers in a menu above the field, drawn by the extension (§1), by title and
-  username; below the field only when there is no room above. The browser draws its own autofill
+  username; below the field only when there is more room there. It stays inside the window,
+  scrolling when its rows are taller than the room on its side. The browser draws its own autofill
   dropdown below the field, over anything a page or an extension draws, so a menu there would be
-  hidden under it. A locked domain is a row *tsync is locked — unlock it in tsync*, which does nothing
+  hidden under it. The icon is a toggle, showing whether its menu is open: a second click closes
+  the menu, as do Escape, a scroll and a click elsewhere on the page. A locked domain is a row *tsync is locked — unlock it in tsync*, which does nothing
   (extensions README §5).
 - **A pick counts only as the user saw it**: a trusted click (`isTrusted`) on the icon or a row, the
   overlay on top at the click's point (`elementFromPoint`), visible, unfiltered, with nothing in the
