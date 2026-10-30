@@ -4,6 +4,9 @@
 (** [content_id] is empty for a folder. *)
 type t = { ref_ : string; content_id : string }
 
+(** A folder's carries no content id, whatever its row says. *)
+val of_item : ref_:string -> is_dir:bool -> content_id:string option -> t
+
 (** Three lines, UTF-8: [t1], the reference, the content id. *)
 val encode : t -> string
 

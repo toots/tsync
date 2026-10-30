@@ -156,3 +156,36 @@ external user_sid : unit -> string = "tsync_cf_user_sid"
 external upcase : string -> string = "tsync_cf_upcase"
 external identity : string -> string option = "tsync_cf_identity"
 external hydrate : string -> unit = "tsync_cf_hydrate"
+
+type state = {
+  is_dir : bool;
+  other_reparse : bool;
+  placeholder : bool;
+  in_sync : bool;
+  identity : string;
+  usn : int64;
+  unpopulated : bool;
+}
+
+external state : string -> state option = "tsync_cf_state"
+
+type watch = int64
+
+external watch_open : string -> watch = "tsync_cf_watch_open"
+
+external watch_read : watch -> (int * string) list option
+  = "tsync_cf_watch_read"
+
+external watch_close : watch -> unit = "tsync_cf_watch_close"
+
+type held = int64
+
+external hold : string -> held option = "tsync_cf_hold"
+external held_usn : held -> int64 = "tsync_cf_held_usn"
+external release : held -> unit = "tsync_cf_release"
+
+external set_identity_ : held -> bool -> string -> bool -> unit
+  = "tsync_cf_set_identity"
+
+let set_identity h ~placeholder identity ~in_sync =
+  set_identity_ h placeholder identity in_sync
