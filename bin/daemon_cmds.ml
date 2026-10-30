@@ -12,13 +12,9 @@ open Cli
 let log_to_service_file () =
   match Paths.service_log () with
     | Some file when not (Unix.isatty Unix.stderr) ->
-        let dir = Filename.dirname file in
-        let rec mkdir_p d =
-          if not (Sys.file_exists d) then (
-            mkdir_p (Filename.dirname d);
-            try Unix.mkdir d 0o755 with Unix.Unix_error (EEXIST, _, _) -> ())
-        in
-        mkdir_p dir;
+        (* security-model §7.1: on Windows this can be the first folder made
+           under the one that holds the config, which must be private. *)
+        Fs.mkdir_p ~durable:false (Filename.dirname file);
         let fd = Fs.unix_openfile file [O_WRONLY; O_APPEND; O_CREAT] 0o644 in
         Fs.with_fd fd (fun fd ->
             Unix.dup2 ~cloexec:false fd Unix.stdout;
@@ -78,6 +74,10 @@ let start mount tls verbose =
   set_verbose verbose;
   Atomic.set Log.min_level Log.Debug;
   match Paths.read_config () with
+    (* 07 §3.1: a config that cannot be read is a config error, not a crash. *)
+    | exception Fail.E f ->
+        prerr_endline ("tsync: " ^ f.reason);
+        78
     | None when Fs.is_macos ->
         prerr_endline "tsync: no config; serving the menu until one exists";
         macos_service tls (no_domains ())
