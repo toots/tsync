@@ -59,6 +59,8 @@ try {
   icacls (Split-Path $configPath) /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
   Check 'the config folder is private' ($LASTEXITCODE -eq 0)
   Set-Content -Path $configPath -Value $config -Encoding utf8
+  $acl = Get-Acl $configPath
+  Step "  config owner $($acl.Owner); entries: $(($acl.Access | ForEach-Object { "$($_.IdentityReference) $($_.AccessControlType)" }) -join ', ')"
 
   Step 'installing'
   Import-Certificate -FilePath (Join-Path (Split-Path $Setup) 'tsync-development.cer') `
