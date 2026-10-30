@@ -478,6 +478,21 @@ static int process_user(HANDLE process, char *buf, DWORD size) {
   return ok;
 }
 
+/* An elevated administrator's new files are owned by the Administrators group,
+   the token's default owner, so that owner is this user's as much as its SID. */
+static int owned_by_me(PSID owner) {
+  HANDLE token;
+  DWORD needed;
+  char user[256], default_owner[256];
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 0;
+  BOOL ok = GetTokenInformation(token, TokenUser, user, sizeof user, &needed) &&
+            GetTokenInformation(token, TokenOwner, default_owner, sizeof default_owner,
+                                &needed);
+  CloseHandle(token);
+  return ok && (EqualSid(owner, ((TOKEN_USER *)user)->User.Sid) ||
+                EqualSid(owner, ((TOKEN_OWNER *)default_owner)->Owner));
+}
+
 CAMLprim value tsync_peer_same_user(value fd) {
   CAMLparam1(fd);
   ULONG pid = 0;
@@ -511,7 +526,7 @@ CAMLprim value tsync_is_private(value path) {
   /* security-model §7.1: what counts is that no entry, inherited or not,
      grants anyone else; a file in a private folder inherits its one entry. */
   int private_ = dacl != NULL && process_user(GetCurrentProcess(), me, sizeof me) &&
-                 EqualSid(owner, ((TOKEN_USER *)me)->User.Sid);
+                 owned_by_me(owner);
   for (DWORD i = 0; private_ && i < dacl->AceCount; i++) {
     ACE_HEADER *ace;
     if (!GetAce(dacl, i, (void **)&ace)) private_ = 0;
@@ -530,13 +545,11 @@ CAMLprim value tsync_owned_by_this_user(value path) {
   wchar_t *p = wide_path(path);
   PSID owner = NULL;
   PSECURITY_DESCRIPTOR sd = NULL;
-  char me[256];
   DWORD err = GetNamedSecurityInfoW(p, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner,
                                     NULL, NULL, NULL, &sd);
   caml_stat_free(p);
   if (err != ERROR_SUCCESS) win_fail(err, "owner", path);
-  int mine = process_user(GetCurrentProcess(), me, sizeof me) &&
-             EqualSid(owner, ((TOKEN_USER *)me)->User.Sid);
+  int mine = owned_by_me(owner);
   LocalFree(sd);
   CAMLreturn(Val_bool(mine));
 }
