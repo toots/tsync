@@ -96,7 +96,10 @@ See [the Android page](android.md#passwords-and-autofill).
 
 - **Setting it up.** Run `tsync passwords browser install` once per user: it lets your browsers start tsync's bridge. Then add tsync's extension from the Chrome Web Store, which keeps it up to date. Its store listing is not published yet; until it is, the extension is loaded from tsync's source, `browser/` in *Developer mode* with *Load unpacked*, which is meant for development.
 - **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
-- **Codes.** A two-factor field offers the code of the site's login that links one. The popup (tsync's toolbar icon) also copies it.
+- **Codes.** A two-factor field offers the code of each of the site's logins that links one, by username, under each vault's name when several vaults have one. The popup (tsync's toolbar icon) also copies it.
+
+  ![The code menu on a two-factor field: two accounts in each of two vaults](images/browser-code-menu.png)
+
 - **Saving.** Signing in with a password you typed asks *Save this login in tsync?*, or *Update the password* when tsync has another one for that username. *Never for this site* stops asking there.
 - **A strong password.** Signing up, or changing a password, a new-password field offers *Use a strong password*: it fills a generated password, and the field confirming it, and saves the login in tsync at once; submitting the form adds the username to that login.
 - **Passkeys.** A site asking to make or use a passkey shows tsync's sheet, naming the site; on Linux it asks the vault's passphrase when the site wants you verified, on a Mac Touch ID. tsync answers every passkey request, even on a site where it has none: Chrome only gets a sign-in when you pick *Use a phone or security key*, and never a new passkey.
