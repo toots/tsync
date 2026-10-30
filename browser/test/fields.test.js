@@ -2,7 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { kind, classify } = require("../fields.js");
+const { kind, classify, submits } = require("../fields.js");
 
 test("autocomplete decides first", () => {
   assert.equal(kind({ type: "text", autocomplete: "one-time-code" }), "code");
@@ -84,4 +84,10 @@ test("passwords §5.1: the fields that ask for a new password", () => {
   assert.deepEqual(newPasswords(old, classify(old)), [false, true], "named the current one");
   const bold = [{ type: "password", name: "bold" }, { type: "password", name: "x" }];
   assert.deepEqual(newPasswords(bold, classify(bold)), [true, true]);
+});
+
+test("Google's formless Next submits, its Forgot password does not", () => {
+  assert.equal(submits(["Next", null, "", "", "passwordNext"]), true);
+  assert.equal(submits(["Forgot password?", null, "", "", "forgotPassword"]), false);
+  assert.equal(submits(["", "Show password", "", "", null]), false);
 });

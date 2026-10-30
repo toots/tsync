@@ -62,7 +62,13 @@ const TsyncFields = (() => {
     });
   }
 
-  return { kind, classify, newPasswords };
+  // A button outside a form is a sign-in's only when its names say nothing else: a page drawing
+  // its sign-in by script puts Next beside Forgot password, both plain buttons.
+  // ponytail: English names only; a page's ids are English more often than its labels.
+  const NOT_SUBMIT = /forgot|reset|recover|help|cancel|back|show|hide|try.another|create|sign.?up|regist/i;
+  const submits = (names) => !NOT_SUBMIT.test(names.filter(Boolean).join(" "));
+
+  return { kind, classify, newPasswords, submits };
 })();
 
 if (typeof module !== "undefined") module.exports = TsyncFields;
