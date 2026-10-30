@@ -22,6 +22,8 @@ static CfDisconnectSyncRoot_t cf_disconnect;
 static CfExecute_t cf_execute;
 static CfGetPlaceholderInfo_t cf_get_placeholder_info;
 static CfHydratePlaceholder_t cf_hydrate;
+static CfConvertToPlaceholder_t cf_convert;
+static CfUpdatePlaceholder_t cf_update;
 
 static void fail_hresult(const char *what, HRESULT hr) {
   char message[128];
@@ -42,8 +44,11 @@ static void load_api(void) {
   cf_get_placeholder_info =
       (CfGetPlaceholderInfo_t)GetProcAddress(library, "CfGetPlaceholderInfo");
   cf_hydrate = (CfHydratePlaceholder_t)GetProcAddress(library, "CfHydratePlaceholder");
+  cf_convert = (CfConvertToPlaceholder_t)GetProcAddress(library, "CfConvertToPlaceholder");
+  cf_update = (CfUpdatePlaceholder_t)GetProcAddress(library, "CfUpdatePlaceholder");
   if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL ||
-      cf_get_placeholder_info == NULL || cf_hydrate == NULL)
+      cf_get_placeholder_info == NULL || cf_hydrate == NULL || cf_convert == NULL ||
+      cf_update == NULL)
     caml_failwith("cldapi.dll lacks a function the provider calls");
 }
 
@@ -437,5 +442,188 @@ CAMLprim value tsync_cf_hydrate(value _path) {
   CloseHandle(h);
   if (FAILED(hr))
     fail_hresult("making the content whole", hr);
+  CAMLreturn(Val_unit);
+}
+
+#include <winioctl.h>
+
+/* The recursive change watch (cloud-files §9.4). The handle is an int64 so
+   OCaml can hold it; reads block their thread only. */
+CAMLprim value tsync_cf_watch_open(value _path) {
+  CAMLparam1(_path);
+  wchar_t *path = utf16_of_value(_path);
+  HANDLE h = CreateFileW(path, FILE_LIST_DIRECTORY,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(path);
+  if (h == INVALID_HANDLE_VALUE)
+    caml_failwith("the sync root cannot be watched");
+  CAMLreturn(caml_copy_int64((int64_t)(intptr_t)h));
+}
+
+CAMLprim value tsync_cf_watch_close(value _handle) {
+  CloseHandle((HANDLE)(intptr_t)Int64_val(_handle));
+  return Val_unit;
+}
+
+/* [Some] list of (action, relative path), or [None] when events were lost: an
+   overflow, which the caller answers with a sweep. */
+CAMLprim value tsync_cf_watch_read(value _handle) {
+  CAMLparam1(_handle);
+  CAMLlocal4(_list, _cell, _event, _name);
+  HANDLE h = (HANDLE)(intptr_t)Int64_val(_handle);
+  DWORD size = 64 * 1024, returned = 0;
+  BYTE *buffer = malloc(size);
+  if (buffer == NULL)
+    caml_raise_out_of_memory();
+  caml_release_runtime_system();
+  BOOL ok = ReadDirectoryChangesW(
+      h, buffer, size, TRUE,
+      FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+          FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
+          FILE_NOTIFY_CHANGE_LAST_WRITE,
+      &returned, NULL, NULL);
+  DWORD error = GetLastError();
+  caml_acquire_runtime_system();
+  if (!ok && error != ERROR_NOTIFY_ENUM_DIR) {
+    free(buffer);
+    caml_failwith("the sync root's watch failed");
+  }
+  if (!ok || returned == 0) {
+    free(buffer);
+    CAMLreturn(Val_none);
+  }
+  _list = Val_emptylist;
+  for (BYTE *at = buffer;;) {
+    FILE_NOTIFY_INFORMATION *n = (FILE_NOTIFY_INFORMATION *)at;
+    _name = value_of_utf16_length(n->FileName, (int)(n->FileNameLength / sizeof(WCHAR)));
+    _event = caml_alloc_tuple(2);
+    Store_field(_event, 0, Val_long(n->Action));
+    Store_field(_event, 1, _name);
+    _cell = caml_alloc_small(2, 0);
+    Field(_cell, 0) = _event;
+    Field(_cell, 1) = _list;
+    _list = _cell;
+    if (n->NextEntryOffset == 0)
+      break;
+    at += n->NextEntryOffset;
+  }
+  free(buffer);
+  CAMLreturn(caml_alloc_some(_list));
+}
+
+static HANDLE open_item(const wchar_t *path, DWORD access, DWORD share) {
+  return CreateFileW(path, access, share, NULL, OPEN_EXISTING,
+                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+}
+
+static LONGLONG usn_of(HANDLE h) {
+  BYTE record[1024];
+  DWORD returned = 0;
+  if (!DeviceIoControl(h, FSCTL_READ_FILE_USN_DATA, NULL, 0, record, sizeof record,
+                       &returned, NULL))
+    return -1;
+  return ((USN_RECORD *)record)->Usn;
+}
+
+#define CLOUD_TAG_MASK 0xFFFF0FFFu
+#define CLOUD_TAG 0x9000001Au
+
+/* An item as the take reads it (cloud-files §9.3): the fields of
+   Cf.state, in order, or [None] when it is gone. */
+CAMLprim value tsync_cf_state(value _path) {
+  CAMLparam1(_path);
+  CAMLlocal3(_state, _identity, _usn);
+  load_api();
+  wchar_t *path = utf16_of_value(_path);
+  caml_release_runtime_system();
+  HANDLE h = open_item(path, FILE_READ_ATTRIBUTES,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+  FILE_ATTRIBUTE_TAG_INFO tag = {0};
+  BOOL have_tag = h != INVALID_HANDLE_VALUE &&
+                  GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag, sizeof tag);
+  DWORD size = sizeof(CF_PLACEHOLDER_BASIC_INFO) + 4096, written = 0;
+  CF_PLACEHOLDER_BASIC_INFO *info = calloc(1, size);
+  BOOL placeholder = have_tag && info != NULL &&
+                     (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                     (tag.ReparseTag & CLOUD_TAG_MASK) == CLOUD_TAG &&
+                     SUCCEEDED(cf_get_placeholder_info(h, CF_PLACEHOLDER_INFO_BASIC, info,
+                                                       size, &written));
+  LONGLONG usn = have_tag ? usn_of(h) : -1;
+  if (h != INVALID_HANDLE_VALUE)
+    CloseHandle(h);
+  caml_acquire_runtime_system();
+  free(path);
+  if (!have_tag) {
+    free(info);
+    CAMLreturn(Val_none);
+  }
+  BOOL other_reparse = (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                       (tag.ReparseTag & CLOUD_TAG_MASK) != CLOUD_TAG;
+  _identity = placeholder ? caml_alloc_initialized_string(info->FileIdentityLength,
+                                                          (const char *)info->FileIdentity)
+                          : caml_copy_string("");
+  _usn = caml_copy_int64(usn);
+  _state = caml_alloc_tuple(7);
+  Store_field(_state, 0, Val_bool(tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY));
+  Store_field(_state, 1, Val_bool(other_reparse));
+  Store_field(_state, 2, Val_bool(placeholder));
+  Store_field(_state, 3, Val_bool(placeholder && info->InSyncState == 1));
+  Store_field(_state, 4, _identity);
+  Store_field(_state, 5, _usn);
+  /* FILE_ATTRIBUTE_RECALL_ON_OPEN: a folder whose children were never asked. */
+  Store_field(_state, 6, Val_bool(tag.FileAttributes & 0x40000));
+  free(info);
+  CAMLreturn(caml_alloc_some(_state));
+}
+
+/* A handle that denies writing to others, through which the take converts or
+   updates the item; [None] while a writer holds it (cloud-files §9.3). */
+CAMLprim value tsync_cf_hold(value _path) {
+  CAMLparam1(_path);
+  wchar_t *path = utf16_of_value(_path);
+  caml_release_runtime_system();
+  HANDLE h = open_item(path, FILE_READ_ATTRIBUTES | WRITE_DAC | SYNCHRONIZE,
+                       FILE_SHARE_READ | FILE_SHARE_DELETE);
+  caml_acquire_runtime_system();
+  free(path);
+  if (h == INVALID_HANDLE_VALUE)
+    CAMLreturn(Val_none);
+  CAMLreturn(caml_alloc_some(caml_copy_int64((int64_t)(intptr_t)h)));
+}
+
+CAMLprim value tsync_cf_held_usn(value _handle) {
+  return caml_copy_int64(usn_of((HANDLE)(intptr_t)Int64_val(_handle)));
+}
+
+CAMLprim value tsync_cf_release(value _handle) {
+  CloseHandle((HANDLE)(intptr_t)Int64_val(_handle));
+  return Val_unit;
+}
+
+/* Stores an identity on a held item, converting it to a placeholder when it is
+   not one; [in_sync] marks it so. */
+CAMLprim value tsync_cf_set_identity(value _handle, value _placeholder, value _identity,
+                                     value _in_sync) {
+  CAMLparam4(_handle, _placeholder, _identity, _in_sync);
+  load_api();
+  HANDLE h = (HANDLE)(intptr_t)Int64_val(_handle);
+  DWORD length = (DWORD)caml_string_length(_identity);
+  void *identity = malloc(length == 0 ? 1 : length);
+  if (identity == NULL)
+    caml_raise_out_of_memory();
+  memcpy(identity, String_val(_identity), length);
+  BOOL in_sync = Bool_val(_in_sync), placeholder = Bool_val(_placeholder);
+  caml_release_runtime_system();
+  HRESULT hr =
+      placeholder
+          ? cf_update(h, NULL, identity, length, NULL, 0,
+                      in_sync ? CF_UPDATE_FLAG_MARK_IN_SYNC : 0, NULL, NULL)
+          : cf_convert(h, identity, length, in_sync ? CF_CONVERT_FLAG_MARK_IN_SYNC : 0,
+                       NULL, NULL);
+  caml_acquire_runtime_system();
+  free(identity);
+  if (FAILED(hr))
+    fail_hresult(placeholder ? "updating the placeholder" : "converting to a placeholder", hr);
   CAMLreturn(Val_unit);
 }

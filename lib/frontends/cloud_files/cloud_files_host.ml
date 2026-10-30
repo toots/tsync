@@ -8,6 +8,7 @@ type t = {
   root : string;
   handler : Handler.t;
   connection : Cf.connection;
+  take : Take.t;
 }
 
 exception Failed_with of Cf.status * exn
@@ -20,18 +21,9 @@ let status_of_failure = function
   | Fail.E { kind = Unreachable | Link; _ } -> `Network_unavailable
   | _ -> `Unsuccessful
 
-(* Windows compares paths ignoring case, with either separator. *)
-let same_path a b =
-  let norm p =
-    let p = Cf.upcase (String.map (function '/' -> '\\' | c -> c) p) in
-    if String.ends_with ~suffix:"\\" p then String.sub p 0 (String.length p - 1)
-    else p
-  in
-  norm a = norm b
-
 (* §8.1: the sync root itself carries no identity and stands for root. *)
 let ref_of t (r : Cf.request) =
-  if r.identity = "" && same_path r.path t.root then Some "root"
+  if r.identity = "" && Win_path.same r.path t.root then Some "root"
   else Option.map (fun (i : Identity.t) -> i.ref_) (Identity.decode r.identity)
 
 let rows t ref_ =
@@ -179,7 +171,7 @@ let decoded identity = Option.bind identity (fun s -> Identity.decode s)
 
 (* A folder of the sync root as the domain names it, by its placeholder. *)
 let folder_ref t dir =
-  if same_path dir t.root then "root"
+  if Win_path.same dir t.root then "root"
   else (
     match decoded (Cf.identity dir) with
       | Some id -> id.ref_
@@ -292,9 +284,8 @@ let handle t (r : Cf.request) =
       | `Delete -> acknowledge t r `Delete delete
       | `Rename -> acknowledge t r `Rename rename
       | `Dehydrate -> Cf.ack t.connection r `Dehydrate `Success
-      | `Cancel_fetch_data | `Cancel_fetch_placeholders | `Close_completion
-      | `Other _ ->
-          ()
+      | `Close_completion -> if not (own r) then Take.schedule t.take r.path
+      | `Cancel_fetch_data | `Cancel_fetch_placeholders | `Other _ -> ()
   with e ->
     Log.err "cloud_files: a callback on %s failed: %s" r.path
       (Printexc.to_string e)
@@ -309,8 +300,17 @@ let start (domain : Domain.t) engine root handler =
     ~id:(Sync_root_id.id ~sid:(Cf.user_sid ()) domain.name)
     ~path:root ~display_name:name ~version:"1" ~icon;
   let connection = Cf.connect root in
-  let t = { engine; root; handler; connection } in
+  let take =
+    Take.create ~engine ~handler ~root
+      ~staging:
+        (List.fold_left Filename.concat
+           (Tsync_config.Paths.cache_root ())
+           [name; "staging"])
+      ~read_only:domain.domain.read_only ()
+  in
+  let t = { engine; root; handler; connection; take } in
   Cf.on_callback (handle t);
+  Take.start take;
   Log.info "cloud_files: %s presented at %s" name root;
   let (_unregister : unit -> unit) =
     Stop.on_request (fun () ->

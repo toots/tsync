@@ -98,3 +98,41 @@ val hydrate : string -> unit
 
 (** A name as NTFS compares names, for case groups (§7.2). *)
 val upcase : string -> string
+
+(** An item as the take reads it (§9.3). *)
+type state = {
+  is_dir : bool;
+  other_reparse : bool;  (** a link or another provider's reparse point *)
+  placeholder : bool;
+  in_sync : bool;
+  identity : string;  (** empty unless [placeholder] *)
+  usn : int64;  (** the volume's update sequence number of its last change *)
+  unpopulated : bool;  (** a folder whose children were never asked *)
+}
+
+(** [None] when nothing is at the path. *)
+val state : string -> state option
+
+(** The recursive change watch of a folder (§9.4). *)
+type watch
+
+val watch_open : string -> watch
+
+(** Blocks for the next changes: (action, path relative to the folder), or
+    [None] when events were lost. *)
+val watch_read : watch -> (int * string) list option
+
+val watch_close : watch -> unit
+
+(** An item held open against other writers. *)
+type held
+
+(** [None] while another process holds the item open for writing. *)
+val hold : string -> held option
+
+val held_usn : held -> int64
+val release : held -> unit
+
+(** Stores [identity] on the held item, converting it when it is not a
+    placeholder, and marks it in sync when [in_sync]. *)
+val set_identity : held -> placeholder:bool -> string -> in_sync:bool -> unit

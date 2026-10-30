@@ -220,6 +220,16 @@ typedef HRESULT(WINAPI *CfConnectSyncRoot_t)(PCWSTR, const CF_CALLBACK_REGISTRAT
                                              LPCVOID, LONG, CF_CONNECTION_KEY *);
 typedef HRESULT(WINAPI *CfDisconnectSyncRoot_t)(CF_CONNECTION_KEY);
 typedef HRESULT(WINAPI *CfExecute_t)(const CF_OPERATION_INFO *, CF_OPERATION_PARAMETERS *);
+enum {
+  CF_CONVERT_FLAG_MARK_IN_SYNC = 1,
+  CF_UPDATE_FLAG_MARK_IN_SYNC = 2
+};
+
+typedef HRESULT(WINAPI *CfConvertToPlaceholder_t)(HANDLE, LPCVOID, DWORD, LONG, LONGLONG *,
+                                                  LPOVERLAPPED);
+typedef HRESULT(WINAPI *CfUpdatePlaceholder_t)(HANDLE, const CF_FS_METADATA *, LPCVOID, DWORD,
+                                               const void *, DWORD, LONG, LONGLONG *,
+                                               LPOVERLAPPED);
 typedef HRESULT(WINAPI *CfGetPlaceholderInfo_t)(HANDLE, LONG, PVOID, DWORD, PDWORD);
 typedef HRESULT(WINAPI *CfHydratePlaceholder_t)(HANDLE, LONGLONG, LONGLONG, LONG,
                                                 LPOVERLAPPED);
