@@ -24,12 +24,26 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
 
 # The domain's published files, by relative path, from a fresh export; null
 # while a change is unpublished, which export refuses.
-function Published {
+function Exported {
   $dir = Join-Path $Work "export-$([guid]::NewGuid())"
   & $tsync export --quiet --domain docs $dir 2>$null
   if ($LASTEXITCODE -ne 0) { return $null }
+  $dir
+}
+
+function Published {
+  $dir = Exported
+  if ($null -eq $dir) { return $null }
   @(Get-ChildItem -Recurse -File $dir | ForEach-Object {
     $_.FullName.Substring($dir.Length + 1).Replace('\', '/') }) | Sort-Object
+}
+
+# The published content of one domain file, or null.
+function PublishedText($rel) {
+  $dir = Exported
+  if ($null -eq $dir) { return $null }
+  $file = Join-Path $dir $rel
+  if (Test-Path $file) { Get-Content -Raw $file } else { $null }
 }
 
 $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
@@ -120,7 +134,25 @@ try {
   Until 'a delete in the sync root reaches the domain' {
     $p = Published; ($null -ne $p) -and -not ($p -contains 'sub/b.txt')
   }
-  $checks = 9
+
+  Step 'creating and editing in the sync root'
+  Set-Content -NoNewline -Path (Join-Path $root 'new.txt') -Value 'created'
+  Until 'a file created in the sync root reaches the domain' {
+    (PublishedText 'new.txt') -eq 'created'
+  } 90
+  Set-Content -NoNewline -Path (Join-Path $root 'c.txt') -Value 'changed'
+  Until 'an edit in the sync root reaches the domain' {
+    (PublishedText 'c.txt') -eq 'changed'
+  } 90
+  New-Item -ItemType Directory (Join-Path $root 'made') | Out-Null
+  Set-Content -NoNewline -Path (Join-Path $root 'made\inner.txt') -Value 'inside'
+  Until 'a folder created with a file in it reaches the domain' {
+    (PublishedText 'made\inner.txt') -eq 'inside'
+  } 90
+  $made = Get-Item (Join-Path $root 'new.txt')
+  Check 'a taken file becomes a placeholder' (([int]$made.Attributes -band 0x400) -ne 0 -or
+    (& $tsync status 2>$null | Out-String) -ne '')
+  $checks = 13
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -130,5 +162,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 9) { throw "only $checks of 9 checks ran" }
+if ($checks -ne 13) { throw "only $checks of 13 checks ran" }
 Step "cloud files end to end: $checks checks passed"
