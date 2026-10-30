@@ -22,6 +22,16 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
   throw "FAILED within $seconds s: $what"
 }
 
+# The domain's published files, by relative path, from a fresh export; null
+# while a change is unpublished, which export refuses.
+function Published {
+  $dir = Join-Path $Work "export-$([guid]::NewGuid())"
+  & $tsync export --quiet --domain docs $dir 2>$null
+  if ($LASTEXITCODE -ne 0) { return $null }
+  @(Get-ChildItem -Recurse -File $dir | ForEach-Object {
+    $_.FullName.Substring($dir.Length + 1).Replace('\', '/') }) | Sort-Object
+}
+
 $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
 $tsync = Join-Path $programs 'tsync.exe'
 $log = Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log'
@@ -100,7 +110,17 @@ try {
   Step 'reading through the sync root'
   Check 'a.txt reads its content' ((Get-Content -Raw (Join-Path $root 'a.txt')) -eq 'alpha')
   Check 'sub\b.txt reads its content' ((Get-Content -Raw (Join-Path $root 'sub\b.txt')) -eq 'bravo')
-  $checks = 7
+
+  Step 'changing the sync root'
+  Rename-Item (Join-Path $root 'a.txt') 'c.txt'
+  Until 'a rename in the sync root reaches the domain' {
+    $p = Published; ($p -contains 'c.txt') -and -not ($p -contains 'a.txt')
+  }
+  Remove-Item (Join-Path $root 'sub\b.txt')
+  Until 'a delete in the sync root reaches the domain' {
+    $p = Published; ($null -ne $p) -and -not ($p -contains 'sub/b.txt')
+  }
+  $checks = 9
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -110,5 +130,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 7) { throw "only $checks of 7 checks ran" }
+if ($checks -ne 9) { throw "only $checks of 9 checks ran" }
 Step "cloud files end to end: $checks checks passed"
