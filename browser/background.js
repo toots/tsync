@@ -237,7 +237,7 @@ const handlers = {
     const reply = await one({ type: "match", origin });
     if (!reply.ok) return { error: reply.error };
     const logins = m.kind === "code" ? reply.logins.filter((l) => l.code) : reply.logins;
-    return { logins, locked: reply.locked, domains: new Set(reply.logins.map((l) => l.domain)).size, looks: await looks() };
+    return { logins, locked: reply.locked, domains: new Set(logins.map((l) => l.domain)).size, looks: await looks() };
   },
   async fill(m, sender) {
     const origin = originOf(sender);

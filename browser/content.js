@@ -250,7 +250,7 @@
         heading = login.domain;
         menu.appendChild(header(login.domain, (answer.looks || {})[login.domain] || null));
       }
-      const detail = kind === "code" ? "one-time code" : login.username;
+      const detail = kind === "code" ? [login.username, "one-time code"].filter(Boolean).join(" · ") : login.username;
       menu.appendChild(row(login.title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind)));
     }
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
