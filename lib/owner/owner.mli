@@ -45,12 +45,14 @@ val owner_held : int
 val stop_on_signals : ?second:(unit -> unit) -> unit -> unit
 
 (** What a presenting frontend does for its domain once its engine has started:
-    the hooks the handler calls, and what presents it once the socket serves. *)
+    the hooks the handler calls, and what presents it once the socket serves,
+    given the domain's request handler, which an in-process provider calls
+    directly (08 §3). *)
 type present =
   Tsync_domain.Domain.t ->
   (module Tsync_sync.Engine.S) ->
   publish:(Protocol.event -> unit) ->
-  Handler.hooks * (unit -> unit)
+  Handler.hooks * (Handler.t -> unit)
 
 (** Owner start, serve until the process stop, then drain within the grace.
     Answers the exit status: 0, or {!owner_held}. [shared] (macOS): one socket

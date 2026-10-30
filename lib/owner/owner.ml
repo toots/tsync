@@ -107,9 +107,9 @@ type present =
   Tsync_domain.Domain.t ->
   (module Tsync_sync.Engine.S) ->
   publish:(Protocol.event -> unit) ->
-  Handler.hooks * (unit -> unit)
+  Handler.hooks * (Handler.t -> unit)
 
-type served = { domain : Domain.t; handler : Handler.t; go : unit -> unit }
+type served = { domain : Domain.t; handler : Handler.t; go : Handler.t -> unit }
 
 let answered_while_draining = ["stats"; "status"; "stop"]
 
@@ -386,7 +386,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
   List.iter
     (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
-  List.iter (fun s -> s.go ()) !served;
+  List.iter (fun s -> s.go s.handler) !served;
   Atomic.set serving (List.map (fun s -> s.handler) !served);
   Stop.wait ()
 
