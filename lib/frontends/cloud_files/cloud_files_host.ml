@@ -159,6 +159,126 @@ let fetch_data t (r : Cf.request) =
                   in
                   send start))
 
+(* §12, the delete and rename column. *)
+let mutation_status = function
+  | Fail.E { kind = Absent; _ } -> `Success
+  | Fail.E { kind = Exists; _ } -> `Collision
+  | Fail.E { kind = Not_empty; _ } -> `Not_empty
+  | Fail.E { kind = Read_only | Denied; _ } -> `Access_denied
+  | Fail.E { kind = Invalid; _ } -> `Invalid
+  | _ -> `Unsuccessful
+
+(* §9.1: the provider's own changes follow the domain, which holds them. *)
+let own (r : Cf.request) = r.process_id = Pid.self ()
+let is_dir_flag = 1
+let target_in_scope_flag = 4
+
+exception Refused of Cf.status * string
+
+let decoded identity = Option.bind identity (fun s -> Identity.decode s)
+
+(* A folder of the sync root as the domain names it, by its placeholder. *)
+let folder_ref t dir =
+  if same_path dir t.root then "root"
+  else (
+    match decoded (Cf.identity dir) with
+      | Some id -> id.ref_
+      | None ->
+          raise (Refused (`Unsuccessful, dir ^ " is not in the domain yet")))
+
+(* §7.3, §9.2: a folder holding what the user never saw cannot leave. *)
+let check_all_presented t dir ref_ =
+  let rows = Rt.run_sync (fun () -> rows t ref_) in
+  let _, others =
+    Presentation.choose ~fold:Cf.upcase
+      ~on_disk:(fun _ -> false)
+      (List.map (fun (row : Protocol.row) -> (row.name, row)) rows)
+  in
+  if
+    others <> []
+    || List.exists (fun (row : Protocol.row) -> row.kind = `Symlink) rows
+  then raise (Refused (`Not_empty, dir ^ " holds items not shown here"))
+
+(* §9.2: what leaves the sync root is made whole on disk first, folders
+   populated by listing them, so the user keeps every byte. *)
+let rec make_whole t path ~is_dir =
+  if is_dir then (
+    (match decoded (Cf.identity path) with
+      | Some id -> check_all_presented t path id.ref_
+      | None -> ());
+    Array.iter
+      (fun name ->
+        let child = Filename.concat path name in
+        make_whole t child ~is_dir:(Sys.is_directory child))
+      (Sys.readdir path))
+  else if Cf.identity path <> None then Cf.hydrate path
+
+let delete t (r : Cf.request) =
+  let (module E : Tsync_sync.Engine.S) = t.engine in
+  match decoded (Some r.identity) with
+    | None -> ()
+    | Some id when r.flags land is_dir_flag <> 0 ->
+        (* §9.2: only a folder the domain holds nothing beneath. *)
+        Rt.run_sync (fun () ->
+            let path = Handler.path_of_ref t.handler id.ref_ in
+            E.atomically (fun () -> E.rmdir path))
+    | Some id ->
+        ignore
+          (Rt.run_sync (fun () ->
+               Handler.call t.handler
+                 (Delete { item = Ref id.ref_; base = Some id.content_id })))
+
+let rename t (r : Cf.request) =
+  match decoded (Some r.identity) with
+    | None -> ()
+    | Some id when r.flags land target_in_scope_flag <> 0 ->
+        let parent_ref = folder_ref t (Filename.dirname r.target) in
+        let replaced =
+          decoded (try Cf.identity r.target with Failure _ -> None)
+        in
+        ignore
+          (Rt.run_sync (fun () ->
+               Handler.call t.handler
+                 (Rename
+                    {
+                      src = id.ref_;
+                      at = { parent_ref; name = Filename.basename r.target };
+                      noreplace = not (Sys.file_exists r.target);
+                      dst_base =
+                        Option.map
+                          (fun (i : Identity.t) -> i.content_id)
+                          replaced;
+                    })))
+    | Some id ->
+        let is_dir = r.flags land is_dir_flag <> 0 in
+        make_whole t r.path ~is_dir;
+        ignore
+          (Rt.run_sync (fun () ->
+               if is_dir then Handler.call t.handler (Rmdir (Ref id.ref_))
+               else (
+                 match
+                   Handler.call t.handler
+                     (Delete { item = Ref id.ref_; base = Some id.content_id })
+                 with
+                   | `Deleted | `Kept -> ())))
+
+let acknowledge t (r : Cf.request) what f =
+  let status =
+    if own r then `Success
+    else (
+      try
+        f t r;
+        `Success
+      with
+        | Refused (status, why) ->
+            Log.info "cloud_files: refused on %s: %s" r.path why;
+            status
+        | e ->
+            Log.warn "cloud_files: %s: %s" r.path (Printexc.to_string e);
+            mutation_status e)
+  in
+  Cf.ack t.connection r what status
+
 let handle t (r : Cf.request) =
   try
     match r.kind with
@@ -169,8 +289,8 @@ let handle t (r : Cf.request) =
             Log.warn "cloud_files: reading %s: %s" r.path (Printexc.to_string e);
             Cf.transfer_data t.connection r status (Bigstring.create 0)
               ~offset:r.offset ~length:r.length)
-      | `Delete -> Cf.ack t.connection r `Delete `Access_denied
-      | `Rename -> Cf.ack t.connection r `Rename `Access_denied
+      | `Delete -> acknowledge t r `Delete delete
+      | `Rename -> acknowledge t r `Rename rename
       | `Dehydrate -> Cf.ack t.connection r `Dehydrate `Success
       | `Cancel_fetch_data | `Cancel_fetch_placeholders | `Close_completion
       | `Other _ ->

@@ -89,5 +89,12 @@ val unregister : string -> unit
 (** The user's SID in its string form. *)
 val user_sid : unit -> string
 
+(** The file identity of the placeholder at a path, [None] when it is not one.
+*)
+val identity : string -> string option
+
+(** Makes a placeholder's whole content local. *)
+val hydrate : string -> unit
+
 (** A name as NTFS compares names, for case groups (§7.2). *)
 val upcase : string -> string
