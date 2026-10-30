@@ -68,7 +68,16 @@ const TsyncFields = (() => {
   const NOT_SUBMIT = /forgot|reset|recover|help|cancel|back|show|hide|try.another|create|sign.?up|regist/i;
   const submits = (names) => !NOT_SUBMIT.test(names.filter(Boolean).join(" "));
 
-  return { kind, classify, newPasswords, submits };
+  // A sign-in asking the password on a later step keeps its username out of sight: hidden or read-only.
+  // A type="hidden" field also carries tokens (login_challenge), so only its exact name makes it a username.
+  function keptUsername(field) {
+    if (!(field.hidden || field.readOnly || field.disabled)) return false;
+    if (field.type === "hidden" && !/^(user.?name|e.?mail|identifier|login)$/i.test(field.name || field.id || "")) return false;
+    const shown = { ...field, type: field.type === "hidden" ? "text" : field.type, hidden: false, readOnly: false, disabled: false };
+    return kind(shown) === "username";
+  }
+
+  return { kind, classify, newPasswords, submits, keptUsername };
 })();
 
 if (typeof module !== "undefined") module.exports = TsyncFields;
