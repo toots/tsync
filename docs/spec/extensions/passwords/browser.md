@@ -29,8 +29,11 @@ capability. What has been seen working is recorded in §10.
 - **The native-messaging manifest** is the file a Chromium-family browser reads to start the
   bridge: `name` `org.feverdreamtv.tsync`, `type` `stdio`, `path` the absolute path of the `tsync`
   executable, and `allowed_origins` the extension's id and any `--extension-id` given.
-  `tsync passwords browser manifest --path PATH` prints it; it is the one place its form is
-  written, and both ways of installing below take it from there.
+  `tsync passwords browser manifest --path PATH` prints it; with `--root DIR` it writes it into
+  each system-wide location of the platform below under `DIR`, a package's staging root, and prints
+  the locations, which the package takes for its file list and its checks. It is the one place the
+  manifest's form and the browsers' locations are written, and both ways of installing below take
+  them from there.
 - **The bridge starts as `tsync ORIGIN`.** A browser starts the manifest's `path` with the
   caller's origin as its first argument, and on Windows `--parent-window=N` after it: `tsync` whose
   first argument starts with `chrome-extension://` runs `tsync passwords browser-host` with its
@@ -45,7 +48,8 @@ capability. What has been seen working is recorded in §10.
   | the Windows installer | the manifest in the install folder, named by the default value of `HKEY_LOCAL_MACHINE\SOFTWARE\Google\Chrome\NativeMessagingHosts\org.feverdreamtv.tsync`, a key the installer owns | the installed `tsync.exe` |
 
   Each file is named `org.feverdreamtv.tsync.json`. The package build makes it with the `tsync` it
-  packages, never from a copy kept in the source tree. Brave reads Chrome's location and Vivaldi
+  packages, never from a copy kept in the source tree. Under `/etc` it is a configuration file of
+  the package (a deb's `conffiles`, an rpm's `%config`). Brave reads Chrome's location and Vivaldi
   Chromium's; Edge on Windows falls back to Chrome's key.
 - **Without a package**, a build from source or a development build: `tsync passwords browser
   install` writes the same manifest, naming the `tsync` that runs it, under each Chromium-family

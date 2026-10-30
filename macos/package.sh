@@ -44,16 +44,8 @@ ROOT="$OUT/root"
 mkdir -p "$ROOT/Applications"
 ditto "$APP" "$ROOT/Applications/TsyncApp.app"
 TSYNC=/Applications/TsyncApp.app/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync
-MANIFESTS=(
-    "Library/Google/Chrome/NativeMessagingHosts"
-    "Library/Application Support/Chromium/NativeMessagingHosts"
-    "Library/Microsoft/Edge/NativeMessagingHosts"
-)
-for dir in "${MANIFESTS[@]}"; do
-    mkdir -p "$ROOT/$dir"
-    "$ROOT$TSYNC" passwords browser manifest --path "$TSYNC" \
-        > "$ROOT/$dir/org.feverdreamtv.tsync.json"
-done
+"$ROOT$TSYNC" passwords browser manifest --path "$TSYNC" --root "$ROOT" > "$OUT/manifests"
+test -s "$OUT/manifests"
 
 # A relocatable bundle is installed over whatever copy of it the installer
 # finds elsewhere on disk, not in /Applications.
@@ -78,9 +70,9 @@ pkgbuild \
 
 pkgutil --check-signature "$PKG" >/dev/null
 payload=$(pkgutil --payload-files "$PKG")
-for dir in "${MANIFESTS[@]}"; do
-    grep -qx "./$dir/org.feverdreamtv.tsync.json" <<<"$payload"
-done
+while IFS= read -r manifest; do
+    grep -qxF ".$manifest" <<<"$payload"
+done < "$OUT/manifests"
 rm -rf "$ROOT"
 
 if [[ -z "${AC_API_KEY_PATH:-}" ]]; then
