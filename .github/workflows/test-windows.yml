@@ -163,18 +163,17 @@ jobs:
           name: tsync-windows-installer
           path: installer/
 
-      # cloud-files §17: the installed service presents a domain on a local
-      # MinIO, which takes conditional writes as S3 does.
+      # cloud-files §17: the installed service presents a domain on moto's
+      # local S3, which takes conditional writes as S3 does.
       - name: Cloud Files end to end
         id: cloud-files
         shell: pwsh
         run: |
-          Invoke-WebRequest -UseBasicParsing https://dl.min.io/server/minio/release/windows-amd64/minio.exe -OutFile "$env:RUNNER_TEMP\minio.exe"
-          Invoke-WebRequest -UseBasicParsing https://dl.min.io/client/mc/release/windows-amd64/mc.exe -OutFile "$env:RUNNER_TEMP\mc.exe"
+          python -m pip install --quiet "moto[server]"
           New-Item -ItemType Directory -Force e2e | Out-Null
           Start-Transcript e2e\transcript.txt
           try {
-            tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe -Minio "$env:RUNNER_TEMP\minio.exe" -Mc "$env:RUNNER_TEMP\mc.exe"
+            tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe
           } finally {
             Stop-Transcript
             Copy-Item -ErrorAction Ignore (Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log') e2e\

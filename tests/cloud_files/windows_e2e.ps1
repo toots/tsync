@@ -1,9 +1,7 @@
 # The Windows host end to end (cloud-files §17): the installed service presents
-# a domain on a local MinIO, and Explorer's view of its sync root is checked.
+# a domain on moto's local S3, and Explorer's view of its sync root is checked.
 param(
   [Parameter(Mandatory)] [string] $Setup,
-  [Parameter(Mandatory)] [string] $Minio,
-  [Parameter(Mandatory)] [string] $Mc,
   [string] $Work = (Join-Path $env:RUNNER_TEMP 'cloud-files-e2e')
 )
 $ErrorActionPreference = 'Stop'
@@ -31,18 +29,15 @@ $root = Join-Path $env:USERPROFILE 'tsync\docs'
 $checks = 0
 
 try {
-  Step 'starting MinIO'
-  New-Item -ItemType Directory -Force (Join-Path $Work 'minio') | Out-Null
-  $env:MINIO_ROOT_USER = 'tsyncci'
-  $env:MINIO_ROOT_PASSWORD = 'tsyncci-secret-key'
-  $minioProcess = Start-Process -FilePath $Minio -PassThru `
-    -ArgumentList 'server', (Join-Path $Work 'minio'), '--address', '127.0.0.1:9000' `
-    -RedirectStandardOutput (Join-Path $Work 'minio.out') -RedirectStandardError (Join-Path $Work 'minio.err')
-  Until 'MinIO answers' {
-    try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/minio/health/live).StatusCode -eq 200 } catch { $false }
+  Step 'starting the S3 server'
+  New-Item -ItemType Directory -Force $Work | Out-Null
+  $s3Process = Start-Process -FilePath python -PassThru `
+    -ArgumentList '-m', 'moto.server', '-H', '127.0.0.1', '-p', '9000' `
+    -RedirectStandardOutput (Join-Path $Work 's3.out') -RedirectStandardError (Join-Path $Work 's3.err')
+  Until 'the S3 server answers' {
+    try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/).StatusCode -eq 200 } catch { $false }
   }
-  & $Mc alias set ci http://127.0.0.1:9000 tsyncci tsyncci-secret-key | Out-Null
-  & $Mc mb --ignore-existing ci/tsync-ci | Out-Null
+  python -c "import boto3; boto3.client('s3', endpoint_url='http://127.0.0.1:9000', aws_access_key_id='tsyncci', aws_secret_access_key='tsyncci-secret-key', region_name='us-east-1').create_bucket(Bucket='tsync-ci')"
   Check 'the bucket exists' ($LASTEXITCODE -eq 0)
 
   Step 'writing the config'
@@ -99,7 +94,7 @@ try {
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
   throw
 } finally {
-  if ($minioProcess) { Stop-Process -Id $minioProcess.Id -Force -ErrorAction SilentlyContinue }
+  if ($s3Process) { Stop-Process -Id $s3Process.Id -Force -ErrorAction SilentlyContinue }
 }
 
 # 09 §10.1: a pass names how many checks ran.
