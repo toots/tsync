@@ -92,7 +92,8 @@ try {
   Check 'the root lists a.txt and sub' (($names -contains 'a.txt') -and ($names -contains 'sub'))
   $a = Get-Item (Join-Path $root 'a.txt')
   Step "  a.txt: $($a.Attributes), $($a.Length) bytes"
-  Check 'a.txt is a placeholder of its size' (($a.Attributes -match 'ReparsePoint') -and $a.Length -eq 5)
+  # FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: its content is the provider's to fetch.
+  Check 'a.txt is a dehydrated placeholder of its size' ((([int]$a.Attributes) -band 0x400000) -and $a.Length -eq 5)
   $sub = @(Get-ChildItem -Force (Join-Path $root 'sub') | ForEach-Object Name)
   Check 'sub lists b.txt on its first enumeration' ($sub -contains 'b.txt')
   $checks = 5
