@@ -171,7 +171,21 @@ jobs:
         run: |
           Invoke-WebRequest -UseBasicParsing https://dl.min.io/server/minio/release/windows-amd64/minio.exe -OutFile "$env:RUNNER_TEMP\minio.exe"
           Invoke-WebRequest -UseBasicParsing https://dl.min.io/client/mc/release/windows-amd64/mc.exe -OutFile "$env:RUNNER_TEMP\mc.exe"
-          tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe -Minio "$env:RUNNER_TEMP\minio.exe" -Mc "$env:RUNNER_TEMP\mc.exe"
+          New-Item -ItemType Directory -Force e2e | Out-Null
+          Start-Transcript e2e\transcript.txt
+          try {
+            tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe -Minio "$env:RUNNER_TEMP\minio.exe" -Mc "$env:RUNNER_TEMP\mc.exe"
+          } finally {
+            Stop-Transcript
+            Copy-Item -ErrorAction Ignore (Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log') e2e\
+          }
+
+      # Readable while the suite below still runs, which a job log is not.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: cloud-files-e2e
+          path: e2e/
 
       # Also after a failure of the end-to-end step, so one run reports both.
       - name: Timing-sensitive tests
