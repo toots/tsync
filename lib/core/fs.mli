@@ -82,7 +82,7 @@ val release : string -> bool
 val unlink_quiet : string -> unit
 
 (** Creates [p] holding [data] (mode [perm], 0600 by default, which on Windows
-    is the access list of {!is_private}), whole or not at all; EXISTS when [p]
+    is the access list of {!make_private}), whole or not at all; EXISTS when [p]
     exists, which is never replaced. *)
 val create_new : ?perm:int -> string -> string -> unit
 
@@ -100,8 +100,8 @@ val unix_unlink : string -> unit
 val rename : ?op:string -> string -> string -> unit
 
 (** Whether only this process's user can reach the file or directory: owned by
-    it with no group or other mode bits, or on Windows owned by its SID with a
-    protected access list allowing no one else (security-model §7.1). Raises
+    it with no group or other mode bits, or on Windows owned by its SID with no
+    entry, inherited or not, allowing anyone else (security-model §7.1). Raises
     [Unix_error]. *)
 val is_private : string -> bool
 
@@ -119,8 +119,8 @@ val end_with_this_process : int -> unit
 val std_handle_missing : [ `Stdin | `Stdout | `Stderr ] -> bool
 
 (** Makes a file or directory private to this process's user: mode 0600 or 0700,
-    or on Windows the access list of {!is_private}, which a directory passes on
-    to what is created in it. Raises [Unix_error]. *)
+    or on Windows a protected access list whose one entry grants the user, which
+    a directory passes on to what is created in it. Raises [Unix_error]. *)
 val make_private : string -> unit
 
 (** EEXIST when the target exists. *)
