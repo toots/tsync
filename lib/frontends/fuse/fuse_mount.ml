@@ -684,7 +684,7 @@ let host ~mount domains ~run =
               });
       }
     in
-    let go () =
+    let go _handler =
       prepare mount_point;
       Fs.rm_rf t.scratch_dir;
       Rt.spawn ~name:"fuse failures" report_failures;
