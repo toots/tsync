@@ -45,6 +45,8 @@ try {
     name = 'ci'
     domains = @(@{
       name = 'docs'
+      versioning = $true
+      symlinks = 'skip'
       backends = @(@{
         type = 's3'; name = 'main'; role = 'main'; endpoint = 'http://127.0.0.1:9000'
         bucket = 'tsync-ci'; region = 'us-east-1'
