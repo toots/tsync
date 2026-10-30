@@ -98,6 +98,10 @@ module type S = sig
   val write_whole :
     string -> src:string -> ?base:string -> exclusive:bool -> unit -> string
 
+  (** [aside(key)] (conflict-resolution §5): the conflicted-copy name beside the
+      key that nothing holds yet. *)
+  val aside_name : string -> is_dir:bool -> string
+
   (** The symlink policy in force: the main's where it states one (05 §2.1). *)
   val symlinks : unit -> [ `Keep | `Follow | `Skip ]
 

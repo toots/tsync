@@ -49,7 +49,12 @@ type pull = [ `Auto | `Now | `Never | `Background ]
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
 
-type written = { size : int; mtime : float; item : row }
+(** [aside]: the row of the item made at the conflicted-copy name, when the
+    action landed there (08 §3.3). *)
+type written = { size : int; mtime : float; item : row; aside : row option }
+
+(** The item at the destination, and [aside] as for {!written}. *)
+type placed = { item : row; aside : row option }
 
 type fetched = {
   local_path : string;
@@ -278,18 +283,34 @@ type _ request =
       staging : string;
       base : string option;
       exclusive : bool;
+      aside : bool;
       await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
-  | Mkdir : { at : destination; exclusive : bool } -> row request
+  | Mkdir : {
+      at : destination;
+      exclusive : bool;
+      aside : bool;
+    }
+      -> placed request
   | Symlink : {
       at : destination;
       link_target : string;
       exclusive : bool;
     }
       -> row request
-  | Rename : { src : string; at : destination; noreplace : bool } -> row request
-  | Delete : target -> unit request
+  | Rename : {
+      src : string;
+      at : destination;
+      noreplace : bool;
+      dst_base : string option;
+    }
+      -> placed request
+  | Delete : {
+      item : target;
+      base : string option;
+    }
+      -> [ `Deleted | `Kept ] request
   | Rmdir : target -> unit request
   | Evict : target -> counted request
   | Restore : { item : target; keep : float option } -> counted request
