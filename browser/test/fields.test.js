@@ -2,7 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { kind, classify, submits } = require("../fields.js");
+const { kind, classify, submits, keptUsername } = require("../fields.js");
 
 test("autocomplete decides first", () => {
   assert.equal(kind({ type: "text", autocomplete: "one-time-code" }), "code");
@@ -90,4 +90,12 @@ test("Google's formless Next submits, its Forgot password does not", () => {
   assert.equal(submits(["Next", null, "", "", "passwordNext"]), true);
   assert.equal(submits(["Forgot password?", null, "", "", "forgotPassword"]), false);
   assert.equal(submits(["", "Show password", "", "", null]), false);
+});
+
+test("a later password step's username kept out of sight, never a token or a shown field", () => {
+  assert.equal(keptUsername({ type: "email", name: "identifier", hidden: true }), true, "Google's hidden email");
+  assert.equal(keptUsername({ type: "text", name: "username", readOnly: true }), true, "a read-only username");
+  assert.equal(keptUsername({ type: "hidden", name: "username", hidden: true }), true);
+  assert.equal(keptUsername({ type: "hidden", name: "login_challenge", hidden: true }), false, "a token");
+  assert.equal(keptUsername({ type: "email", name: "newsletter_email" }), false, "a shown field");
 });

@@ -160,10 +160,12 @@ browser's password manager for that.
   tsync filled does not count), the content script hands the username and the password to the
   service worker, with the frame's origin from the browser. A page that signs in by script has no
   form: a button outside any form submits the whole document. A click on a button that is not a
-  form's submit button counts only when its text, label, id, name and nearest id around it name
-  nothing else (forgot, reset, recover, help, cancel, back, show, hide, try another, create, sign
+  form's submit button counts only when its own text, label, id and name name nothing else (forgot, reset, recover, help, cancel, back, show, hide, try another, create, sign
   up, register), as a page drawn by script puts *Forgot password?* beside *Next*. A sign-in asking the password on a
-  later step keeps the username in a hidden field, which is read when no shown field has one. A
+  later step keeps the username out of sight, in a hidden or read-only field, which is read when no
+  username field has one; a `type="hidden"` field only by its exact name, `username`, `email`,
+  `identifier` or `login`, as such fields also carry tokens. An offer is made once per password: a
+  click that was no submit does not stop the real submit's. A
   script's submit, or a password a script set, offers nothing.
 - The service worker never compares the typed password with tsync's: whether a sheet appears
   depends on nothing secret, so a page cannot use it to test a guess. It asks `match` only to tell

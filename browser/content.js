@@ -288,14 +288,21 @@
     placeMenu(el);
   }
 
+  function usernameOf(scope) {
+    const inputs = [...scope.querySelectorAll("input")];
+    const found = inputs.filter((input) => kinds.get(input) === "username" && input.value).pop();
+    if (found) return found.value;
+    const kept = inputs.find((input) => !kinds.has(input) && input.value && TsyncFields.keptUsername(describe(input)));
+    return kept ? kept.value : "";
+  }
+
   // §5.1: every password field of the form gets the suggestion, its confirmation
   // included; the form remembers the login it went to, for its submit.
   const suggested = new WeakMap();
   async function suggest(el) {
     close();
     const scope = el.form || document;
-    let username = "";
-    for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "username" && input.value) username = input.value;
+    const username = usernameOf(scope);
     let answer;
     try {
       answer = await chrome.runtime.sendMessage({ type: "suggest", username });
@@ -359,37 +366,25 @@
   document.addEventListener("input", (e) => {
     if (e.isTrusted && e.target instanceof HTMLInputElement && kinds.get(e.target) === "password") typed.add(e.target);
   }, true);
-  let offered = false;
+  // The last pick or password offered: a click that was no submit must not stop the real one's offer.
+  let offered = null;
   function offer(form) {
-    if (offered) return;
     const scope = form || document;
+    const username = usernameOf(scope);
     // §5.1: no sheet; the password itself is not sent again.
     const pick = suggested.get(scope);
     if (pick) {
-      offered = true;
-      let username = "";
-      for (const input of scope.querySelectorAll("input")) if (kinds.get(input) === "username" && input.value) username = input.value;
+      if (offered === pick) return;
+      offered = pick;
       chrome.runtime.sendMessage({ type: "save-suggested", id: pick.id, domain: pick.domain, username }).catch(() => {});
       return;
     }
-    let username = "", password = "";
+    let password = "";
     for (const input of scope.querySelectorAll("input")) {
-      const kind = kinds.get(input);
-      if (kind === "username" && input.value) username = input.value;
-      if (kind === "password" && input.value && (typed.has(input) || input.matches(":autofill"))) password = input.value;
+      if (kinds.get(input) === "password" && input.value && (typed.has(input) || input.matches(":autofill"))) password = input.value;
     }
-    // A sign-in asking the password on a later step keeps the username in a hidden field.
-    if (!username) for (const input of scope.querySelectorAll("input")) {
-      // A type="hidden" field also carries tokens (login_challenge): only its exact name says username.
-      const named = input.type !== "hidden" || /^(user.?name|e.?mail|identifier|login)$/i.test(input.name || input.id);
-      const shown = { ...describe(input), type: input.type === "hidden" ? "text" : input.type, hidden: false, readOnly: false, disabled: false };
-      if (named && !kinds.has(input) && input.value && TsyncFields.kind(shown) === "username") {
-        username = input.value;
-        break;
-      }
-    }
-    if (!password) return;
-    offered = true;
+    if (!password || offered === password) return;
+    offered = password;
     chrome.runtime.sendMessage({ type: "offer-save", username, password }).catch(() => {});
   }
   document.addEventListener("submit", (e) => e.isTrusted && offer(e.target), true);
@@ -398,7 +393,7 @@
     const button = e.target instanceof Element && e.target.closest("button, input[type=submit]");
     if (!button || button.type === "reset") return;
     if (button.form && button.type === "submit") return offer(button.form);
-    const names = [button.textContent, button.getAttribute("aria-label"), button.id, button.name, button.parentElement?.closest("[id]")?.id];
+    const names = [button.textContent, button.getAttribute("aria-label"), button.id, button.name];
     if (TsyncFields.submits(names)) offer(button.form);
   }, true);
   // A page that signs in by script has no form to submit: Enter in its password field is the submit.
