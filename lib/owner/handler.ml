@@ -1128,23 +1128,33 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
         (match r.at with Child d -> pull_destination d | _ -> ());
-        let path, written, item =
+        let path, written, item, aside =
           mutate (fun () ->
-              let path =
+              let path, placed =
                 match r.at with
-                  | Child d -> destination t d
+                  | Child d ->
+                      let path = destination t d in
+                      (* conflict-resolution §7: a creation that never saw the
+                         occupant lands beside it. *)
+                      if r.aside && E.kind path <> `Absent then
+                        (path, E.aside_name path ~is_dir:false)
+                      else (path, path)
                   | at ->
                       let p = target t at in
                       if E.kind p <> `File then invalid "write names a file";
-                      p
+                      (p, p)
               in
               let written =
-                occupied t path (fun () ->
-                    E.write_whole path ~src:r.staging ?base:r.base
-                      ~exclusive:r.exclusive ())
+                occupied t placed (fun () ->
+                    E.write_whole placed ~src:r.staging ?base:r.base
+                      ~exclusive:(r.exclusive || placed <> path)
+                      ())
               in
-              keys_changed t [path];
-              (path, written, row_or_unnamed t path))
+              keys_changed t (List.sort_uniq compare [path; written]);
+              let aside =
+                if written = path then None else Some (row_or_unnamed t written)
+              in
+              (path, written, row_or_unnamed t path, aside))
         in
         (* The row is the write's, read under its hold. After a wait it is read
            again for [isUploaded]; a file renamed or removed meanwhile still
@@ -1157,14 +1167,26 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             E.await_upload written;
             try row_or_unnamed t path with Fail.E _ -> item)
         in
-        { Protocol.size = item.size; mtime = item.mtime; item }
+        { Protocol.size = item.size; mtime = item.mtime; item; aside }
     | Mkdir r ->
         pull_destination r.at;
         mutate (fun () ->
             let path = destination t r.at in
-            if r.exclusive || E.kind path <> `Dir then
-              occupied t path (fun () -> E.mkdir path ~exclusive:r.exclusive);
-            row_or_unnamed t path)
+            match E.kind path with
+              | `File when r.aside ->
+                  (* A folder meeting a file lands beside it; meeting a folder,
+                     it is that folder (conflict-resolution §7). *)
+                  let aside = E.aside_name path ~is_dir:true in
+                  occupied t aside (fun () -> E.mkdir aside ~exclusive:true);
+                  {
+                    Protocol.item = row_or_unnamed t path;
+                    aside = Some (row_or_unnamed t aside);
+                  }
+              | kind ->
+                  if r.exclusive || kind <> `Dir then
+                    occupied t path (fun () ->
+                        E.mkdir path ~exclusive:r.exclusive);
+                  { Protocol.item = row_or_unnamed t path; aside = None })
     | Symlink r ->
         pull_destination r.at;
         mutate (fun () ->
@@ -1177,19 +1199,40 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         mutate (fun () ->
             let src = resolve_ref t.engine r.src in
             let dst = destination t r.at in
-            if src <> dst then
-              occupied t dst (fun () ->
-                  (match (E.kind src, E.kind dst) with
+            (* conflict-resolution §7: a replace of a version the caller never
+               saw lands the source beside the destination. *)
+            let landed =
+              match (r.dst_base, E.kind src, E.kind dst) with
+                | Some b, `File, `File
+                  when src <> dst && (not r.noreplace)
+                       && (E.stat dst).content_id <> Some b ->
+                    E.aside_name dst ~is_dir:false
+                | _ -> dst
+            in
+            if src <> landed then
+              occupied t landed (fun () ->
+                  (match (E.kind src, E.kind landed) with
                     | _, `Absent -> ()
                     | `File, `File when not r.noreplace -> ()
-                    | _ -> Fail.raise_ Fail.Exists "%s exists" dst);
-                  E.rename ~src ~dst ~exclusive:r.noreplace);
-            row_or_unnamed t dst)
-    | Delete item ->
+                    | _ -> Fail.raise_ Fail.Exists "%s exists" landed);
+                  E.rename ~src ~dst:landed ~exclusive:r.noreplace);
+            {
+              Protocol.item = row_or_unnamed t dst;
+              aside =
+                (if landed = dst then None else Some (row_or_unnamed t landed));
+            })
+    | Delete r ->
         mutate (fun () ->
-            let path = target t item in
+            let path = target t r.item in
             if E.kind path = `Dir then invalid "a folder is removed with rmdir";
-            E.delete path)
+            match r.base with
+              | Some b when (E.stat path).content_id <> Some b ->
+                  (* conflict-resolution §7: a removal that met an edit it never
+                     saw removes nothing. *)
+                  `Kept
+              | _ ->
+                  E.delete path;
+                  `Deleted)
     | Rmdir item ->
         (* android §3.2 rule 4: what is removed is the subtree the store holds,
            and a folder that cannot be read fails the removal whole. *)

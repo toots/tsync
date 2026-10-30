@@ -15,8 +15,11 @@ create            request reads back, reply reads back
 write             request reads back, reply reads back
 write             request reads back, reply reads back
 mkdir             request reads back, reply reads back
+mkdir             request reads back, reply reads back
 symlink           request reads back, reply reads back
 rename            request reads back, reply reads back
+rename            request reads back, reply reads back
+delete            request reads back, reply reads back
 delete            request reads back, reply reads back
 rmdir             request reads back, reply reads back
 evict             request reads back, reply reads back

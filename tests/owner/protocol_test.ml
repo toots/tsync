@@ -121,9 +121,15 @@ let cases =
             staging = "/tmp/s";
             base = Some "abcd";
             exclusive = false;
+            aside = true;
             await = true;
           },
-        { size = 24; mtime = 1400000000.; item = row } );
+        {
+          size = 24;
+          mtime = 1400000000.;
+          item = row;
+          aside = Some { row with name = "big (conflicted copy).txt" };
+        } );
     Case
       ( Write
           {
@@ -131,10 +137,17 @@ let cases =
             staging = "/tmp/s";
             base = None;
             exclusive = false;
+            aside = false;
             await = false;
           },
-        { size = 24; mtime = 1400000000.; item = row } );
-    Case (Mkdir { at; exclusive = false }, dir);
+        { size = 24; mtime = 1400000000.; item = row; aside = None } );
+    Case
+      ( Mkdir { at; exclusive = false; aside = true },
+        { item = dir; aside = Some { dir with name = "d (conflicted copy)" } }
+      );
+    Case
+      ( Mkdir { at; exclusive = true; aside = false },
+        { item = dir; aside = None } );
     Case
       ( Symlink { at; link_target = "../x"; exclusive = true },
         {
@@ -144,8 +157,17 @@ let cases =
           availability = None;
           content_id = None;
         } );
-    Case (Rename { src = "f:1/a"; at; noreplace = true }, row);
-    Case (Delete (Ref "f:9f3a/big.txt"), ());
+    Case
+      ( Rename { src = "f:1/a"; at; noreplace = true; dst_base = None },
+        { item = row; aside = None } );
+    Case
+      ( Rename { src = "f:1/a"; at; noreplace = false; dst_base = Some "abcd" },
+        {
+          item = row;
+          aside = Some { row with name = "x (conflicted copy).txt" };
+        } );
+    Case (Delete { item = Ref "f:9f3a/big.txt"; base = None }, `Deleted);
+    Case (Delete { item = Rel "big.txt"; base = Some "abcd" }, `Kept);
     Case (Rmdir (Ref "d:9f3a"), ());
     Case (Evict (Ref "root"), { succeeded = 3; failed = 1 });
     Case

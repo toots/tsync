@@ -40,7 +40,12 @@ type pull = [ `Auto | `Now | `Never | `Background ]
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
 
-type written = { size : int; mtime : float; item : row }
+(** [aside]: the row of the item made at the conflicted-copy name, when the
+    action landed there (08 §3.3). *)
+type written = { size : int; mtime : float; item : row; aside : row option }
+
+(** The item at the destination, and [aside] as for {!written}. *)
+type placed = { item : row; aside : row option }
 
 type fetched = {
   local_path : string;
@@ -265,18 +270,34 @@ type _ request =
       staging : string;
       base : string option;
       exclusive : bool;
+      aside : bool;
       await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
-  | Mkdir : { at : destination; exclusive : bool } -> row request
+  | Mkdir : {
+      at : destination;
+      exclusive : bool;
+      aside : bool;
+    }
+      -> placed request
   | Symlink : {
       at : destination;
       link_target : string;
       exclusive : bool;
     }
       -> row request
-  | Rename : { src : string; at : destination; noreplace : bool } -> row request
-  | Delete : target -> unit request
+  | Rename : {
+      src : string;
+      at : destination;
+      noreplace : bool;
+      dst_base : string option;
+    }
+      -> placed request
+  | Delete : {
+      item : target;
+      base : string option;
+    }
+      -> [ `Deleted | `Kept ] request
   | Rmdir : target -> unit request
   | Evict : target -> counted request
   | Restore : { item : target; keep : float option } -> counted request
@@ -593,8 +614,8 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ opt "account" (fun a -> `String a) r.account
   | Totp_remove id | Totp_code id -> [("id", `String id)]
   | Totp_import text -> [("text", `String text)]
-  | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
-      target_fields t
+  | Stat t | Download_progress t | Rmdir t | Evict t -> target_fields t
+  | Delete r -> target_fields r.item @ opt "base" (fun b -> `String b) r.base
   | List_all r ->
       opt "after" (fun a -> `String a) r.after
       @ opt "limit" (fun l -> `Int l) r.limit
@@ -618,14 +639,19 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       target_fields r.at
       @ [("staging", `String r.staging); ("exclusive", `Bool r.exclusive)]
       @ opt "base" (fun b -> `String b) r.base
+      @ (if r.aside then [("aside", `Bool true)] else [])
       @ if r.await then [("await", `Bool true)] else []
-  | Mkdir r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
+  | Mkdir r ->
+      destination_fields r.at
+      @ [("exclusive", `Bool r.exclusive)]
+      @ if r.aside then [("aside", `Bool true)] else []
   | Symlink r ->
       destination_fields r.at
       @ [("target", `String r.link_target); ("exclusive", `Bool r.exclusive)]
   | Rename r ->
       (("ref", `String r.src) :: destination_fields r.at)
       @ [("noreplace", `Bool r.noreplace)]
+      @ opt "dstBase" (fun b -> `String b) r.dst_base
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Revert r ->
       target_fields r.item
@@ -690,11 +716,17 @@ let decode j =
                staging = required j "staging";
                base = str j "base";
                exclusive = flag j "exclusive";
+               aside = flag j "aside";
                await = flag j "await";
              })
     | "mkdir" ->
         Request
-          (Mkdir { at = destination_of j; exclusive = flag j "exclusive" })
+          (Mkdir
+             {
+               at = destination_of j;
+               exclusive = flag j "exclusive";
+               aside = flag j "aside";
+             })
     | "symlink" ->
         Request
           (Symlink
@@ -710,8 +742,9 @@ let decode j =
                src = required j "ref";
                at = destination_of j;
                noreplace = flag j "noreplace" || flag j "exclusive";
+               dst_base = str j "dstBase";
              })
-    | "delete" -> Request (Delete (target_of j))
+    | "delete" -> Request (Delete { item = target_of j; base = str j "base" })
     | "rmdir" -> Request (Rmdir (target_of j))
     | "evict" -> Request (Evict (target_of j))
     | "restore" ->
@@ -928,6 +961,8 @@ let row_of_fields j =
 
 let ok fields = `Assoc (("ok", `Bool true) :: fields)
 let item r = [("item", `Assoc (row_fields r))]
+let aside_field = opt "aside" (fun r -> `Assoc (row_fields r))
+let placed_fields (p : placed) = item p.item @ aside_field p.aside
 let item_opt = function Some r -> item r | None -> []
 
 let feed_op_to_json = function
@@ -1037,7 +1072,8 @@ let carried_of j : carried =
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Wake | Stop | Delete _ | Rmdir _ | Revert _
+    | Delete _ -> ok (if reply = `Kept then [("kept", `Bool true)] else [])
+    | Ping | Full_resync | Poll | Wake | Stop | Rmdir _ | Revert _
     | Vault_unlock _ | Vault_lock _ | Vault_appearance _ | Totp_rename _
     | Totp_remove _ ->
         ok []
@@ -1195,9 +1231,9 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
               reply.appearance)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
-    | Mkdir _ -> ok (item reply)
+    | Mkdir _ -> ok (placed_fields reply)
     | Symlink _ -> ok (item reply)
-    | Rename _ -> ok (item reply)
+    | Rename _ -> ok (placed_fields reply)
     | List_dir _ -> ok (page_fields reply)
     | List_all _ -> (
         match reply with
@@ -1239,7 +1275,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Write _ ->
         ok
           ([("size", `Int reply.size); ("mtime", `Float reply.mtime)]
-          @ item reply.item)
+          @ item reply.item @ aside_field reply.aside)
     | Evict _ ->
         ok [("evicted", `Int reply.succeeded); ("failed", `Int reply.failed)]
     | Restore _ ->
@@ -1349,6 +1385,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
       | Some i -> row_of_fields i
       | None -> Fail.invalid "the reply has no item"
   in
+  let aside () = Option.map row_of_fields (member j "aside") in
   match req with
     | Ping -> ()
     | Extension _ -> (
@@ -1526,13 +1563,13 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Poll -> ()
     | Wake -> ()
     | Stop -> ()
-    | Delete _ -> ()
+    | Delete _ -> if flag j "kept" then `Kept else `Deleted
     | Rmdir _ -> ()
     | Stat _ -> row_of_fields j
     | Create _ -> item ()
-    | Mkdir _ -> item ()
+    | Mkdir _ -> { item = item (); aside = aside () }
     | Symlink _ -> item ()
-    | Rename _ -> item ()
+    | Rename _ -> { item = item (); aside = aside () }
     | List_dir _ -> page_of j
     | List_all _ -> if flag j "stale" then Walk_stale else Listed (page_of j)
     | Cursor -> required j "cursor"
@@ -1570,6 +1607,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           size = count "size" j;
           mtime = Option.value ~default:0. (number j "mtime");
           item = item ();
+          aside = aside ();
         }
     | Evict _ -> { succeeded = count "evicted" j; failed = count "failed" j }
     | Restore _ -> { succeeded = count "restored" j; failed = count "failed" j }
