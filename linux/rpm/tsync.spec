@@ -57,6 +57,7 @@ install -Dm644 %{srcdir}/linux/org.feverdreamtv.tsync.policy \
   %{buildroot}%{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 install -Dm644 %{srcdir}/assets/tsync-app.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
+%{srcdir}/linux/browser-manifests.sh %{srcdir}/_build/default/bin/tsync.exe %{buildroot}
 install -Dm755 %{srcdir}/_build/default/linux/mounts/libtsync_mounts.so \
   %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 strip --strip-unneeded %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
@@ -76,6 +77,9 @@ DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build --strip
 %{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 %{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 %{_libdir}/tsync/libtsync_mounts.so
+%{_sysconfdir}/opt/chrome/native-messaging-hosts/org.feverdreamtv.tsync.json
+%{_sysconfdir}/chromium/native-messaging-hosts/org.feverdreamtv.tsync.json
+%{_sysconfdir}/opt/edge/native-messaging-hosts/org.feverdreamtv.tsync.json
 
 %files tray
 %{_bindir}/tsync-tray

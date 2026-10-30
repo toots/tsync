@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Produce a notarized, stapled tsync.pkg for distribution.
 #
-# The installer places the app in /Applications and symlinks the CLI into
-# /usr/local/bin — see scripts/postinstall. That is the reason for a pkg rather
+# The installer places the app in /Applications and the browsers' native-messaging
+# manifests under /Library, and symlinks the CLI into /usr/local/bin — see
+# scripts/postinstall. That is the reason for a pkg rather
 # than a disk image: a sandboxed app cannot put anything outside its bundle.
 #
 # Required environment:
@@ -37,11 +38,37 @@ say "Building installer"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
+# passwords/browser §2: the payload is the app and the browsers' native-messaging
+# manifests, each printed by the app's own tsync naming where it is installed.
+ROOT="$OUT/root"
+mkdir -p "$ROOT/Applications"
+ditto "$APP" "$ROOT/Applications/TsyncApp.app"
+TSYNC=/Applications/TsyncApp.app/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync
+MANIFESTS=(
+    "Library/Google/Chrome/NativeMessagingHosts"
+    "Library/Application Support/Chromium/NativeMessagingHosts"
+    "Library/Microsoft/Edge/NativeMessagingHosts"
+)
+for dir in "${MANIFESTS[@]}"; do
+    mkdir -p "$ROOT/$dir"
+    "$ROOT$TSYNC" passwords browser manifest --path "$TSYNC" \
+        > "$ROOT/$dir/org.feverdreamtv.tsync.json"
+done
+
+# A relocatable bundle is installed over whatever copy of it the installer
+# finds elsewhere on disk, not in /Applications.
+pkgbuild --analyze --root "$ROOT" "$OUT/components.plist" >/dev/null
+n=0
+while /usr/libexec/PlistBuddy -c "Set :$n:BundleIsRelocatable false" "$OUT/components.plist" 2>/dev/null; do
+    n=$((n + 1))
+done
+
 # ponytail: a component package installs fine on its own. productbuild only
 # earns its place once the installer needs a title, licence or custom pages.
 pkgbuild \
-    --component "$APP" \
-    --install-location /Applications \
+    --root "$ROOT" \
+    --component-plist "$OUT/components.plist" \
+    --install-location / \
     --scripts "$MACOS_DIR/scripts" \
     --identifier org.feverdreamtv.tsync \
     --version "${BUNDLE_SHORT_VERSION:-0.0.0}" \
@@ -50,6 +77,11 @@ pkgbuild \
     "$PKG" >/dev/null
 
 pkgutil --check-signature "$PKG" >/dev/null
+payload=$(pkgutil --payload-files "$PKG")
+for dir in "${MANIFESTS[@]}"; do
+    grep -qx "./$dir/org.feverdreamtv.tsync.json" <<<"$payload"
+done
+rm -rf "$ROOT"
 
 if [[ -z "${AC_API_KEY_PATH:-}" ]]; then
     say "No App Store Connect credentials, skipping notarization"

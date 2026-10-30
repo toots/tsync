@@ -70,6 +70,7 @@ strip --strip-unneeded "$root$libdir/tsync/libtsync_mounts.so"
 install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.service"
 install -Dm644 linux/org.feverdreamtv.tsync.policy "$root/usr/share/polkit-1/actions/org.feverdreamtv.tsync.policy"
 install -Dm644 assets/tsync-app.svg "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
+linux/browser-manifests.sh _build/default/bin/tsync.exe "$root"
 for script in postinst prerm postrm; do
   install -Dm755 "linux/deb/$script" "$root/DEBIAN/$script"
 done
