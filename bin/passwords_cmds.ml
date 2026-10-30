@@ -742,6 +742,36 @@ let browser_dirs () =
 let manifest_path dir =
   Filename.concat dir ("NativeMessagingHosts/" ^ host_name ^ ".json")
 
+(* browser §2: where the packages install the manifest; Brave and Vivaldi read
+   Chrome's and Chromium's. *)
+let system_manifests () =
+  let dirs =
+    if Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" then
+      [
+        "/Library/Google/Chrome/NativeMessagingHosts";
+        "/Library/Application Support/Chromium/NativeMessagingHosts";
+        "/Library/Microsoft/Edge/NativeMessagingHosts";
+      ]
+    else
+      [
+        "/etc/opt/chrome/native-messaging-hosts";
+        "/etc/chromium/native-messaging-hosts";
+        "/etc/opt/edge/native-messaging-hosts";
+      ]
+  in
+  List.map (fun dir -> Filename.concat dir (host_name ^ ".json")) dirs
+
+(* A package build writes into its staging root and lists what it wrote, for
+   its file list and its checks. *)
+let install_system ~root manifest =
+  List.iter
+    (fun path ->
+      let staged = root ^ path in
+      Fs.mkdir_p (Filename.dirname staged);
+      Fs.replace ~perm:0o644 staged manifest;
+      print_endline path)
+    (system_manifests ())
+
 (* browser §2: the one place the manifest's form is written; packages print it
    with [browser manifest] and [install] writes it per user. *)
 let manifest ~path ids =
@@ -822,15 +852,25 @@ let browser_cmd =
           "Print the native-messaging manifest naming the bridge at $(i,PATH), \
            for a package to install."
         Term.(
-          const (fun path ids ->
+          const (fun path root ids ->
               Cli.run @@ fun () ->
-              print_string (manifest ~path ids);
+              let manifest = manifest ~path ids in
+              (match root with
+                | None -> print_string manifest
+                | Some root -> install_system ~root manifest);
               0)
           $ Arg.(
               required
               & opt (some string) None
               & info ["path"] ~docv:"PATH"
                   ~doc:"The absolute path tsync is installed at.")
+          $ Arg.(
+              value
+              & opt (some string) None
+              & info ["root"] ~docv:"DIR"
+                  ~doc:
+                    "Write it into each system-wide location under $(docv), a \
+                     package's staging root, and print the locations.")
           $ ids);
       Cli.cmd "uninstall" ~doc:"Remove what install wrote."
         Term.(

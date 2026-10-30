@@ -33,11 +33,14 @@ for state in idle sync paused error; do
 done
 # passwords/browser §2: tsync alone carries the browsers' manifests, each the
 # installed tsync's own, naming itself.
-for manifest in $(linux/browser-manifests.sh --list); do
+rm -rf /tmp/tsync-manifests
+tsync passwords browser manifest --path /usr/bin/tsync --root /tmp/tsync-manifests > /tmp/tsync-manifests.list
+test -s /tmp/tsync-manifests.list
+while read -r manifest; do
   files tsync | grep -qx "$manifest"
   test "$(grep -c "$manifest" /tmp/tsync-files)" = 1
-  tsync passwords browser manifest --path /usr/bin/tsync | cmp - "$manifest"
-done
+  cmp "/tmp/tsync-manifests$manifest" "$manifest"
+done < /tmp/tsync-manifests.list
 
 # The startup list is where a user turns the tray off.
 if grep -Eq '^(NoDisplay|Hidden)=' /etc/xdg/autostart/tsync-tray.desktop; then

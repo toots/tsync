@@ -57,7 +57,10 @@ install -Dm644 %{srcdir}/linux/org.feverdreamtv.tsync.policy \
   %{buildroot}%{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 install -Dm644 %{srcdir}/assets/tsync-app.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
-%{srcdir}/linux/browser-manifests.sh %{srcdir}/_build/default/bin/tsync.exe %{buildroot}
+%{srcdir}/_build/default/bin/tsync.exe passwords browser manifest \
+  --path %{_bindir}/tsync --root %{buildroot} > %{_builddir}/manifests.list
+sed 's/^/%%config /' %{_builddir}/manifests.list > %{_builddir}/manifests.files
+test -s %{_builddir}/manifests.files
 install -Dm755 %{srcdir}/_build/default/linux/mounts/libtsync_mounts.so \
   %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 strip --strip-unneeded %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
@@ -71,15 +74,12 @@ for state in idle sync paused error; do
 done
 DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build --strip
 
-%files
+%files -f %{_builddir}/manifests.files
 %{_bindir}/tsync
 %{_unitdir}/tsync@.service
 %{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 %{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 %{_libdir}/tsync/libtsync_mounts.so
-%{_sysconfdir}/opt/chrome/native-messaging-hosts/org.feverdreamtv.tsync.json
-%{_sysconfdir}/chromium/native-messaging-hosts/org.feverdreamtv.tsync.json
-%{_sysconfdir}/opt/edge/native-messaging-hosts/org.feverdreamtv.tsync.json
 
 %files tray
 %{_bindir}/tsync-tray

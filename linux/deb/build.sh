@@ -70,10 +70,14 @@ strip --strip-unneeded "$root$libdir/tsync/libtsync_mounts.so"
 install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.service"
 install -Dm644 linux/org.feverdreamtv.tsync.policy "$root/usr/share/polkit-1/actions/org.feverdreamtv.tsync.policy"
 install -Dm644 assets/tsync-app.svg "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
-linux/browser-manifests.sh _build/default/bin/tsync.exe "$root"
 for script in postinst prerm postrm; do
   install -Dm755 "linux/deb/$script" "$root/DEBIAN/$script"
 done
+# passwords/browser §2: files under /etc are conffiles, which an upgrade does not
+# overwrite without asking.
+_build/default/bin/tsync.exe passwords browser manifest --path /usr/bin/tsync \
+  --root "$root" > "$root/DEBIAN/conffiles"
+test -s "$root/DEBIAN/conffiles"
 deps=$(shlibs "$root/usr/bin/tsync" "$root$libdir/tsync/libtsync_mounts.so")
 test -n "$deps"
 # fuse3 by hand: fusermount3 is executed, not linked, so nothing in the binary
