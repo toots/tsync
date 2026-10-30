@@ -96,7 +96,11 @@ try {
   Check 'a.txt is a dehydrated placeholder of its size' ((([int]$a.Attributes) -band 0x400000) -and $a.Length -eq 5)
   $sub = @(Get-ChildItem -Force (Join-Path $root 'sub') | ForEach-Object Name)
   Check 'sub lists b.txt on its first enumeration' ($sub -contains 'b.txt')
-  $checks = 5
+
+  Step 'reading through the sync root'
+  Check 'a.txt reads its content' ((Get-Content -Raw (Join-Path $root 'a.txt')) -eq 'alpha')
+  Check 'sub\b.txt reads its content' ((Get-Content -Raw (Join-Path $root 'sub\b.txt')) -eq 'bravo')
+  $checks = 7
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -106,5 +110,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 5) { throw "only $checks of 5 browse checks ran" }
-Step "cloud files end to end: $checks browse checks passed"
+if ($checks -ne 7) { throw "only $checks of 7 checks ran" }
+Step "cloud files end to end: $checks checks passed"
