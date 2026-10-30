@@ -20,6 +20,8 @@
 static CfConnectSyncRoot_t cf_connect;
 static CfDisconnectSyncRoot_t cf_disconnect;
 static CfExecute_t cf_execute;
+static CfGetPlaceholderInfo_t cf_get_placeholder_info;
+static CfHydratePlaceholder_t cf_hydrate;
 
 static void fail_hresult(const char *what, HRESULT hr) {
   char message[128];
@@ -37,7 +39,11 @@ static void load_api(void) {
   cf_connect = (CfConnectSyncRoot_t)GetProcAddress(library, "CfConnectSyncRoot");
   cf_disconnect = (CfDisconnectSyncRoot_t)GetProcAddress(library, "CfDisconnectSyncRoot");
   cf_execute = (CfExecute_t)GetProcAddress(library, "CfExecute");
-  if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL)
+  cf_get_placeholder_info =
+      (CfGetPlaceholderInfo_t)GetProcAddress(library, "CfGetPlaceholderInfo");
+  cf_hydrate = (CfHydratePlaceholder_t)GetProcAddress(library, "CfHydratePlaceholder");
+  if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL ||
+      cf_get_placeholder_info == NULL || cf_hydrate == NULL)
     caml_failwith("cldapi.dll lacks a function the provider calls");
 }
 
@@ -63,16 +69,18 @@ static value int64_value(LONGLONG n) { return caml_copy_int64(n); }
 
 /* With CF_CONNECT_FLAG_REQUIRE_FULL_FILE_PATH a path is the volume's: the
    drive name makes it one the file API opens. */
-static value full_path(const CF_CALLBACK_INFO *info) {
+static value full_path(const CF_CALLBACK_INFO *info, const wchar_t *relative) {
+  if (relative == NULL)
+    return caml_copy_string("");
   size_t volume = info->VolumeDosName == NULL ? 0 : wcslen(info->VolumeDosName);
-  size_t rest = info->NormalizedPath == NULL ? 0 : wcslen(info->NormalizedPath);
+  size_t rest = wcslen(relative);
   wchar_t *path = malloc((volume + rest + 1) * sizeof(wchar_t));
   if (path == NULL)
     caml_raise_out_of_memory();
   if (volume > 0)
     memcpy(path, info->VolumeDosName, volume * sizeof(wchar_t));
   if (rest > 0)
-    memcpy(path + volume, info->NormalizedPath, rest * sizeof(wchar_t));
+    memcpy(path + volume, relative, rest * sizeof(wchar_t));
   path[volume + rest] = 0;
   value _path = value_of_utf16(path);
   free(path);
@@ -120,8 +128,8 @@ static value request_of(const CF_CALLBACK_INFO *info,
   }
   _identity = caml_alloc_initialized_string(info->FileIdentityLength,
                                             (const char *)info->FileIdentity);
-  _path = full_path(info);
-  _target = value_of_utf16(target);
+  _path = full_path(info, info->NormalizedPath);
+  _target = full_path(info, target);
   _transfer = int64_value(info->TransferKey);
   _request_key = int64_value(info->RequestKey);
   _request = caml_alloc_tuple(13);
@@ -374,4 +382,60 @@ CAMLprim value tsync_cf_upcase(value _name) {
   _upper = value_of_utf16_length(name, units);
   free(name);
   CAMLreturn(_upper);
+}
+
+static HANDLE open_placeholder(value _path, DWORD access) {
+  wchar_t *path = utf16_of_value(_path);
+  caml_release_runtime_system();
+  HANDLE h = CreateFileW(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  caml_acquire_runtime_system();
+  free(path);
+  return h;
+}
+
+/* The placeholder's file identity, or [None] for a file or folder that is not
+   a placeholder (cloud-files §8.1). */
+CAMLprim value tsync_cf_identity(value _path) {
+  CAMLparam1(_path);
+  CAMLlocal1(_identity);
+  load_api();
+  HANDLE h = open_placeholder(_path, FILE_READ_ATTRIBUTES);
+  if (h == INVALID_HANDLE_VALUE)
+    caml_failwith("the item cannot be opened for its placeholder state");
+  DWORD size = sizeof(CF_PLACEHOLDER_BASIC_INFO) + 4096, written = 0;
+  CF_PLACEHOLDER_BASIC_INFO *info = malloc(size);
+  if (info == NULL) {
+    CloseHandle(h);
+    caml_raise_out_of_memory();
+  }
+  caml_release_runtime_system();
+  HRESULT hr = cf_get_placeholder_info(h, CF_PLACEHOLDER_INFO_BASIC, info, size, &written);
+  caml_acquire_runtime_system();
+  CloseHandle(h);
+  if (FAILED(hr)) {
+    free(info);
+    CAMLreturn(Val_none);
+  }
+  _identity = caml_alloc_initialized_string(info->FileIdentityLength,
+                                            (const char *)info->FileIdentity);
+  free(info);
+  CAMLreturn(caml_alloc_some(_identity));
+}
+
+/* Makes the file's whole content local, through this provider's own fetch
+   callbacks, which run on other threads (cloud-files §9.2). */
+CAMLprim value tsync_cf_hydrate(value _path) {
+  CAMLparam1(_path);
+  load_api();
+  HANDLE h = open_placeholder(_path, GENERIC_READ);
+  if (h == INVALID_HANDLE_VALUE)
+    caml_failwith("the file cannot be opened to make its content whole");
+  caml_release_runtime_system();
+  HRESULT hr = cf_hydrate(h, 0, -1, 0, NULL);
+  caml_acquire_runtime_system();
+  CloseHandle(h);
+  if (FAILED(hr))
+    fail_hresult("making the content whole", hr);
+  CAMLreturn(Val_unit);
 }

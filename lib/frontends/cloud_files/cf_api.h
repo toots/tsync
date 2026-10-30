@@ -204,10 +204,24 @@ typedef struct CF_OPERATION_PARAMETERS {
   (FIELD_OFFSET(CF_OPERATION_PARAMETERS, field) +                              \
    sizeof(((CF_OPERATION_PARAMETERS *)0)->field))
 
+typedef struct CF_PLACEHOLDER_BASIC_INFO {
+  LONG PinState;
+  LONG InSyncState;
+  LONGLONG FileId;
+  LONGLONG SyncRootFileId;
+  DWORD FileIdentityLength;
+  BYTE FileIdentity[1];
+} CF_PLACEHOLDER_BASIC_INFO;
+
+enum { CF_PLACEHOLDER_INFO_BASIC = 0 };
+
 /* The functions, loaded from cldapi.dll at start. */
 typedef HRESULT(WINAPI *CfConnectSyncRoot_t)(PCWSTR, const CF_CALLBACK_REGISTRATION *,
                                              LPCVOID, LONG, CF_CONNECTION_KEY *);
 typedef HRESULT(WINAPI *CfDisconnectSyncRoot_t)(CF_CONNECTION_KEY);
 typedef HRESULT(WINAPI *CfExecute_t)(const CF_OPERATION_INFO *, CF_OPERATION_PARAMETERS *);
+typedef HRESULT(WINAPI *CfGetPlaceholderInfo_t)(HANDLE, LONG, PVOID, DWORD, PDWORD);
+typedef HRESULT(WINAPI *CfHydratePlaceholder_t)(HANDLE, LONGLONG, LONGLONG, LONG,
+                                                LPOVERLAPPED);
 
 #endif
