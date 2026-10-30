@@ -131,7 +131,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 |---|---|---|
 | `.deb` (`tsync`, `tsync-tray`, `tsync-dolphin`) | Debian stable and Ubuntu latest, amd64 and arm64, in containers | install the three packages on the image they were built for, run the binary and the tray, and make the package checks of [linux-desktop.md §6.3](frontends/linux-desktop.md#63-packages) |
 | `.rpm` | the latest Fedora release, amd64 and arm64, in containers | as for `.deb` |
-| `tsync.pkg` | macOS, Apple silicon | check the package signature and that Gatekeeper accepts the notarized package |
+| `tsync.pkg` | macOS, Apple silicon | check the package signature, that Gatekeeper accepts the notarized package, and that its payload carries the native-messaging manifests of [passwords/browser §2](extensions/passwords/browser.md#2-installing), naming the app's `tsync` |
 | `tsync-arm64-v8a.apk` | Linux, cross-compiled | check that the package holds the core library for its ABI, aligned for 16 KB pages, and that its signer is the tsync key (§5.4) |
 | `tsync-browser-extension.zip` | Linux | check that the manifest carries no `key` and the build's version, that no test is packed and that every script parses; uploaded to the Chrome Web Store by hand ([passwords/browser §2](extensions/passwords/browser.md#2-installing)) |
 

@@ -26,11 +26,34 @@ capability. What has been seen working is recorded in §10.
 
 ## 2. Installing
 
-- `tsync passwords browser install` writes the native-messaging manifest for each Chromium-family
-  browser it finds on the host, under the browser's per-user directory (`NativeMessagingHosts/` of
-  its profile root on macOS and Linux), naming the bridge's absolute path and the extension's id in
-  `allowed_origins`. `--extension-id ID` adds one; `tsync passwords browser uninstall` removes what
-  install wrote. Nothing else in the browser's directories is touched.
+- **The native-messaging manifest** is the file a Chromium-family browser reads to start the
+  bridge: `name` `org.feverdreamtv.tsync`, `type` `stdio`, `path` the absolute path of the `tsync`
+  executable, and `allowed_origins` the extension's id and any `--extension-id` given.
+  `tsync passwords browser manifest --path PATH` prints it; it is the one place its form is
+  written, and both ways of installing below take it from there.
+- **The bridge starts as `tsync ORIGIN`.** A browser starts the manifest's `path` with the
+  caller's origin as its first argument, and on Windows `--parent-window=N` after it: `tsync` whose
+  first argument starts with `chrome-extension://` runs `tsync passwords browser-host` with its
+  arguments. No launcher script stands between the browser and the executable.
+- **Every package installs the manifest system-wide**, as files the package carries, so the
+  package manager removes them with it and a user has nothing to run:
+
+  | Package | Where the manifest goes | `path` |
+  |---|---|---|
+  | `.deb`, `.rpm` | `/etc/opt/chrome/native-messaging-hosts/`, `/etc/chromium/native-messaging-hosts/`, `/etc/opt/edge/native-messaging-hosts/` | `/usr/bin/tsync` |
+  | `tsync.pkg` | `/Library/Google/Chrome/NativeMessagingHosts/`, `/Library/Application Support/Chromium/NativeMessagingHosts/`, `/Library/Microsoft/Edge/NativeMessagingHosts/` | `/Applications/TsyncApp.app/Contents/Library/Helpers/tsyncd.app/Contents/MacOS/tsync` |
+  | the Windows installer | the manifest in the install folder, named by the default value of `HKEY_LOCAL_MACHINE\SOFTWARE\Google\Chrome\NativeMessagingHosts\org.feverdreamtv.tsync`, a key the installer owns | the installed `tsync.exe` |
+
+  Each file is named `org.feverdreamtv.tsync.json`. The package build makes it with the `tsync` it
+  packages, never from a copy kept in the source tree. Brave reads Chrome's location and Vivaldi
+  Chromium's; Edge on Windows falls back to Chrome's key.
+- **Without a package**, a build from source or a development build: `tsync passwords browser
+  install` writes the same manifest, naming the `tsync` that runs it, under each Chromium-family
+  browser's per-user directory it finds (`NativeMessagingHosts/` of its profile root on macOS and
+  Linux, `HKEY_CURRENT_USER` on Windows), and `tsync passwords browser uninstall` removes what it
+  wrote. Nothing else in the browser's directories is touched. A development machine removes the
+  package first, so that one manifest names the bridge: which of a per-user and a system-wide
+  manifest a browser prefers is the browser's to say.
 - **The extension id is fixed**: the manifest carries the public key of the extension's Chrome Web
   Store item (`key`), so a copy loaded unpacked has the store's id, the one install names.
 - **From the Chrome Web Store**, on every host: Chrome accepts an extension from outside its store
@@ -45,7 +68,8 @@ capability. What has been seen working is recorded in §10.
   makes passkeys there as in a regular window, each the user's own act, and stores nothing of its
   own from an incognito tab: the save sheet offers no *Never for this site* there.
 - The popup says what is missing when it cannot reach the bridge: the native host not installed
-  (*Run `tsync passwords browser install`*), the owner not running, or no domain using passwords.
+  (*Install tsync, or run `tsync passwords browser install`*), the owner not running, or no domain
+  using passwords.
 
 ## 3. Forms and fills
 

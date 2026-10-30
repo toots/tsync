@@ -370,9 +370,9 @@ bridge it talks to.
   each message, both ways, is a 32-bit length in the host's byte order followed by that many
   bytes of UTF-8 JSON. A message the bridge sends is at most 1 MiB.
 - The browser starts it only for the extensions its native-messaging manifest names (Chromium
-  `allowed_origins`, Firefox `allowed_extensions`). `tsync passwords browser install` writes that
-  manifest for each browser it finds on the host, naming tsync's published extension ids and any
-  `--extension-id` given.
+  `allowed_origins`, Firefox `allowed_extensions`). tsync's packages install that manifest
+  system-wide, and `tsync passwords browser install` writes it per user without one
+  ([browser §2](passwords/browser.md#2-installing)).
 - The bridge is a one-shot client of the owner of access class **owner**
   ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)). It forwards only the requests of §8.2;
   anything else is refused `invalid`. It holds no K and keeps nothing.

@@ -299,6 +299,9 @@ fail against a deliberately bad artifact before its pass counts.
 - A package build with the plugin's toolkit absent fails.
 - After install, `tsync-tray` runs: started with no session bus, it exits as
   [linux-tray.md §1](linux-tray.md#1-command-line-and-exit) says.
+- `tsync` carries the native-messaging manifest in each location of
+  [browser §2](../extensions/passwords/browser.md#2-installing), naming `/usr/bin/tsync` and the
+  extension's id, and no other package lists it.
 - A client machine installs `tsync` and `tsync-tray` from the repository as it is served.
 
 ### 6.4 Icons
