@@ -163,8 +163,20 @@ jobs:
           name: tsync-windows-installer
           path: installer/
 
+      # cloud-files §17: the installed service presents a domain on a local
+      # MinIO, which takes conditional writes as S3 does.
+      - name: Cloud Files end to end
+        id: cloud-files
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing https://dl.min.io/server/minio/release/windows-amd64/minio.exe -OutFile "$env:RUNNER_TEMP\minio.exe"
+          Invoke-WebRequest -UseBasicParsing https://dl.min.io/client/mc/release/windows-amd64/mc.exe -OutFile "$env:RUNNER_TEMP\mc.exe"
+          tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe -Minio "$env:RUNNER_TEMP\minio.exe" -Mc "$env:RUNNER_TEMP\mc.exe"
+
+      # Also after a failure of the end-to-end step, so one run reports both.
       - name: Timing-sensitive tests
         id: serial
+        if: ${{ !cancelled() }}
         run: opam exec -- dune build @runtest-serial -j1
 
       # Also after a failure of the step above, so one run reports both.
