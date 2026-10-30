@@ -15,7 +15,7 @@ type command = {
 
 (** How [tsync config --edit] offers a frontend (07 §5.9). *)
 type wizard = {
-  systems : [ `Linux | `Macos ] list;  (** where it is offered *)
+  systems : [ `Linux | `Macos | `Windows ] list;  (** where it is offered *)
   question : string;  (** the yes-or-no question that adds it to a domain *)
   asks : string list;
       (** the options asked without being asked for; the others sit behind one
@@ -49,4 +49,4 @@ val names : unit -> string list
 
 (** The registered types the wizard offers on [system], each with its
     descriptor: presenting ones first, then by name. *)
-val offered : [ `Linux | `Macos ] -> (string * t) list
+val offered : [ `Linux | `Macos | `Windows ] -> (string * t) list
