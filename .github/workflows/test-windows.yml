@@ -145,8 +145,8 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log"; throw "setup exited $($p.ExitCode)" }
           $package = Get-AppxPackage -Name org.feverdreamtv.tsync
           if (-not $package) { throw 'the identity package is not registered' }
-          "identity package: $($package.PackageFullName) at $($package.InstallLocation)"
-          if ($package.InstallLocation -ne $programs) { throw "its external location is $($package.InstallLocation)" }
+          "identity package: $($package.PackageFullName), status $($package.Status)"
+          if ($package.Status -ne 'Ok') { throw "the identity package's status is $($package.Status)" }
           $publisher = Get-Content windows\publisher -TotalCount 1
           $signer = (Get-AuthenticodeSignature "$programs\tsyncd.exe").SignerCertificate.Subject
           if ($signer -ne $publisher) { throw "tsyncd.exe is signed by '$signer'" }
