@@ -186,7 +186,7 @@
   new MutationObserver(rescan).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["type", "autocomplete", "hidden", "style", "class"] });
   scan();
 
-  window.addEventListener("scroll", (e) => { if (e.target !== host) { close(); refollow(); } }, true);
+  window.addEventListener("scroll", () => { close(); refollow(); }, true);
   window.addEventListener("resize", refollow);
   document.addEventListener("transitionend", refollow, true);
   document.addEventListener("focusin", refollow, true);
@@ -266,6 +266,7 @@
     } catch (_) {
       answer = { error: "tsync did not answer" };
     }
+    if (openFor !== el) return;
     menu.replaceChildren();
     if (newPassword.has(el)) menu.appendChild(row("Use a strong password", "saved in tsync as you pick it", () => suggest(el)));
     if (answer.error) menu.appendChild(note(answer.error));
@@ -379,7 +380,13 @@
     }
     // A sign-in asking the password on a later step keeps the username in a hidden field.
     if (!username) for (const input of scope.querySelectorAll("input")) {
-      if (!kinds.has(input) && input.value && TsyncFields.kind({ ...describe(input), hidden: false }) === "username") username = input.value;
+      // A type="hidden" field also carries tokens (login_challenge): only its exact name says username.
+      const named = input.type !== "hidden" || /^(user.?name|e.?mail|identifier|login)$/i.test(input.name || input.id);
+      const shown = { ...describe(input), type: input.type === "hidden" ? "text" : input.type, hidden: false, readOnly: false, disabled: false };
+      if (named && !kinds.has(input) && input.value && TsyncFields.kind(shown) === "username") {
+        username = input.value;
+        break;
+      }
     }
     if (!password) return;
     offered = true;
