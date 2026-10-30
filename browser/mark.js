@@ -32,5 +32,18 @@ const TsyncMark = (() => {
     return svg;
   }
 
-  return { element };
+  // vault §8.1: rows grouped by domain in name order; a page draws a header per group only when
+  // there are several, so a picker of one domain draws no mark.
+  function byVault(items) {
+    const groups = new Map();
+    for (const item of items) {
+      if (!groups.has(item.domain)) groups.set(item.domain, []);
+      groups.get(item.domain).push(item);
+    }
+    return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([domain, rows]) => ({ domain, items: rows }));
+  }
+
+  return { element, byVault };
 })();
+
+if (typeof module !== "undefined") module.exports = TsyncMark;

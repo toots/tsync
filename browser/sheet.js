@@ -61,16 +61,13 @@ function render(item) {
       break;
     case "passkey-get":
       main.append(el("h1", { textContent: `Sign in to ${site} with a passkey` }));
-      // vault §8.1: with several domains, each one's passkeys under a header carrying its mark.
-      const several = new Set(item.passkeys.map((k) => k.domain)).size > 1;
-      let heading = null;
-      for (const key of several ? [...item.passkeys].sort((a, b) => a.domain.localeCompare(b.domain)) : item.passkeys) {
-        if (several && key.domain !== heading) {
-          heading = key.domain;
-          main.append(el("p", { className: "detail mark" }, TsyncMark.element((item.looks || {})[key.domain] || null, 16), ` ${key.domain}`));
+      const groups = TsyncMark.byVault(item.passkeys);
+      for (const group of groups) {
+        if (groups.length > 1) main.append(el("p", { className: "detail mark" }, TsyncMark.element((item.looks || {})[group.domain] || null, 16), ` ${group.domain}`));
+        for (const key of group.items) {
+          main.append(el("button", { className: "row", onclick: () => answer({ action: "pick", id: key.id }) },
+            el("span", {}, el("strong", { textContent: key.userDisplayName || key.userName }), el("small", { textContent: key.userName }))));
         }
-        main.append(el("button", { className: "row", onclick: () => answer({ action: "pick", id: key.id }) },
-          el("span", {}, el("strong", { textContent: key.userDisplayName || key.userName }), el("small", { textContent: key.userName }))));
       }
       actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })), button("Cancel", () => answer({ action: "cancel" })));
       break;
