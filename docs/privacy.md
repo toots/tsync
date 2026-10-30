@@ -2,7 +2,7 @@
 
 tsync collects nothing. It has no account, no server of its own, no analytics and no crash reporting. Your files and your vault go only to the storage you configure: your bucket, your disk, or a tsync server you run.
 
-This applies to every part of tsync: the `tsync` program, the macOS app, the Android app and the browser extension.
+This applies to every part of tsync: the `tsync` program, the macOS app, the Windows client, the Android app and the browser extension.
 
 ## What goes where
 
@@ -16,6 +16,12 @@ This applies to every part of tsync: the `tsync` program, the macOS app, the And
 - It talks only to the `tsync` program on the same computer, through Chrome's native messaging. It makes no network requests of its own.
 - It stores one thing in the browser: the list of sites where you chose *Never for this site*.
 - It turns off Chrome's own offer to save passwords, and its address and card autofill, so that new logins go to one place. The popup's checkbox turns them back on.
+
+## The Windows client
+
+- Its sync folder is registered with Windows as a cloud files folder: when a program opens a file there, Windows asks tsync for its contents, and tsync fetches them from your storage.
+- The key that unlocks your vault is kept in Windows Credential Manager, for this computer only: it does not roam with your account.
+- Its settings and data stay in your Local AppData folder, never the roaming profile, so they do not travel to another computer with your account.
 
 ## The Android app
 
