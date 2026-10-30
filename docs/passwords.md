@@ -95,10 +95,14 @@ See [the Android page](android.md#passwords-and-autofill).
 <a id="browser"></a>Chrome, Chromium, Brave, Edge or Vivaldi, on Linux or a Mac. tsync's browser extension fills logins and two-factor codes, saves new logins, suggests strong passwords, and makes and uses passkeys.
 
 - **Setting it up.** Run `tsync passwords browser install` once per user: it lets your browsers start tsync's bridge. Then add tsync's extension from the Chrome Web Store, which keeps it up to date. Its store listing is not published yet; until it is, the extension is loaded from tsync's source, `browser/` in *Developer mode* with *Load unpacked*, which is meant for development.
-- **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
+- **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. The icon's arrow shows whether the menu is open; click it again, press Escape or click elsewhere to close it. With logins in several vaults, the menu lists them under each vault's name. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
+
+  <img src="images/browser-icon-closed.png" width="359" alt="A sign-in form: the Email and Password fields each show tsync's icon, its arrow pointing down">
+
+  <img src="images/browser-password-menu.png" width="359" alt="The menu open above the Email field, the icon's arrow pointing up: two logins under Files, two under Work"> <img src="images/browser-password-menu-one-vault.png" width="359" alt="The menu on a site whose logins are all in one vault: two logins, no vault name">
 - **Codes.** A two-factor field offers the code of each of the site's logins that links one, by username, under each vault's name when several vaults have one. The popup (tsync's toolbar icon) also copies it.
 
-  ![The code menu on a two-factor field: two accounts in each of two vaults](images/browser-code-menu.png)
+  <img src="images/browser-code-menu.png" width="359" alt="The code menu on a two-factor field: two accounts in each of two vaults, each row naming its account"> <img src="images/browser-code-menu-one-vault.png" width="359" alt="The code menu on a site whose logins are all in one vault: two accounts, no vault name">
 
 - **Saving.** Signing in with a password you typed asks *Save this login in tsync?*, or *Update the password* when tsync has another one for that username. *Never for this site* stops asking there.
 - **A strong password.** Signing up, or changing a password, a new-password field offers *Use a strong password*: it fills a generated password, and the field confirming it, and saves the login in tsync at once; submitting the form adds the username to that login.
