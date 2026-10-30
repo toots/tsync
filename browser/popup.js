@@ -43,34 +43,33 @@ async function render() {
   main.append(el("h2", { textContent: new URL(state.origin).host }));
   const logins = (state.match && state.match.ok && state.match.logins) || [];
   if (!logins.length) main.append(el("p", { className: "detail", textContent: "Nothing in tsync for this site." }));
-  // vault §8.1: with several domains, each one's logins under a header carrying its mark.
-  const several = new Set(logins.map((l) => l.domain)).size > 1;
-  let heading = null;
-  for (const login of several ? [...logins].sort((a, b) => a.domain.localeCompare(b.domain)) : logins) {
-    if (several && login.domain !== heading) {
-      heading = login.domain;
-      main.append(el("p", { className: "detail mark" }, TsyncMark.element(looks[login.domain], 16), ` ${login.domain}`));
-    }
-    const fill = el("button", { textContent: "Fill", className: "primary", onclick: async () => {
-      const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
-        title: login.title, username: login.username });
-      if (reply && reply.error) main.append(el("p", { className: "detail", textContent: reply.error }));
-      else window.close();
-    } });
-    const actions = el("div", { className: "actions" }, fill);
-    if (login.code) {
-      actions.prepend(el("button", { textContent: "Copy code", onclick: async () => {
-        const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
-          title: login.title, username: login.username, kind: "code" });
-        if (!reply || !reply.code) return main.append(el("p", { className: "detail", textContent: (reply && reply.error) || "tsync gave no code." }));
-        await navigator.clipboard.writeText(reply.code);
-        main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
-      } }));
-    }
-    main.append(el("div", { className: "login" },
-      el("strong", { textContent: login.title }),
-      el("small", { textContent: login.username }), actions));
+  const groups = TsyncMark.byVault(logins);
+  for (const group of groups) {
+    if (groups.length > 1) main.append(el("p", { className: "detail mark" }, TsyncMark.element(looks[group.domain], 16), ` ${group.domain}`));
+    for (const login of group.items) main.append(loginRow(tab, login));
   }
+}
+
+function loginRow(tab, login) {
+  const fill = el("button", { textContent: "Fill", className: "primary", onclick: async () => {
+    const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+      title: login.title, username: login.username });
+    if (reply && reply.error) main.append(el("p", { className: "detail", textContent: reply.error }));
+    else window.close();
+  } });
+  const actions = el("div", { className: "actions" }, fill);
+  if (login.code) {
+    actions.prepend(el("button", { textContent: "Copy code", onclick: async () => {
+      const reply = await chrome.runtime.sendMessage({ type: "popup-fill", tabId: tab.id, domain: login.domain, id: login.id,
+        title: login.title, username: login.username, kind: "code" });
+      if (!reply || !reply.code) return main.append(el("p", { className: "detail", textContent: (reply && reply.error) || "tsync gave no code." }));
+      await navigator.clipboard.writeText(reply.code);
+      main.append(el("p", { className: "detail", textContent: "Code copied. It stays on the clipboard until replaced." }));
+    } }));
+  }
+  return el("div", { className: "login" },
+    el("strong", { textContent: login.title }),
+    el("small", { textContent: login.username }), actions);
 }
 
 render();

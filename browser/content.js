@@ -270,17 +270,13 @@
     menu.replaceChildren();
     if (newPassword.has(el)) menu.appendChild(row("Use a strong password", "saved in tsync as you pick it", () => suggest(el)));
     if (answer.error) menu.appendChild(note(answer.error));
-    // vault §8.1: with several domains, each one's logins under a header carrying its mark.
-    let heading = null;
-    const order = [...new Set((answer.logins || []).map((l) => l.domain))];
-    const grouped = [...(answer.logins || [])].sort((a, b) => order.indexOf(a.domain) - order.indexOf(b.domain));
-    for (const login of grouped) {
-      if (answer.domains > 1 && login.domain !== heading) {
-        heading = login.domain;
-        menu.appendChild(header(login.domain, (answer.looks || {})[login.domain] || null));
+    const groups = TsyncMark.byVault(answer.logins || []);
+    for (const group of groups) {
+      if (groups.length > 1) menu.appendChild(header(group.domain, (answer.looks || {})[group.domain] || null));
+      for (const login of group.items) {
+        const detail = kind === "code" ? [login.username, "one-time code"].filter(Boolean).join(" · ") : login.username;
+        menu.appendChild(row(login.title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind)));
       }
-      const detail = kind === "code" ? [login.username, "one-time code"].filter(Boolean).join(" · ") : login.username;
-      menu.appendChild(row(login.title, login.exact ? detail : `${detail} · saved for another site of this domain`, () => pick(el, login, kind)));
     }
     if (conditional && kind !== "code") menu.appendChild(row("Sign in with a passkey", "from tsync", usePasskey));
     for (const domain of answer.locked || []) menu.appendChild(note(`${domain}: tsync is locked — unlock it in tsync`));
