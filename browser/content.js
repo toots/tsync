@@ -324,7 +324,8 @@
 
   // --- saving (§4) -----------------------------------------------------------
 
-  // §4: offered only for a password the user typed, on the user's own submit.
+  // §4: offered only for a password the user typed or the browser filled, on the user's own submit;
+  // a page can set neither a trusted input event nor the :autofill state.
   const typed = new WeakSet();
   document.addEventListener("input", (e) => {
     if (e.isTrusted && e.target instanceof HTMLInputElement && kinds.get(e.target) === "password") typed.add(e.target);
@@ -346,7 +347,11 @@
     for (const input of scope.querySelectorAll("input")) {
       const kind = kinds.get(input);
       if (kind === "username" && input.value) username = input.value;
-      if (kind === "password" && input.value && typed.has(input)) password = input.value;
+      if (kind === "password" && input.value && (typed.has(input) || input.matches(":autofill"))) password = input.value;
+    }
+    // A sign-in asking the password on a later step keeps the username in a hidden field.
+    if (!username) for (const input of scope.querySelectorAll("input")) {
+      if (!kinds.has(input) && input.value && TsyncFields.kind({ ...describe(input), hidden: false }) === "username") username = input.value;
     }
     if (!password) return;
     offered = true;
@@ -356,7 +361,14 @@
   document.addEventListener("click", (e) => {
     if (!e.isTrusted) return;
     const button = e.target instanceof Element && e.target.closest("button, input[type=submit]");
-    if (button && (button.type === "submit" || button.form)) offer(button.form);
+    if (!button || button.type === "reset") return;
+    if (button.form && button.type === "submit") return offer(button.form);
+    const names = [button.textContent, button.getAttribute("aria-label"), button.id, button.name, button.parentElement?.closest("[id]")?.id];
+    if (TsyncFields.submits(names)) offer(button.form);
+  }, true);
+  // A page that signs in by script has no form to submit: Enter in its password field is the submit.
+  document.addEventListener("keydown", (e) => {
+    if (e.isTrusted && e.key === "Enter" && kinds.get(e.target) === "password") offer(e.target.form);
   }, true);
 
   // --- passkeys (§5) ---------------------------------------------------------

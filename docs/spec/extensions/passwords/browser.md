@@ -128,11 +128,17 @@ browser's password manager for that.
 
 ## 4. Saving
 
-- When the user submits a form (a trusted `submit`, or a trusted click on its button) holding a
-  password field the user typed into (a trusted `input` event; a value tsync filled does not
-  count), the content script hands the username and the password typed to the service worker, with
-  the frame's origin from the browser. A script's submit, or a password a script set, offers
-  nothing.
+- When the user submits a form (a trusted `submit`, a trusted click on a button, or a trusted
+  Enter in a password field) holding a password field the user typed into (a trusted `input`
+  event) or the browser's own password manager filled (the field matches `:autofill`; a value
+  tsync filled does not count), the content script hands the username and the password to the
+  service worker, with the frame's origin from the browser. A page that signs in by script has no
+  form: a button outside any form submits the whole document. A click on a button that is not a
+  form's submit button counts only when its text, label, id, name and nearest id around it name
+  nothing else (forgot, reset, recover, help, cancel, back, show, hide, try another, create, sign
+  up, register), as a page drawn by script puts *Forgot password?* beside *Next*. A sign-in asking the password on a
+  later step keeps the username in a hidden field, which is read when no shown field has one. A
+  script's submit, or a password a script set, offers nothing.
 - The service worker never compares the typed password with tsync's: whether a sheet appears
   depends on nothing secret, so a page cannot use it to test a guess. It asks `match` only to tell
   a new login from a changed one, and shows the extension's sheet: *Save this login in tsync?*, or
