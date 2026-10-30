@@ -31,6 +31,14 @@ files tsync-tray | grep -qx '/etc/xdg/autostart/tsync-tray.desktop'
 for state in idle sync paused error; do
   files tsync-tray | grep -qx "/usr/share/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg"
 done
+# passwords/browser §2: tsync alone carries the browsers' manifests, each the
+# installed tsync's own, naming itself.
+for manifest in $(linux/browser-manifests.sh --list); do
+  files tsync | grep -qx "$manifest"
+  test "$(grep -c "$manifest" /tmp/tsync-files)" = 1
+  tsync passwords browser manifest --path /usr/bin/tsync | cmp - "$manifest"
+done
+
 # The startup list is where a user turns the tray off.
 if grep -Eq '^(NoDisplay|Hidden)=' /etc/xdg/autostart/tsync-tray.desktop; then
   echo "the autostart entry is hidden" >&2; exit 1
