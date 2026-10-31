@@ -2,4 +2,4 @@
 
 (library
  (name tsync_cloud_files_rules)
- (libraries tsync_core))
+ (libraries tsync_core yojson))

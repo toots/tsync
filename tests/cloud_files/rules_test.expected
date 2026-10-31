@@ -50,3 +50,44 @@ prefix tsync!S-1-5-21-1-2-3-1001!
 docs         tsync!S-1-5-21-1-2-3-1001!f6bd4d8de4f22df5 (under the prefix true)
 Docs         tsync!S-1-5-21-1-2-3-1001!fffc0b78c59ccaea (under the prefix true)
 a!b:c        tsync!S-1-5-21-1-2-3-1001!24364602c02d0147 (under the prefix true)
+
+== apply state (§10.1)
+{"anchor":"12|3","pending":["d:9f3a","root"]} -> reads back
+fresh: anchor "", pending [root]
+""                                       unreadable
+"{}"                                     unreadable
+"{\"anchor\":\"x\"}"                     unreadable
+"{\"anchor\":\"x\",\"pending\":[1]}"     unreadable
+"not json"                               unreadable
+
+== applying a folder (§10.2)
+a new folder: everything is created
+  create a.txt (file)
+  create sub (folder)
+in step: nothing
+  nothing
+a peer renamed it
+  rename a.txt -> b.txt
+a peer edited it
+  refresh a.txt
+a peer renamed and edited it
+  rename a.txt -> b.txt
+  refresh b.txt
+only its time changed
+  update a.txt
+a row with no time is not compared on it
+  nothing
+an owed child is taken, and a row of its name not created
+  take notes.txt
+an owed edit is taken, never refreshed
+  take a.txt
+a peer deleted it
+  delete gone.txt
+a peer moved it to a folder the root holds
+  move gone.txt into C:\root\sub as gone.txt
+a foreign item stays, and its name is not reused
+  nothing
+names Windows refuses, links and case groups are not created
+  create X (file)
+the group member on disk stays
+  nothing
