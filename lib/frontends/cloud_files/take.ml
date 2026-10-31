@@ -253,7 +253,7 @@ and take_file t path (st : Cf.state) parent_ref =
               Fun.protect
                 ~finally:(fun () -> Cf.release h)
                 (fun () ->
-                  Cf.set_identity h ~placeholder:st.placeholder
+                  Cf.set_identity ~size:got.size h ~placeholder:st.placeholder
                     (identity_of got)
                     ~in_sync:(Cf.held_usn h = st.usn));
               Atomic.incr t.takes;

@@ -145,8 +145,10 @@ val held_usn : held -> int64
 val release : held -> unit
 
 (** Stores [identity] on the held item, converting it when it is not a
-    placeholder, and marks it in sync when [in_sync]. *)
-val set_identity : held -> placeholder:bool -> string -> in_sync:bool -> unit
+    placeholder, and marks it in sync when [in_sync]; a placeholder also records
+    [size], which an edit changed. *)
+val set_identity :
+  ?size:int -> held -> placeholder:bool -> string -> in_sync:bool -> unit
 
 (** Makes one placeholder, in sync, in a folder outside any callback. *)
 val create : string -> placeholder -> unit

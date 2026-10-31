@@ -106,8 +106,9 @@ let fetch_data t (r : Cf.request) =
             Rt.run_sync (fun () ->
                 let path = Handler.path_of_ref t.handler id.ref_ in
                 E.atomically (fun () ->
-                    if (E.stat path).content_id = Some id.content_id then
-                      Some (E.retain path)
+                    let st = E.stat path in
+                    if st.content_id = Some id.content_id then
+                      Some (E.retain path, st.size)
                     else None))
           with e -> raise (Failed_with (status_of_failure e, e))
         in
@@ -116,13 +117,15 @@ let fetch_data t (r : Cf.request) =
               raise
                 (Failed_with
                    (`Not_in_sync, Failure "its content changed in the domain"))
-          | Some h ->
+          | Some (h, size) ->
               Fun.protect
                 ~finally:(fun () -> Rt.run_sync (fun () -> E.release h))
                 (fun () ->
                   let start = r.offset / alignment * alignment in
                   let stop =
-                    min r.file_size
+                    (* The version's size, never the placeholder's record of
+                       it, which a local edit leaves behind. *)
+                    min size
                       ((r.offset + r.length + alignment - 1)
                       / alignment * alignment)
                   in
