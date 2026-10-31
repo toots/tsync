@@ -146,6 +146,9 @@ type frontend = {
   read_only : bool option;
   shares : bool option;  (** serves share links *)
   unanswered : bool;
+  unpresented : int option;
+  untaken : int option;
+  pending_folders : int option;
 }
 [@@deriving yojson]
 
