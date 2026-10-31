@@ -160,6 +160,16 @@ try {
     (PublishedText 'made\inner.txt') -eq 'inside'
   } 90
 
+  Step 'saving through a temporary file'
+  $temporary = Join-Path $root 'new.txt.saving'
+  Set-Content -NoNewline -Path $temporary -Value 'saved whole'
+  Move-Item -Force $temporary (Join-Path $root 'new.txt')
+  Until 'a save renamed over the original reaches it as one content' {
+    $p = Published
+    ((PublishedText 'new.txt') -eq 'saved whole') -and
+      -not ($p -match 'conflicted copy') -and -not ($p -contains 'new.txt.saving')
+  } 90
+
   Step 'changing the domain outside the sync root'
   $elsewhere = Join-Path $Work 'elsewhere'
   New-Item -ItemType Directory -Force $elsewhere | Out-Null
@@ -190,7 +200,7 @@ try {
     (Test-Path $c) -and -not (Dehydrated $c) -and ((Get-Content -Raw $c) -eq 'changed'))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 21
+  $checks = 22
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -200,5 +210,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 21) { throw "only $checks of 21 checks ran" }
+if ($checks -ne 22) { throw "only $checks of 22 checks ran" }
 Step "cloud files end to end: $checks checks passed"
