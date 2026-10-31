@@ -96,6 +96,9 @@ val identity : string -> string option
 (** Makes a placeholder's whole content local. *)
 val hydrate : string -> unit
 
+(** Drops the local copy of an in-sync placeholder's content. *)
+val dehydrate : string -> unit
+
 (** A name as NTFS compares names, for case groups (§7.2). *)
 val upcase : string -> string
 
@@ -109,6 +112,7 @@ type state = {
   usn : int64;  (** the volume's update sequence number of its last change *)
   unpopulated : bool;  (** a folder whose children were never asked *)
   dehydrated : bool;  (** some of its content is not on disk *)
+  pin : [ `Unspecified | `Pinned | `Unpinned | `Excluded | `Inherit ];
 }
 
 (** [None] when nothing is at the path. *)

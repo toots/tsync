@@ -25,6 +25,7 @@ static CfHydratePlaceholder_t cf_hydrate;
 static CfConvertToPlaceholder_t cf_convert;
 static CfUpdatePlaceholder_t cf_update;
 static CfCreatePlaceholders_t cf_create;
+static CfDehydratePlaceholder_t cf_dehydrate;
 
 static void fail_hresult(const char *what, HRESULT hr) {
   char message[128];
@@ -48,9 +49,10 @@ static void load_api(void) {
   cf_convert = (CfConvertToPlaceholder_t)GetProcAddress(library, "CfConvertToPlaceholder");
   cf_update = (CfUpdatePlaceholder_t)GetProcAddress(library, "CfUpdatePlaceholder");
   cf_create = (CfCreatePlaceholders_t)GetProcAddress(library, "CfCreatePlaceholders");
+  cf_dehydrate = (CfDehydratePlaceholder_t)GetProcAddress(library, "CfDehydratePlaceholder");
   if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL ||
       cf_get_placeholder_info == NULL || cf_hydrate == NULL || cf_convert == NULL ||
-      cf_update == NULL || cf_create == NULL)
+      cf_update == NULL || cf_create == NULL || cf_dehydrate == NULL)
     caml_failwith("cldapi.dll lacks a function the provider calls");
 }
 
@@ -569,7 +571,7 @@ CAMLprim value tsync_cf_state(value _path) {
                                                           (const char *)info->FileIdentity)
                           : caml_copy_string("");
   _usn = caml_copy_int64(usn);
-  _state = caml_alloc_tuple(8);
+  _state = caml_alloc_tuple(9);
   Store_field(_state, 0, Val_bool(tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY));
   Store_field(_state, 1, Val_bool(other_reparse));
   Store_field(_state, 2, Val_bool(placeholder));
@@ -580,6 +582,8 @@ CAMLprim value tsync_cf_state(value _path) {
   Store_field(_state, 6, Val_bool(tag.FileAttributes & 0x40000));
   /* FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: some content is not on disk. */
   Store_field(_state, 7, Val_bool(tag.FileAttributes & 0x400000));
+  /* CF_PIN_STATE: 0 unspecified, 1 pinned, 2 unpinned, 3 excluded, 4 inherit. */
+  Store_field(_state, 8, Val_long(placeholder ? info->PinState : 0));
   free(info);
   CAMLreturn(caml_alloc_some(_state));
 }
@@ -728,4 +732,23 @@ CAMLprim value tsync_cf_refresh_bytecode(value *argv, int argn) {
   (void)argn;
   return tsync_cf_refresh_native(argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
                                  argv[6], argv[7]);
+}
+
+/* Drops the system's copy of an in-sync file's content (cloud-files §11). */
+CAMLprim value tsync_cf_dehydrate(value _path) {
+  CAMLparam1(_path);
+  load_api();
+  wchar_t *path = utf16_of_value(_path);
+  caml_release_runtime_system();
+  HANDLE h = open_item(path, FILE_READ_ATTRIBUTES | WRITE_DAC | SYNCHRONIZE,
+                       FILE_SHARE_READ | FILE_SHARE_DELETE);
+  HRESULT hr = h == INVALID_HANDLE_VALUE ? HRESULT_FROM_WIN32(GetLastError())
+                                         : cf_dehydrate(h, 0, -1, 0, NULL);
+  if (h != INVALID_HANDLE_VALUE)
+    CloseHandle(h);
+  caml_acquire_runtime_system();
+  free(path);
+  if (FAILED(hr))
+    fail_hresult("freeing the content", hr);
+  CAMLreturn(Val_unit);
 }

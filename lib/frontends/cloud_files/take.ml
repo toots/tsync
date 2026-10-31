@@ -74,6 +74,49 @@ let follow_aside path (item : Protocol.row) =
   let dst = Filename.concat (Filename.dirname path) item.name in
   if not (Win_path.same path dst) then Sys.rename path dst
 
+(* §11: an item's own pin, else its folder's, up to the root. *)
+let rec effective_pin t path (st : Cf.state) =
+  match st.pin with
+    | (`Pinned | `Unpinned) as pin -> pin
+    | `Unspecified | `Excluded | `Inherit ->
+        let parent = Filename.dirname path in
+        if Win_path.same path t.root || Win_path.same parent path then
+          `Unspecified
+        else (
+          match Cf.state parent with
+            | Some ps -> effective_pin t parent ps
+            | None -> `Unspecified)
+
+(* §11: a pinned file is made whole in the background; an unpinned one in
+   sync loses its local copy, here and in the chunk cache. *)
+let rec follow_pin t path (st : Cf.state) =
+  if st.is_dir then (
+    if not st.unpopulated then
+      Array.iter
+        (fun name ->
+          let child = Filename.concat path name in
+          match Cf.state child with
+            | Some cs when cs.placeholder && cs.in_sync -> follow_pin t child cs
+            | _ -> ())
+        (try Sys.readdir path with Sys_error _ -> [||]))
+  else (
+    match (effective_pin t path st, st.dehydrated) with
+      | `Pinned, true ->
+          ignore
+            (Thread.create
+               (fun () ->
+                 try Cf.hydrate path
+                 with e ->
+                   Log.warn "cloud_files: keeping %s on this device: %s" path
+                     (Printexc.to_string e))
+               ())
+      | `Unpinned, false -> (
+          Cf.dehydrate path;
+          match Identity.decode st.identity with
+            | Some id -> ignore (call t (Evict (Ref id.ref_)))
+            | None -> ())
+      | _ -> ())
+
 let rec take t path =
   if Names.is_temp_name (Filename.basename path) then `Done
   else (
@@ -85,7 +128,9 @@ let rec take t path =
       | Some st when st.placeholder && Identity.decode st.identity = None ->
           untake t path "a placeholder of another provider";
           `Done
-      | Some st when st.placeholder && st.in_sync -> `Done
+      | Some st when st.placeholder && st.in_sync ->
+          follow_pin t path st;
+          `Done
       | Some _ when t.read_only ->
           untake t path "the domain is read-only";
           `Done

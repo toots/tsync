@@ -166,9 +166,46 @@ type state = {
   usn : int64;
   unpopulated : bool;
   dehydrated : bool;
+  pin : [ `Unspecified | `Pinned | `Unpinned | `Excluded | `Inherit ];
 }
 
-external state : string -> state option = "tsync_cf_state"
+type raw_state = {
+  r_is_dir : bool;
+  r_other_reparse : bool;
+  r_placeholder : bool;
+  r_in_sync : bool;
+  r_identity : string;
+  r_usn : int64;
+  r_unpopulated : bool;
+  r_dehydrated : bool;
+  r_pin : int;
+}
+
+external raw_state : string -> raw_state option = "tsync_cf_state"
+
+let state path =
+  Option.map
+    (fun r ->
+      {
+        is_dir = r.r_is_dir;
+        other_reparse = r.r_other_reparse;
+        placeholder = r.r_placeholder;
+        in_sync = r.r_in_sync;
+        identity = r.r_identity;
+        usn = r.r_usn;
+        unpopulated = r.r_unpopulated;
+        dehydrated = r.r_dehydrated;
+        pin =
+          (match r.r_pin with
+            | 1 -> `Pinned
+            | 2 -> `Unpinned
+            | 3 -> `Excluded
+            | 4 -> `Inherit
+            | _ -> `Unspecified);
+      })
+    (raw_state path)
+
+external dehydrate : string -> unit = "tsync_cf_dehydrate"
 
 type watch = int64
 
