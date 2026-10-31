@@ -165,6 +165,7 @@ type state = {
   identity : string;
   usn : int64;
   unpopulated : bool;
+  dehydrated : bool;
 }
 
 external state : string -> state option = "tsync_cf_state"
