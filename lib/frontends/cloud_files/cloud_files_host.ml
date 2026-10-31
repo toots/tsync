@@ -10,6 +10,7 @@ type t = {
   connection : Cf.connection;
   take : Take.t;
   apply : Apply.t;
+  unshown : Unshown.t;
 }
 
 exception Failed_with of Cf.status * exn
@@ -64,21 +65,9 @@ let fetch_placeholders t (r : Cf.request) =
                    (fun n -> Hashtbl.replace on_disk n ())
                    (Sys.readdir r.path)
                with Sys_error _ -> ());
-              let presented, others =
-                Presentation.choose ~fold:Cf.upcase
-                  ~on_disk:(Hashtbl.mem on_disk)
-                  (List.filter_map
-                     (fun (row : Protocol.row) ->
-                       if row.kind = `Symlink then None else Some (row.name, row))
-                     rows)
+              let presented =
+                Unshown.present t.unshown ~on_disk:(Hashtbl.mem on_disk) rows
               in
-              List.iter
-                (fun ((row : Protocol.row), why) ->
-                  Log.info "cloud_files: %s not shown: %s" row.name
-                    (match why with
-                      | `Unpresentable reason -> reason
-                      | `Case_group shown -> "its case group shows " ^ shown))
-                others;
               Cf.transfer_placeholders t.connection r `Success
                 (List.filter_map
                    (fun (row, name) ->
@@ -297,7 +286,7 @@ let handle t (r : Cf.request) =
 (* §8.3: the shell's cloud icon until the programs carry their own. *)
 let icon = "%SystemRoot%\\system32\\imageres.dll,-1043"
 
-let start (domain : Domain.t) engine root applying handler =
+let start (domain : Domain.t) engine root served handler =
   Fs.mkdir_p root;
   let name = Domain_name.to_string domain.name in
   Cf.register
@@ -312,16 +301,17 @@ let start (domain : Domain.t) engine root applying handler =
            [name; "staging"])
       ~read_only:domain.domain.read_only ()
   in
+  let unshown = Unshown.create () in
   let apply =
-    Apply.create ~engine ~handler ~root ~take
+    Apply.create ~engine ~handler ~root ~take ~unshown
       ~state_file:
         (Filename.concat
            (Tsync_config.Paths.data_dir ())
            ("cloudfiles-" ^ name ^ ".json"))
       ()
   in
-  applying := Some apply;
-  let t = { engine; root; handler; connection; take; apply } in
+  let t = { engine; root; handler; connection; take; apply; unshown } in
+  served := Some t;
   Cf.on_callback (handle t);
   Take.start take;
   Apply.start apply;
@@ -336,11 +326,14 @@ let start (domain : Domain.t) engine root applying handler =
   ()
 
 let present root (domain : Domain.t) engine ~publish:_ =
-  let applying = ref None in
+  let served = ref None in
+  let count f = Option.map f !served in
   let hooks =
     {
-      Handler.changed = (fun _ -> Option.iter Apply.wake !applying);
-      reannounce = (fun () -> Option.iter Apply.restart_anchor !applying);
+      Handler.changed =
+        (fun _ -> Option.iter (fun t -> Apply.wake t.apply) !served);
+      reannounce =
+        (fun () -> Option.iter (fun t -> Apply.restart_anchor t.apply) !served);
       frontend =
         (fun () ->
           Some
@@ -356,10 +349,13 @@ let present root (domain : Domain.t) engine ~publish:_ =
               read_only = None;
               shares = None;
               unanswered = false;
+              unpresented = count (fun t -> Unshown.count t.unshown);
+              untaken = count (fun t -> Take.untaken t.take);
+              pending_folders = count (fun t -> Apply.pending t.apply);
             });
     }
   in
-  (hooks, fun handler -> start domain engine root applying handler)
+  (hooks, fun handler -> start domain engine root served handler)
 
 let host ~mount:_ domains ~run =
   match domains with
