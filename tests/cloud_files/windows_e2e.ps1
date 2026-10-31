@@ -20,7 +20,11 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
     Start-Sleep -Milliseconds 500
   }
   Step "FAILED within $seconds s: $what"
-  if (Test-Path (Join-Path $Work 'export.err')) { Step 'last export said:'; Get-Content (Join-Path $Work 'export.err') }
+  if (Test-Path (Join-Path $Work 'export.code')) {
+    Step "last export exited $(Get-Content (Join-Path $Work 'export.code')), saying:"
+    Get-Content (Join-Path $Work 'export.out'), (Join-Path $Work 'export.err') -ErrorAction Ignore
+    Step "published: $((Published) -join ', ')"
+  }
   Step 'status:'; & $tsync status 2>&1 | Out-String | Write-Host
   throw "FAILED within $seconds s: $what"
 }
@@ -29,8 +33,11 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
 # while a change is unpublished, which export refuses.
 function Exported {
   $dir = Join-Path $Work "export-$([guid]::NewGuid())"
-  & $tsync export --domain docs $dir 2> (Join-Path $Work 'export.err')
-  if ($LASTEXITCODE -ne 0) { return $null }
+  # Its output stays out of this function's value, which is only the folder.
+  & $tsync export --domain docs $dir > (Join-Path $Work 'export.out') 2> (Join-Path $Work 'export.err')
+  $code = $LASTEXITCODE
+  Set-Content (Join-Path $Work 'export.code') $code
+  if ($code -ne 0) { return $null }
   $dir
 }
 
