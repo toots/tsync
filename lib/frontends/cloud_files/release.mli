@@ -6,6 +6,10 @@
 
 val release : id:string -> string -> unit
 
+(** What under a sync root the domain does not hold yet: items out of sync or
+    not placeholders, by their in-sync bit (§9.3), which needs no provider. *)
+val owed : string -> string list
+
 (** The sync roots registered for this user by tsync, as (id, path). *)
 val registered : unit -> (string * string) list
 
