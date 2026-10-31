@@ -67,21 +67,6 @@ let purge ~domain:_ _ =
         print_endline "tsync's sync roots, task and local state are removed.";
         0
 
-(* §13.3: what a reset must not cost, read from each item's in-sync bit. *)
-let rec owed path acc =
-  if Names.is_temp_name (Filename.basename path) then acc
-  else (
-    match Cf.state path with
-      | Some st when st.placeholder && st.in_sync ->
-          if st.is_dir && not st.unpopulated then
-            Array.fold_left
-              (fun acc name -> owed (Filename.concat path name) acc)
-              acc
-              (try Sys.readdir path with Sys_error _ -> [||])
-          else acc
-      | Some _ -> path :: acc
-      | None -> acc)
-
 (* An in-sync placeholder is the domain's, so deleting it loses nothing; its
    state is read again right before, so an edit made meanwhile stays. *)
 let rec clear path =
@@ -113,11 +98,7 @@ let reset ~domain _ =
         let children () =
           try Array.to_list (Sys.readdir root) with Sys_error _ -> []
         in
-        let held =
-          List.fold_left
-            (fun acc name -> owed (Filename.concat root name) acc)
-            [] (children ())
-        in
+        let held = Release.owed root in
         if held <> [] then (
           start_service ();
           fail
