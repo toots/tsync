@@ -21,3 +21,12 @@
   (progn
    (echo "runtest-linux: not run, this host is not Linux\n")
    (system "exit 1"))))
+
+(rule
+ (alias runtest-windows)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (progn
+   (echo "runtest-windows: not run, this host is not Windows\n")
+   (system "exit 1"))))

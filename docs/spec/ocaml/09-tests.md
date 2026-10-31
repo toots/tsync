@@ -13,9 +13,10 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 - `runtest` is the common suite (§5.9). A platform's suite is `runtest-<platform>`: `runtest-linux`
   holds FUSE mounts and their discovery, the tray, the D-Bus vault services, `watch_test`,
   `mapped_pages_test`, `mount_point_test`, `config_test` and `wizard_test` (their configs name the `fuse` frontend);
-  `runtest-android` holds `tests/android`. The root `dune` fails `runtest-linux` on another system.
-  Linux CI builds `@runtest @runtest-linux`, the android job `@runtest-android`, macOS and Windows
-  `@runtest`.
+  `runtest-android` holds `tests/android`, and `runtest-windows` holds `tests/windows`. The root
+  `dune` fails `runtest-linux` and `runtest-windows` on another system.
+  Linux CI builds `@runtest @runtest-linux`, the android job `@runtest-android`, macOS `@runtest`,
+  Windows `@runtest @runtest-windows`.
 - The tests whose snapshot states a time bound have a second diff rule under their suite's serial
   alias (one rule with `(aliases runtest runtest-serial)` would pull the directory's whole `runtest`
   into it): `runtest-serial` for `dqueue_test`, `proxy_test`, `http_test`, `rt_test`, `rt_fd_test`,
