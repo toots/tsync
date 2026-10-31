@@ -211,8 +211,10 @@ try {
   $c = Join-Path $root 'c.txt'
 
   Step 'resetting'
-  & $tsync cloudfiles reset --domain docs
-  Check 'reset exits 0 with nothing owed' ($LASTEXITCODE -eq 0)
+  $said = & $tsync cloudfiles reset --domain docs 2>&1 | Out-String
+  $code = $LASTEXITCODE
+  Step "  reset exited $code, saying: $said"
+  Check 'reset exits 0 with nothing owed' ($code -eq 0)
   Until 'the sync root fills again from the domain' {
     (Test-Path $c) -and (Dehydrated $c)
   } 90
