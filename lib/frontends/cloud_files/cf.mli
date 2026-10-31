@@ -108,6 +108,7 @@ type state = {
   identity : string;  (** empty unless [placeholder] *)
   usn : int64;  (** the volume's update sequence number of its last change *)
   unpopulated : bool;  (** a folder whose children were never asked *)
+  dehydrated : bool;  (** some of its content is not on disk *)
 }
 
 (** [None] when nothing is at the path. *)

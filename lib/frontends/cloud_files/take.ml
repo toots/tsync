@@ -156,6 +156,17 @@ and take_folder t path (st : Cf.state) parent_ref =
    the bytes copied are marked in sync only if nothing changed them since. *)
 and take_file t path (st : Cf.state) parent_ref =
   match Cf.hold path with
+    (* A write hydrates, so content not on disk was never edited: a rename
+       that cleared in-sync owes only the bit, not the bytes. *)
+    | Some h
+      when st.placeholder && st.dehydrated
+           && Identity.decode st.identity <> None ->
+        Fun.protect
+          ~finally:(fun () -> Cf.release h)
+          (fun () ->
+            if Cf.held_usn h = st.usn then
+              Cf.set_identity h ~placeholder:true st.identity ~in_sync:true);
+        `Done
     | None -> `Again
     | Some h when Cf.held_usn h <> st.usn ->
         Cf.release h;
