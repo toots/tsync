@@ -99,6 +99,12 @@ val hydrate : string -> unit
 (** Drops the local copy of an in-sync placeholder's content. *)
 val dehydrate : string -> unit
 
+(** Makes a placeholder whose content is whole on disk a plain file. *)
+val revert : string -> unit
+
+(** Every sync root registered for this user, as (id, path). *)
+val registered : unit -> (string * string) list
+
 (** A name as NTFS compares names, for case groups (§7.2). *)
 val upcase : string -> string
 

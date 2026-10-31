@@ -234,6 +234,7 @@ enum { CF_UPDATE_FLAG_DEHYDRATE = 4 };
 
 typedef HRESULT(WINAPI *CfDehydratePlaceholder_t)(HANDLE, LONGLONG, LONGLONG, LONG,
                                                   LPOVERLAPPED);
+typedef HRESULT(WINAPI *CfRevertPlaceholder_t)(HANDLE, LONG, LPOVERLAPPED);
 typedef HRESULT(WINAPI *CfCreatePlaceholders_t)(PCWSTR, CF_PLACEHOLDER_CREATE_INFO *, DWORD,
                                                 LONG, PDWORD);
 typedef HRESULT(WINAPI *CfGetPlaceholderInfo_t)(HANDLE, LONG, PVOID, DWORD, PDWORD);

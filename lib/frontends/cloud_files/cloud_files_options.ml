@@ -29,5 +29,5 @@ let () =
       commands_only = None;
       pulled = None;
       group = Some "cloudfiles";
-      commands = [];
+      commands = Cloud_files_cli.commands;
     }

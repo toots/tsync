@@ -363,4 +363,6 @@ let host ~mount:_ domains ~run =
     | [d] -> run (present (Cloud_files_options.sync_root d))
     | _ -> Fail.invalid "cloud_files presents one domain per owner"
 
-let () = Owner.register_host "cloud_files" host
+let () =
+  Owner.register_host "cloud_files" host;
+  Owner.on_service_start Release.at_service_start
