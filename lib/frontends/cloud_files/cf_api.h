@@ -230,6 +230,10 @@ typedef HRESULT(WINAPI *CfConvertToPlaceholder_t)(HANDLE, LPCVOID, DWORD, LONG, 
 typedef HRESULT(WINAPI *CfUpdatePlaceholder_t)(HANDLE, const CF_FS_METADATA *, LPCVOID, DWORD,
                                                const void *, DWORD, LONG, LONGLONG *,
                                                LPOVERLAPPED);
+enum { CF_UPDATE_FLAG_DEHYDRATE = 4 };
+
+typedef HRESULT(WINAPI *CfCreatePlaceholders_t)(PCWSTR, CF_PLACEHOLDER_CREATE_INFO *, DWORD,
+                                                LONG, PDWORD);
 typedef HRESULT(WINAPI *CfGetPlaceholderInfo_t)(HANDLE, LONG, PVOID, DWORD, PDWORD);
 typedef HRESULT(WINAPI *CfHydratePlaceholder_t)(HANDLE, LONGLONG, LONGLONG, LONG,
                                                 LPOVERLAPPED);

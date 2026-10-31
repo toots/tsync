@@ -24,6 +24,7 @@ static CfGetPlaceholderInfo_t cf_get_placeholder_info;
 static CfHydratePlaceholder_t cf_hydrate;
 static CfConvertToPlaceholder_t cf_convert;
 static CfUpdatePlaceholder_t cf_update;
+static CfCreatePlaceholders_t cf_create;
 
 static void fail_hresult(const char *what, HRESULT hr) {
   char message[128];
@@ -46,9 +47,10 @@ static void load_api(void) {
   cf_hydrate = (CfHydratePlaceholder_t)GetProcAddress(library, "CfHydratePlaceholder");
   cf_convert = (CfConvertToPlaceholder_t)GetProcAddress(library, "CfConvertToPlaceholder");
   cf_update = (CfUpdatePlaceholder_t)GetProcAddress(library, "CfUpdatePlaceholder");
+  cf_create = (CfCreatePlaceholders_t)GetProcAddress(library, "CfCreatePlaceholders");
   if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL ||
       cf_get_placeholder_info == NULL || cf_hydrate == NULL || cf_convert == NULL ||
-      cf_update == NULL)
+      cf_update == NULL || cf_create == NULL)
     caml_failwith("cldapi.dll lacks a function the provider calls");
 }
 
@@ -285,6 +287,9 @@ CAMLprim value tsync_cf_ack(value _key, value _transfer, value _request,
 static LONGLONG file_time(double seconds) {
   return (LONGLONG)((seconds + 11644473600.0) * 10000000.0);
 }
+
+static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, double mtime,
+                          BOOL read_only);
 
 /* [_entries]: an array of (name, is_dir, size, mtime, identity, read_only). */
 CAMLprim value tsync_cf_transfer_placeholders(value _key, value _transfer,
@@ -626,4 +631,99 @@ CAMLprim value tsync_cf_set_identity(value _handle, value _placeholder, value _i
   if (FAILED(hr))
     fail_hresult(placeholder ? "updating the placeholder" : "converting to a placeholder", hr);
   CAMLreturn(Val_unit);
+}
+
+static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, double mtime,
+                          BOOL read_only) {
+  LONGLONG when = file_time(mtime);
+  memset(m, 0, sizeof *m);
+  m->BasicInfo.CreationTime.QuadPart = when;
+  m->BasicInfo.LastWriteTime.QuadPart = when;
+  m->BasicInfo.LastAccessTime.QuadPart = when;
+  m->BasicInfo.ChangeTime.QuadPart = when;
+  m->BasicInfo.FileAttributes = (is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL) |
+                                (read_only ? FILE_ATTRIBUTE_READONLY : 0);
+  m->FileSize.QuadPart = is_dir ? 0 : size;
+}
+
+/* One placeholder made in [_dir] outside any callback, in sync (§10.2). */
+CAMLprim value tsync_cf_create_native(value _dir, value _name, value _is_dir, value _size,
+                                      value _mtime, value _identity, value _read_only) {
+  CAMLparam5(_dir, _name, _is_dir, _size, _mtime);
+  CAMLxparam2(_identity, _read_only);
+  load_api();
+  wchar_t *dir = utf16_of_value(_dir), *name = utf16_of_value(_name);
+  mlsize_t length = caml_string_length(_identity);
+  char *identity = malloc(length == 0 ? 1 : length);
+  if (identity == NULL)
+    caml_raise_out_of_memory();
+  memcpy(identity, String_val(_identity), length);
+  CF_PLACEHOLDER_CREATE_INFO ph = {0};
+  ph.RelativeFileName = name;
+  ph.FileIdentity = identity;
+  ph.FileIdentityLength = (DWORD)length;
+  ph.Flags = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
+  fill_metadata(&ph.FsMetadata, Bool_val(_is_dir), Long_val(_size), Double_val(_mtime),
+                Bool_val(_read_only));
+  DWORD processed = 0;
+  caml_release_runtime_system();
+  HRESULT hr = cf_create(dir, &ph, 1, 0, &processed);
+  caml_acquire_runtime_system();
+  free(dir);
+  free(name);
+  free(identity);
+  if (FAILED(hr) || FAILED(ph.Result))
+    fail_hresult("creating a placeholder", FAILED(hr) ? hr : ph.Result);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_cf_create_bytecode(value *argv, int argn) {
+  (void)argn;
+  return tsync_cf_create_native(argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
+                                argv[6]);
+}
+
+/* New metadata and identity for an in-sync placeholder, dehydrated when
+   [_dehydrate]; [false] when the item changed since [_usn], which leaves it as
+   it was (§10.2). */
+CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, value _size,
+                                       value _mtime, value _identity, value _read_only,
+                                       value _dehydrate) {
+  CAMLparam5(_path, _usn, _is_dir, _size, _mtime);
+  CAMLxparam3(_identity, _read_only, _dehydrate);
+  load_api();
+  wchar_t *path = utf16_of_value(_path);
+  mlsize_t length = caml_string_length(_identity);
+  char *identity = malloc(length == 0 ? 1 : length);
+  if (identity == NULL)
+    caml_raise_out_of_memory();
+  memcpy(identity, String_val(_identity), length);
+  CF_FS_METADATA metadata;
+  fill_metadata(&metadata, Bool_val(_is_dir), Long_val(_size), Double_val(_mtime),
+                Bool_val(_read_only));
+  LONGLONG usn = Int64_val(_usn);
+  LONG flags = CF_UPDATE_FLAG_MARK_IN_SYNC | (Bool_val(_dehydrate) ? CF_UPDATE_FLAG_DEHYDRATE : 0);
+  caml_release_runtime_system();
+  HANDLE h = open_item(path, FILE_READ_ATTRIBUTES | WRITE_DAC | SYNCHRONIZE,
+                       FILE_SHARE_READ | FILE_SHARE_DELETE);
+  HRESULT hr = h == INVALID_HANDLE_VALUE
+                   ? HRESULT_FROM_WIN32(GetLastError())
+                   : cf_update(h, &metadata, identity, (DWORD)length, NULL, 0, flags, &usn, NULL);
+  if (h != INVALID_HANDLE_VALUE)
+    CloseHandle(h);
+  caml_acquire_runtime_system();
+  free(path);
+  free(identity);
+  if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) ||
+      hr == HRESULT_FROM_WIN32(ERROR_CLOUD_FILE_NOT_IN_SYNC))
+    CAMLreturn(Val_false);
+  if (FAILED(hr))
+    fail_hresult("updating a placeholder", hr);
+  CAMLreturn(Val_true);
+}
+
+CAMLprim value tsync_cf_refresh_bytecode(value *argv, int argn) {
+  (void)argn;
+  return tsync_cf_refresh_native(argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
+                                 argv[6], argv[7]);
 }

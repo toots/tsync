@@ -136,3 +136,11 @@ val release : held -> unit
 (** Stores [identity] on the held item, converting it when it is not a
     placeholder, and marks it in sync when [in_sync]. *)
 val set_identity : held -> placeholder:bool -> string -> in_sync:bool -> unit
+
+(** Makes one placeholder, in sync, in a folder outside any callback. *)
+val create : string -> placeholder -> unit
+
+(** Gives an in-sync placeholder the metadata and identity of [placeholder],
+    dehydrating it when [dehydrate]; [false] when it changed since [usn] or is
+    held for writing, which leaves it as it was. *)
+val refresh : string -> usn:int64 -> placeholder -> dehydrate:bool -> bool

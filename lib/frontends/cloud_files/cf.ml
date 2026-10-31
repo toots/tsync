@@ -189,3 +189,17 @@ external set_identity_ : held -> bool -> string -> bool -> unit
 
 let set_identity h ~placeholder identity ~in_sync =
   set_identity_ h placeholder identity in_sync
+
+external create_ :
+  string -> string -> bool -> int -> float -> string -> bool -> unit
+  = "tsync_cf_create_bytecode" "tsync_cf_create_native"
+
+let create dir (p : placeholder) =
+  create_ dir p.name p.is_dir p.size p.mtime p.identity p.read_only
+
+external refresh_ :
+  string -> int64 -> bool -> int -> float -> string -> bool -> bool -> bool
+  = "tsync_cf_refresh_bytecode" "tsync_cf_refresh_native"
+
+let refresh path ~usn (p : placeholder) ~dehydrate =
+  refresh_ path usn p.is_dir p.size p.mtime p.identity p.read_only dehydrate
