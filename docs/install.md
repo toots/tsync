@@ -3,11 +3,19 @@
 
 ## macOS
 
-Download [`tsync.pkg`](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) and open it. It needs Apple silicon and macOS 13 or later. The package is signed and notarized. It installs `TsyncApp.app` into `/Applications`, registers a background service that starts at login, and links the `tsync` command into `/usr/local/bin`.
+tsync needs Apple silicon and macOS 13 or later. With Homebrew:
+
+```bash
+brew tap toots/tsync https://github.com/toots/tsync
+brew trust toots/tsync
+brew install --cask tsync
+```
+
+`brew upgrade --cask --greedy tsync` updates to the latest build; without `--greedy`, `brew upgrade` skips it. Or download [`tsync.pkg`](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) and open it. The package is signed and notarized. It installs `TsyncApp.app` into `/Applications`, registers a background service that starts at login, and links the `tsync` command into `/usr/local/bin`.
 
 Approve the extension once in **System Settings → General → Login Items & Extensions → File Provider Extensions**. The first start may also ask once for access to data from other apps; allow it.
 
-Uninstall with `tsync fileprovider purge`. It removes the app, the service and the local data, and keeps your config.
+Uninstall with `tsync fileprovider purge`. It removes the app, the service and the local data, and keeps your config. With Homebrew, run `brew uninstall --cask tsync` after it; on its own, that does not unregister the folders.
 
 ## Linux
 
