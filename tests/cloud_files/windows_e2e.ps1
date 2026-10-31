@@ -170,7 +170,17 @@ try {
     (Test-Path (Join-Path $root 'peer.txt')) -and
       ((Get-Content -Raw (Join-Path $root 'peer.txt')) -eq 'from elsewhere')
   } 90
-  $checks = 14
+
+  Step 'pinning'
+  $c = Join-Path $root 'c.txt'
+  # FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: the content is not on disk.
+  function Dehydrated($path) { (([int](Get-Item $path).Attributes) -band 0x400000) -ne 0 }
+  attrib -P +U $c
+  Until 'free up space drops a file''s local content' { Dehydrated $c } 60
+  attrib -U +P $c
+  Until 'always keep on this device brings it back' { -not (Dehydrated $c) } 60
+  Check 'it still reads its content' ((Get-Content -Raw $c) -eq 'changed')
+  $checks = 17
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -180,5 +190,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 14) { throw "only $checks of 14 checks ran" }
+if ($checks -ne 17) { throw "only $checks of 17 checks ran" }
 Step "cloud files end to end: $checks checks passed"
