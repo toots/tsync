@@ -222,11 +222,11 @@ external hold : string -> held option = "tsync_cf_hold"
 external held_usn : held -> int64 = "tsync_cf_held_usn"
 external release : held -> unit = "tsync_cf_release"
 
-external set_identity_ : held -> bool -> string -> bool -> unit
+external set_identity_ : held -> bool -> string -> bool -> int -> unit
   = "tsync_cf_set_identity"
 
-let set_identity h ~placeholder identity ~in_sync =
-  set_identity_ h placeholder identity in_sync
+let set_identity ?size h ~placeholder identity ~in_sync =
+  set_identity_ h placeholder identity in_sync (Option.value ~default:(-1) size)
 
 external create_ :
   string -> string -> bool -> int -> float -> string -> bool -> unit
