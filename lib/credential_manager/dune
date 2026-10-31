@@ -1,0 +1,11 @@
+; Windows only: the vault keystore in the user's Credential Manager.
+
+(library
+ (name tsync_credential_manager)
+ (enabled_if
+  (= %{os_type} Win32))
+ (foreign_stubs
+  (language c)
+  (names credential_stubs))
+ (c_library_flags (-ladvapi32))
+ (libraries tsync_core tsync_owner))
