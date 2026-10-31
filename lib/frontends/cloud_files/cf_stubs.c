@@ -35,9 +35,22 @@ static void fail_hresult(const char *what, HRESULT hr) {
   caml_failwith(message);
 }
 
+/* Windows shows most processes a placeholder as a plain file; this one reads
+   placeholders as they are, whether or not it is the root's provider. */
+static void expose_placeholders(void) {
+  typedef CHAR(NTAPI * set_mode_t)(CHAR);
+  HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  set_mode_t set_mode =
+      ntdll == NULL ? NULL
+                    : (set_mode_t)GetProcAddress(ntdll, "RtlSetProcessPlaceholderCompatibilityMode");
+  if (set_mode != NULL)
+    set_mode(2 /* PHCM_EXPOSE_PLACEHOLDERS */);
+}
+
 static void load_api(void) {
   if (cf_execute != NULL)
     return;
+  expose_placeholders();
   HMODULE library = LoadLibraryW(L"cldapi.dll");
   if (library == NULL)
     caml_failwith("cldapi.dll cannot be loaded: Windows 10 1709 or later is needed");
