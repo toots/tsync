@@ -149,10 +149,18 @@ try {
   Until 'a folder created with a file in it reaches the domain' {
     (PublishedText 'made\inner.txt') -eq 'inside'
   } 90
-  $made = Get-Item (Join-Path $root 'new.txt')
-  Check 'a taken file becomes a placeholder' (([int]$made.Attributes -band 0x400) -ne 0 -or
-    (& $tsync status 2>$null | Out-String) -ne '')
-  $checks = 13
+
+  Step 'changing the domain outside the sync root'
+  $elsewhere = Join-Path $Work 'elsewhere'
+  New-Item -ItemType Directory -Force $elsewhere | Out-Null
+  Set-Content -NoNewline -Path (Join-Path $elsewhere 'peer.txt') -Value 'from elsewhere'
+  & $tsync import $elsewhere --domain docs
+  Check 'an import beside the running owner exits 0' ($LASTEXITCODE -eq 0)
+  Until 'a domain change appears in the sync root' {
+    (Test-Path (Join-Path $root 'peer.txt')) -and
+      ((Get-Content -Raw (Join-Path $root 'peer.txt')) -eq 'from elsewhere')
+  } 90
+  $checks = 14
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -162,5 +170,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 13) { throw "only $checks of 13 checks ran" }
+if ($checks -ne 14) { throw "only $checks of 14 checks ran" }
 Step "cloud files end to end: $checks checks passed"
