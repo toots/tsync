@@ -1,0 +1,86 @@
+open Tsync_core
+open Tsync_config
+open Tsync_owner
+
+let fail fmt =
+  Printf.ksprintf
+    (fun s ->
+      prerr_endline ("tsync: " ^ s);
+      1)
+    fmt
+
+let domain_named name =
+  match Option.map Config.of_user_string (Paths.read_config ()) with
+    | None -> Error "no config"
+    | Some config -> (
+        match Config.find_domain config name with
+          | Some d -> Ok d
+          | None -> Error (Printf.sprintf "no domain %S in the config" name))
+
+(* §13.3: the owner stamps a new generation, so the apply finds its anchor
+   stale and walks every populated folder. *)
+let reimport ~domain _ =
+  match domain_named domain with
+    | Error why -> fail "%s" why
+    | Ok d -> (
+        match Owner.ask d Full_resync with
+          | () ->
+              print_endline
+                ("The sync root of " ^ domain
+               ^ " is compared with the domain again.");
+              0
+          | exception e -> fail "%s" (Fail.classify e).reason)
+
+(* §13.3: a staged edit not yet committed is the only copy of its content. *)
+let uncommitted (config : Config.t) =
+  List.filter
+    (fun (d : Config.domain) ->
+      Tsync_checkout.Staged.edits
+        (Tsync_checkout.Staged.create ~cache_root:(Paths.cache_root ()) d.name)
+      <> [])
+    config.domains
+
+let beside name = Filename.concat (Filename.dirname Sys.executable_name) name
+
+(* §13.3: the uninstaller's step, run by tsyncd.exe, whose package identity
+   unregistering needs. It keeps the config and every sync root folder. *)
+let purge ~domain:_ _ =
+  ignore (Sys.command (Filename.quote_command (beside "tsync.exe") ["stop"]));
+  let config = Option.map Config.of_user_string (Paths.read_config ()) in
+  match Option.map uncommitted config with
+    | Some (_ :: _ as held) ->
+        fail "nothing was purged: %s hold changes not committed yet"
+          (String.concat ", "
+             (List.map
+                (fun (d : Config.domain) -> Domain_name.to_string d.name)
+                held))
+    | _ ->
+        List.iter
+          (fun (id, path) -> Release.release ~id path)
+          (Release.registered ());
+        ignore
+          (Sys.command
+             (Filename.quote_command "schtasks"
+                ["/Delete"; "/TN"; "\\tsync\\service"; "/F"]));
+        Fs.rm_rf (Paths.data_dir ());
+        Fs.rm_rf (Paths.cache_root ());
+        print_endline "tsync's sync roots, task and local state are removed.";
+        0
+
+let commands =
+  [
+    {
+      Frontend.verb = "purge";
+      doc =
+        "Release every sync root and remove the service task and local state, \
+         keeping the config and the folders; refused while a change is not \
+         committed.";
+      run = purge;
+    };
+    {
+      Frontend.verb = "reimport";
+      doc =
+        "Compare the sync root with the domain again, changing what differs.";
+      run = reimport;
+    };
+  ]

@@ -19,5 +19,6 @@
   tsync_owner
   tsync_status
   tsync_cloud_files_rules
+  tsync_checkout
   threads.posix
   unix))
