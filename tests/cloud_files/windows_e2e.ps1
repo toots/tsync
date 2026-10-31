@@ -179,7 +179,9 @@ try {
   Until 'free up space drops a file''s local content' { Dehydrated $c } 60
   attrib -U +P $c
   Until 'always keep on this device brings it back' { -not (Dehydrated $c) } 60
-  Check 'it still reads its content' ((Get-Content -Raw $c) -eq 'changed')
+  $read = try { Get-Content -Raw $c } catch { "error: $_" }
+  Step "  c.txt reads: $read ($((Get-Item $c).Length) bytes)"
+  Check 'it still reads its content' ($read -eq 'changed')
 
   Step 'uninstalling'
   $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
