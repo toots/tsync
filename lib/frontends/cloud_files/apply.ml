@@ -10,6 +10,7 @@ type t = {
   handler : Handler.t;
   root : string;
   take : Take.t;
+  unshown : Unshown.t;
   state_file : string;
   m : Mutex.t;
   mutable state : Apply_state.t;
@@ -22,11 +23,12 @@ let load state_file =
         Option.value ~default:Apply_state.fresh (Apply_state.decode text)
     | None -> Apply_state.fresh
 
-let create ~engine:_ ~handler ~root ~take ~state_file () =
+let create ~engine:_ ~handler ~root ~take ~unshown ~state_file () =
   {
     handler;
     root;
     take;
+    unshown;
     state_file;
     m = Mutex.create ();
     state = load state_file;
@@ -205,8 +207,14 @@ let apply_folder t ref_ =
   match held_folder t ref_ with
     | None -> true
     | Some dir ->
-        let rows = List.map plan_row (rows t ref_) in
+        let rows = rows t ref_ in
         let children, usns = children dir in
+        ignore
+          (Unshown.present t.unshown
+             ~on_disk:(fun n ->
+               List.exists (fun (c : Apply_plan.child) -> c.name = n) children)
+             rows);
+        let rows = List.map plan_row rows in
         let actions =
           Apply_plan.plan ~fold:Cf.upcase ~rows ~children ~locate:(locate t)
         in
