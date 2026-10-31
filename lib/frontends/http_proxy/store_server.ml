@@ -891,6 +891,9 @@ let presented t route : Tsync_status.Status_report.presented =
               | `Self _ -> true
               | `Off | `Member _ -> false);
         unanswered = false;
+        unpresented = None;
+        untaken = None;
+        pending_folders = None;
       };
   }
 

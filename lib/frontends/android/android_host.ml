@@ -137,6 +137,9 @@ let frontend () : R.frontend option =
       read_only = None;
       shares = None;
       unanswered = false;
+      unpresented = None;
+      untaken = None;
+      pending_folders = None;
     }
 
 let booted : Owner.embedded option Atomic.t = Atomic.make None
