@@ -193,6 +193,14 @@ try {
   Step "  c.txt reads: $read ($((Get-Item $c).Length) bytes)"
   Check 'it still reads its content' ($read -eq 'changed')
 
+  Step 'resetting'
+  & $tsync cloudfiles reset --domain docs
+  Check 'reset exits 0 with nothing owed' ($LASTEXITCODE -eq 0)
+  Until 'the sync root fills again from the domain' {
+    (Test-Path $c) -and (Dehydrated $c)
+  } 90
+  Check 'a file reads its content after the reset' ((Get-Content -Raw $c) -eq 'changed')
+
   Step 'uninstalling'
   $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
   Check 'the uninstaller exits 0' ($p.ExitCode -eq 0)
@@ -200,7 +208,7 @@ try {
     (Test-Path $c) -and -not (Dehydrated $c) -and ((Get-Content -Raw $c) -eq 'changed'))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 22
+  $checks = 25
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -210,5 +218,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 22) { throw "only $checks of 22 checks ran" }
+if ($checks -ne 25) { throw "only $checks of 25 checks ran" }
 Step "cloud files end to end: $checks checks passed"
