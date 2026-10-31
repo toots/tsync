@@ -26,6 +26,7 @@ static CfConvertToPlaceholder_t cf_convert;
 static CfUpdatePlaceholder_t cf_update;
 static CfCreatePlaceholders_t cf_create;
 static CfDehydratePlaceholder_t cf_dehydrate;
+static CfRevertPlaceholder_t cf_revert;
 
 static void fail_hresult(const char *what, HRESULT hr) {
   char message[128];
@@ -50,9 +51,10 @@ static void load_api(void) {
   cf_update = (CfUpdatePlaceholder_t)GetProcAddress(library, "CfUpdatePlaceholder");
   cf_create = (CfCreatePlaceholders_t)GetProcAddress(library, "CfCreatePlaceholders");
   cf_dehydrate = (CfDehydratePlaceholder_t)GetProcAddress(library, "CfDehydratePlaceholder");
+  cf_revert = (CfRevertPlaceholder_t)GetProcAddress(library, "CfRevertPlaceholder");
   if (cf_connect == NULL || cf_disconnect == NULL || cf_execute == NULL ||
       cf_get_placeholder_info == NULL || cf_hydrate == NULL || cf_convert == NULL ||
-      cf_update == NULL || cf_create == NULL || cf_dehydrate == NULL)
+      cf_update == NULL || cf_create == NULL || cf_dehydrate == NULL || cf_revert == NULL)
     caml_failwith("cldapi.dll lacks a function the provider calls");
 }
 
@@ -750,5 +752,25 @@ CAMLprim value tsync_cf_dehydrate(value _path) {
   free(path);
   if (FAILED(hr))
     fail_hresult("freeing the content", hr);
+  CAMLreturn(Val_unit);
+}
+
+/* Makes a placeholder whose content is whole on disk a plain file, which
+   opens with no provider running (cloud-files §13.4). */
+CAMLprim value tsync_cf_revert(value _path) {
+  CAMLparam1(_path);
+  load_api();
+  wchar_t *path = utf16_of_value(_path);
+  caml_release_runtime_system();
+  HANDLE h = open_item(path, FILE_READ_ATTRIBUTES | WRITE_DAC | SYNCHRONIZE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+  HRESULT hr = h == INVALID_HANDLE_VALUE ? HRESULT_FROM_WIN32(GetLastError())
+                                         : cf_revert(h, 0, NULL);
+  if (h != INVALID_HANDLE_VALUE)
+    CloseHandle(h);
+  caml_acquire_runtime_system();
+  free(path);
+  if (FAILED(hr))
+    fail_hresult("making it a plain file", hr);
   CAMLreturn(Val_unit);
 }
