@@ -227,6 +227,8 @@ try {
   Step 'uninstalling'
   $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
   Check 'the uninstaller exits 0' ($p.ExitCode -eq 0)
+  Step 'purge said:'
+  Get-Content -ErrorAction Ignore (Join-Path $env:TEMP 'tsync-purge.out'), (Join-Path $env:TEMP 'tsync-purge.err')
   Check 'a file whole on disk stays, as a plain file' (
     (Test-Path $released) -and -not (Dehydrated $released) -and
       ((Get-Content -Raw $released) -eq 'changed'))
