@@ -211,10 +211,14 @@ try {
   $c = Join-Path $root 'c.txt'
 
   Step 'resetting'
+  Clear-Content $log
   $said = & $tsync cloudfiles reset --domain docs 2>&1 | Out-String
   $code = $LASTEXITCODE
   Step "  reset exited $code, saying: $said"
   Check 'reset exits 0 with nothing owed' ($code -eq 0)
+  Until 'the service presents the sync root again' {
+    Select-String -Quiet -Path $log -Pattern 'presented at'
+  }
   Until 'the sync root fills again from the domain' {
     (Test-Path $c) -and (Dehydrated $c)
   } 90
@@ -229,7 +233,7 @@ try {
   Check 'a placeholder whose content was not on disk goes' (-not (Test-Path $c))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 28
+  $checks = 29
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -239,5 +243,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 28) { throw "only $checks of 28 checks ran" }
+if ($checks -ne 29) { throw "only $checks of 29 checks ran" }
 Step "cloud files end to end: $checks checks passed"
