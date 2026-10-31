@@ -10,8 +10,11 @@ if (Test-Path $config) {
     Where-Object { @($_.frontends | Where-Object { $_ -eq 'cloud_files' -or $_.type -eq 'cloud_files' }).Count -gt 0 } |
     Select-Object -First 1
   if ($domain) {
+    # tsyncd.exe has no console: what it says is kept for a support request.
     Start-Process -Wait -FilePath (Join-Path $ProgramDir 'tsyncd.exe') `
-      -ArgumentList 'cloudfiles', 'purge', '--domain', $domain.name
+      -ArgumentList 'cloudfiles', 'purge', '--domain', $domain.name `
+      -RedirectStandardOutput (Join-Path $env:TEMP 'tsync-purge.out') `
+      -RedirectStandardError (Join-Path $env:TEMP 'tsync-purge.err')
   }
 }
 & (Join-Path $ProgramDir 'tsync.exe') stop 2>$null
