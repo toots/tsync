@@ -254,6 +254,13 @@ let acknowledge t (r : Cf.request) what f =
     else (
       try
         f t r;
+        Log.info "cloud_files: %s %s%s"
+          (match what with
+            | `Delete -> "deleted"
+            | `Rename -> "renamed"
+            | `Dehydrate -> "dehydrated")
+          r.path
+          (if r.target = "" then "" else " to " ^ r.target);
         `Success
       with
         | Refused (status, why) ->

@@ -139,6 +139,7 @@ and take_folder t path (st : Cf.state) parent_ref =
             Cf.set_identity h ~placeholder:st.placeholder (identity_of got)
               ~in_sync:true);
         Atomic.incr t.takes;
+        Log.info "cloud_files: took the folder %s" path;
         let path =
           match aside with
             | Some a ->
@@ -200,13 +201,16 @@ and take_file t path (st : Cf.state) parent_ref =
                     (identity_of got)
                     ~in_sync:(Cf.held_usn h = st.usn));
               Atomic.incr t.takes;
+              Log.info "cloud_files: took %s" path;
               Option.iter (follow_aside path) w.aside;
               `Done)
 
 let take_logged t path =
   match take t path with
     | `Done -> ()
-    | `Again -> schedule t path
+    | `Again ->
+        Log.debug "cloud_files: %s is not settled; taken later" path;
+        schedule t path
     | exception e ->
         Log.warn "cloud_files: taking %s: %s" path (Printexc.to_string e);
         schedule_at t path (Unix.gettimeofday () +. 30.)
