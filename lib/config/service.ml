@@ -26,4 +26,5 @@ let launch_app () = run ["/usr/bin/open"; "-g"; "-b"; app_bundle_id] = 0
 
 let remove_agent () =
   ignore (run ["/bin/launchctl"; "bootout"; target ()]);
-  try Unix.unlink (agent_definition ()) with Unix.Unix_error _ -> ()
+  try Tsync_core.Fs.unix_unlink (agent_definition ())
+  with Unix.Unix_error _ -> ()

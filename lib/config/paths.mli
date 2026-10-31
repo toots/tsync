@@ -34,6 +34,10 @@ val read_config : ?interactive:bool -> unit -> string option
 
 val default_domain : unit -> string option
 
+(** 07 §2.7: the file the service writes its log to, [None] where the system
+    journal holds it (Linux). *)
+val service_log : unit -> string option
+
 (** The host's claim on its App Group container (file-provider §3.1), run once
     by the program before anything touches the container; a no-op on hosts
     without one. *)

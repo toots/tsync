@@ -1,0 +1,93 @@
+== presentable (§7.1)
+"notes.txt"                  shown
+"a:b"                        a character Windows refuses in a name
+"a?"                         a character Windows refuses in a name
+"pipe|"                      a character Windows refuses in a name
+"tab\there"                  a character Windows refuses in a name
+"trailing."                  a name ending with a space or a dot
+"trailing "                  a name ending with a space or a dot
+"CON"                        a reserved device name
+"con.txt"                    a reserved device name
+"Com1.log"                   a reserved device name
+"COM\194\185"                a reserved device name
+"LPT0"                       a reserved device name
+"CONSOLE"                    shown
+"conx.txt"                   shown
+".hidden"                    shown
+"caf\195\169"                shown
+"bad\255byte"                shown as "bad\239\191\189byte"
+<255 bytes>                  shown
+<256 bytes>                  longer than 255 UTF-16 code units
+<508 bytes>                  shown
+<512 bytes>                  longer than 255 UTF-16 code units
+
+== case groups (§7.2)
+none on disk: the least by bytes
+  shown: README, other
+  not shown: readme, the group shows README
+  not shown: Readme, the group shows README
+the one on disk stays
+  shown: readme
+  not shown: README, the group shows readme
+  not shown: Readme, the group shows readme
+unpresentable and grouped together
+  shown: X, a
+  not shown: a., a name ending with a space or a dot
+  not shown: x, the group shows X
+
+== identity (§8.1)
+"t1\nd:9f3a\n" -> reads back
+"t1\ni:6c1e\n0123456789abcdef-fedcba9876543210" -> reads back
+"" -> foreign
+"t2\ni:1\nx" -> foreign
+"t1\n\nx" -> foreign
+"t1\ni:1" -> foreign
+"t1\ni:1\nx\nextra" -> foreign
+"OneDrive" -> foreign
+
+== sync root id (§4.3)
+prefix tsync!S-1-5-21-1-2-3-1001!
+docs         tsync!S-1-5-21-1-2-3-1001!f6bd4d8de4f22df5 (under the prefix true)
+Docs         tsync!S-1-5-21-1-2-3-1001!fffc0b78c59ccaea (under the prefix true)
+a!b:c        tsync!S-1-5-21-1-2-3-1001!24364602c02d0147 (under the prefix true)
+
+== apply state (§10.1)
+{"anchor":"12|3","pending":["d:9f3a","root"]} -> reads back
+fresh: anchor "", pending [root]
+""                                       unreadable
+"{}"                                     unreadable
+"{\"anchor\":\"x\"}"                     unreadable
+"{\"anchor\":\"x\",\"pending\":[1]}"     unreadable
+"not json"                               unreadable
+
+== applying a folder (§10.2)
+a new folder: everything is created
+  create a.txt (file)
+  create sub (folder)
+in step: nothing
+  nothing
+a peer renamed it
+  rename a.txt -> b.txt
+a peer edited it
+  refresh a.txt
+a peer renamed and edited it
+  rename a.txt -> b.txt
+  refresh b.txt
+only its time changed
+  update a.txt
+a row with no time is not compared on it
+  nothing
+an owed child is taken, and a row of its name not created
+  take notes.txt
+an owed edit is taken, never refreshed
+  take a.txt
+a peer deleted it
+  delete gone.txt
+a peer moved it to a folder the root holds
+  move gone.txt into C:\root\sub as gone.txt
+a foreign item stays, and its name is not reused
+  nothing
+names Windows refuses, links and case groups are not created
+  create X (file)
+the group member on disk stays
+  nothing

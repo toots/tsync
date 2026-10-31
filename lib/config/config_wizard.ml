@@ -576,8 +576,10 @@ let describe_domain d =
     (Option.value ~default:"?" (Option.bind (get d "name") show))
     (List.length (list_of d "backends"))
 
-let edit ?(advanced = false) ?(system = if Fs.is_macos then `Macos else `Linux)
-    io start =
+let edit ?(advanced = false)
+    ?(system =
+      if Fs.is_macos then `Macos else if Sys.win32 then `Windows else `Linux) io
+    start =
   let domain = domain io ~advanced ~system and globals = globals ~advanced in
   let j =
     match start with
@@ -639,6 +641,6 @@ let prepare j =
           if l = [] then unset j "links" else set j "links" (`Assoc l)
       | _ -> j
   in
-  match Config.of_json j with
+  match Config.of_user_json j with
     | _ -> Ok j
     | exception Config.Invalid e -> Error e

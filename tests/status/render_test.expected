@@ -57,6 +57,9 @@ Domain Files
   uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
   PARKED           1 upload: DEADLINE: store did not answer
   Frontend http-proxy port 5446  NOT ANSWERING
+  Frontend cloud_files pid 101  C:\Users\me\tsync\photos
+    not shown        2
+    not taken        1
   Backend gcs (gcs, main)  bucket files
     link             wan
     HELD DOWN        for 0m 42s after 5 failures (connection refused)

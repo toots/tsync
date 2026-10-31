@@ -60,7 +60,7 @@ let acquire ?socket ~role ~what d =
           match
             let record =
               Yojson.Safe.to_string
-                (holder_json { pid = Unix.getpid (); role; what; socket })
+                (holder_json { pid = Pid.self (); role; what; socket })
             in
             Unix.ftruncate fd 0;
             ignore (Unix.lseek fd 0 SEEK_SET);
@@ -76,29 +76,40 @@ let release fd =
   Unix.close fd
 
 let stop_on_signals ?second () =
-  let signals = [Sys.sigterm; Sys.sigint] in
-  ignore (Thread.sigmask SIG_BLOCK signals);
-  ignore
-    (Thread.create
-       (fun () ->
-         while true do
-           let s = Thread.wait_signal signals in
-           match second with
-             | Some f when Stop.requested () -> f ()
-             | _ ->
-                 Log.info "received %s; stopping"
-                   (if s = Sys.sigterm then "SIGTERM" else "SIGINT");
-                 Stop.request ()
-         done)
-       ())
+  let stop what =
+    match second with
+      | Some f when Stop.requested () -> f ()
+      | _ ->
+          Log.info "received %s; stopping" what;
+          Stop.request ()
+  in
+  if Sys.win32 then (
+    (* No signal masks on Windows: a console interrupt runs SIGINT's handler,
+       which may interrupt code holding a lock, so the stop runs elsewhere. *)
+    Sys.set_signal Sys.sigint
+      (Sys.Signal_handle
+         (fun _ -> ignore (Thread.create stop "a console interrupt")));
+    Session.on_end (fun () -> stop "the end of the session"))
+  else begin
+    let signals = [Sys.sigterm; Sys.sigint] in
+    ignore (Thread.sigmask SIG_BLOCK signals);
+    ignore
+      (Thread.create
+         (fun () ->
+           while true do
+             let s = Thread.wait_signal signals in
+             stop (if s = Sys.sigterm then "SIGTERM" else "SIGINT")
+           done)
+         ())
+  end
 
 type present =
   Tsync_domain.Domain.t ->
   (module Tsync_sync.Engine.S) ->
   publish:(Protocol.event -> unit) ->
-  Handler.hooks * (unit -> unit)
+  Handler.hooks * (Handler.t -> unit)
 
-type served = { domain : Domain.t; handler : Handler.t; go : unit -> unit }
+type served = { domain : Domain.t; handler : Handler.t; go : Handler.t -> unit }
 
 let answered_while_draining = ["stats"; "status"; "stop"]
 
@@ -375,7 +386,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
   List.iter
     (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
-  List.iter (fun s -> s.go ()) !served;
+  List.iter (fun s -> s.go s.handler) !served;
   Atomic.set serving (List.map (fun s -> s.handler) !served);
   Stop.wait ()
 
@@ -488,15 +499,9 @@ let one_shot ~what config dom f =
       in
       f handler)
 
-let alive pid =
-  match Unix.kill pid 0 with
-    | () -> true
-    | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
-    | exception Unix.Unix_error _ -> false
-
 let served name =
   match holder name with
-    | Some { socket = Some _; pid; _ } -> alive pid
+    | Some { socket = Some _; pid; _ } -> Pid.alive pid
     | _ -> false
 
 (* 07 §2.5: a refused connection is not an absent owner, since a full backlog
@@ -535,6 +540,16 @@ type host =
   int
 
 let hosts : host Registry.t = Registry.create ()
+let service_start_hooks = ref []
+let on_service_start f = service_start_hooks := f :: !service_start_hooks
+
+let service_starting config =
+  List.iter
+    (fun f ->
+      try f config
+      with e -> Log.warn "at service start: %s" (Printexc.to_string e))
+    (List.rev !service_start_hooks)
+
 let register_host = Registry.register hosts
 
 let host_for (domains : Config.domain list) =

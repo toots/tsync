@@ -30,10 +30,21 @@
   import_plan_test.output
   (run ./import_plan_test.exe)))
 
+; CI's Windows account lists past a deny entry, so the unreadable case is not run.
+
 (rule
  (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
  (action
   (diff import_plan_test.expected import_plan_test.output)))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (diff import_plan_test.windows.expected import_plan_test.output)))
 
 (executable
  (name import_test)
@@ -52,10 +63,21 @@
   import_test.output
   (run ./import_test.exe)))
 
+; Windows skips the link the policy keeps (cloud-files §7.3).
+
 (rule
  (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
  (action
   (diff import_test.expected import_test.output)))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (diff import_test.windows.expected import_test.output)))
 
 (executable
  (name rsync_plan_test)

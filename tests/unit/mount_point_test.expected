@@ -1,0 +1,7 @@
+== a mount point, its parent resolved
+real/Drive               true
+real/Drive/              true
+real/./Drive             true
+real//Drive              true
+link/Drive               true
+/                        /

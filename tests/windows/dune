@@ -1,0 +1,22 @@
+; The Windows suite (09 §5.9): what exists on Windows alone.
+
+(executable
+ (name keystore_test)
+ (enabled_if
+  (= %{os_type} Win32))
+ (libraries tsync_core tsync_owner tsync_credential_manager))
+
+(rule
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (with-stdout-to
+   keystore_test.output
+   (run ./keystore_test.exe))))
+
+(rule
+ (alias runtest-windows)
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (diff keystore_test.expected keystore_test.output)))

@@ -238,8 +238,21 @@ its current content. The reply names the key as it now resolves; the conflicted 
 frontends through the change feed. A `write` without `base`, or with the current base, is an
 ordinary edit.
 
-This is a local decision: it happens before the write becomes part of $L$, and nothing of `base`
-is published.
+A `delete` MAY carry `base` too: the version the caller saw when it removed the file. If it
+differs from the key's current `content_id`, the removal met an edit it never saw, and nothing is
+removed (§8.1: "B deletes, A edits"). A `rename` that replaces a destination file MAY carry
+`dstBase`, the destination's version the caller saw; if it differs, the source lands at
+`aside(destination)` and the destination keeps its content (§8.1: "B renames onto a name A
+wrote").
+
+A `write` or `mkdir` with `aside` ([08](../08-frontends.md) §3.3) is a local creation made without
+seeing what the domain holds at its place. When the place holds an item, the new item is created
+at `aside(key)` instead, exactly as if the two creations had met in a merge (§8.1: "Both create one
+name with different content", "B creates a file, A a folder"); a folder meeting a folder is the
+same folder.
+
+These are local decisions: each happens before the change becomes part of $L$, and nothing of
+`base`, `dstBase` or `aside` is published.
 
 ---
 

@@ -1,14 +1,34 @@
 open Tsync_core
 
+let absolute_env var =
+  match Sys.getenv_opt var with
+    | Some d when d <> "" && not (Filename.is_relative d) -> Some d
+    | _ -> None
+
 let home () =
   match Sys.getenv_opt "HOME" with
     | Some h when h <> "" -> h
-    | _ -> Fail.raise_ Fail.Invalid "HOME is not set"
+    | _ -> (
+        match if Sys.win32 then absolute_env "USERPROFILE" else None with
+          | Some h -> h
+          | None -> Fail.raise_ Fail.Invalid "HOME is not set")
 
 let env_dir var default =
-  match Sys.getenv_opt var with
-    | Some d when d <> "" && String.starts_with ~prefix:"/" d -> d
-    | _ -> Filename.concat (home ()) default
+  match absolute_env var with
+    | Some d -> d
+    | None -> Filename.concat (home ()) default
+
+(* 07 §2.7: Windows keeps tsync's files in the user's Local AppData; the XDG
+   variables still redirect them, as the tests do. *)
+let local_appdata sub =
+  match absolute_env "LOCALAPPDATA" with
+    | Some d -> Filename.concat (Filename.concat d "tsync") sub
+    | None -> Fail.raise_ Fail.Invalid "LOCALAPPDATA is not set"
+
+let windows_dir var sub =
+  match absolute_env var with
+    | Some d -> Filename.concat d "tsync"
+    | None -> local_appdata sub
 
 (* file-provider §3.1: on macOS the host asks the system for the group
    container before the program touches it; elsewhere nothing. *)
@@ -22,6 +42,10 @@ let group () =
 
 let config_file () =
   if Fs.is_macos then Filename.concat (group ()) "config.json"
+  else if Sys.win32 then (
+    match absolute_env "XDG_CONFIG_HOME" with
+      | Some d -> Filename.concat (Filename.concat d "tsync") "config.json"
+      | None -> local_appdata "config.json")
   else
     Filename.concat
       (Filename.concat (env_dir "XDG_CONFIG_HOME" ".config") "tsync")
@@ -29,10 +53,12 @@ let config_file () =
 
 let data_dir () =
   if Fs.is_macos then Filename.concat (group ()) "tsync"
+  else if Sys.win32 then windows_dir "XDG_DATA_HOME" "data"
   else Filename.concat (env_dir "XDG_DATA_HOME" ".local/share") "tsync"
 
 let cache_root () =
   if Fs.is_macos then Filename.concat (data_dir ()) "cache"
+  else if Sys.win32 then windows_dir "XDG_CACHE_HOME" "cache"
   else Filename.concat (env_dir "XDG_CACHE_HOME" ".cache") "tsync"
 
 let service_socket () = Filename.concat (data_dir ()) "tsync.sock"
@@ -56,6 +82,13 @@ let ownership_lock domain =
 
 let default_domain_file () = Filename.concat (data_dir ()) "default-domain"
 
+let service_log () =
+  if Fs.is_macos then
+    Some (Filename.concat (home ()) "Library/Logs/tsync-daemon.log")
+  else if Sys.win32 then
+    Some (local_appdata (Filename.concat "logs" "tsync.log"))
+  else None
+
 let mount_point domain =
   Filename.concat
     (Filename.concat (home ()) "tsync")
@@ -64,17 +97,18 @@ let mount_point domain =
 (* security-model §10.2: the config holds secrets. *)
 let private_config ~interactive path =
   match Fs.stat_opt path with
-    | Some { st_perm; _ } when st_perm land 0o077 <> 0 ->
+    | Some { st_perm; _ } when not (Fs.is_private path) ->
+        let mode = if Sys.win32 then "" else Printf.sprintf " (mode %o)" st_perm
+        and now = if Sys.win32 then "private to you" else "600" in
         if interactive then (
-          Unix.chmod path 0o600;
+          Fs.make_private path;
           Printf.eprintf
-            "tsync: %s was readable by other users (mode %o); it is now 600\n%!"
-            path st_perm)
+            "tsync: %s was readable by other users%s; it is now %s\n%!" path
+            mode now)
         else
           Fail.raise_ Fail.Denied
-            "%s holds secrets and is readable by other users (mode %o): chmod \
-             600 it"
-            path st_perm
+            "%s holds secrets and is readable by other users%s: %s" path mode
+            (if Sys.win32 then "make it private to you" else "chmod 600 it")
     | _ -> ()
 
 let read_config ?(interactive = Unix.isatty Unix.stderr) () =

@@ -240,6 +240,10 @@ fails rather than passing empty (§10.1).
   104-byte socket limit); end to end, the installed app with a second client.
 - **Android**: the bridge called from foreign threads in-process, and the desktop command group
   spawned once per call, so that a frontend that works only as a long-lived process cannot pass.
+- **Windows**: a real sync root on an NTFS volume, registered by an owner started from the build
+  and driven by ordinary file calls and by the shell's pin and free-space verbs; the platform layer
+  (sharing, POSIX rename, the socket peer check) against the real system; the tray as a process with
+  doubled owners. A second client is a desktop peer on the same store.
 
 ## 6. Scenarios
 
@@ -352,6 +356,9 @@ here. A block-level recorder on a real filesystem MAY cross-check the model.
   deferred logs.
 - **macOS**: kill the owner during a `write` adoption, a fetch into the provider directory and a reset;
   the extension's retried calls and the app's relay must bring the replica back without a user action.
+- **Windows**: kill the owner during a take (before and after the write's reply), during an apply's
+  rename, delete and dehydration, and during a fetch; after a restart the sweep and the stored apply
+  state must bring the sync root and the domain together, with no local edit lost or duplicated.
 
 ### 7.5 Multi-process ownership
 

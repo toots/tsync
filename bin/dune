@@ -1,9 +1,10 @@
 ; tsync_catalog links every driver and frontend this build has.
 
-(executable
- (name tsync)
- (public_name tsync)
- (package tsync)
+(library
+ (name tsync_cli)
+ (wrapped false)
+ (modules
+  (:standard \ tsync tsyncd))
  (libraries
   cmdliner
   tsync_core
@@ -29,4 +30,41 @@
    platform.ml
    from
    (tsync_secret_service tsync_logind tsync_polkit -> platform.linux.ml)
+   (tsync_credential_manager -> platform.windows.ml)
    (-> platform.none.ml))))
+
+(executable
+ (name tsync)
+ (public_name tsync)
+ (package tsync)
+ (modules tsync)
+ (libraries tsync_cli))
+
+; cloud-files §14.1: the manifest ties tsyncd.exe to the identity package, whose
+; publisher is the signing certificate's subject.
+
+(rule
+ (enabled_if
+  (= %{os_type} Win32))
+ (action
+  (write-file
+   tsyncd.manifest
+   "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n  <assemblyIdentity type=\"win32\" name=\"org.feverdreamtv.tsync.tsyncd\" version=\"1.0.0.0\"/>\n  <msix xmlns=\"urn:schemas-microsoft-com:msix.v1\" publisher=\"%{read-lines:../windows/publisher}\" packageName=\"org.feverdreamtv.tsync\" applicationId=\"tsyncd\"/>\n</assembly>\n")))
+
+(rule
+ (enabled_if
+  (= %{os_type} Win32))
+ (targets tsyncd_manifest.o)
+ (deps tsyncd.manifest)
+ (action
+  (run x86_64-w64-mingw32-windres %{dep:tsyncd.rc} -O coff -o %{targets})))
+
+(executable
+ (name tsyncd)
+ (modules tsyncd)
+ (enabled_if
+  (= %{os_type} Win32))
+ (link_deps tsyncd_manifest.o)
+ (link_flags
+  (-cclib "-subsystem windows" -cclib bin/tsyncd_manifest.o))
+ (libraries tsync_cli))

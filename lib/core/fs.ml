@@ -17,11 +17,23 @@ external clone_ : string -> string -> unit = "tsync_clone"
 external terminal_columns_ : Unix.file_descr -> int = "tsync_terminal_columns"
 external drop_mapped_pages : bigstring -> unit = "tsync_drop_mapped_pages"
 external is_network_fs_ : string -> bool = "tsync_is_network_fs"
-external pid_alive_ : int -> bool = "tsync_pid_alive"
 external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
 external is_macos_ : unit -> bool = "tsync_is_macos"
-external peer_uid : Unix.file_descr -> int = "tsync_peer_uid"
+external peer_same_user : Unix.file_descr -> bool = "tsync_peer_same_user"
 external raise_nofile : int -> int = "tsync_raise_nofile"
+external unix_rename : string -> string -> unit = "tsync_rename"
+external unix_unlink : string -> unit = "tsync_unlink"
+external is_private : string -> bool = "tsync_is_private"
+external owned_by_this_user : string -> bool = "tsync_owned_by_this_user"
+external end_with_this_process : int -> unit = "tsync_end_with_this_process"
+external std_handle_missing_ : int -> bool = "tsync_std_handle_missing"
+
+let std_handle_missing = function
+  | `Stdin -> std_handle_missing_ 0
+  | `Stdout -> std_handle_missing_ 1
+  | `Stderr -> std_handle_missing_ 2
+
+external make_private : string -> unit = "tsync_make_private"
 
 let is_macos = is_macos_ ()
 let rec eintr f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> eintr f
@@ -58,8 +70,11 @@ let kind p =
 let is_dir p =
   match stat_opt p with Some { st_kind = S_DIR; _ } -> true | _ -> false
 
+let unix_openfile p flags perm =
+  Unix.openfile p (Unix.O_CLOEXEC :: Unix.O_SHARE_DELETE :: flags) perm
+
 let openfile ?(perm = 0o600) p flags =
-  sys (fun () -> Unix.openfile p (Unix.O_CLOEXEC :: flags) perm)
+  sys (fun () -> unix_openfile p flags perm)
 
 let close fd = try Unix.close fd with _ -> ()
 let with_fd fd f = Fun.protect ~finally:(fun () -> close fd) (fun () -> f fd)
@@ -83,7 +98,7 @@ let read_fd_all fd =
   Buffer.contents buf
 
 let read_file_opt p =
-  match opt (fun () -> Unix.openfile p [O_RDONLY; O_CLOEXEC] 0) with
+  match opt (fun () -> unix_openfile p [O_RDONLY] 0) with
     | None -> None
     | Some fd -> Some (with_fd fd read_fd_all)
 
@@ -123,10 +138,13 @@ let write_all fd s =
 
 let fsync fd = sys (fun () -> fsync_ fd)
 
+(* Windows cannot open a directory to flush it, and has nothing to flush: NTFS
+   journals metadata and renames are written through (cloud-files §5.1). *)
 let fsync_dir d =
-  match opt (fun () -> Unix.openfile d [O_RDONLY; O_CLOEXEC] 0) with
-    | None -> ()
-    | Some fd -> with_fd fd fsync
+  if not Sys.win32 then (
+    match opt (fun () -> Unix.openfile d [O_RDONLY; O_CLOEXEC] 0) with
+      | None -> ()
+      | Some fd -> with_fd fd fsync)
 
 let mkdir_p ?(perm = 0o700) ?(durable = true) d =
   let rec go d =
@@ -137,18 +155,21 @@ let mkdir_p ?(perm = 0o700) ?(durable = true) d =
         | None -> (
             go (Filename.dirname d);
             match eintr (fun () -> Unix.mkdir d perm) with
-              | () -> if durable then fsync_dir (Filename.dirname d)
+              | () ->
+                  (* Windows ignores the mode, so a private one is applied. *)
+                  if Sys.win32 && perm land 0o077 = 0 then make_private d;
+                  if durable then fsync_dir (Filename.dirname d)
               | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ()
               | exception Unix.Unix_error (e, fn, a) ->
                   raise (Fail.E (Fail.of_unix e fn a))))
   in
   go d
 
-let unlink_quiet p = try eintr (fun () -> Unix.unlink p) with _ -> ()
+let unlink_quiet p = try eintr (fun () -> unix_unlink p) with _ -> ()
 
 (* Answers whether something was removed; any error but absence is raised. *)
 let release p =
-  match opt (fun () -> Unix.unlink p) with Some () -> true | None -> false
+  match opt (fun () -> unix_unlink p) with Some () -> true | None -> false
 
 let temp_in dir = Filename.concat dir (Names.temp_name ())
 
@@ -156,6 +177,8 @@ let write_temp_with ?(perm = 0o600) dir write =
   let tmp = temp_in dir in
   let fd = openfile ~perm tmp [O_WRONLY; O_CREAT; O_EXCL] in
   (try
+     (* Windows ignores the mode, so a private one is applied before any byte. *)
+     if Sys.win32 && perm land 0o077 = 0 then make_private tmp;
      with_fd fd (fun fd ->
          write fd;
          fsync fd)
@@ -167,7 +190,7 @@ let write_temp_with ?(perm = 0o600) dir write =
 let write_temp ?perm dir data =
   write_temp_with ?perm dir (fun fd -> write_all fd data)
 
-let rename ?(op = "") a b = sys ~op (fun () -> Unix.rename a b)
+let rename ?(op = "") a b = sys ~op (fun () -> unix_rename a b)
 
 (* Written aside and linked into place, so [p] is whole or absent, and a link
    never replaces a file. *)
@@ -320,7 +343,7 @@ let funlock fd = funlock_ fd
 
 let lifetime_lock path =
   mkdir_p ~perm:0o700 (Filename.dirname path);
-  let fd = Unix.openfile path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
+  let fd = unix_openfile path [O_RDWR; O_CREAT] 0o600 in
   match flock ~exclusive:true ~block:false fd with
     | true -> Some fd
     | false ->
@@ -330,7 +353,10 @@ let lifetime_lock path =
         Unix.close fd;
         raise e
 
-let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+(* Windows has no SIGPIPE: a write to a closed socket fails with an error. *)
+let ignore_sigpipe () =
+  if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore
+
 let rename_noreplace a b = sys (fun () -> rename_noreplace_ a b)
 let clone a b = sys (fun () -> clone_ a b)
 
@@ -341,8 +367,6 @@ let rec is_network_fs p =
     | exception Unix.Unix_error (ENOENT, _, _) when Filename.dirname p <> p ->
         is_network_fs (Filename.dirname p)
     | exception _ -> true
-
-let pid_alive pid = pid_alive_ pid
 
 (* ELOOP means the last component is a symbolic link. *)
 let open_nofollow p = opt (fun () -> open_nofollow_ p)
@@ -375,7 +399,7 @@ let sweep_temps ?(older_than = 0.) dir =
         let p = Filename.concat dir n in
         let dead =
           match Names.temp_owner n with
-            | Some pid -> not (pid_alive pid)
+            | Some pid -> not (Pid.alive pid)
             | None -> (
                 match lstat_opt p with
                   | Some st -> Unix.gettimeofday () -. st.st_mtime > older_than
@@ -405,6 +429,7 @@ let resolve_parent p =
           leaf
 
 let syncfs dir =
-  Option.iter
-    (fun fd -> with_fd fd (fun fd -> sys (fun () -> syncfs_ fd)))
-    (opt (fun () -> Unix.openfile dir [O_RDONLY; O_CLOEXEC] 0))
+  if not Sys.win32 then
+    Option.iter
+      (fun fd -> with_fd fd (fun fd -> sys (fun () -> syncfs_ fd)))
+      (opt (fun () -> Unix.openfile dir [O_RDONLY; O_CLOEXEC] 0))

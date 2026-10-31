@@ -248,7 +248,7 @@ let close m d n composite ~run ~generation shard =
       Fs.rm_rf fdir)
 
 let rename_quiet src dst =
-  match Fs.eintr (fun () -> Unix.rename src dst) with
+  match Fs.eintr (fun () -> Fs.unix_rename src dst) with
     | () -> true
     | exception Unix.Unix_error _ -> false
 

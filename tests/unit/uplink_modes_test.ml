@@ -50,6 +50,9 @@ let grant rate =
     }
 
 let () =
+  if Array.length Sys.argv > 1 && Sys.argv.(1) = "print-pid" then (
+    print_int (Tsync_core.Pid.self ());
+    exit 0);
   Rt.run_sync (fun () ->
       let wan = Uplink.link "wan" settings
       and lan = Uplink.link "lan" settings in
@@ -96,7 +99,7 @@ let () =
          until (fun () -> !calls > c) && mode "wan" = "local");
       p "== owner";
       Uplink.own (fun _ -> settings);
-      let me = Unix.getpid () in
+      let me = Tsync_core.Pid.self () in
       let report pid =
         {
           Uplink_lease.pid;
@@ -121,13 +124,23 @@ let () =
                 | Some g -> Printf.sprintf "%.0f of %.0f" g.rate (256. *. 1024.)
                 | None -> "no grant")
         | None -> p "refused");
-      let dead =
-        let pid =
-          Unix.create_process "true" [| "true" |] Unix.stdin Unix.stdout
-            Unix.stderr
+      (* The child reports its own pid: on Windows, create_process answers a
+         handle rather than a pid. *)
+      let dead, child =
+        let out, into = Unix.pipe () in
+        let child =
+          Unix.create_process Sys.executable_name
+            [| Sys.executable_name; "print-pid" |]
+            Unix.stdin into Unix.stderr
         in
-        ignore (Unix.waitpid [] pid);
-        pid
+        Unix.close into;
+        let ic = Unix.in_channel_of_descr out in
+        let pid = int_of_string (String.trim (input_line ic)) in
+        close_in ic;
+        (* Windows gives a freed pid to the next process at once, so there the
+           child is reaped after the check, its handle keeping the pid taken. *)
+        if not Sys.win32 then ignore (Unix.waitpid [] child);
+        (pid, child)
       in
       ignore (Uplink.renewal (report dead));
       let lessees () =
@@ -138,6 +151,7 @@ let () =
       p "two lessees recorded: %d" (lessees ());
       p "the row of a gone pid is dropped at the next step: %b"
         (until (fun () -> lessees () = 1));
+      if Sys.win32 then ignore (Unix.waitpid [] child);
       p "a flat report of an older build is answered with a top-level rate: %b"
         (match
            Option.bind

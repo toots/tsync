@@ -1,0 +1,218 @@
+# Windows (10 §3.1 item 6), outside the gate until its suites pass (10 §8).
+# One x86-64 build: OCaml's configure has no native backend for Windows on
+# ARM64, so the ARM job runs that binary under the system's x64 emulation.
+name: test-windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  x86-64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+          ocaml-compiler: "5.5.1"
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: Build
+        run: opam exec -- dune build bin/tsync.exe bin/tsyncd.exe
+
+      - name: The binary runs and has the native TLS implementation
+        run: |
+          opam exec -- ./_build/default/bin/tsync.exe --help > /dev/null
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^tls:.*\bnative\b'
+
+      # cloud-files §14.2: the service and its owners show no console.
+      - name: tsync is a console program, tsyncd a windowed one
+        run: |
+          subsystem() { opam exec -- x86_64-w64-mingw32-objdump -p "_build/default/bin/$1.exe" | sed -n 's/^Subsystem[[:space:]]*//p'; }
+          subsystem tsync; subsystem tsyncd
+          subsystem tsync | grep -q '(Windows CUI)'
+          subsystem tsyncd | grep -q '(Windows GUI)'
+
+      # A windowed program has no standard handles: with no config, the
+      # service's start must still exit 0 and say why in the service log.
+      - name: tsyncd starts without a console and logs
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log'
+          Remove-Item -ErrorAction Ignore $log
+          $p = Start-Process -FilePath _build\default\bin\tsyncd.exe -ArgumentList start -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "tsyncd start exited $($p.ExitCode)" }
+          Get-Content $log
+          if (-not (Select-String -Quiet -Path $log -Pattern 'no config; nothing to start')) { throw 'the service log lacks the no-config line' }
+
+      # The binary with the DLLs of the toolchain that built it, for the ARM
+      # job; every other DLL it loads is the system's. The first copy on the
+      # PATH can belong to another install, of another architecture.
+      - name: Package the binary
+        run: |
+          mkdir dist
+          cp _build/default/bin/tsync.exe _build/default/bin/tsyncd.exe dist/
+          # dune's outputs are read-only, and signing rewrites the file.
+          chmod u+w dist/*.exe
+          toolchain="$(opam exec -- x86_64-w64-mingw32-gcc -print-sysroot)/mingw/bin"
+          for dll in $(opam exec -- x86_64-w64-mingw32-objdump -p dist/tsync.exe | sed -n 's/^[[:space:]]*DLL Name: //p'); do
+            if [ -f "$toolchain/$dll" ]; then cp "$toolchain/$dll" dist/; fi
+          done
+          for f in dist/*; do
+            opam exec -- x86_64-w64-mingw32-objdump -f "$f" | grep -q 'pei-x86-64' || { echo "$f is not x86-64"; exit 1; }
+          done
+          ls dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-windows-x86-64
+          path: dist/
+
+      # cloud-files §14: the programs and the identity package signed with the
+      # certificate windows/publisher names, then the installer around them.
+      - name: Sign and build the installer
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.TSYNC_WINDOWS_PFX }}
+          PFX_PASSWORD: ${{ secrets.TSYNC_WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX) { throw 'the TSYNC_WINDOWS_PFX secret is not set' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX))
+          $kit = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1).DirectoryName
+          $timestamp = 'http://timestamp.digicert.com'
+          function Sign($file) {
+            & "$kit\signtool.exe" sign /fd SHA256 /f $pfx /p $env:PFX_PASSWORD /tr $timestamp /td SHA256 $file
+            if ($LASTEXITCODE) { throw "signing $file failed" }
+          }
+          Sign dist\tsync.exe
+          Sign dist\tsyncd.exe
+          $version = "0.0.$env:GITHUB_RUN_NUMBER.0"
+          $publisher = Get-Content windows\publisher -TotalCount 1
+          $package = Join-Path $env:RUNNER_TEMP 'identity'
+          Copy-Item -Recurse windows\package $package
+          $manifest = Join-Path $package 'AppxManifest.xml'
+          (Get-Content $manifest -Raw).Replace('@PUBLISHER@', $publisher).Replace('@VERSION@', $version) | Set-Content $manifest -Encoding utf8
+          & "$kit\makeappx.exe" pack /d $package /p dist\tsync-identity.msix /nv /o
+          if ($LASTEXITCODE) { throw 'packing the identity package failed' }
+          Sign dist\tsync-identity.msix
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /Q "/DVersion=$version" "/DSource=$PWD\dist" "/DOutput=$PWD\installer" /DSign `
+            "/Stsync=`$q$kit\signtool.exe`$q sign /fd SHA256 /f `$q$pfx`$q /p $env:PFX_PASSWORD /tr $timestamp /td SHA256 `$f" `
+            windows\tsync.iss
+          if ($LASTEXITCODE) { throw 'building the installer failed' }
+          Copy-Item windows\tsync-development.cer installer\
+
+      # The certificate is trusted as on a test machine; then each step of
+      # install.ps1 and uninstall.ps1 is checked for what it leaves behind.
+      - name: The installer installs and uninstalls
+        shell: pwsh
+        run: |
+          Import-Certificate -FilePath windows\tsync-development.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
+          $p = Start-Process installer\tsync-setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$env:RUNNER_TEMP\setup.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log"; throw "setup exited $($p.ExitCode)" }
+          $package = Get-AppxPackage -Name org.feverdreamtv.tsync
+          if (-not $package) { throw 'the identity package is not registered' }
+          "identity package: $($package.PackageFullName), status $($package.Status)"
+          if ($package.Status -ne 'Ok') { throw "the identity package's status is $($package.Status)" }
+          $publisher = Get-Content windows\publisher -TotalCount 1
+          $signer = (Get-AuthenticodeSignature "$programs\tsyncd.exe").SignerCertificate.Subject
+          if ($signer -ne $publisher) { throw "tsyncd.exe is signed by '$signer'" }
+          if (-not (Get-ScheduledTask -TaskPath '\tsync\' -TaskName service -ErrorAction SilentlyContinue)) { throw 'the scheduled task is missing' }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -notcontains $programs) { throw 'the programs folder is not on the PATH' }
+          $p = Start-Process "$programs\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited $($p.ExitCode)" }
+          if (Get-AppxPackage -Name org.feverdreamtv.tsync) { throw 'the identity package is still registered' }
+          if (Get-ScheduledTask -TaskPath '\tsync\' -TaskName service -ErrorAction SilentlyContinue) { throw 'the scheduled task is still there' }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $programs) { throw 'the programs folder is still on the PATH' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-windows-installer
+          path: installer/
+
+      # cloud-files §17: the installed service presents a domain on moto's
+      # local S3, which takes conditional writes as S3 does.
+      - name: Cloud Files end to end
+        id: cloud-files
+        shell: pwsh
+        run: |
+          python -m pip install --quiet "moto[server]"
+          New-Item -ItemType Directory -Force e2e | Out-Null
+          Start-Transcript e2e\transcript.txt
+          try {
+            tests\cloud_files\windows_e2e.ps1 -Setup installer\tsync-setup.exe
+          } finally {
+            Stop-Transcript
+            Copy-Item -ErrorAction Ignore (Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log') e2e\
+          }
+
+      # Readable while the suite below still runs, which a job log is not.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: cloud-files-e2e
+          path: e2e/
+
+      # Also after a failure of the end-to-end step, so one run reports both.
+      - name: Timing-sensitive tests
+        id: serial
+        if: ${{ !cancelled() }}
+        run: opam exec -- dune build @runtest-serial -j1
+
+      # Also after a failure of the step above, so one run reports both.
+      - name: Tests
+        if: ${{ !cancelled() && steps.serial.conclusion != 'skipped' }}
+        run: opam exec -- dune build @runtest @runtest-windows --force
+
+  arm64:
+    needs: x86-64
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tsync-windows-x86-64
+
+      - name: The x86-64 binary runs on ARM64 Windows
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') { throw "not an ARM64 runner: $env:PROCESSOR_ARCHITECTURE" }
+          .\tsync.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "tsync --help exited $LASTEXITCODE" }
+          $info = .\tsync.exe build-info
+          if ($LASTEXITCODE -ne 0) { throw "tsync build-info exited $LASTEXITCODE" }
+          $info
+          if (-not ($info -match '^tls:.*\bnative\b')) { throw 'native TLS missing' }

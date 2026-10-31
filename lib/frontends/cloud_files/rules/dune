@@ -1,0 +1,5 @@
+; The Windows host's rules that need no Windows: built and tested everywhere.
+
+(library
+ (name tsync_cloud_files_rules)
+ (libraries tsync_core yojson))

@@ -24,7 +24,8 @@ let refuse fmt =
 
 let config_opt () =
   Option.map
-    (fun s -> try Config.of_string s with Config.Invalid e -> fail "%s" e)
+    (fun s ->
+      try Config.of_user_string s with Config.Invalid e -> fail "%s" e)
     (Paths.read_config ())
 
 let config () =

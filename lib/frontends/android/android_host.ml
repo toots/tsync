@@ -85,7 +85,7 @@ let load ?candidate name =
     match
       match candidate with Some _ -> candidate | None -> Paths.read_config ()
     with
-      | Some text -> Config.of_string text
+      | Some text -> Config.of_user_string text
       | None -> Fail.absent "no config at %s" (Paths.config_file ())
   in
   let dom =
@@ -126,7 +126,7 @@ let frontend () : R.frontend option =
   Some
     {
       kind = "android";
-      pid = Some (Unix.getpid ());
+      pid = Some (Pid.self ());
       mount = None;
       port = None;
       open_handles =
@@ -137,6 +137,9 @@ let frontend () : R.frontend option =
       read_only = None;
       shares = None;
       unanswered = false;
+      unpresented = None;
+      untaken = None;
+      pending_folders = None;
     }
 
 let booted : Owner.embedded option Atomic.t = Atomic.make None

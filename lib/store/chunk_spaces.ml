@@ -89,7 +89,7 @@ let with_run_lock t d f =
 let promote t d c =
   let src = file t (Key.chunk_from d c) and dst = file t (Key.chunk d c) in
   let attempt () =
-    match Fs.eintr (fun () -> Unix.rename src dst) with
+    match Fs.eintr (fun () -> Fs.unix_rename src dst) with
       | () -> true
       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
       | exception Unix.Unix_error (e, fn, a) ->

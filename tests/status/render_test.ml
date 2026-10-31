@@ -32,7 +32,7 @@ let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime
         role;
         serves;
       };
-    usage = usage ~cpu:1.25 ~private_:(mib 61) ~heap:(mib 18);
+    usage = usage ~cpu:1.24 ~private_:(mib 61) ~heap:(mib 18);
     uplinks;
     traffic;
     recent_errors = recent;
@@ -94,6 +94,9 @@ let fuse : frontend =
     read_only = None;
     shares = None;
     unanswered = false;
+    unpresented = None;
+    untaken = None;
+    pending_folders = None;
   }
 
 (* Presented by the store server, merged into the owner's section. *)
@@ -334,6 +337,14 @@ let degraded : machine =
                   mount = None;
                   port = Some 5446;
                   unanswered = true;
+                };
+                {
+                  fuse with
+                  kind = "cloud_files";
+                  mount = Some "C:\\Users\\me\\tsync\\photos";
+                  unpresented = Some 2;
+                  untaken = Some 1;
+                  pending_folders = Some 0;
                 };
               ];
             backends =

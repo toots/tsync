@@ -17,7 +17,7 @@ type io = { ask : prompt -> string; say : string -> unit }
     answer [-] removes one. *)
 val edit :
   ?advanced:bool ->
-  ?system:[ `Linux | `Macos ] ->
+  ?system:[ `Linux | `Macos | `Windows ] ->
   io ->
   Yojson.Safe.t option ->
   Yojson.Safe.t option

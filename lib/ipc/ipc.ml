@@ -141,14 +141,8 @@ let check_length path =
       path max_path
 
 let check_dir dir =
-  Fs.mkdir_p (Filename.dirname dir);
-  (try Unix.mkdir dir 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
-  let st = Unix.lstat dir in
-  if
-    st.st_kind <> S_DIR
-    || st.st_uid <> Unix.getuid ()
-    || st.st_perm land 0o077 <> 0
-  then
+  Fs.mkdir_p ~perm:0o700 dir;
+  if (Unix.lstat dir).st_kind <> S_DIR || not (Fs.is_private dir) then
     Fail.raise_ Fail.Denied
       "%s must be a directory owned by this user with mode 0700; refusing to \
        serve"
@@ -300,7 +294,7 @@ let hang_up c = try Unix.shutdown c.line.fd SHUTDOWN_ALL with _ -> ()
 (* 01 §11: at the bound, the connection idle the longest makes room; with none
    idle the newcomer is refused. *)
 let admit t fd ~execution handler =
-  if (try Fs.peer_uid fd with _ -> -1) <> Unix.getuid () then (
+  if not (try Fs.peer_same_user fd with _ -> false) then (
     Unix.close fd;
     Rt.within `Threaded (fun () ->
         Log.once ("ipc peer " ^ t.path) Log.Warn
@@ -378,7 +372,7 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
   Tsync_core.Fs.ignore_sigpipe ();
   check_dir (Filename.dirname path);
   check_length path;
-  (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
+  (try Fs.unix_unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
   let lfd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
   (* The accept fiber owns the socket once spawned. *)
   Tsync_core.Fs.or_close lfd @@ fun lfd ->
@@ -406,7 +400,7 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
         ~finally:(fun () ->
           Unix.close lfd;
           Rt.within `Threaded (fun () ->
-              try Unix.unlink path with Unix.Unix_error _ -> ());
+              try Fs.unix_unlink path with Unix.Unix_error _ -> ());
           Rt.Promise.resolve t.finished ())
         (fun () -> accept_loop t ~execution handler));
   t
@@ -455,20 +449,19 @@ module Client = struct
   let connect ?(timeout = connect_timeout) path =
     Tsync_core.Fs.ignore_sigpipe ();
     check_length path;
-    let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-    Tsync_core.Fs.or_close fd @@ fun fd ->
-    Unix.set_nonblock fd;
     let deadline = Rt.now () +. timeout in
-    let rec attempt () =
+    let rec attempt fd =
       match Unix.connect fd (ADDR_UNIX path) with
         | () -> ()
+        (* On POSIX it is a full backlog; on Windows, a connection under way. *)
         | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
-          when Rt.now () < deadline ->
+          when (not Sys.win32) && Rt.now () < deadline ->
             Rt.sleep 0.05;
-            attempt ()
-        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
+            attempt fd
+        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
+          when not Sys.win32 ->
             Fail.raise_ Fail.Deadline "%s accepts no connection" path
-        | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+        | exception Unix.Unix_error ((EINPROGRESS | EWOULDBLOCK), _, _) -> (
             (try Rt.wait_writable ~timeout:(deadline -. Rt.now ()) fd
              with Rt.Timeout ->
                Fail.raise_ Fail.Deadline "%s accepts no connection" path);
@@ -476,9 +469,29 @@ module Client = struct
               | None -> ()
               | Some e -> raise (Unix.Unix_error (e, "connect", path)))
     in
-    match attempt () with
-      | () -> Line.make fd
+    (* Windows answers a full backlog with ENOBUFS, which spends the socket. *)
+    let rec on_fresh_socket () =
+      let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+      match
+        Tsync_core.Fs.or_close fd (fun fd ->
+            Unix.set_nonblock fd;
+            attempt fd;
+            Line.make fd)
+      with
+        | line -> line
+        | exception Unix.Unix_error (ENOBUFS, _, _)
+          when Sys.win32 && Rt.now () < deadline ->
+            Rt.sleep 0.05;
+            on_fresh_socket ()
+        | exception Unix.Unix_error (ENOBUFS, _, _) when Sys.win32 ->
+            Fail.raise_ Fail.Deadline "%s accepts no connection" path
+    in
+    match on_fresh_socket () with
+      | line -> line
       | exception Unix.Unix_error ((ENOENT | ECONNREFUSED | ENOTSOCK), _, _) ->
+          raise (Not_serving path)
+      (* Windows answers a path no socket is bound to with ENETDOWN. *)
+      | exception Unix.Unix_error (ENETDOWN, _, _) when Sys.win32 ->
           raise (Not_serving path)
 
   let read ?timeout t =

@@ -107,6 +107,28 @@
   (diff mapped_pages_test.expected mapped_pages_test.output)))
 
 (executable
+ (name mount_point_test)
+ (modules mount_point_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   mount_point_test.output
+   (run ./mount_point_test.exe))))
+
+(rule
+ (alias runtest-linux)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff mount_point_test.expected mount_point_test.output)))
+
+(executable
  (name rt_class_test)
  (modules rt_class_test)
  (libraries tsync_core tsync_ipc threads.posix unix))

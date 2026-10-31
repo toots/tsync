@@ -7,7 +7,7 @@ let action a = `Assoc [("action", `String a)]
 
 let dir =
   let d = Filename.temp_dir "tsync-ipc" "" in
-  Unix.chmod d 0o700;
+  Fs.make_private d;
   d
 
 let path = Filename.concat dir "t.sock"

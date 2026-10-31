@@ -235,6 +235,12 @@ is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains n
 - The real name is recovered from the file's manifest (files) or from a `.tsync-name` record
   beside the escaped directory (folders); the layout of those records is owned by
   [04](04-checkout-cache.md).
+- **Filesystems that match names loosely.** Where the local filesystem compares names other than
+  byte for byte (ignoring case, as NTFS and APFS by default do, or up to Unicode normalisation),
+  a component is also unstorable as itself when the folder already files a different component
+  that the filesystem takes for the same name. A lookup confirms that the name the filesystem
+  holds equals the component byte for byte; a successful open alone does not. Readers accept
+  either form, as for every escaped name.
 - The escape handle is a 64-bit hash, so two distinct unstorable leaves in one folder can map
   to one handle. A writer that finds the handle already taken by a different real name MUST
   refuse the second item locally as EXISTS rather than overwrite the first; the conflict policy
