@@ -154,12 +154,15 @@ let execute t dir usns (action : Apply_plan.action) =
         true
     | Create { name; row } ->
         Cf.create dir (placeholder name row);
+        (* §11: under a pinned folder it is made whole, which the take decides. *)
+        Take.schedule t.take (path name);
         true
     | Refresh { name; row } | Update { name; row } ->
         let dehydrate = match action with Refresh _ -> true | _ -> false in
         let usn = Option.value ~default:(-1L) (Hashtbl.find_opt usns name) in
-        if Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate then
-          true
+        if Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate then (
+          if dehydrate then Take.schedule t.take (path name);
+          true)
         else (
           Take.schedule t.take (path name);
           false)
