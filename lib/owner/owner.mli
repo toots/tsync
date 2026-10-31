@@ -141,6 +141,13 @@ type host =
 (** At module initialisation, by the frontend's library. *)
 val register_host : string -> host -> unit
 
+(** At module initialisation, by a frontend's library: what [tsync start] runs
+    once it has read the config, before it supervises any owner. *)
+val on_service_start : (Tsync_config.Config.t -> unit) -> unit
+
+(** Runs what {!on_service_start} registered, each failure logged. *)
+val service_starting : Tsync_config.Config.t -> unit
+
 (** The host of the first frontend of these domains that registered one. *)
 val host_for : Tsync_config.Config.domain list -> host option
 
