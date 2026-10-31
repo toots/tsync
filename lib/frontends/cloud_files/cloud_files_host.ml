@@ -359,7 +359,7 @@ let present root (domain : Domain.t) engine ~publish:_ =
 
 let host ~mount:_ domains ~run =
   match domains with
-    | [d] -> run (present (Cloud_files_options.sync_root d))
+    | [d] -> run (present (Sync_root.of_domain d))
     | _ -> Fail.invalid "cloud_files presents one domain per owner"
 
 let () =

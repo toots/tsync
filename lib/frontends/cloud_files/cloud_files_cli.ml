@@ -67,8 +67,84 @@ let purge ~domain:_ _ =
         print_endline "tsync's sync roots, task and local state are removed.";
         0
 
+(* §13.3: what a reset must not cost, read from each item's in-sync bit. *)
+let rec owed path acc =
+  if Names.is_temp_name (Filename.basename path) then acc
+  else (
+    match Cf.state path with
+      | Some st when st.placeholder && st.in_sync ->
+          if st.is_dir && not st.unpopulated then
+            Array.fold_left
+              (fun acc name -> owed (Filename.concat path name) acc)
+              acc
+              (try Sys.readdir path with Sys_error _ -> [||])
+          else acc
+      | Some _ -> path :: acc
+      | None -> acc)
+
+(* An in-sync placeholder is the domain's, so deleting it loses nothing; its
+   state is read again right before, so an edit made meanwhile stays. *)
+let rec clear path =
+  match Cf.state path with
+    | Some st when st.placeholder && st.in_sync && st.is_dir -> (
+        if not st.unpopulated then
+          Array.iter
+            (fun name -> clear (Filename.concat path name))
+            (try Sys.readdir path with Sys_error _ -> [||]);
+        try Sys.rmdir path with Sys_error _ -> ())
+    | Some st when st.placeholder && st.in_sync -> (
+        try Sys.remove path with Sys_error _ -> ())
+    | _ -> ()
+
+let start_service () =
+  ignore
+    (Sys.command
+       (Filename.quote_command "schtasks" ["/Run"; "/TN"; "\\tsync\\service"]))
+
+(* §13.3, run with the owner stopped; the registration is kept, as the owner
+   registers the same settings when it starts. *)
+let reset ~domain _ =
+  match domain_named domain with
+    | Error why -> fail "%s" why
+    | Ok d ->
+        ignore
+          (Sys.command (Filename.quote_command (beside "tsync.exe") ["stop"]));
+        let root = Sync_root.of_domain d in
+        let children () =
+          try Array.to_list (Sys.readdir root) with Sys_error _ -> []
+        in
+        let held =
+          List.fold_left
+            (fun acc name -> owed (Filename.concat root name) acc)
+            [] (children ())
+        in
+        if held <> [] then (
+          start_service ();
+          fail
+            "nothing was reset: these changes are not in the domain yet:\n  %s"
+            (String.concat "\n  " (List.rev held)))
+        else (
+          List.iter
+            (fun name -> clear (Filename.concat root name))
+            (children ());
+          Fs.unlink_quiet
+            (Filename.concat (Paths.data_dir ())
+               ("cloudfiles-" ^ Domain_name.to_string d.name ^ ".json"));
+          start_service ();
+          print_endline
+            ("The sync root of " ^ domain
+           ^ " is cleared; it fills again from the domain as it is browsed.");
+          0)
+
 let commands =
   [
+    {
+      Frontend.verb = "reset";
+      doc =
+        "Rebuild the sync root from the domain; refused while it holds a \
+         change the domain does not.";
+      run = reset;
+    };
     {
       Frontend.verb = "purge";
       doc =

@@ -53,3 +53,12 @@ code and what is known to stand in the way.
   toolchain is needed.
 - **TLS.** Both implementations must read the Windows root stores (spec §5.4); check that the
   certificate loading of each does before shipping.
+
+## Departures
+
+- `tsync cloudfiles reset` (§13.3) runs in the CLI with the owner stopped, not in the owner, and
+  keeps the registration: the owner registers the same settings when it starts again, and
+  unregistering would need the package identity only `tsyncd.exe` carries. Each placeholder's
+  state is read again right before it is deleted, so an edit made meanwhile is kept.
+- `tsync cloudfiles purge` releases every root of the user but is dispatched, as every frontend
+  verb is, with a domain configured with `cloud_files`; the uninstaller passes the first one.
