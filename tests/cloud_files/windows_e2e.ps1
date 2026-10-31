@@ -19,6 +19,9 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
     if (& $test) { Step "ok: $what"; return }
     Start-Sleep -Milliseconds 500
   }
+  Step "FAILED within $seconds s: $what"
+  if (Test-Path (Join-Path $Work 'export.err')) { Step 'last export said:'; Get-Content (Join-Path $Work 'export.err') }
+  Step 'status:'; & $tsync status 2>&1 | Out-String | Write-Host
   throw "FAILED within $seconds s: $what"
 }
 
@@ -26,7 +29,7 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
 # while a change is unpublished, which export refuses.
 function Exported {
   $dir = Join-Path $Work "export-$([guid]::NewGuid())"
-  & $tsync export --quiet --domain docs $dir 2>$null
+  & $tsync export --quiet --domain docs $dir 2> (Join-Path $Work 'export.err')
   if ($LASTEXITCODE -ne 0) { return $null }
   $dir
 }
