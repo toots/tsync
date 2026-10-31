@@ -195,7 +195,7 @@ jobs:
       # Also after a failure of the step above, so one run reports both.
       - name: Tests
         if: ${{ !cancelled() && steps.serial.conclusion != 'skipped' }}
-        run: opam exec -- dune build @runtest --force
+        run: opam exec -- dune build @runtest @runtest-windows --force
 
   arm64:
     needs: x86-64
