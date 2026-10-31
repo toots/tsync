@@ -681,6 +681,9 @@ let host ~mount domains ~run =
                 read_only = None;
                 shares = None;
                 unanswered = false;
+                unpresented = None;
+                untaken = None;
+                pending_folders = None;
               });
       }
     in

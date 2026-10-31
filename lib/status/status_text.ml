@@ -189,6 +189,16 @@ let frontend b (f : frontend) =
   (match f.open_handles with
     | Some n when n > 0 -> row b "    " "open" (plural n "handle" "handles")
     | _ -> ());
+  List.iter
+    (fun (label, count) ->
+      match count with
+        | Some n when n > 0 -> row b "    " label (string_of_int n)
+        | _ -> ())
+    [
+      ("not shown", f.unpresented);
+      ("not taken", f.untaken);
+      ("folders pending", f.pending_folders);
+    ];
   match (f.bytes_read, f.bytes_written) with
     | Some r, Some w when r > 0 || w > 0 ->
         row b "    " "io"

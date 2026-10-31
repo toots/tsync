@@ -189,6 +189,9 @@ type frontend = {
   read_only : bool option; [@key "readOnly"] [@default None]
   shares : bool option; [@default None]
   unanswered : bool; [@default false]
+  unpresented : int option; [@default None]
+  untaken : int option; [@default None]
+  pending_folders : int option; [@key "pendingFolders"] [@default None]
 }
 [@@deriving yojson { strict = false }]
 
