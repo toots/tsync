@@ -569,7 +569,7 @@ CAMLprim value tsync_cf_state(value _path) {
                                                           (const char *)info->FileIdentity)
                           : caml_copy_string("");
   _usn = caml_copy_int64(usn);
-  _state = caml_alloc_tuple(7);
+  _state = caml_alloc_tuple(8);
   Store_field(_state, 0, Val_bool(tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY));
   Store_field(_state, 1, Val_bool(other_reparse));
   Store_field(_state, 2, Val_bool(placeholder));
@@ -578,6 +578,8 @@ CAMLprim value tsync_cf_state(value _path) {
   Store_field(_state, 5, _usn);
   /* FILE_ATTRIBUTE_RECALL_ON_OPEN: a folder whose children were never asked. */
   Store_field(_state, 6, Val_bool(tag.FileAttributes & 0x40000));
+  /* FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: some content is not on disk. */
+  Store_field(_state, 7, Val_bool(tag.FileAttributes & 0x400000));
   free(info);
   CAMLreturn(caml_alloc_some(_state));
 }
