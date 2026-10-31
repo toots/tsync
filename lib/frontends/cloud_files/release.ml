@@ -13,7 +13,12 @@ let rec owed_under path acc =
               acc
               (try Sys.readdir path with Sys_error _ -> [||])
           else acc
-      | Some _ -> path :: acc
+      | Some st when not st.placeholder ->
+          (path ^ " (not a placeholder"
+          ^ (if st.other_reparse then ", another reparse point" else "")
+          ^ ")")
+          :: acc
+      | Some _ -> (path ^ " (out of sync)") :: acc
       | None -> acc)
 
 let owed root =
