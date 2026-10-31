@@ -9,6 +9,7 @@ type t = {
   handler : Handler.t;
   connection : Cf.connection;
   take : Take.t;
+  apply : Apply.t;
 }
 
 exception Failed_with of Cf.status * exn
@@ -26,16 +27,7 @@ let ref_of t (r : Cf.request) =
   if r.identity = "" && Win_path.same r.path t.root then Some "root"
   else Option.map (fun (i : Identity.t) -> i.ref_) (Identity.decode r.identity)
 
-let rows t ref_ =
-  let rec pages after acc =
-    let (page : Protocol.page) =
-      Handler.call t.handler
-        (List_dir { dir = Ref ref_; after; limit = None; pull = `Never })
-    in
-    let acc = List.rev_append page.items acc in
-    match page.next with Some n -> pages (Some n) acc | None -> List.rev acc
-  in
-  pages None []
+let rows t ref_ = Listing.rows t.handler ref_
 
 let placeholder (row : Protocol.row) name : Cf.placeholder =
   let is_dir = row.kind = `Dir in
@@ -92,7 +84,9 @@ let fetch_placeholders t (r : Cf.request) =
                    (fun (row, name) ->
                      if Hashtbl.mem on_disk name then None
                      else Some (placeholder row name))
-                   presented))
+                   presented);
+              (* §9.1: a change that raced the listing is applied after it. *)
+              Apply.schedule t.apply ref_)
 
 (* §9.1: transfers start at a multiple of this and are a multiple of it long,
    except the one that ends at end of file. *)
@@ -293,7 +287,7 @@ let handle t (r : Cf.request) =
 (* §8.3: the shell's cloud icon until the programs carry their own. *)
 let icon = "%SystemRoot%\\system32\\imageres.dll,-1043"
 
-let start (domain : Domain.t) engine root handler =
+let start (domain : Domain.t) engine root applying handler =
   Fs.mkdir_p root;
   let name = Domain_name.to_string domain.name in
   Cf.register
@@ -308,9 +302,19 @@ let start (domain : Domain.t) engine root handler =
            [name; "staging"])
       ~read_only:domain.domain.read_only ()
   in
-  let t = { engine; root; handler; connection; take } in
+  let apply =
+    Apply.create ~engine ~handler ~root ~take
+      ~state_file:
+        (Filename.concat
+           (Tsync_config.Paths.data_dir ())
+           ("cloudfiles-" ^ name ^ ".json"))
+      ()
+  in
+  applying := Some apply;
+  let t = { engine; root; handler; connection; take; apply } in
   Cf.on_callback (handle t);
   Take.start take;
+  Apply.start apply;
   Log.info "cloud_files: %s presented at %s" name root;
   let (_unregister : unit -> unit) =
     Stop.on_request (fun () ->
@@ -322,9 +326,11 @@ let start (domain : Domain.t) engine root handler =
   ()
 
 let present root (domain : Domain.t) engine ~publish:_ =
+  let applying = ref None in
   let hooks =
     {
-      Handler.no_hooks with
+      Handler.changed = (fun _ -> Option.iter Apply.wake !applying);
+      reannounce = (fun () -> Option.iter Apply.restart_anchor !applying);
       frontend =
         (fun () ->
           Some
@@ -343,7 +349,7 @@ let present root (domain : Domain.t) engine ~publish:_ =
             });
     }
   in
-  (hooks, fun handler -> start domain engine root handler)
+  (hooks, fun handler -> start domain engine root applying handler)
 
 let host ~mount:_ domains ~run =
   match domains with
