@@ -75,20 +75,23 @@ try {
   Check 'the bucket exists' ($LASTEXITCODE -eq 0)
 
   Step 'writing the config'
-  $config = @{
-    name = 'ci'
-    domains = @(@{
-      name = 'docs'
-      versioning = $true
-      symlinks = 'skip'
-      backends = @(@{
-        type = 's3'; name = 'main'; role = 'main'; endpoint = 'http://127.0.0.1:9000'
-        bucket = 'tsync-ci'; region = 'us-east-1'
-        accessKeyId = 'tsyncci'; secretAccessKey = 'tsyncci-secret-key'
+  function Config($frontend) {
+    @{
+      name = 'ci'
+      domains = @(@{
+        name = 'docs'
+        versioning = $true
+        symlinks = 'skip'
+        backends = @(@{
+          type = 's3'; name = 'main'; role = 'main'; endpoint = 'http://127.0.0.1:9000'
+          bucket = 'tsync-ci'; region = 'us-east-1'
+          accessKeyId = 'tsyncci'; secretAccessKey = 'tsyncci-secret-key'
+        })
+        frontends = @($frontend)
       })
-      frontends = @('cloud_files')
-    })
-  } | ConvertTo-Json -Depth 6
+    } | ConvertTo-Json -Depth 6
+  }
+  $config = Config 'cloud_files'
   $configPath = Join-Path $env:LOCALAPPDATA 'tsync\config.json'
   New-Item -ItemType Directory -Force (Split-Path $configPath) | Out-Null
   # security-model §7.1: the config's folder grants the user alone.
@@ -193,6 +196,20 @@ try {
   Step "  c.txt reads: $read ($((Get-Item $c).Length) bytes)"
   Check 'it still reads its content' ($read -eq 'changed')
 
+  Step 'moving the sync root'
+  $moved = Join-Path $env:USERPROFILE 'tsync-moved\docs'
+  & $tsync stop
+  Set-Content -Path $configPath -Value (Config @{ type = 'cloud_files'; syncRoot = $moved }) -Encoding utf8
+  Start-ScheduledTask -TaskPath '\tsync\' -TaskName 'service'
+  Until 'the moved sync root lists the domain' {
+    (Test-Path (Join-Path $moved 'c.txt')) -and (Test-Path (Join-Path $moved 'new.txt'))
+  } 90
+  Check 'the old folder keeps its whole file as a plain file' (
+    (Test-Path $c) -and -not (Dehydrated $c) -and ((Get-Content -Raw $c) -eq 'changed'))
+  $released = $c
+  $root = $moved
+  $c = Join-Path $root 'c.txt'
+
   Step 'resetting'
   & $tsync cloudfiles reset --domain docs
   Check 'reset exits 0 with nothing owed' ($LASTEXITCODE -eq 0)
@@ -205,10 +222,12 @@ try {
   $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
   Check 'the uninstaller exits 0' ($p.ExitCode -eq 0)
   Check 'a file whole on disk stays, as a plain file' (
-    (Test-Path $c) -and -not (Dehydrated $c) -and ((Get-Content -Raw $c) -eq 'changed'))
+    (Test-Path $released) -and -not (Dehydrated $released) -and
+      ((Get-Content -Raw $released) -eq 'changed'))
+  Check 'a placeholder whose content was not on disk goes' (-not (Test-Path $c))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 25
+  $checks = 28
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -218,5 +237,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 25) { throw "only $checks of 25 checks ran" }
+if ($checks -ne 28) { throw "only $checks of 28 checks ran" }
 Step "cloud files end to end: $checks checks passed"
