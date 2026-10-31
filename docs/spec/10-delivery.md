@@ -147,6 +147,15 @@ After a package release publishes, `release-repo` rebuilds the apt and dnf repos
 nightly release holds, signs them with the repository key, checks that `tsync` installs from them,
 and deploys them to Pages. A rebuild is idempotent: two triggers in a row produce the same site.
 
+The repository is also a Homebrew tap: `Casks/tsync.rb` installs the nightly `tsync.pkg`. The
+nightly release replaces the package at one URL, so the cask pins no version and no checksum; the
+installer's check of the Developer ID signature and notarization stands in for the checksum, and
+`brew upgrade --cask --greedy` takes the current build. Homebrew runs a cask's uninstall steps on
+upgrade too, so they stop the service, quit the app and remove the package and the command-line
+link, and leave the domains and local data to `tsync fileprovider purge`
+([frontends/file-provider.md §9.4](frontends/file-provider.md#94-purge-uninstall)).
+`release-macos` passes the cask through `brew style` and `brew audit --strict`.
+
 ### 5.3 macOS signing
 
 The signing assets come from secrets into a throwaway keychain whose keys every signing tool may use
@@ -205,5 +214,6 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
 - Exactly one script installs OCaml dependencies, and every building job other than the user-install
   job calls it.
 - Every job declares a timeout.
+- The Homebrew cask passes `brew style` and `brew audit --strict` on every pull request.
 - A published APK is signed with the tsync key and carries the core library built from its own
   commit; the device suite fails when it ran zero tests.

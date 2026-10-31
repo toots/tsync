@@ -57,6 +57,15 @@ jobs:
           # formulae, which a newer version moves.
           echo "linked=$(brew list --versions openssl@3 gmp ffmpeg | tr ' ' '-' | paste -sd_ -)" >> "$GITHUB_OUTPUT"
 
+      # 10 §5.2: Homebrew loads a cask only from a trusted tap, so tap the
+      # checkout itself.
+      - name: Check the Homebrew cask
+        run: |
+          brew tap tsync-ci/tsync "$GITHUB_WORKSPACE"
+          brew trust tsync-ci/tsync
+          brew style --cask tsync-ci/tsync/tsync
+          brew audit --cask --strict tsync-ci/tsync/tsync
+
       - uses: ocaml/setup-ocaml@v3
         with:
           # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
