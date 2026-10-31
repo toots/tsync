@@ -180,7 +180,15 @@ try {
   attrib -U +P $c
   Until 'always keep on this device brings it back' { -not (Dehydrated $c) } 60
   Check 'it still reads its content' ((Get-Content -Raw $c) -eq 'changed')
-  $checks = 17
+
+  Step 'uninstalling'
+  $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
+  Check 'the uninstaller exits 0' ($p.ExitCode -eq 0)
+  Check 'a file whole on disk stays, as a plain file' (
+    (Test-Path $c) -and -not (Dehydrated $c) -and ((Get-Content -Raw $c) -eq 'changed'))
+  Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
+  Check 'the config stays' (Test-Path $configPath)
+  $checks = 21
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -190,5 +198,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 17) { throw "only $checks of 17 checks ran" }
+if ($checks -ne 21) { throw "only $checks of 21 checks ran" }
 Step "cloud files end to end: $checks checks passed"
