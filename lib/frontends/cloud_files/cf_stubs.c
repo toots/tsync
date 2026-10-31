@@ -615,10 +615,15 @@ CAMLprim value tsync_cf_release(value _handle) {
 }
 
 /* Stores an identity on a held item, converting it to a placeholder when it is
-   not one; [in_sync] marks it so. */
+   not one; [in_sync] marks it so. A placeholder also records [_size] when it
+   is not negative: zero times and attributes leave those as they are. */
 CAMLprim value tsync_cf_set_identity(value _handle, value _placeholder, value _identity,
-                                     value _in_sync) {
-  CAMLparam4(_handle, _placeholder, _identity, _in_sync);
+                                     value _in_sync, value _size) {
+  CAMLparam5(_handle, _placeholder, _identity, _in_sync, _size);
+  CF_FS_METADATA metadata;
+  memset(&metadata, 0, sizeof metadata);
+  metadata.FileSize.QuadPart = Long_val(_size);
+  BOOL with_size = Long_val(_size) >= 0;
   load_api();
   HANDLE h = (HANDLE)(intptr_t)Int64_val(_handle);
   DWORD length = (DWORD)caml_string_length(_identity);
@@ -630,7 +635,7 @@ CAMLprim value tsync_cf_set_identity(value _handle, value _placeholder, value _i
   caml_release_runtime_system();
   HRESULT hr =
       placeholder
-          ? cf_update(h, NULL, identity, length, NULL, 0,
+          ? cf_update(h, with_size ? &metadata : NULL, identity, length, NULL, 0,
                       in_sync ? CF_UPDATE_FLAG_MARK_IN_SYNC : 0, NULL, NULL)
           : cf_convert(h, identity, length, in_sync ? CF_CONVERT_FLAG_MARK_IN_SYNC : 0,
                        NULL, NULL);
