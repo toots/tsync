@@ -540,6 +540,16 @@ type host =
   int
 
 let hosts : host Registry.t = Registry.create ()
+let service_start_hooks = ref []
+let on_service_start f = service_start_hooks := f :: !service_start_hooks
+
+let service_starting config =
+  List.iter
+    (fun f ->
+      try f config
+      with e -> Log.warn "at service start: %s" (Printexc.to_string e))
+    (List.rev !service_start_hooks)
+
 let register_host = Registry.register hosts
 
 let host_for (domains : Config.domain list) =

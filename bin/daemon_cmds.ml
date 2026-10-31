@@ -95,10 +95,12 @@ let start mount tls verbose =
           | exception Config.Invalid e ->
               prerr_endline ("tsync: " ^ e);
               78
-          | { domains = []; _ } ->
+          | { domains = []; _ } as config ->
+              Owner.service_starting config;
               prerr_endline "tsync: no domains configured; nothing to start";
               0
           | config -> (
+              Owner.service_starting config;
               let refusal =
                 List.find_map
                   (fun (d : Config.domain) ->
