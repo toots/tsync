@@ -286,12 +286,30 @@ let handle t (r : Cf.request) =
 (* §8.3: the shell's cloud icon until the programs carry their own. *)
 let icon = "%SystemRoot%\\system32\\imageres.dll,-1043"
 
-let start (domain : Domain.t) engine root served handler =
-  Fs.mkdir_p root;
+(* §13.1: a moved syncRoot leaves the old folder released, once the domain
+   holds everything in it; until then the old one is served, so its take can
+   publish what is owed, and the move waits for a later start. *)
+let place ~id configured =
+  match List.assoc_opt id (Release.registered ()) with
+    | Some old when not (Win_path.same old configured) -> (
+        match Release.owed old with
+          | [] ->
+              Release.release ~id old;
+              configured
+          | held ->
+              Log.warn
+                "cloud_files: moving to %s waits on %d changes in %s not in \
+                 the domain yet; serving %s"
+                configured (List.length held) old old;
+              old)
+    | _ -> configured
+
+let start (domain : Domain.t) engine configured served handler =
   let name = Domain_name.to_string domain.name in
-  Cf.register
-    ~id:(Sync_root_id.id ~sid:(Cf.user_sid ()) domain.name)
-    ~path:root ~display_name:name ~version:"1" ~icon;
+  let id = Sync_root_id.id ~sid:(Cf.user_sid ()) domain.name in
+  let root = place ~id configured in
+  Fs.mkdir_p root;
+  Cf.register ~id ~path:root ~display_name:name ~version:"1" ~icon;
   let connection = Cf.connect root in
   let take =
     Take.create ~engine ~handler ~root
@@ -340,7 +358,8 @@ let present root (domain : Domain.t) engine ~publish:_ =
             {
               Tsync_status.Status_report.kind = "cloud_files";
               pid = Some (Pid.self ());
-              mount = Some root;
+              mount =
+                Some (Option.fold ~none:root ~some:(fun t -> t.root) !served);
               port = None;
               open_handles = None;
               bytes_read = None;

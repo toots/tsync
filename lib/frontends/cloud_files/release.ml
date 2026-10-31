@@ -2,6 +2,27 @@ open Tsync_core
 open Tsync_config
 open Tsync_cloud_files_rules
 
+let rec owed_under path acc =
+  if Names.is_temp_name (Filename.basename path) then acc
+  else (
+    match Cf.state path with
+      | Some st when st.placeholder && st.in_sync ->
+          if st.is_dir && not st.unpopulated then
+            Array.fold_left
+              (fun acc name -> owed_under (Filename.concat path name) acc)
+              acc
+              (try Sys.readdir path with Sys_error _ -> [||])
+          else acc
+      | Some _ -> path :: acc
+      | None -> acc)
+
+let owed root =
+  List.rev
+    (Array.fold_left
+       (fun acc name -> owed_under (Filename.concat root name) acc)
+       []
+       (try Sys.readdir root with Sys_error _ -> [||]))
+
 let rec strip path =
   match Cf.state path with
     | Some st when st.placeholder && st.is_dir && st.unpopulated ->
