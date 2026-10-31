@@ -29,7 +29,7 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
 # while a change is unpublished, which export refuses.
 function Exported {
   $dir = Join-Path $Work "export-$([guid]::NewGuid())"
-  & $tsync export --quiet --domain docs $dir 2> (Join-Path $Work 'export.err')
+  & $tsync export --domain docs $dir 2> (Join-Path $Work 'export.err')
   if ($LASTEXITCODE -ne 0) { return $null }
   $dir
 }
