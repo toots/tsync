@@ -266,10 +266,11 @@ let from_deployment io (specs : Field_spec.field list) b filled =
   b
 
 let backend io ~advanced ~has_main b =
-  let types = Tsync_store.Driver.names () in
+  let types = List.filter Config.held_here (Tsync_store.Driver.names ()) in
+  let fresh = if List.mem "local" types then "local" else List.hd types in
   let btype =
     choose io ~label:"type"
-      ~default:(Option.value ~default:"local" (Option.bind (get b "type") show))
+      ~default:(Option.value ~default:fresh (Option.bind (get b "type") show))
       types
   in
   let b = set b "type" (`String btype) in
