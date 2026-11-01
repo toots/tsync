@@ -84,13 +84,12 @@ let answer connection (r : Cf.request) =
 (* Windows refuses to revert a folder placeholder, or to make anything in the
    sync root, while no provider is connected to it. *)
 let connected root f =
-  match Cf.connect root with
+  match Cf.connect ~handle:answer root with
     | exception e ->
         Log.info "cloud_files: releasing %s unconnected: %s" root
           (Printexc.to_string e);
         f ()
     | connection ->
-        Cf.on_callback connection (answer connection);
         Fun.protect
           ~finally:(fun () ->
             try Cf.disconnect connection
