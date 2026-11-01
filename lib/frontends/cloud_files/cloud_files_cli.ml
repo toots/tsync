@@ -55,6 +55,10 @@ let purge ~domain:_ _ =
                 (fun (d : Config.domain) -> Domain_name.to_string d.name)
                 held))
     | _ ->
+        let all = Cf.registered () in
+        Printf.printf "%d sync roots registered for this user\n"
+          (List.length all);
+        List.iter (fun (id, path) -> Printf.printf "  %s at %s\n" id path) all;
         let left =
           List.concat_map
             (fun (id, path) ->

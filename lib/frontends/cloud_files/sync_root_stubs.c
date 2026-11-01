@@ -357,11 +357,13 @@ CAMLprim value tsync_cf_registered(value _unit) {
     if (SUCCEEDED(step))
       step = VTBL(storage_item_vtbl, item)->get_Path(item, &path);
     caml_acquire_runtime_system();
-    if (SUCCEEDED(step)) {
+    {
+      char failed[64];
+      snprintf(failed, sizeof failed, "<unreadable: HRESULT 0x%08lx>", (unsigned long)step);
       _pair = caml_alloc_tuple(2);
-      _text = value_of_hstring(id);
+      _text = id != NULL ? value_of_hstring(id) : caml_copy_string(failed);
       Store_field(_pair, 0, _text);
-      _text = value_of_hstring(path);
+      _text = SUCCEEDED(step) ? value_of_hstring(path) : caml_copy_string(failed);
       Store_field(_pair, 1, _text);
       _cell = caml_alloc_small(2, 0);
       Field(_cell, 0) = _pair;
