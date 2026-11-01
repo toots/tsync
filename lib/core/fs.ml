@@ -34,17 +34,15 @@ let std_handle_missing = function
   | `Stderr -> std_handle_missing_ 2
 
 let attach_missing_handles () =
-  List.iter
-    (fun (stream, fd, flag) ->
-      if std_handle_missing stream then (
-        let null = Unix.openfile Filename.null [flag] 0 in
-        Unix.dup2 ~cloexec:false null fd;
-        Unix.close null))
-    [
-      (`Stdin, Unix.stdin, Unix.O_RDONLY);
-      (`Stdout, Unix.stdout, O_WRONLY);
-      (`Stderr, Unix.stderr, O_WRONLY);
-    ]
+  let attach stream fd flag =
+    if std_handle_missing stream then (
+      let null = Unix.openfile Filename.null [flag] 0 in
+      Unix.dup2 ~cloexec:false null fd;
+      Unix.close null)
+  in
+  attach `Stdin Unix.stdin Unix.O_RDONLY;
+  attach `Stdout Unix.stdout O_WRONLY;
+  attach `Stderr Unix.stderr O_WRONLY
 
 external make_private : string -> unit = "tsync_make_private"
 
