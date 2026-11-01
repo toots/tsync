@@ -17,7 +17,7 @@ The idea is the one behind iCloud Drive or Dropbox Smart Sync, pointed at your o
 
 ## Files
 
-- **It is an ordinary folder.** Any application reads and writes it. It is a FUSE mount on Linux, a File Provider location in Finder on macOS, and an app with a documents provider on Android.
+- **It is an ordinary folder.** Any application reads and writes it. It is a FUSE mount on Linux, a File Provider location in Finder on macOS, a cloud files folder in Explorer on Windows, and an app with a documents provider on Android.
 - **Only what you open takes space.** The whole tree is listed; content is cached as it is read, and the cache can be capped. A folder can be kept offline, or made online-only again.
 - **Several machines share it.** Each one publishes its changes and picks up the others'. Work done in two places at once ends as two files, never as a lost one.
 - **History is kept.** With versioning on, every change, rename and delete of a file leaves the previous version behind, and a deleted file can be put back.

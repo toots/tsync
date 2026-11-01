@@ -19,7 +19,7 @@ Both are the same program and the same config file. A server is a domain with an
 
 | Page | What it covers |
 |---|---|
-| [Install](install.md) | macOS, Linux packages, Android, building from source |
+| [Install](install.md) | macOS, Windows, Linux packages, Android, building from source |
 | [Getting started](getting-started.md) | Configure a first domain, start the service, put files in, day-to-day use |
 
 ## Going further
@@ -42,7 +42,7 @@ Both are the same program and the same config file. A server is a domain with an
 |---|---|
 | [Config reference](config.md) | Every key of the config file, backend types, frontend options, paths, TLS |
 | [Command reference](commands.md) | Every command, the status report, logs |
-| [macOS and the Linux desktop](desktop.md) | Finder and the menu bar; the tray and the Dolphin plugin |
+| [macOS, Windows and the Linux desktop](desktop.md) | Finder and the menu bar; Explorer and the Windows tray; the Linux tray and the Dolphin plugin |
 | [Troubleshooting](troubleshooting.md) | Symptoms and what to try |
 | [Privacy](privacy.md) | What tsync sends where, and what it never collects |
 
