@@ -34,6 +34,19 @@ type outcome =
   | `Left of string * string
   | `Failed of string * string ]
 
+(* Reverting a folder placeholder needs its provider running, which a release
+   runs without: a plain folder takes its place and its children, whose own
+   release made them plain or removed them. *)
+let replace_folder path =
+  let fresh = path ^ " (releasing)" in
+  Sys.mkdir fresh 0o755;
+  Array.iter
+    (fun name ->
+      Sys.rename (Filename.concat path name) (Filename.concat fresh name))
+    (Sys.readdir path);
+  Sys.rmdir path;
+  Sys.rename fresh path
+
 (* One failing item leaves its siblings to be released. *)
 let rec strip path : outcome list =
   let attempt done_ f =
@@ -51,7 +64,9 @@ let rec strip path : outcome list =
           (fun name -> strip (Filename.concat path name))
           (Array.to_list (try Sys.readdir path with Sys_error _ -> [||]))
         @
-        if st.placeholder then attempt (`Kept path) (fun () -> Cf.revert path)
+        if st.placeholder then
+          attempt (`Kept path) (fun () ->
+              try Cf.revert path with Failure _ -> replace_folder path)
         else []
     | Some st when st.placeholder && st.dehydrated ->
         attempt (`Removed path) (fun () -> Sys.remove path)
