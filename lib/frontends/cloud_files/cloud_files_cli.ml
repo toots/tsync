@@ -57,7 +57,17 @@ let purge ~domain:_ _ =
     | _ ->
         let left =
           List.concat_map
-            (fun (id, path) -> Release.release ~id path)
+            (fun (id, path) ->
+              let outcomes = Release.release ~id path in
+              print_endline (Release.summary path outcomes);
+              List.iter
+                (function
+                  | `Left (p, why) -> print_endline ("  left " ^ p ^ ": " ^ why)
+                  | _ -> ())
+                outcomes;
+              List.filter_map
+                (function `Failed (p, why) -> Some (p, why) | _ -> None)
+                outcomes)
             (Release.registered ())
         in
         ignore

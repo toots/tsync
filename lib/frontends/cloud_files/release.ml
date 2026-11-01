@@ -28,44 +28,56 @@ let owed root =
        []
        (try Sys.readdir root with Sys_error _ -> [||]))
 
-(* Each item that could not be released, with why; one failing item leaves
-   its siblings to be released. *)
-let rec strip path =
-  let attempt f =
-    try
-      f ();
-      []
-    with e -> [(path, Printexc.to_string e)]
+type outcome =
+  [ `Kept of string
+  | `Removed of string
+  | `Left of string * string
+  | `Failed of string * string ]
+
+(* One failing item leaves its siblings to be released. *)
+let rec strip path : outcome list =
+  let attempt done_ f =
+    match f () with
+      | () -> [done_]
+      | exception e -> [`Failed (path, Printexc.to_string e)]
   in
   match Cf.state path with
+    | exception e -> [`Failed (path, Printexc.to_string e)]
+    | None -> [`Left (path, "its state cannot be read")]
     | Some st when st.placeholder && st.is_dir && st.unpopulated ->
-        attempt (fun () -> Sys.rmdir path)
+        attempt (`Removed path) (fun () -> Sys.rmdir path)
     | Some st when st.is_dir ->
-        let failed =
-          List.concat_map
-            (fun name -> strip (Filename.concat path name))
-            (Array.to_list (try Sys.readdir path with Sys_error _ -> [||]))
-        in
-        failed
-        @ if st.placeholder then attempt (fun () -> Cf.revert path) else []
+        List.concat_map
+          (fun name -> strip (Filename.concat path name))
+          (Array.to_list (try Sys.readdir path with Sys_error _ -> [||]))
+        @
+        if st.placeholder then attempt (`Kept path) (fun () -> Cf.revert path)
+        else []
+    | Some st when st.placeholder && st.dehydrated ->
+        attempt (`Removed path) (fun () -> Sys.remove path)
     | Some st when st.placeholder ->
-        attempt (fun () ->
-            if st.dehydrated then Sys.remove path else Cf.revert path)
-    | _ -> []
-    | exception e -> [(path, Printexc.to_string e)]
+        attempt (`Kept path) (fun () -> Cf.revert path)
+    | Some _ -> [`Left (path, "not a placeholder")]
+
+let summary root (outcomes : outcome list) =
+  let count f = List.length (List.filter f outcomes) in
+  Printf.sprintf
+    "released %s: %d kept as plain files, %d cloud-only removed, %d left as \
+     they were"
+    root
+    (count (function `Kept _ -> true | _ -> false))
+    (count (function `Removed _ -> true | _ -> false))
+    (count (function `Left _ -> true | _ -> false))
 
 let release ~id root =
-  let failed =
+  let outcomes =
     List.concat_map
       (fun name -> strip (Filename.concat root name))
       (Array.to_list (try Sys.readdir root with Sys_error _ -> [||]))
   in
-  List.iter
-    (fun (path, why) -> Log.warn "cloud_files: releasing %s: %s" path why)
-    failed;
   Cf.unregister id;
-  Log.info "cloud_files: released %s" root;
-  failed
+  Log.info "cloud_files: %s" (summary root outcomes);
+  outcomes
 
 let registered () =
   let prefix = Sync_root_id.prefix ~sid:(Cf.user_sid ()) in
