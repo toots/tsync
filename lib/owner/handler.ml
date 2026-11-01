@@ -879,6 +879,19 @@ let pending_bytes t now =
         bytes
 
 (* 08 §3.3, one request. *)
+
+(** A write as made under its hold:
+    - [path]: the key the write named
+    - [written]: where its content went, [path] unless it landed aside
+    - [item]: the row at [path]
+    - [aside]: the row at [written] when it is not [path] *)
+type written = {
+  path : string;
+  written : string;
+  item : Protocol.row;
+  aside : Protocol.row option;
+}
+
 let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
  fun t ~send req ->
   let (module E : Engine.S) = t.engine in
@@ -1128,7 +1141,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
         (match r.at with Child d -> pull_destination d | _ -> ());
-        let path, written, item, aside =
+        let { path; written; item; aside } =
           mutate (fun () ->
               let path, placed =
                 match r.at with
@@ -1154,7 +1167,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               let aside =
                 if written = path then None else Some (row_or_unnamed t written)
               in
-              (path, written, row_or_unnamed t path, aside))
+              { path; written; item = row_or_unnamed t path; aside })
         in
         (* The row is the write's, read under its hold. After a wait it is read
            again for [isUploaded]; a file renamed or removed meanwhile still
