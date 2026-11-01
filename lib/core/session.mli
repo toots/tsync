@@ -1,8 +1,10 @@
 (** cloud-files §5.2: the Windows session's end and screen lock, read from a
     hidden window's messages on a thread of its own, which the first hook added
-    starts. Hooks run on that thread. Elsewhere no hook is ever called. *)
+    starts. Lock hooks run on that thread, end hooks on another, while the first
+    holds Windows' answer back. Elsewhere no hook is ever called. *)
 
-(** When the session ends: Windows ends the process seconds later. *)
+(** When the session ends: the process has until it exits, within Windows' limit
+    for an unanswered end of session. *)
 val on_end : (unit -> unit) -> unit
 
 (** When the screen locks. *)

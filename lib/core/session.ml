@@ -1,4 +1,5 @@
 external next_event : unit -> int = "tsync_session_event"
+external wait_end : unit -> unit = "tsync_session_wait_end"
 
 let ends = ref []
 let locks = ref []
@@ -12,9 +13,6 @@ let run hooks =
 
 let rec loop () =
   match next_event () with
-    | 0 ->
-        run ends;
-        loop ()
     | 1 ->
         run locks;
         loop ()
@@ -28,7 +26,14 @@ let add hooks f =
       hooks := f :: !hooks;
       if Sys.win32 && not !started then (
         started := true;
-        ignore (Thread.create loop ())))
+        ignore (Thread.create loop ());
+        ignore
+          (Thread.create
+             (fun () ->
+               match wait_end () with
+                 | () -> run ends
+                 | exception Unix.Unix_error _ -> ())
+             ())))
 
 let on_end f = add ends f
 let on_lock f = add locks f
