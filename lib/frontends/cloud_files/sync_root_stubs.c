@@ -88,18 +88,6 @@ typedef struct sync_root_manager_vtbl {
   HRESULT(STDMETHODCALLTYPE *GetCurrentSyncRoots)(void *, void **);
 } sync_root_manager_vtbl;
 
-typedef struct vector_view_vtbl {
-  inspectable_vtbl base;
-  HRESULT(STDMETHODCALLTYPE *GetAt)(void *, UINT32, void **);
-  HRESULT(STDMETHODCALLTYPE *get_Size)(void *, UINT32 *);
-} vector_view_vtbl;
-
-typedef struct storage_item_vtbl {
-  inspectable_vtbl base;
-  void *RenameAsyncOverloadDefaultOptions, *RenameAsync, *DeleteAsyncOverloadDefaultOptions,
-      *DeleteAsync, *GetBasicPropertiesAsync, *get_Name;
-  HRESULT(STDMETHODCALLTYPE *get_Path)(void *, HSTRING *);
-} storage_item_vtbl;
 
 typedef struct com_object {
   const void *vtbl;
@@ -113,8 +101,6 @@ static const IID iid_sync_root_info = {
     0x7c1305c4, 0x99f9, 0x41ac, {0x89, 0x04, 0xab, 0x05, 0x5d, 0x65, 0x49, 0x26}};
 static const IID iid_sync_root_manager = {
     0x3e99fbbf, 0x8fe3, 0x4b40, {0xab, 0xc7, 0xf6, 0xfc, 0x3d, 0x74, 0xc9, 0x8e}};
-static const IID iid_storage_item = {
-    0x4207a996, 0xca2f, 0x42f7, {0xbd, 0xe8, 0x8b, 0x10, 0x45, 0x7a, 0x7f, 0x30}};
 static const IID iid_async_info = {
     0x00000036, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
@@ -315,68 +301,47 @@ CAMLprim value tsync_cf_user_sid(value _unit) {
   CAMLreturn(_sid);
 }
 
-static value value_of_hstring(HSTRING s) {
-  UINT32 length = 0;
-  const wchar_t *text = WindowsGetStringRawBuffer(s, &length);
-  return value_of_utf16_length(text, (int)length);
-}
-
-/* Every sync root registered for this user, as (id, path) (§13.1). */
-CAMLprim value tsync_cf_registered(value _unit) {
-  CAMLparam1(_unit);
+/* Every sync root registered for this user whose id starts with [_prefix], as
+   (id, path), read where the sync root manager keeps them: the WinRT listing
+   answers none to a process that did not register them (§13.1). */
+CAMLprim value tsync_cf_registered(value _prefix, value _sid) {
+  CAMLparam2(_prefix, _sid);
   CAMLlocal4(_list, _cell, _pair, _text);
-  void *manager = NULL, *roots = NULL;
-  UINT32 count = 0;
-  caml_release_runtime_system();
-  HRESULT hr = enter_apartment();
-  if (SUCCEEDED(hr))
-    hr = factory(L"Windows.Storage.Provider.StorageProviderSyncRootManager",
-                 &iid_sync_root_manager, &manager);
-  if (SUCCEEDED(hr))
-    hr = VTBL(sync_root_manager_vtbl, manager)->GetCurrentSyncRoots(manager, &roots);
-  if (SUCCEEDED(hr))
-    hr = VTBL(vector_view_vtbl, roots)->get_Size(roots, &count);
-  caml_acquire_runtime_system();
-  if (FAILED(hr)) {
-    release(roots);
-    release(manager);
-    fail_hresult("listing the sync roots", hr);
-  }
+  wchar_t *prefix = utf16_of_value(_prefix), *sid = utf16_of_value(_sid);
+  HKEY manager;
   _list = Val_emptylist;
-  for (UINT32 i = 0; i < count; i++) {
-    void *info = NULL, *folder = NULL, *item = NULL;
-    HSTRING id = NULL, path = NULL;
-    caml_release_runtime_system();
-    HRESULT step = VTBL(vector_view_vtbl, roots)->GetAt(roots, i, &info);
-    if (SUCCEEDED(step))
-      step = VTBL(sync_root_info_vtbl, info)->get_Id(info, &id);
-    if (SUCCEEDED(step))
-      step = VTBL(sync_root_info_vtbl, info)->get_Path(info, &folder);
-    if (SUCCEEDED(step))
-      step = VTBL(inspectable_vtbl, folder)->QueryInterface(folder, &iid_storage_item, &item);
-    if (SUCCEEDED(step))
-      step = VTBL(storage_item_vtbl, item)->get_Path(item, &path);
-    caml_acquire_runtime_system();
-    {
-      char failed[64];
-      snprintf(failed, sizeof failed, "<unreadable: HRESULT 0x%08lx>", (unsigned long)step);
+  LSTATUS status = RegOpenKeyExW(
+      HKEY_LOCAL_MACHINE,
+      L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager", 0,
+      KEY_READ, &manager);
+  if (status == ERROR_SUCCESS) {
+    wchar_t id[512];
+    for (DWORD i = 0;; i++) {
+      DWORD id_length = sizeof id / sizeof id[0];
+      if (RegEnumKeyExW(manager, i, id, &id_length, NULL, NULL, NULL, NULL) !=
+          ERROR_SUCCESS)
+        break;
+      if (wcsncmp(id, prefix, wcslen(prefix)) != 0)
+        continue;
+      wchar_t subkey[600], path[MAX_PATH * 4];
+      DWORD path_size = sizeof path;
+      swprintf(subkey, sizeof subkey / sizeof subkey[0], L"%ls\\UserSyncRoots", id);
+      if (RegGetValueW(manager, subkey, sid, RRF_RT_REG_SZ, NULL, path, &path_size) !=
+          ERROR_SUCCESS)
+        continue;
       _pair = caml_alloc_tuple(2);
-      _text = id != NULL ? value_of_hstring(id) : caml_copy_string(failed);
+      _text = value_of_utf16(id);
       Store_field(_pair, 0, _text);
-      _text = SUCCEEDED(step) ? value_of_hstring(path) : caml_copy_string(failed);
+      _text = value_of_utf16(path);
       Store_field(_pair, 1, _text);
       _cell = caml_alloc_small(2, 0);
       Field(_cell, 0) = _pair;
       Field(_cell, 1) = _list;
       _list = _cell;
     }
-    WindowsDeleteString(id);
-    WindowsDeleteString(path);
-    release(item);
-    release(folder);
-    release(info);
+    RegCloseKey(manager);
   }
-  release(roots);
-  release(manager);
+  free(prefix);
+  free(sid);
   CAMLreturn(_list);
 }

@@ -55,10 +55,9 @@ let purge ~domain:_ _ =
                 (fun (d : Config.domain) -> Domain_name.to_string d.name)
                 held))
     | _ ->
-        let all = Cf.registered () in
-        Printf.printf "%d sync roots registered for this user\n"
-          (List.length all);
-        List.iter (fun (id, path) -> Printf.printf "  %s at %s\n" id path) all;
+        let roots = Release.registered () in
+        Printf.printf "%d of tsync's sync roots are registered for this user\n"
+          (List.length roots);
         let left =
           List.concat_map
             (fun (id, path) ->
@@ -72,7 +71,7 @@ let purge ~domain:_ _ =
               List.filter_map
                 (function `Failed (p, why) -> Some (p, why) | _ -> None)
                 outcomes)
-            (Release.registered ())
+            roots
         in
         ignore
           (Sys.command

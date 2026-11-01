@@ -102,8 +102,9 @@ val dehydrate : string -> unit
 (** Makes a placeholder whose content is whole on disk a plain file. *)
 val revert : string -> unit
 
-(** Every sync root registered for this user, as (id, path). *)
-val registered : unit -> (string * string) list
+(** Every sync root registered for the user [sid] whose id starts with [prefix],
+    as (id, path). *)
+val registered : prefix:string -> sid:string -> (string * string) list
 
 (** A name as NTFS compares names, for case groups (§7.2). *)
 val upcase : string -> string

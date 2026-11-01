@@ -80,8 +80,8 @@ let release ~id root =
   outcomes
 
 let registered () =
-  let prefix = Sync_root_id.prefix ~sid:(Cf.user_sid ()) in
-  List.filter (fun (id, _) -> String.starts_with ~prefix id) (Cf.registered ())
+  let sid = Cf.user_sid () in
+  Cf.registered ~prefix:(Sync_root_id.prefix ~sid) ~sid
 
 let at_service_start (config : Config.t) =
   let sid = Cf.user_sid () in
