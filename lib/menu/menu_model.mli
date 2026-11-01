@@ -27,8 +27,16 @@ type item = {
           the vault's appearance (vault §8.1) *)
 }
 
-type entry = Separator | Item of item
-type t = { icon : string; tooltip : string; entries : entry list }
+type entry =
+  | Separator
+  | Item of item  (** The status icon (§4.1): one of four images. *)
+
+type state = [ `Idle | `Sync | `Paused | `Error ]
+
+(** The icon's freedesktop name, as the Linux tray and the JSON form give it. *)
+val icon_name : state -> string
+
+type t = { icon : state; tooltip : string; entries : entry list }
 
 (** {1 Formatters (§3)} *)
 
