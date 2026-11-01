@@ -70,11 +70,12 @@ jobs:
         shell: pwsh
         run: |
           Add-Type -Namespace Win32 -Name User -MemberDefinition '[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern System.IntPtr FindWindowW(string cls, string title);'
-          $tray = Start-Process -FilePath _build\default\windows\tray\tsync_tray.exe -PassThru
+          $tray = Start-Process -FilePath _build\default\windows\tray\tsync_tray.exe -ArgumentList '--verbose' -PassThru
           $deadline = (Get-Date).AddSeconds(30)
-          while ([Win32.User]::FindWindowW('tsync-tray', $null) -eq [IntPtr]::Zero) {
+          # PowerShell passes $null to a string parameter as "".
+          while ([Win32.User]::FindWindowW('tsync-tray', [NullString]::Value) -eq [IntPtr]::Zero) {
             if ($tray.HasExited) { throw "the tray exited $($tray.ExitCode)" }
-            if ((Get-Date) -gt $deadline) { throw 'the tray made no window in 30 s' }
+            if ((Get-Date) -gt $deadline) { Get-Content -ErrorAction Ignore (Join-Path $env:LOCALAPPDATA 'tsync\logs\tray.log'); throw 'the tray made no window in 30 s' }
             Start-Sleep -Milliseconds 200
           }
           $second = Start-Process -FilePath _build\default\windows\tray\tsync_tray.exe -PassThru
