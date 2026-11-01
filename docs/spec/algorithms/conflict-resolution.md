@@ -243,7 +243,9 @@ differs from the key's current `content_id`, the removal met an edit it never sa
 removed (§8.1: "B deletes, A edits"). A `rename` that replaces a destination file MAY carry
 `dstBase`, the destination's version the caller saw; if it differs, the source lands at
 `aside(destination)` and the destination keeps its content (§8.1: "B renames onto a name A
-wrote").
+wrote"). A `rename` with `aside` replaced something the caller held of its own, which the domain
+never had: when the domain holds an item at the destination, the source lands at
+`aside(destination)` the same way.
 
 A `write` or `mkdir` with `aside` ([08](../08-frontends.md) §3.3) is a local creation made without
 seeing what the domain holds at its place. When the place holds an item, the new item is created

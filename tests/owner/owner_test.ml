@@ -643,6 +643,27 @@ let () =
              ("name", `String "x.txt");
              ("dstBase", `String "stale");
            ]);
+      let unseen name =
+        let z =
+          call
+            [
+              ("action", `String "write");
+              ("parentRef", `String k);
+              ("name", `String ("z-" ^ name));
+              ("staging", `String (staging ("kz" ^ name) "unseen"));
+            ]
+        in
+        call
+          [
+            ("action", `String "rename");
+            ("ref", `String (item_ref z));
+            ("parentRef", `String k);
+            ("name", `String name);
+            ("aside", `Bool true);
+          ]
+      in
+      show "rename aside onto a name the domain holds" (unseen "x.txt");
+      show "rename aside onto a free name" (unseen "free.txt");
       show "delete on a stale base"
         (call
            [

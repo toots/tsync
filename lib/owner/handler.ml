@@ -1200,13 +1200,16 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             let src = resolve_ref t.engine r.src in
             let dst = destination t r.at in
             (* conflict-resolution §7: a replace of a version the caller never
-               saw lands the source beside the destination. *)
+               saw, or of an item it saw none of, lands the source beside the
+               destination. *)
             let landed =
-              match (r.dst_base, E.kind src, E.kind dst) with
-                | Some b, `File, `File
+              match (r.dst_seen, E.kind src, E.kind dst) with
+                | Some (`Version b), `File, `File
                   when src <> dst && (not r.noreplace)
                        && (E.stat dst).content_id <> Some b ->
                     E.aside_name dst ~is_dir:false
+                | Some `Nothing, kind, (`File | `Dir) when src <> dst ->
+                    E.aside_name dst ~is_dir:(kind = `Dir)
                 | _ -> dst
             in
             if src <> landed then

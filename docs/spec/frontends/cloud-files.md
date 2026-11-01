@@ -366,7 +366,8 @@ leaves both as they were.
   included; otherwise refused as not empty. `not_found` is success.
 - **Rename or move within the sync root**: the target folder's identity gives `parentRef`;
   `rename(ref, parentRef, name)` with replacement as the system asked (a rename that may replace
-  replaces, with `dstBase` the replaced placeholder's `contentId`; one that may not answers
+  replaces, with `dstBase` the replaced placeholder's `contentId`, or `aside` when the replaced item
+  is not a placeholder, so the domain's item there was never shown; one that may not answers
   `exists` as a collision). A reply carrying `aside` is success, and both folders are applied once
   the system has renamed, which moves the file to its aside name and brings the destination back.
 - **Move out of the sync root**, the volume's recycle bin included: the content of the item, and of

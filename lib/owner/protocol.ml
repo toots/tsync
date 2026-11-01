@@ -290,7 +290,7 @@ type _ request =
       src : string;
       at : destination;
       noreplace : bool;
-      dst_base : string option;
+      dst_seen : [ `Version of string | `Nothing ] option;
     }
       -> placed request
   | Delete : {
@@ -648,10 +648,14 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Symlink r ->
       destination_fields r.at
       @ [("target", `String r.link_target); ("exclusive", `Bool r.exclusive)]
-  | Rename r ->
+  | Rename r -> (
       (("ref", `String r.src) :: destination_fields r.at)
       @ [("noreplace", `Bool r.noreplace)]
-      @ opt "dstBase" (fun b -> `String b) r.dst_base
+      @
+        match r.dst_seen with
+        | Some (`Version b) -> [("dstBase", `String b)]
+        | Some `Nothing -> [("aside", `Bool true)]
+        | None -> [])
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Revert r ->
       target_fields r.item
@@ -742,7 +746,9 @@ let decode j =
                src = required j "ref";
                at = destination_of j;
                noreplace = flag j "noreplace" || flag j "exclusive";
-               dst_base = str j "dstBase";
+               dst_seen =
+                 (if flag j "aside" then Some `Nothing
+                  else Option.map (fun b -> `Version b) (str j "dstBase"));
              })
     | "delete" -> Request (Delete { item = target_of j; base = str j "base" })
     | "rmdir" -> Request (Rmdir (target_of j))

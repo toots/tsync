@@ -222,10 +222,15 @@ let rename t (r : Cf.request) =
                       src = id.ref_;
                       at = { parent_ref; name = Filename.basename r.target };
                       noreplace = not (Sys.file_exists r.target);
-                      dst_base =
-                        Option.map
-                          (fun (i : Identity.t) -> i.content_id)
-                          replaced;
+                      (* conflict-resolution §7: a local item the domain does
+                         not hold hid whatever the domain has at that name. *)
+                      dst_seen =
+                        (if not (Sys.file_exists r.target) then None
+                         else (
+                           match replaced with
+                             | Some (i : Identity.t) ->
+                                 Some (`Version i.content_id)
+                             | None -> Some `Nothing));
                     })))
     | Some id ->
         let is_dir = r.flags land is_dir_flag <> 0 in
