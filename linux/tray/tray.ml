@@ -1,5 +1,4 @@
 open Tsync_core
-open Tsync_config
 open Tsync_dbus
 open Tsync_menu
 open Tsync_tray_core
@@ -692,7 +691,6 @@ let platform t =
       (fun () ->
         if on_path "kdialog" then Ok () else Error "kdialog is not installed.");
     code_domains;
-    configured_folder = Mounts.configured;
   }
 
 let serve bus =

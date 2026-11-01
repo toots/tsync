@@ -116,7 +116,7 @@ let reset ~domain _ =
     | Ok d ->
         ignore
           (Sys.command (Filename.quote_command (beside "tsync.exe") ["stop"]));
-        let root = Sync_root.of_domain d in
+        let root = Mounts.sync_root d in
         let children () =
           try Array.to_list (Sys.readdir root) with Sys_error _ -> []
         in

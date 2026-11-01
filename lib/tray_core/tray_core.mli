@@ -22,8 +22,6 @@ type platform = {
   can_ask : unit -> (unit, string) result;
   code_domains : string list -> string list;
       (** of the domains listing totp, those whose codes it can copy *)
-  configured_folder : Tsync_config.Config.domain -> string option;
-      (** where the domain is shown when its owner has not said *)
 }
 
 type t
