@@ -30,4 +30,11 @@
    -luser32
    -cclib
    -ladvapi32))
- (libraries cmdliner tsync_core tsync_menu tsync_tray_core threads.posix))
+ (libraries
+  cmdliner
+  tsync_core
+  tsync_config
+  tsync_menu
+  tsync_tray_core
+  threads.posix
+  unix))

@@ -145,14 +145,26 @@ let rec events core =
 let run () =
   if not (single ()) then 0
   else (
+    Log.debug "tray: starting";
     let core = Tray_core.create ~quit:"Quit tsync tray" platform in
     start ();
     Rt.spawn ~name:"tray events" (fun () -> events core);
     Rt.spawn ~name:"tray poll" (fun () -> Tray_core.poll core);
     Rt.Promise.await (Tray_core.finished core))
 
+(* A windowed program's warnings go to tray.log beside the service log. *)
+let log_to_file () =
+  match Tsync_config.Paths.service_log () with
+    | Some service_log when not (Unix.isatty Unix.stderr) ->
+        let file = Filename.concat (Filename.dirname service_log) "tray.log" in
+        Fs.mkdir_p ~durable:false (Filename.dirname file);
+        let fd = Fs.unix_openfile file [O_WRONLY; O_APPEND; O_CREAT] 0o644 in
+        Fs.with_fd fd (fun fd -> Unix.dup2 ~cloexec:false fd Unix.stderr)
+    | _ -> ()
+
 let main verbose =
   Fs.attach_missing_handles ();
+  log_to_file ();
   Atomic.set Log.min_level (if verbose then Log.Debug else Log.Warn);
   Atomic.set Log.sink Log.stderr_sink;
   Rt.run_sync run
