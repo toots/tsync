@@ -1,20 +1,5 @@
 open Cmdliner
 
-(* A windowed program starts without standard handles: the null device stands
-   in, so printing works and a child spawned with them starts. *)
-let attach_missing_handles () =
-  List.iter
-    (fun (stream, fd, flag) ->
-      if Tsync_core.Fs.std_handle_missing stream then (
-        let null = Unix.openfile Filename.null [flag] 0 in
-        Unix.dup2 ~cloexec:false null fd;
-        Unix.close null))
-    [
-      (`Stdin, Unix.stdin, Unix.O_RDONLY);
-      (`Stdout, Unix.stdout, O_WRONLY);
-      (`Stderr, Unix.stderr, O_WRONLY);
-    ]
-
 (* passwords/browser §2: a browser starts the manifest's path with the caller's
    origin first, and on Windows a --parent-window the bridge does not use. *)
 let argv () =
@@ -25,7 +10,7 @@ let argv () =
     | _ -> Sys.argv
 
 let main () =
-  attach_missing_handles ();
+  Tsync_core.Fs.attach_missing_handles ();
   (* Output ends lines in LF on Windows too, as it does elsewhere. *)
   set_binary_mode_out stdout true;
   set_binary_mode_out stderr true;

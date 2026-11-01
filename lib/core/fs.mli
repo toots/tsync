@@ -118,6 +118,11 @@ val end_with_this_process : int -> unit
     windowed program. Elsewhere false. *)
 val std_handle_missing : [ `Stdin | `Stdout | `Stderr ] -> bool
 
+(** A windowed program starts without standard handles: the null device stands
+    in for each missing one, so printing works and a child spawned with them
+    starts. Called first by every windowed entry point. *)
+val attach_missing_handles : unit -> unit
+
 (** Makes a file or directory private to this process's user: mode 0600 or 0700,
     or on Windows a protected access list whose one entry grants the user, which
     a directory passes on to what is created in it. Raises [Unix_error]. *)
