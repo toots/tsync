@@ -216,11 +216,30 @@ CAMLprim value tsync_std_handle_missing(value stream) {
    return for it: the procedure posts an empty message to end the wait. */
 static int session_pending = -1;
 static HWND session_window;
+static HANDLE session_end;
+
+/* Created by whichever of the two session threads asks first. */
+static HANDLE session_end_event(void) {
+  if (session_end == NULL) {
+    HANDLE created = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (InterlockedCompareExchangePointer((PVOID *)&session_end, created, NULL) != NULL)
+      CloseHandle(created);
+  }
+  return session_end;
+}
+
+/* Windows may end the process once WM_ENDSESSION is answered, so the answer
+   waits for the stop the end-of-session hooks start, whose exit ends it. */
+#define SESSION_END_GRACE_MS 30000
 
 static LRESULT CALLBACK session_procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
   int event = -1;
   if (message == WM_QUERYENDSESSION) return TRUE;
-  if (message == WM_ENDSESSION && w) event = 0;
+  if (message == WM_ENDSESSION && w) {
+    SetEvent(session_end_event());
+    Sleep(SESSION_END_GRACE_MS);
+    return 0;
+  }
   if (message == WM_WTSSESSION_CHANGE && w == WTS_SESSION_LOCK) event = 1;
   if (message == WM_WTSSESSION_CHANGE && w == WTS_SESSION_UNLOCK) event = 2;
   if (event >= 0) {
@@ -229,6 +248,17 @@ static LRESULT CALLBACK session_procedure(HWND window, UINT message, WPARAM w, L
     return 0;
   }
   return DefWindowProcW(window, message, w, l);
+}
+
+/* Returns once the session ends, on a thread of its own: the one reading the
+   window's messages is held inside the procedure meanwhile. */
+CAMLprim value tsync_session_wait_end(value unit) {
+  CAMLparam1(unit);
+  HANDLE ended = session_end_event();
+  caml_release_runtime_system();
+  WaitForSingleObject(ended, INFINITE);
+  caml_acquire_runtime_system();
+  CAMLreturn(Val_unit);
 }
 
 /* A top-level window, since a message-only one is not told the session ends. */
@@ -777,6 +807,13 @@ CAMLprim value tsync_unlink(value path) {
 }
 
 CAMLprim value tsync_session_event(value unit) {
+  CAMLparam1(unit);
+  errno = ENOSYS;
+  uerror("session", Nothing);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_session_wait_end(value unit) {
   CAMLparam1(unit);
   errno = ENOSYS;
   uerror("session", Nothing);
