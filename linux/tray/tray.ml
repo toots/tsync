@@ -26,7 +26,7 @@ type t = {
   item_name : string;
   lock : Mutex.t;
   layout : Layout.t;
-  mutable icon : string;
+  mutable icon : M.state;
   mutable tooltip : string;
   mutable core : Tray_core.t option;
 }
@@ -429,7 +429,7 @@ let item_properties t =
     ("Title", String "tsync");
     ("Status", String "Active");
     ("WindowId", Int32 0);
-    ("IconName", String icon);
+    ("IconName", String (M.icon_name icon));
     ("IconPixmap", pixmaps);
     ("OverlayIconName", String "");
     ("AttentionIconName", String "");
@@ -701,7 +701,7 @@ let serve bus =
         Printf.sprintf "org.kde.StatusNotifierItem-%d-1" (Unix.getpid ());
       lock = Mutex.create ();
       layout = Layout.create ();
-      icon = "tsync-idle-symbolic";
+      icon = `Idle;
       tooltip = "tsync";
       core = None;
     }

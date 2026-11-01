@@ -41,7 +41,7 @@ let menu ?(quit = "Quit tsync tray") domains =
   M.render ~quit (List.map (fun (name, reply) -> (name, status reply)) domains)
 
 let show (m : M.t) =
-  Printf.printf "icon    %s\ntooltip %s\n" m.icon m.tooltip;
+  Printf.printf "icon    %s\ntooltip %s\n" (M.icon_name m.icon) m.tooltip;
   List.iter entry m.entries
 
 let stats replies =

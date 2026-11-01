@@ -98,11 +98,12 @@ and row = function
 
 let redraw () = Mutex.protect tray.lock (fun () -> set_menu (rows tray.entries))
 
-let icon_state = function
-  | "tsync-sync-symbolic" -> 1
-  | "tsync-paused-symbolic" -> 2
-  | "tsync-error-symbolic" -> 3
-  | _ -> 0
+(* The order of the icon resources, ids 101 + 2 * state. *)
+let icon_state : M.state -> int = function
+  | `Idle -> 0
+  | `Sync -> 1
+  | `Paused -> 2
+  | `Error -> 3
 
 let platform =
   {
