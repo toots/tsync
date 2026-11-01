@@ -22,3 +22,8 @@ $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -Ru
 Register-ScheduledTask -TaskPath '\tsync\' -TaskName 'service' -Action $action `
   -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskPath '\tsync\' -TaskName 'service'
+
+# cloud-files §15: the tray starts at each logon and now; a running one stays.
+$tray = Join-Path $ProgramDir 'tsync-tray.exe'
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'tsync-tray' -Value "`"$tray`""
+Start-Process -FilePath $tray

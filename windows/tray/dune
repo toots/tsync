@@ -1,0 +1,33 @@
+; cloud-files §15: the icons are assets/tray's glyphs rendered white for dark
+; taskbars and near-black for light ones, ids 101 + 2 * state + light.
+
+(rule
+ (enabled_if
+  (= %{os_type} Win32))
+ (targets tray_resources.o)
+ (deps
+  tsync-tray.manifest
+  (glob_files icons/*.ico))
+ (action
+  (run x86_64-w64-mingw32-windres %{dep:tray.rc} -O coff -o %{targets})))
+
+(executable
+ (name tsync_tray)
+ (enabled_if
+  (= %{os_type} Win32))
+ (foreign_stubs
+  (language c)
+  (names tray_stubs))
+ (link_deps tray_resources.o)
+ (link_flags
+  (-cclib
+   "-subsystem windows"
+   -cclib
+   windows/tray/tray_resources.o
+   -cclib
+   -lshell32
+   -cclib
+   -luser32
+   -cclib
+   -ladvapi32))
+ (libraries cmdliner tsync_core tsync_menu tsync_tray_core threads.posix))

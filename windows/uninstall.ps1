@@ -17,6 +17,9 @@ if (Test-Path $config) {
       -RedirectStandardError (Join-Path $env:TEMP 'tsync-purge.err')
   }
 }
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'tsync-tray' `
+  -ErrorAction SilentlyContinue
+Stop-Process -Name 'tsync-tray' -ErrorAction SilentlyContinue
 & (Join-Path $ProgramDir 'tsync.exe') stop 2>$null
 Unregister-ScheduledTask -TaskPath '\tsync\' -TaskName 'service' -Confirm:$false `
   -ErrorAction SilentlyContinue

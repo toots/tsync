@@ -52,13 +52,14 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
 
-{ The running service holds the programs open, so it stops before they are replaced. }
+{ The running service and tray hold the programs open, so they stop before the programs are replaced. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
 begin
   if FileExists(ExpandConstant('{app}\tsync.exe')) then
     Exec(ExpandConstant('{app}\tsync.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec('taskkill.exe', '/IM tsync-tray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := '';
 end;
 
