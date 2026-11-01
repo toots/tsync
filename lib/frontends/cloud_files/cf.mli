@@ -30,11 +30,10 @@ type request = {
 
 type connection
 
-(** The handler of the connection's callbacks; it completes each request it is
-    given before returning. A callback before it is set is dropped. *)
-val on_callback : connection -> (request -> unit) -> unit
+(** Connects the sync root with the handler of its callbacks, installed before
+    any can arrive; it completes each request it is given before returning. *)
+val connect : handle:(connection -> request -> unit) -> string -> connection
 
-val connect : string -> connection
 val disconnect : connection -> unit
 
 (** The completion statuses of cloud-files §12. *)

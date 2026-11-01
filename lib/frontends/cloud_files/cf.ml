@@ -83,13 +83,13 @@ let () =
         (Mutex.protect handlers_lock (fun () ->
              Hashtbl.find_opt handlers r.connection_key)))
 
-let on_callback connection handle =
-  Mutex.protect handlers_lock (fun () ->
-      Hashtbl.replace handlers connection handle)
-
 external connect_ : string -> connection = "tsync_cf_connect"
 
-let connect root = Mutex.protect handlers_lock (fun () -> connect_ root)
+let connect ~handle root =
+  Mutex.protect handlers_lock (fun () ->
+      let connection = connect_ root in
+      Hashtbl.replace handlers connection (handle connection);
+      connection)
 
 external disconnect_ : connection -> unit = "tsync_cf_disconnect"
 

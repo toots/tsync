@@ -310,7 +310,6 @@ let start (domain : Domain.t) engine configured served handler =
   let root = place ~id configured in
   Fs.mkdir_p root;
   Cf.register ~id ~path:root ~display_name:name ~version:"1" ~icon;
-  let connection = Cf.connect root in
   let take =
     Take.create ~engine ~handler ~root
       ~staging:
@@ -328,9 +327,14 @@ let start (domain : Domain.t) engine configured served handler =
            ("cloudfiles-" ^ name ^ ".json"))
       ()
   in
-  let t = { engine; root; handler; connection; take; apply; unshown } in
+  let served_on connection =
+    { engine; root; handler; connection; take; apply; unshown }
+  in
+  let connection =
+    Cf.connect root ~handle:(fun connection -> handle (served_on connection))
+  in
+  let t = served_on connection in
   served := Some t;
-  Cf.on_callback connection (handle t);
   Take.start take;
   Apply.start apply;
   Log.info "cloud_files: %s presented at %s" name root;
