@@ -18,7 +18,7 @@ code and what is known to stand in the way.
 | Sockets (§5.3) | `lib/ipc` | access-list check of the data directory; peer SID from the peer pid |
 | Keystore (§5.4) | `bin/platform.windows.ml`, selected in `bin/dune` like `platform.linux.ml` | Credential Manager stubs |
 | The frontend (§6–§13) | `lib/frontends/cloud_files/`, an `(optional)` library selected into `lib/catalog` like `tsync_fuse` | the Cloud Filter API: register, connect, the callback table, transfers, placeholder calls, the recursive watch |
-| Tray (§15) | `windows/tray/`, the Linux tray's refresh and actions over `lib/menu` | notification icon, popup menu, dialogs, clipboard |
+| Tray (§15) | `lib/tray_core` (refresh, stats, codes, actions), shared with the Linux tray | `windows/tray/`: notification icon, popup menu, dialogs, clipboard |
 | Installer (§14) | — | `windows/`: installer script, identity package manifest |
 
 ## What stands in the way
@@ -62,3 +62,5 @@ code and what is known to stand in the way.
   state is read again right before it is deleted, so an edit made meanwhile is kept.
 - `tsync cloudfiles purge` releases every root of the user but is dispatched, as every frontend
   verb is, with a domain configured with `cloud_files`; the uninstaller passes the first one.
+- The tray's menu draws no row icons and no vault marks (menu-model §7): a Win32 menu row takes a
+  bitmap, not the model's icon names or PNG marks.

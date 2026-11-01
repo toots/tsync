@@ -104,7 +104,9 @@ try {
   Step 'installing'
   Import-Certificate -FilePath (Join-Path (Split-Path $Setup) 'tsync-development.cer') `
     -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
-  $p = Start-Process $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$Work\setup.log" -Wait -PassThru
+  # -Wait would also wait for the tray setup starts.
+  $p = Start-Process $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$Work\setup.log" -PassThru
+  $p.WaitForExit()
   Check 'setup exits 0' ($p.ExitCode -eq 0)
 
   Step 'seeding the domain'
