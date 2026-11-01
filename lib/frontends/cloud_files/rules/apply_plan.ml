@@ -53,6 +53,9 @@ let plan ~fold ~rows ~children ~locate =
   List.iter
     (fun ((r : row), name) -> Hashtbl.replace by_ref r.ref_ (r, name))
     presented;
+  let taken_by_another (c : child) name =
+    List.exists (fun (o : child) -> o != c && fold o.name = fold name) children
+  in
   let held = Hashtbl.create 16 and placed = Hashtbl.create 16 in
   let hold name = Hashtbl.replace held (fold name) () in
   let child_actions (c : child) =
@@ -65,6 +68,13 @@ let plan ~fold ~rows ~children ~locate =
           []
       | Some id -> (
           match Hashtbl.find_opt by_ref id.ref_ with
+            | Some (row, name) when taken_by_another c name ->
+                (* conflict-resolution F11: an item never lands on a name
+                   another holds; it goes, as only an item matching the
+                   domain may, and comes back once the name is free. *)
+                Hashtbl.replace placed row.ref_ ();
+                hold name;
+                [Delete c.name]
             | Some (row, name) ->
                 Hashtbl.replace placed row.ref_ ();
                 hold name;

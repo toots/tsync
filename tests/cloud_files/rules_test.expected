@@ -91,3 +91,13 @@ names Windows refuses, links and case groups are not created
   create X (file)
 the group member on disk stays
   nothing
+a peer's rename onto a file owed here never replaces it
+  delete draft.txt
+  take report.txt
+a peer's rename onto a foreign file never replaces it
+  delete a.txt
+a swap of two names frees both before either is placed
+  delete a.txt
+  delete b.txt
+a rename of its case alone goes through
+  rename a.txt -> A.txt
