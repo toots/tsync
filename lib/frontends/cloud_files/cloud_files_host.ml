@@ -106,6 +106,13 @@ let fetch_data t (r : Cf.request) =
               raise
                 (Failed_with
                    (`Not_in_sync, Failure "its content changed in the domain"))
+          | Some (h, size) when r.offset + r.length > size ->
+              (* The placeholder outgrew the version it names: a read past the
+                 version's end would never complete. *)
+              Rt.run_sync (fun () -> E.release h);
+              raise
+                (Failed_with
+                   (`Not_in_sync, Failure "the read passes the content's end"))
           | Some (h, size) ->
               Fun.protect
                 ~finally:(fun () -> Rt.run_sync (fun () -> E.release h))
