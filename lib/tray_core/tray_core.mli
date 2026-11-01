@@ -10,8 +10,9 @@ type platform = {
   menu : Menu_model.t -> unit;  (** the icon, tooltip and rows of a refresh *)
   children : Menu_model.action -> Menu_model.entry list -> unit;
       (** the rows of the submenu row with that action: stats or codes *)
-  marks : (string * string) list -> unit;
-      (** the vault marks of the code domains, by domain (vault §8.1) *)
+  marks : ((string * string) list -> unit) option;
+      (** the vault marks of the code domains, by domain (vault §8.1); [None]
+          for a menu that draws none, so none is fetched *)
   notify : string -> string -> unit;  (** a summary and a body *)
   copy : string -> (unit, string) result;
       (** a one-time code onto the clipboard, never logged nor kept *)
