@@ -303,7 +303,7 @@ type _ request =
       src : string;
       at : destination;
       noreplace : bool;
-      dst_base : string option;
+      dst_seen : [ `Version of string | `Nothing ] option;
     }
       -> placed request
   | Delete : {

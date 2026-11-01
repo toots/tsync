@@ -158,10 +158,22 @@ let cases =
           content_id = None;
         } );
     Case
-      ( Rename { src = "f:1/a"; at; noreplace = true; dst_base = None },
+      ( Rename { src = "f:1/a"; at; noreplace = true; dst_seen = None },
         { item = row; aside = None } );
     Case
-      ( Rename { src = "f:1/a"; at; noreplace = false; dst_base = Some "abcd" },
+      ( Rename
+          {
+            src = "f:1/a";
+            at;
+            noreplace = false;
+            dst_seen = Some (`Version "abcd");
+          },
+        {
+          item = row;
+          aside = Some { row with name = "x (conflicted copy).txt" };
+        } );
+    Case
+      ( Rename { src = "f:1/a"; at; noreplace = false; dst_seen = Some `Nothing },
         {
           item = row;
           aside = Some { row with name = "x (conflicted copy).txt" };

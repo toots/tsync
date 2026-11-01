@@ -255,7 +255,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
 | `mkdir` | `parentRef`, `name`, `exclusive?`, `aside?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
-| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`), `dstBase?` | `item` at the destination; a folder keeps its id, a file its file id | M |
+| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`), `dstBase?` or `aside?` | `item` at the destination; a folder keeps its id, a file its file id | M |
 | `delete` | `ref`\|`rel` (a file or symlink), `base?` | `{}`, or `{kept:true}` when a stale `base` left the file in place; a folder target → `invalid` | M |
 | `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture): `remove_tree` of [04 §4.5](04-checkout-cache.md#45-namespace-operations) | M |
 | `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
@@ -305,7 +305,8 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
   changes; the check and the change are one step. A rename onto the item's own current place is a
   no-op answered with its item, `noreplace` notwithstanding.
 - `aside` (on `write` and `mkdir` by `parentRef` and `name`) declares a creation made without
-  seeing what the domain holds at its place. What the owner does with it is
+  seeing what the domain holds at its place; on `rename`, a replace of an item the caller saw none
+  of at the destination. What the owner does with it is
   [conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base);
   the check and the creation are one step.
 - `base` on `delete` and `dstBase` on `rename` declare the version the caller saw; what a stale
