@@ -13,7 +13,9 @@ type t = {
   unshown : Unshown.t;
   state_file : string;
   m : Mutex.t;
+  woke : Condition.t;
   mutable state : Apply_state.t;
+  mutable stored : Apply_state.t;
   mutable woken : float option;
 }
 
@@ -31,7 +33,9 @@ let create ~engine:_ ~handler ~root ~take ~unshown ~state_file () =
     unshown;
     state_file;
     m = Mutex.create ();
+    woke = Condition.create ();
     state = load state_file;
+    stored = load state_file;
     woken = None;
   }
 
@@ -47,8 +51,9 @@ let add_pending t refs =
 
 let wake t =
   Mutex.protect t.m (fun () ->
-      if t.woken = None then
-        t.woken <- Some (Unix.gettimeofday () +. apply_debounce))
+      if t.woken = None then (
+        t.woken <- Some (Unix.gettimeofday () +. apply_debounce);
+        Condition.signal t.woke))
 
 let schedule t ref_ =
   add_pending t [ref_];
@@ -261,7 +266,9 @@ let op_folders = function
 
 let store t =
   let state = Mutex.protect t.m (fun () -> t.state) in
-  Fs.replace t.state_file (Apply_state.encode state)
+  if state <> t.stored then (
+    Fs.replace t.state_file (Apply_state.encode state);
+    t.stored <- state)
 
 let rec follow t =
   let anchor = Mutex.protect t.m (fun () -> t.state.anchor) in
@@ -303,24 +310,28 @@ let rec follow t =
   store t;
   if more then follow t
 
+(* Sleeps until woken, then until the debounce has passed. *)
 let rec loop t =
-  let due =
+  let at =
     Mutex.protect t.m (fun () ->
-        match t.woken with
-          | Some at when at <= Unix.gettimeofday () ->
-              t.woken <- None;
-              true
-          | _ -> false)
+        let rec woken () =
+          match t.woken with
+            | Some at -> at
+            | None ->
+                Condition.wait t.woke t.m;
+                woken ()
+        in
+        woken ())
   in
-  if due then (
-    try follow t
-    with e -> Log.warn "cloud_files: apply: %s" (Printexc.to_string e));
-  Thread.delay 0.1;
+  Thread.delay (Float.max 0. (at -. Unix.gettimeofday ()));
+  Mutex.protect t.m (fun () -> t.woken <- None);
+  (try follow t
+   with e -> Log.warn "cloud_files: apply: %s" (Printexc.to_string e));
   loop t
 
 let rec retry t =
   Thread.delay apply_retry;
-  wake t;
+  if pending t > 0 then wake t;
   retry t
 
 let start t =
