@@ -152,8 +152,14 @@ let execute t dir usns (action : Apply_plan.action) =
         Sys.rename (path from) (path to_);
         true
     | Move { name; into; as_ } ->
-        Sys.rename (path name) (Filename.concat into as_);
-        true
+        (* The plan sees no other folder: a name taken there stays, and the
+           item goes only when it matches the domain. *)
+        if Sys.file_exists (Filename.concat into as_) then (
+          if all_in_sync (path name) then remove (path name);
+          false)
+        else (
+          Sys.rename (path name) (Filename.concat into as_);
+          true)
     | Create { name; row } ->
         Cf.create dir (placeholder name row);
         (* §11: under a pinned folder it is made whole, which the take decides. *)

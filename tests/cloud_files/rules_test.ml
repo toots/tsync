@@ -207,4 +207,19 @@ let () =
     [];
   show "the group member on disk stays"
     [row "i:7" "X"; row "i:8" "x"]
-    [child ?identity:(id "i:8" "c1") "x"]
+    [child ?identity:(id "i:8" "c1") "x"];
+  show "a peer's rename onto a file owed here never replaces it"
+    [row "i:1" "report.txt"]
+    [child ?identity:(id "i:1" "c1") "draft.txt"; child ~owed:true "report.txt"];
+  show "a peer's rename onto a foreign file never replaces it"
+    [row "i:1" "theirs.txt"]
+    [child ?identity:(id "i:1" "c1") "a.txt"; child "theirs.txt"];
+  show "a swap of two names frees both before either is placed"
+    [row "i:1" "b.txt"; row "i:2" "a.txt"]
+    [
+      child ?identity:(id "i:1" "c1") "a.txt";
+      child ?identity:(id "i:2" "c1") "b.txt";
+    ];
+  show "a rename of its case alone goes through"
+    [row "i:1" "A.txt"]
+    [child ?identity:(id "i:1" "c1") "a.txt"]
