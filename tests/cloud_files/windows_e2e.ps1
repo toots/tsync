@@ -224,6 +224,10 @@ try {
   } 90
   Check 'a file reads its content after the reset' ((Get-Content -Raw $c) -eq 'changed')
 
+  $cloudOnly = Join-Path $root 'peer.txt'
+  Check 'a file not read since the reset is still cloud-only' (
+    (Test-Path $cloudOnly) -and (Dehydrated $cloudOnly))
+
   Step 'uninstalling'
   $p = Start-Process (Join-Path $programs 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
   Check 'the uninstaller exits 0' ($p.ExitCode -eq 0)
@@ -232,10 +236,10 @@ try {
   Check 'a file whole on disk stays, as a plain file' (
     (Test-Path $released) -and -not (Dehydrated $released) -and
       ((Get-Content -Raw $released) -eq 'changed'))
-  Check 'a placeholder whose content was not on disk goes' (-not (Test-Path $c))
+  Check 'a placeholder whose content was not on disk goes' (-not (Test-Path $cloudOnly))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 29
+  $checks = 30
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -245,5 +249,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 29) { throw "only $checks of 29 checks ran" }
+if ($checks -ne 30) { throw "only $checks of 30 checks ran" }
 Step "cloud files end to end: $checks checks passed"
