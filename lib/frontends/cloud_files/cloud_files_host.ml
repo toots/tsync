@@ -330,7 +330,7 @@ let start (domain : Domain.t) engine configured served handler =
   in
   let t = { engine; root; handler; connection; take; apply; unshown } in
   served := Some t;
-  Cf.on_callback (handle t);
+  Cf.on_callback connection (handle t);
   Take.start take;
   Apply.start apply;
   Log.info "cloud_files: %s presented at %s" name root;

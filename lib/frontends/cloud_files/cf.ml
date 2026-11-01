@@ -12,6 +12,7 @@ type raw_request = {
   optional_offset : int;
   optional_length : int;
   target : string;
+  connection_key : int64;
 }
 
 type request = {
@@ -51,29 +52,50 @@ let kind_of = function
   | 11 -> `Rename
   | n -> `Other n
 
-let on_callback handle =
-  Callback.register "tsync_cf_callback" (fun (r : raw_request) ->
-      handle
-        {
-          kind = kind_of r.raw_kind;
-          transfer = r.transfer;
-          request_key = r.request_key;
-          identity = r.identity;
-          path = r.path;
-          file_size = r.file_size;
-          process_id = r.process_id;
-          flags = r.flags;
-          offset = r.offset;
-          length = r.length;
-          optional_offset = r.optional_offset;
-          optional_length = r.optional_length;
-          target = r.target;
-        })
-
 type connection = int64
 
-external connect : string -> connection = "tsync_cf_connect"
-external disconnect : connection -> unit = "tsync_cf_disconnect"
+let request_of (r : raw_request) =
+  {
+    kind = kind_of r.raw_kind;
+    transfer = r.transfer;
+    request_key = r.request_key;
+    identity = r.identity;
+    path = r.path;
+    file_size = r.file_size;
+    process_id = r.process_id;
+    flags = r.flags;
+    offset = r.offset;
+    length = r.length;
+    optional_offset = r.optional_offset;
+    optional_length = r.optional_length;
+    target = r.target;
+  }
+
+(* Each connection's handler, looked up under the lock connect holds, so a
+   callback arriving while connect returns waits for its handler. *)
+let handlers : (connection, request -> unit) Hashtbl.t = Hashtbl.create 4
+let handlers_lock = Mutex.create ()
+
+let () =
+  Callback.register "tsync_cf_callback" (fun (r : raw_request) ->
+      Option.iter
+        (fun handle -> handle (request_of r))
+        (Mutex.protect handlers_lock (fun () ->
+             Hashtbl.find_opt handlers r.connection_key)))
+
+let on_callback connection handle =
+  Mutex.protect handlers_lock (fun () ->
+      Hashtbl.replace handlers connection handle)
+
+external connect_ : string -> connection = "tsync_cf_connect"
+
+let connect root = Mutex.protect handlers_lock (fun () -> connect_ root)
+
+external disconnect_ : connection -> unit = "tsync_cf_disconnect"
+
+let disconnect connection =
+  disconnect_ connection;
+  Mutex.protect handlers_lock (fun () -> Hashtbl.remove handlers connection)
 
 type status =
   [ `Success

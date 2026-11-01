@@ -28,11 +28,11 @@ type request = {
   target : string;  (** a rename's destination path *)
 }
 
-(** One handler for every callback of every connection; it completes each
-    request it is given before returning. *)
-val on_callback : (request -> unit) -> unit
-
 type connection
+
+(** The handler of the connection's callbacks; it completes each request it is
+    given before returning. A callback before it is set is dropped. *)
+val on_callback : connection -> (request -> unit) -> unit
 
 val connect : string -> connection
 val disconnect : connection -> unit

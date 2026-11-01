@@ -34,19 +34,6 @@ type outcome =
   | `Left of string * string
   | `Failed of string * string ]
 
-(* Reverting a folder placeholder needs its provider running, which a release
-   runs without: a plain folder takes its place and its children, whose own
-   release made them plain or removed them. *)
-let replace_folder path =
-  let fresh = path ^ " (releasing)" in
-  Sys.mkdir fresh 0o755;
-  Array.iter
-    (fun name ->
-      Sys.rename (Filename.concat path name) (Filename.concat fresh name))
-    (Sys.readdir path);
-  Sys.rmdir path;
-  Sys.rename fresh path
-
 (* One failing item leaves its siblings to be released. *)
 let rec strip path : outcome list =
   let attempt done_ f =
@@ -64,9 +51,7 @@ let rec strip path : outcome list =
           (fun name -> strip (Filename.concat path name))
           (Array.to_list (try Sys.readdir path with Sys_error _ -> [||]))
         @
-        if st.placeholder then
-          attempt (`Kept path) (fun () ->
-              try Cf.revert path with Failure _ -> replace_folder path)
+        if st.placeholder then attempt (`Kept path) (fun () -> Cf.revert path)
         else []
     | Some st when st.placeholder && st.dehydrated ->
         attempt (`Removed path) (fun () -> Sys.remove path)
@@ -84,11 +69,42 @@ let summary root (outcomes : outcome list) =
     (count (function `Removed _ -> true | _ -> false))
     (count (function `Left _ -> true | _ -> false))
 
+(* A release's own deletes and renames go through; nothing is fetched. *)
+let answer connection (r : Cf.request) =
+  match r.kind with
+    | (`Delete | `Rename | `Dehydrate) as kind ->
+        Cf.ack connection r kind `Success
+    | `Fetch_placeholders ->
+        Cf.transfer_placeholders connection r `Unsuccessful []
+    | `Fetch_data ->
+        Cf.transfer_data connection r `Unsuccessful (Bigstring.create 0)
+          ~offset:r.offset ~length:r.length
+    | _ -> ()
+
+(* Windows refuses to revert a folder placeholder, or to make anything in the
+   sync root, while no provider is connected to it. *)
+let connected root f =
+  match Cf.connect root with
+    | exception e ->
+        Log.info "cloud_files: releasing %s unconnected: %s" root
+          (Printexc.to_string e);
+        f ()
+    | connection ->
+        Cf.on_callback connection (answer connection);
+        Fun.protect
+          ~finally:(fun () ->
+            try Cf.disconnect connection
+            with e ->
+              Log.info "cloud_files: disconnecting %s: %s" root
+                (Printexc.to_string e))
+          f
+
 let release ~id root =
   let outcomes =
-    List.concat_map
-      (fun name -> strip (Filename.concat root name))
-      (Array.to_list (try Sys.readdir root with Sys_error _ -> [||]))
+    connected root (fun () ->
+        List.concat_map
+          (fun name -> strip (Filename.concat root name))
+          (Array.to_list (try Sys.readdir root with Sys_error _ -> [||])))
   in
   Cf.unregister id;
   Log.info "cloud_files: %s" (summary root outcomes);
