@@ -23,7 +23,6 @@ type platform = {
   ask_secret : title:string -> string -> string option;
   can_ask : unit -> (unit, string) result;
   code_domains : string list -> string list;
-  configured_folder : Config.domain -> string option;
 }
 
 type domain = { name : string; socket : string; configured : string option }
@@ -77,7 +76,7 @@ let ask_all t ~deadline request =
     (Rt.map_concurrently (fun d -> Ipc.ask ~deadline d.socket request) domains)
 
 (* A config that cannot be used is no domains, whatever the reason (§5.2). *)
-let configured_domains t =
+let configured_domains () =
   let none reason =
     Log.once ("tray-config:" ^ reason) Log.Warn "tray: no domains: %s" reason;
     []
@@ -92,7 +91,7 @@ let configured_domains t =
                   {
                     name = Domain_name.to_string d.name;
                     socket = Paths.owner_socket d.name;
-                    configured = t.platform.configured_folder d;
+                    configured = Mounts.configured d;
                   })
                 config.domains
           | exception Config.Invalid reason -> none reason)
@@ -113,7 +112,7 @@ let lists_totp = function
 
 let refresh t =
   Rt.Fmutex.with_lock t.refreshing @@ fun () ->
-  let domains = try configured_domains t with _ -> [] in
+  let domains = try configured_domains () with _ -> [] in
   let replies =
     Rt.map_concurrently
       (fun d ->
@@ -181,14 +180,12 @@ let mark d =
     | Ok { appearance = Some { color; _ }; _ } -> Mark.glyph color
     | _ -> None
 
-(* §6.5: rows from an earlier opening are never shown again. *)
-let fetch_codes t =
-  let domains =
-    locked t (fun () ->
-        List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
-  in
+let code_domains t =
+  locked t (fun () ->
+      List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
+
+let fetch_codes t domains =
   if domains <> [] then (
-    t.platform.children Show_codes M.codes_placeholder;
     let answers =
       Rt.map_concurrently
         (fun d ->
@@ -224,7 +221,11 @@ let opened t =
              (List.filter_map
                 (fun (_, reply) -> Option.bind reply M.stats_of_json)
                 (ask_all t ~deadline:stats_deadline (Stats [])))));
-    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t))
+    (* §6.5: rows from an earlier opening are never shown again, so they are
+       gone before the platform can show the submenu. *)
+    let domains = code_domains t in
+    if domains <> [] then t.platform.children Show_codes M.codes_placeholder;
+    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t domains))
 
 (* security-model §10.6: the code is never logged and the clipboard never
    cleared. *)
