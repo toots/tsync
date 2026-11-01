@@ -4,7 +4,8 @@
     longer configured, and by purge for every root of the user. The root must
     not be connected. *)
 
-val release : id:string -> string -> unit
+(** What could not be released, each path with why, which stays as it is. *)
+val release : id:string -> string -> (string * string) list
 
 (** What under a sync root the domain does not hold yet: items out of sync or
     not placeholders, by their in-sync bit (§9.3), which needs no provider; each

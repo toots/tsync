@@ -294,7 +294,7 @@ let place ~id configured =
     | Some old when not (Win_path.same old configured) -> (
         match Release.owed old with
           | [] ->
-              Release.release ~id old;
+              ignore (Release.release ~id old);
               configured
           | held ->
               Log.warn

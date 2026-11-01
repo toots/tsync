@@ -55,17 +55,26 @@ let purge ~domain:_ _ =
                 (fun (d : Config.domain) -> Domain_name.to_string d.name)
                 held))
     | _ ->
-        List.iter
-          (fun (id, path) -> Release.release ~id path)
-          (Release.registered ());
+        let left =
+          List.concat_map
+            (fun (id, path) -> Release.release ~id path)
+            (Release.registered ())
+        in
         ignore
           (Sys.command
              (Filename.quote_command "schtasks"
                 ["/Delete"; "/TN"; "\\tsync\\service"; "/F"]));
         Fs.rm_rf (Paths.data_dir ());
         Fs.rm_rf (Paths.cache_root ());
-        print_endline "tsync's sync roots, task and local state are removed.";
-        0
+        if left = [] then (
+          print_endline "tsync's sync roots, task and local state are removed.";
+          0)
+        else
+          fail
+            "the sync roots were released, but these items stay as they were:\n\
+            \  %s"
+            (String.concat "\n  "
+               (List.map (fun (path, why) -> path ^ ": " ^ why) left))
 
 (* An in-sync placeholder is the domain's, so deleting it loses nothing; its
    state is read again right before, so an edit made meanwhile stays. *)

@@ -28,29 +28,44 @@ let owed root =
        []
        (try Sys.readdir root with Sys_error _ -> [||]))
 
+(* Each item that could not be released, with why; one failing item leaves
+   its siblings to be released. *)
 let rec strip path =
+  let attempt f =
+    try
+      f ();
+      []
+    with e -> [(path, Printexc.to_string e)]
+  in
   match Cf.state path with
     | Some st when st.placeholder && st.is_dir && st.unpopulated ->
-        Sys.rmdir path
+        attempt (fun () -> Sys.rmdir path)
     | Some st when st.is_dir ->
-        Array.iter
-          (fun name -> strip (Filename.concat path name))
-          (try Sys.readdir path with Sys_error _ -> [||]);
-        if st.placeholder then Cf.revert path
+        let failed =
+          List.concat_map
+            (fun name -> strip (Filename.concat path name))
+            (Array.to_list (try Sys.readdir path with Sys_error _ -> [||]))
+        in
+        failed
+        @ if st.placeholder then attempt (fun () -> Cf.revert path) else []
     | Some st when st.placeholder ->
-        if st.dehydrated then Sys.remove path else Cf.revert path
-    | _ -> ()
+        attempt (fun () ->
+            if st.dehydrated then Sys.remove path else Cf.revert path)
+    | _ -> []
+    | exception e -> [(path, Printexc.to_string e)]
 
 let release ~id root =
-  Array.iter
-    (fun name ->
-      let path = Filename.concat root name in
-      try strip path
-      with e ->
-        Log.warn "cloud_files: releasing %s: %s" path (Printexc.to_string e))
-    (try Sys.readdir root with Sys_error _ -> [||]);
+  let failed =
+    List.concat_map
+      (fun name -> strip (Filename.concat root name))
+      (Array.to_list (try Sys.readdir root with Sys_error _ -> [||]))
+  in
+  List.iter
+    (fun (path, why) -> Log.warn "cloud_files: releasing %s: %s" path why)
+    failed;
   Cf.unregister id;
-  Log.info "cloud_files: released %s" root
+  Log.info "cloud_files: released %s" root;
+  failed
 
 let registered () =
   let prefix = Sync_root_id.prefix ~sid:(Cf.user_sid ()) in
@@ -68,7 +83,7 @@ let at_service_start (config : Config.t) =
   List.iter
     (fun (id, path) ->
       if not (List.mem id served) then (
-        try release ~id path
+        try ignore (release ~id path)
         with e ->
           Log.warn "cloud_files: releasing %s: %s" path (Printexc.to_string e)))
     (registered ())

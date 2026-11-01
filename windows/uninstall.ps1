@@ -12,7 +12,7 @@ if (Test-Path $config) {
   if ($domain) {
     # tsyncd.exe has no console: what it says is kept for a support request.
     Start-Process -Wait -FilePath (Join-Path $ProgramDir 'tsyncd.exe') `
-      -ArgumentList 'cloudfiles', 'purge', '--domain', $domain.name `
+      -ArgumentList 'cloudfiles', 'purge', '--verbose', '--domain', $domain.name `
       -RedirectStandardOutput (Join-Path $env:TEMP 'tsync-purge.out') `
       -RedirectStandardError (Join-Path $env:TEMP 'tsync-purge.err')
   }
