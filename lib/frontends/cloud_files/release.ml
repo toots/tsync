@@ -69,13 +69,13 @@ let summary root (outcomes : outcome list) =
     (count (function `Removed _ -> true | _ -> false))
     (count (function `Left _ -> true | _ -> false))
 
-(* A release's own deletes and renames go through; nothing is fetched. *)
+(* A release's own deletes and renames go through and nothing is fetched; a
+   folder is reverted only once complete, and what is not on disk is dropped. *)
 let answer connection (r : Cf.request) =
   match r.kind with
     | (`Delete | `Rename | `Dehydrate) as kind ->
         Cf.ack connection r kind `Success
-    | `Fetch_placeholders ->
-        Cf.transfer_placeholders connection r `Unsuccessful []
+    | `Fetch_placeholders -> Cf.transfer_placeholders connection r `Success []
     | `Fetch_data ->
         Cf.transfer_data connection r `Unsuccessful (Bigstring.create 0)
           ~offset:r.offset ~length:r.length
