@@ -116,6 +116,7 @@ static value request_of(const CF_CALLBACK_INFO *info,
                         const CF_CALLBACK_PARAMETERS *p, LONG kind) {
   CAMLparam0();
   CAMLlocal5(_request, _identity, _path, _target, _transfer);
+  CAMLlocal1(_connection);
   CAMLlocal1(_request_key);
   LONGLONG offset = 0, length = 0, optional_offset = 0, optional_length = 0;
   LONG flags = 0;
@@ -156,7 +157,8 @@ static value request_of(const CF_CALLBACK_INFO *info,
   _target = full_path(info, target);
   _transfer = int64_value(info->TransferKey);
   _request_key = int64_value(info->RequestKey);
-  _request = caml_alloc_tuple(13);
+  _connection = int64_value(info->ConnectionKey);
+  _request = caml_alloc_tuple(14);
   Store_field(_request, 0, Val_long(kind));
   Store_field(_request, 1, _transfer);
   Store_field(_request, 2, _request_key);
@@ -171,6 +173,7 @@ static value request_of(const CF_CALLBACK_INFO *info,
   Store_field(_request, 10, Val_long(optional_offset));
   Store_field(_request, 11, Val_long(optional_length));
   Store_field(_request, 12, _target);
+  Store_field(_request, 13, _connection);
   CAMLreturn(_request);
 }
 
