@@ -237,9 +237,14 @@ try {
     (Test-Path $released) -and -not (Dehydrated $released) -and
       ((Get-Content -Raw $released) -eq 'changed'))
   Check 'a placeholder whose content was not on disk goes' (-not (Test-Path $cloudOnly))
+  Check 'purge leaves nothing as it was' (
+    -not (Select-String -Quiet -Path (Join-Path $env:TEMP 'tsync-purge.err') -Pattern 'stay as they were'))
+  $folder = Join-Path $root 'made'
+  Check 'a folder placeholder becomes a plain folder that opens' (
+    (Test-Path $folder) -and ($null -ne (Get-ChildItem -Force $folder -ErrorAction Stop | Out-String)))
   Check 'the local state is removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'tsync\data')))
   Check 'the config stays' (Test-Path $configPath)
-  $checks = 30
+  $checks = 32
 } catch {
   Step $_
   if (Test-Path $log) { Step 'service log:'; Get-Content $log -Tail 80 }
@@ -249,5 +254,5 @@ try {
 }
 
 # 09 §10.1: a pass names how many checks ran.
-if ($checks -ne 30) { throw "only $checks of 30 checks ran" }
+if ($checks -ne 32) { throw "only $checks of 32 checks ran" }
 Step "cloud files end to end: $checks checks passed"
