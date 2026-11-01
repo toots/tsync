@@ -783,10 +783,12 @@ CAMLprim value tsync_session_event(value unit) {
   CAMLreturn(Val_unit);
 }
 
+/* A config may be a link into a dotfiles tree: its target's mode is what
+   others can read. */
 CAMLprim value tsync_is_private(value path) {
   CAMLparam1(path);
   struct stat s;
-  if (lstat(String_val(path), &s) < 0) uerror("lstat", path);
+  if (stat(String_val(path), &s) < 0) uerror("stat", path);
   CAMLreturn(Val_bool(s.st_uid == getuid() && (s.st_mode & 077) == 0));
 }
 
