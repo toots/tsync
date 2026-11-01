@@ -243,4 +243,6 @@ let refresh path ~usn (p : placeholder) ~dehydrate =
   refresh_ path usn p.is_dir p.size p.mtime p.identity p.read_only dehydrate
 
 external revert : string -> unit = "tsync_cf_revert"
-external registered : unit -> (string * string) list = "tsync_cf_registered"
+
+external registered : prefix:string -> sid:string -> (string * string) list
+  = "tsync_cf_registered"
