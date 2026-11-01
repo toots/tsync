@@ -843,13 +843,15 @@ let of_string s =
     | exception Yojson.Json_error e -> raise (Invalid ("not valid JSON: " ^ e))
 
 (* cloud-files §2: Windows holds no store and serves none. *)
+let held_here btype = not (Sys.win32 && btype = "local")
+
 let refused_on_this_host t =
   if Sys.win32 then
     List.iteri
       (fun i d ->
         List.iter
           (fun b ->
-            if b.btype = "local" then
+            if not (held_here b.btype) then
               raise
                 (Invalid
                    (Printf.sprintf

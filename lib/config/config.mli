@@ -118,6 +118,10 @@ val of_string : string -> t
 
 val of_json : Yojson.Safe.t -> t
 
+(** Whether a backend of this type may be written in a user's config on this
+    host: on Windows a local store may not. *)
+val held_here : string -> bool
+
 (** {!of_string} for a config the user wrote, by hand or through the wizard,
     with this host's refusals: on Windows a local store and the http-proxy
     frontend (05 §2.1). Configs built in code, as tests build theirs (09 §5.1),
