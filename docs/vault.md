@@ -53,6 +53,7 @@ The first time on a machine it asks for the passphrase and the secret key; the m
 |---|---|
 | macOS | The login keychain, readable only by tsync's own service |
 | Linux | The Secret Service (GNOME Keyring, KWallet); without one, memory until tsync stops |
+| Windows | Credential Manager, for this PC only: it does not roam with your account |
 | Android | The Android Keystore |
 
 `--stdin` reads the passphrase (then the secret key) from standard input instead of the terminal, one line each. A passphrase is never taken as a command-line argument, which other programs can see.
