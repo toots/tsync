@@ -16,7 +16,7 @@ let unlock_deadline = 120.
 type platform = {
   menu : M.t -> unit;
   children : M.action -> M.entry list -> unit;
-  marks : (string * string) list -> unit;
+  marks : ((string * string) list -> unit) option;
   notify : string -> string -> unit;
   copy : string -> (unit, string) result;
   show : folder:bool -> string -> unit;
@@ -194,13 +194,16 @@ let fetch_codes t domains =
               (Ipc.ask ~deadline:stats_deadline d.socket
                  (Protocol.encode (Totp_list { filter = None; pull = `Auto })))
           in
-          (d.name, codes, mark d))
+          (d.name, codes, Option.bind t.platform.marks (fun _ -> mark d)))
         domains
     in
-    t.platform.marks
-      (List.filter_map
-         (fun (domain, _, mark) -> Option.map (fun m -> (domain, m)) mark)
-         answers);
+    Option.iter
+      (fun marks ->
+        marks
+          (List.filter_map
+             (fun (domain, _, mark) -> Option.map (fun m -> (domain, m)) mark)
+             answers))
+      t.platform.marks;
     t.platform.children Show_codes
       (M.codes ~add:false
          (List.map (fun (domain, codes, _) -> (domain, codes)) answers)))

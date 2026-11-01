@@ -682,7 +682,7 @@ let platform t =
         ignore
           (change_layout t (fun layout ->
                Layout.set_children layout action rows)));
-    marks = Atomic.set marks;
+    marks = Some (Atomic.set marks);
     notify = notify t;
     copy;
     show = show t;

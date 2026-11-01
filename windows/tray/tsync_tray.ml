@@ -119,7 +119,7 @@ let platform =
               | Show_codes -> tray.codes <- entries
               | _ -> ());
         redraw ());
-    marks = ignore;
+    marks = None;
     notify;
     copy =
       (fun code ->
