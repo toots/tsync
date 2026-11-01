@@ -247,3 +247,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tsync build-info exited $LASTEXITCODE" }
           $info
           if (-not ($info -match '^tls:.*\bnative\b')) { throw 'native TLS missing' }
+
+  # 10 §2: a push to main whose Windows jobs all pass puts the installer, and
+  # the certificate a test machine trusts it with, on the nightly release.
+  publish:
+    needs: [x86-64, arm64]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'toots/tsync'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tsync-windows-installer
+          path: installer
+
+      - uses: ./.github/actions/publish-nightly
+        with:
+          files: installer/tsync-setup.exe installer/tsync-development.cer
+          sha: ${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
