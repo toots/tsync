@@ -100,26 +100,24 @@ begin
   Log(Output);
 end;
 
+{ A silent install clicks through this page too: a refused link is logged and the install still finishes. }
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   Output: String;
 begin
   Result := True;
   if (CurPageID = LinkPage.ID) and (Trim(LinkPage.Values[0]) <> '') then
-  begin
-    Result := Join(Trim(LinkPage.Values[0]), Output);
-    if not Result then
+    if not Join(Trim(LinkPage.Values[0]), Output) and not WizardSilent then
+    begin
       MsgBox(Output, mbError, MB_OK);
-  end;
+      Result := False;
+    end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
-  Output: String;
 begin
   if (CurStep = ssPostInstall) and not PowerShell('install.ps1', Code) then
     RaiseException('Registering tsync failed (exit ' + IntToStr(Code) + '); see the setup log.');
-  if (CurStep = ssDone) and WizardSilent and (Trim(LinkPage.Values[0]) <> '') then
-    Join(Trim(LinkPage.Values[0]), Output);
 end;
