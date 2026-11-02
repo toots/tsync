@@ -107,6 +107,7 @@ The constraints that shape everything:
 | **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `cloud_files`, `http-proxy`, `android`. |
 | **extension / vault** | An optional package keeping small secret records (`totp`, `passwords`) in a domain's hidden `/.tsync-ext/` folder; the vault is the encryption they share. |
 | **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `i:<fileId>` (a local id kept across renames), or `f:<parentFolderId>/<leaf>`. |
+| **setup link** | A link, or its QR code, carrying the servers and secrets of some domains, sealed under a key only the link holds; a new install joins it instead of being configured by hand. |
 | **uplink governor** | Admits uploads on a network link at a rate chosen from measured queueing delay. |
 
 ## 4. Architecture
@@ -283,6 +284,7 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 |---|---|
 | Key, folder-id and item-reference grammars; chunk keys and shard layout; name escaping; temporary names | [01 §2–3](01-core.md) |
 | Backend key layout; manifest; folder index; folder marker, anchor; versions; collection run record and generation; corruption markers; job objects; share manifests | [02 §2](02-remote-model.md) |
+| Setup links and their sealed payload | [setup-link](algorithms/setup-link.md) |
 | Client identity and leases; commands and log entries; cursor; tree head and takeover; position, before-values, in-flight and arrival records; applied log | [03 §2](03-journal-sync.md) |
 | Local cache tree; staged manifests and bodies; upload records and local intents; pins; folder-id index | [04 §2](04-checkout-cache.md) |
 | Durable-queue record ids and locks | [durable-queue](algorithms/durable-queue.md) |
