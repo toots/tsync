@@ -1,0 +1,3 @@
+(library
+ (name tsync_setup_link)
+ (libraries tsync_core tsync_vault tsync_http yojson base64))

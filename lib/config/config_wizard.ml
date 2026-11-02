@@ -4,6 +4,8 @@ type prompt = { label : string; default : string option; secret : bool }
 type io = { ask : prompt -> string; say : string -> unit }
 type json = Yojson.Safe.t
 
+let default_versioning = "true"
+let default_max_cache = "1 GiB"
 let fields = function `Assoc l -> l | _ -> []
 let get j k = List.assoc_opt k (fields j)
 
@@ -446,13 +448,13 @@ let extensions io current =
 let domain io ~advanced ~system d =
   let d = field io d ~required:true "name" "domain name" String in
   let d =
-    field io d "versioning" "versioning" ~default:"true" ~write_default:true
-      Bool
+    field io d "versioning" "versioning" ~default:default_versioning
+      ~write_default:true Bool
   in
   let d = field io d "readOnly" "read-only" ~default:"false" Bool in
   let d =
-    field io d "maxCache" "cache limit" ~default:"1 GiB" ~write_default:true
-      Size
+    field io d "maxCache" "cache limit" ~default:default_max_cache
+      ~write_default:true Size
   in
   let d =
     List.fold_left
@@ -577,10 +579,29 @@ let describe_domain d =
     (Option.value ~default:"?" (Option.bind (get d "name") show))
     (List.length (list_of d "backends"))
 
-let edit ?(advanced = false)
-    ?(system =
-      if Fs.is_macos then `Macos else if Sys.win32 then `Windows else `Linux) io
-    start =
+let this_system =
+  if Fs.is_macos then `Macos else if Sys.win32 then `Windows else `Linux
+
+(* setup-link §6.2: the defaults a new domain gets here, with no question. *)
+let joined_domain ?(system = this_system) ~name backends =
+  let presenting =
+    List.filter_map
+      (fun (n, (fe : Frontend.t)) ->
+        if fe.presenting <> None then Some (`String n) else None)
+      (Frontend.offered system)
+  in
+  `Assoc
+    [
+      ("name", `String name);
+      ("versioning", Result.get_ok (typed Bool default_versioning));
+      ("maxCache", Result.get_ok (typed Size default_max_cache));
+      ("backends", `List backends);
+      ("frontends", `List presenting);
+    ]
+
+let new_config () = `Assoc [("name", `String (Config.hostname ()))]
+
+let edit ?(advanced = false) ?(system = this_system) io start =
   let domain = domain io ~advanced ~system and globals = globals ~advanced in
   let j =
     match start with
@@ -645,3 +666,15 @@ let prepare j =
   match Config.of_user_json j with
     | _ -> Ok j
     | exception Config.Invalid e -> Error e
+
+(* 07 §5.9, security §10.2: validated, then 0600 from creation and renamed into
+   place. *)
+let write j =
+  match prepare j with
+    | Error e -> Error e
+    | Ok j ->
+        let path = Paths.config_file () in
+        let text = Yojson.Safe.pretty_to_string j ^ "\n" in
+        Fs.mkdir_p (Filename.dirname path);
+        Fs.durable_replace ~perm:0o600 path text;
+        Ok (Config.of_string text)

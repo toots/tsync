@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Set up tsync</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1f2328;
+        --muted: #59636e;
+        --line: #d1d9e0;
+        --card: #f6f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --line: #3d444d;
+          --card: #151b23;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          15px/1.5 -apple-system,
+          system-ui,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 28px 0 8px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      ul.domains {
+        list-style: none;
+        padding: 0;
+        margin: 16px 0;
+        display: grid;
+        gap: 8px;
+      }
+      ul.domains li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+      }
+      .mark {
+        flex: none;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: var(--line);
+      }
+      .mark img {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+      }
+      .mark svg {
+        width: 26px;
+        height: 26px;
+        fill: #ffffff;
+      }
+      .name {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .qr {
+        display: flex;
+        justify-content: center;
+        margin: 16px 0;
+      }
+      .qr svg {
+        width: min(280px, 100%);
+        height: auto;
+        background: #ffffff;
+        border-radius: 8px;
+      }
+      ol {
+        padding-left: 20px;
+      }
+      code {
+        font:
+          13px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        overflow-wrap: anywhere;
+      }
+      pre {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .warn {
+        border-left: 3px solid #d29922;
+        padding: 4px 12px;
+      }
+      a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Set up tsync</h1>
+      <p class="muted" id="server"></p>
+      <ul class="domains" id="domains"></ul>
+      <div id="complete">
+        <div class="qr" id="qr"></div>
+        <h2>On Windows</h2>
+        <ol>
+          <li>
+            Install tsync as
+            <a href="https://github.com/toots/tsync/blob/main/docs/install.md#windows">the install guide</a>
+            says.
+          </li>
+          <li>Paste this page's address on the installer's setup-link page.</li>
+        </ol>
+        <h2>On Android</h2>
+        <ol>
+          <li>
+            Install
+            <a href="https://github.com/toots/tsync/releases/download/nightly/tsync-arm64-v8a.apk">the app</a>.
+          </li>
+          <li>On its Setup screen, tap <b>Scan setup code</b> and scan the code above.</li>
+        </ol>
+        <h2>On macOS and Linux</h2>
+        <p>Once tsync is installed, run:</p>
+        <pre><code id="command"></code></pre>
+        <p class="warn">
+          Anyone with this page's address can reach these domains until the link expires. Do not
+          share it further.
+        </p>
+      </div>
+      <p class="warn" id="incomplete" hidden>
+        This link is incomplete: the part after <code>#</code> is missing. Ask for the whole link
+        again.
+      </p>
+    </main>
+    <script type="application/json" id="data">
+      __SETUP_DATA__
+    </script>
+    <script>
+      __QRCODE_JS__
+    </script>
+    <script>
+      (function () {
+        var data = JSON.parse(document.getElementById("data").textContent);
+        var features = { totp: "Two-factor codes", passwords: "Passwords" };
+        var icon =
+          '<svg viewBox="0 0 24 24"><path d="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z"/>' +
+          '<path d="M6 7h8v2H6Z"/><path d="M15 15.4 19.6 18 15 20.6Z"/></svg>';
+        document.getElementById("server").textContent =
+          "From " + location.host + ", until " + new Date(data.expires * 1000).toLocaleString();
+        var list = document.getElementById("domains");
+        data.about.forEach(function (d) {
+          var li = document.createElement("li");
+          var mark = document.createElement("span");
+          mark.className = "mark";
+          if (d.vault && d.vault.icon) {
+            var img = document.createElement("img");
+            img.alt = "";
+            img.src = "data:image/png;base64," + d.vault.icon;
+            mark.appendChild(img);
+          } else {
+            mark.innerHTML = icon;
+            if (d.vault) mark.style.background = d.vault.color;
+          }
+          var text = document.createElement("div");
+          var name = document.createElement("div");
+          name.className = "name";
+          name.textContent = d.name;
+          var also = document.createElement("div");
+          also.className = "muted";
+          var brings = (d.extensions || [])
+            .map(function (e) {
+              return features[e];
+            })
+            .filter(Boolean);
+          also.textContent = ["Files"].concat(brings).join(" · ");
+          text.appendChild(name);
+          text.appendChild(also);
+          li.appendChild(mark);
+          li.appendChild(text);
+          list.appendChild(li);
+        });
+        if (location.hash.length < 2) {
+          document.getElementById("complete").hidden = true;
+          document.getElementById("incomplete").hidden = false;
+          return;
+        }
+        var link = location.href;
+        var qr = qrcode(0, "M");
+        qr.addData(link);
+        qr.make();
+        document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+        document.getElementById("command").textContent = "tsync config join '" + link + "'";
+      })();
+    </script>
+  </body>
+</html>

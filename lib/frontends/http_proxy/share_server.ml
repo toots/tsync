@@ -117,6 +117,8 @@ let load t token =
       | _ -> refuse 502 "corrupt share manifest"
   in
   if not (Domain_name.equal domain t.domain) then refuse 404 "not found";
+  if Result.is_ok (Tsync_setup_link.Setup_link.stored_of_string body) then
+    refuse 404 "not found";
   let expires =
     match List.assoc_opt "expires" f with
       | Some (`Int n) -> float_of_int n
