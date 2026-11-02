@@ -88,6 +88,28 @@ If the proxy runs on another machine, the server must listen beyond localhost. T
 - The clocks of client and server must agree within five minutes: requests are signed with the time.
 - The server decides whether the domain has a [vault](vault.md#turning-it-on): the clients follow its `extensions`, and its `vaultLock` applies to every client, which may only lock sooner. The server stores the vault's sealed records and never needs to unlock it.
 
+### From a setup link
+
+Rather than copy the address and the secret by hand, a machine that already reaches the server, or the server itself, makes a link that sets up another machine:
+
+```bash
+tsync config share media photos                              # on a client of the server
+tsync config share media --url https://nas.example:8443      # on the server, giving its public address
+```
+
+The link is printed, its expiry after it: 7 days by default, `--expires` as for [share links](sharing.md). It opens a page naming each domain and what it brings (two-factor codes, passwords, with the vault's colour or icon), with a QR code of the link and how to use it on each system. On the new machine:
+
+```bash
+tsync config join 'https://nas.example:8443/join/…#…'
+```
+
+`tsync config --edit` on a machine with no config asks for a setup link first. Each domain is added with this machine's usual way of showing it (a folder on Linux) and the default cache limit; restart the service to start it. A domain already set up with that server is left as it is.
+
+- **Anyone with the link can reach those domains until it expires.** Send it to one person, by a channel you trust.
+- The server keeps the link's contents encrypted. The key is the part after `#`, which never leaves the link: not even the server can read the secret back.
+- `tsync config share --revoke LINK` stops new joins at once. A machine that already joined keeps its access; change the server's secret to remove it.
+- Only domains reached through a tsync server can be shared this way. `--url` is needed on the server because, behind a reverse proxy or a tunnel, it cannot know the address others use.
+
 ## Check on a server
 
 On the server itself, `tsync status` and `tsync logs` work as on any machine.

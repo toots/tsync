@@ -119,14 +119,18 @@ A command of class owner, per domain ([07 §5.3](../07-daemon-cli.md#53-commands
    A domain with neither is refused with exit 2: `<domain> is neither served by this machine nor
    reached through a tsync server`. `--url` given when no named domain is served here is refused
    with exit 2. `--url` follows the scheme rule of §2.
-3. Each distinct shared backend is checked as a join checks it (§6.2): `GET /domains` signed with
-   its secret MUST list the domains shared through it. A listener reached at a wrong `--url` fails
-   here, before anything is written.
-4. Describe each domain for `about` (§4): its extensions in force from its owner's `stats`, and for
-   a domain with a vault its appearance from `vault_status`, which a locked vault answers too.
+3. Each domain is checked through its shared backend as a join checks it (§6.2). A listener reached
+   at a wrong `--url` fails here, before anything is written.
+4. Describe each domain for `about` (§4): its extensions are those its shared backend's server
+   states for it ([05 §2.1](../05-ops-config.md#21-schema-and-validation) rule 5), which a joining
+   machine follows;
+   for a domain with a vault, its appearance from its owner's `vault_status`, which a locked vault
+   answers too.
 5. Build the payload (§3), generate the token and key, seal (§4) and write the manifest through the
-   first domain's shared backend. A server that refuses the manifest (401) predates setup links:
-   `<url> is too old to hold setup links`, exit 1. Any other failure is the driver's sentence, exit 1.
+   first domain's shared backend, then fetch it as a joiner would (§6.1). A server that stores the
+   manifest and does not serve it predates setup links: the manifest is deleted again, and the
+   command says `<url> is too old to hold setup links`, exit 1. Any other failure is the driver's
+   sentence, exit 1.
 6. Print the link on stdout; on stderr, its expiry and
    `Anyone with this link can reach <domains> until then.`
 
@@ -164,11 +168,11 @@ For each domain of the payload:
 - **Already configured** with a backend whose `url` is the payload's: reported as already set up,
   left unchanged. With another `url`: refused for that domain, naming the name clash; the others
   proceed.
-- **Checked** with the server: `GET /domains`, signed with the payload's secret, once per distinct
-  `url` and `secret` ([http-proxy §5.4](../backends/http-proxy.md)). A domain the answer does not
-  list is refused (`the server no longer serves <domain> with this link's secret`); 401 says the
-  secret was refused or this machine's clock is off. A server that cannot be reached fails the join
-  with its sentence, adding nothing.
+- **Checked** with the server, by the served check of
+  [http-proxy §8.1](../backends/http-proxy.md#81-first-use-binding-and-conditional-create-support)
+  signed with the payload's secret: a domain the server does not serve with it, a refused secret
+  (or this machine's clock off), or a server that cannot be reached is not added, with the
+  driver's sentence; the others proceed.
 - **Built** as the wizard builds a new domain ([07 §5.9](../07-daemon-cli.md)), with no question
   asked: its defaults for `versioning` and `maxCache`; the payload's backends, the first with role
   `main` and the others `replica`; the frontends a new domain gets by default on this host, with
@@ -204,9 +208,9 @@ write: a join that adds nothing writes nothing.
 ([backends/http-proxy §5.5](../backends/http-proxy.md#55-unsigned-endpoints)).
 
 - **Dispatch**: each route is asked in config order whether `tsync/shares/<token>` loads from its
-  share store, is of type `setup` and names its domain; the first that claims it answers. None → 404.
-  A manifest that is not valid (§4) answers 502, an expired one 410.
-- **`?json=1`** → 200 `{"expires":<seconds>,"sealed":"<base64url>","about":[…]}`, `about` as stored, `Cache-Control: no-store`.
+  share store, is a valid setup manifest (§4) and names its domain; the first that claims it
+  answers. None → 404. An expired one → 410, whose body with `json` is `{"expires":<seconds>}`.
+- **`?json=1`** → 200, the manifest as stored, `Cache-Control: no-store`.
 - **Otherwise** a page that never decrypts and never holds a secret. It lists the domains of `about`,
   each by name with what it brings beside the files (*Two-factor codes* for `totp`, *Passwords* for
   `passwords`) and, for a domain with a vault, its mark (vault §8.1: the icon, else tsync's icon in
