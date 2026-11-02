@@ -14,6 +14,12 @@ from laptop
 joinable photos: server url=true secret=true
 joinable notes: server url=true secret=true
 
+== the answer the Android app reads (§6.3)
+keys from, domains, skipped, about
+domains photos (url), notes (url)
+about photos, notes (vault)
+refused: {"error":"This is not a tsync setup link"}
+
 == nothing in clear (§8)
 manifest holds a secret: false, the url: false, the key: false
 

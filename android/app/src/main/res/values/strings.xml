@@ -111,6 +111,9 @@
     <string name="server_url">Server URL</string>
     <string name="server_secret">Secret</string>
     <string name="check_server">Check server</string>
+    <string name="setup_scan">Scan setup code</string>
+    <string name="setup_link_from">Setup link from %1$s</string>
+    <string name="setup_link_skipped">Not on this phone: %1$s</string>
     <string name="domain_name">Domain</string>
     <string name="cache_limit">Cache limit</string>
     <string name="connect">Connect</string>

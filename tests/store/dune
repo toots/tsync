@@ -331,6 +331,7 @@
   tsync_http_proxy_client
   tsync_http_proxy
   tsync_setup_link
+  tsync_android
   yojson
   unix))
 

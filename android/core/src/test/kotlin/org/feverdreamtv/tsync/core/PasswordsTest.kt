@@ -51,6 +51,7 @@ class PasswordsTest {
         override fun size(handle: Long): Long = error("unused")
         override fun read(handle: Long, offset: Long, length: Int, dest: ByteArray): Int = error("unused")
         override fun close(handle: Long): Int = error("unused")
+        override fun setupLink(link: String): String = error("unused")
     }
 
     @Test
