@@ -66,6 +66,9 @@ import org.feverdreamtv.tsync.core.FormField
 import org.feverdreamtv.tsync.core.Parameters
 import org.feverdreamtv.tsync.core.ServerAnswer
 import org.feverdreamtv.tsync.core.ServerConfig
+import org.feverdreamtv.tsync.core.SetupAnswer
+import org.feverdreamtv.tsync.core.SetupDomain
+import org.feverdreamtv.tsync.core.SetupLink
 import org.feverdreamtv.tsync.core.Stats
 import org.feverdreamtv.tsync.core.backup.BackupSettings
 
@@ -89,7 +92,8 @@ fun SetupScreen(refused: ServerConfig?, refusal: String?, onConnected: () -> Uni
 
 /**
  * Server URL and secret, Check server, the domain, the cache limit, and the save (app §6.1,
- * §6.2). Each failure is shown on its field, which takes focus and so scrolls into view.
+ * §6.2). Each failure is shown on its field, which takes focus and so scrolls into view. A setup
+ * link, scanned or pasted in the URL field, fills the rest (setup-link §6.3).
  */
 @Composable
 private fun ServerForm(tsync: Tsync, initial: ServerConfig?, refusal: String?, saveLabel: String, onSaved: (ServerConfig) -> Unit) {
@@ -104,6 +108,7 @@ private fun ServerForm(tsync: Tsync, initial: ServerConfig?, refusal: String?, s
     var failure by remember { mutableStateOf(refusal) }
     var checked by remember { mutableStateOf<String?>(null) }
     var offered by remember { mutableStateOf<List<String>>(emptyList()) }
+    var linked by remember { mutableStateOf<List<SetupDomain>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     val focus = remember { FormField.entries.associateWith { FocusRequester() } }
 
@@ -131,9 +136,49 @@ private fun ServerForm(tsync: Tsync, initial: ServerConfig?, refusal: String?, s
         focus.getValue(found.field).requestFocus()
     }
 
+    fun pick(offer: SetupDomain) {
+        url = offer.url
+        secret = offer.secret
+        domain = offer.name
+    }
+
+    fun openLink(link: String) {
+        busy = true
+        scope.launch {
+            val answer = withContext(Dispatchers.IO) {
+                try {
+                    tsync.prepare()
+                    SetupLink.parse(tsync.core.setupLink(link.trim()))
+                } catch (e: Throwable) {
+                    SetupAnswer.Refused(e.message ?: e.toString())
+                }
+            }
+            busy = false
+            offered = emptyList()
+            when (answer) {
+                is SetupAnswer.Refused -> checked = answer.reason
+                is SetupAnswer.Opened -> {
+                    linked = answer.domains
+                    url = ""
+                    secret = ""
+                    domain = ""
+                    answer.domains.singleOrNull()?.let(::pick)
+                    checked = (listOfNotNull(answer.from.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.setup_link_from, it) }) +
+                        answer.skipped.map { context.getString(R.string.setup_link_skipped, it) }).joinToString("\n").ifEmpty { null }
+                }
+            }
+        }
+    }
+
+    val scanner = playServices(context)
+    OutlinedButton(enabled = !busy && scanner, onClick = { scan(context, ::openLink) { checked = it } }) {
+        Text(stringResource(R.string.setup_scan))
+    }
+    if (!scanner) Text(stringResource(R.string.code_scan_unavailable), Modifier.padding(bottom = 8.dp))
     field(FormField.URL, url, R.string.server_url, { url = it })
     field(FormField.SECRET, secret, R.string.server_secret, { secret = it }, secretField = true)
     OutlinedButton(enabled = !busy, onClick = {
+        if (SetupLink.looksLike(url)) return@OutlinedButton openLink(url)
         val found = ConfigForm.urlError(url)
         if (found != null) return@OutlinedButton refuse(found)
         busy = true
@@ -151,6 +196,17 @@ private fun ServerForm(tsync: Tsync, initial: ServerConfig?, refusal: String?, s
         }
     }) { Text(stringResource(R.string.check_server)) }
     checked?.let { Text(it, Modifier.padding(vertical = 8.dp)) }
+    if (linked.size > 1) Column(Modifier.padding(bottom = 8.dp)) {
+        linked.forEach { offer ->
+            val look = offer.look
+            FilterChip(
+                selected = domain == offer.name && url == offer.url,
+                onClick = { pick(offer) },
+                label = { Text(offer.name) },
+                leadingIcon = if (look != null) ({ VaultMark(look) }) else null,
+            )
+        }
+    }
     if (offered.size > 1) Column(Modifier.padding(bottom = 8.dp)) {
         offered.forEach { name -> FilterChip(selected = domain == name, onClick = { domain = name }, label = { Text(name) }) }
     }

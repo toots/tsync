@@ -22,6 +22,7 @@ let () =
                  (String.sub arg 0 i)));
   Callback.register "tsync_boot" (text Android_host.boot);
   Callback.register "tsync_request" (text Android_host.request);
+  Callback.register "tsync_setup_link" (text Android_host.setup_link);
   Callback.register "tsync_status"
     (text (fun (_ : string) -> Android_host.status ()));
   Callback.register "tsync_next_notice"

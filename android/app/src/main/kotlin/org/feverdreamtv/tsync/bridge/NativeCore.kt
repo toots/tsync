@@ -10,6 +10,7 @@ object NativeCore : Core {
         text(Native.nativeCheckConfig(bytes(domain), candidate?.let(::bytes)))
     override fun boot(domain: String): String? = text(Native.nativeBoot(bytes(domain)))
     override fun request(json: String): String = Native.nativeRequest(bytes(json)).toString(Charsets.UTF_8)
+    override fun setupLink(link: String): String = Native.nativeSetupLink(bytes(link)).toString(Charsets.UTF_8)
     override fun status(): String = Native.nativeStatus().toString(Charsets.UTF_8)
     override fun open(ref: String): Long = Native.nativeOpen(bytes(ref))
     override fun size(handle: Long): Long = Native.nativeSize(handle)

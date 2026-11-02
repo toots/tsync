@@ -6,6 +6,7 @@ object Native {
     @JvmStatic external fun nativeCheckConfig(domain: ByteArray, candidate: ByteArray?): ByteArray?
     @JvmStatic external fun nativeBoot(domain: ByteArray): ByteArray?
     @JvmStatic external fun nativeRequest(json: ByteArray): ByteArray
+    @JvmStatic external fun nativeSetupLink(link: ByteArray): ByteArray
     @JvmStatic external fun nativeStatus(): ByteArray
     @JvmStatic external fun nativeOpen(ref: ByteArray): Long
     @JvmStatic external fun nativeSize(handle: Long): Long

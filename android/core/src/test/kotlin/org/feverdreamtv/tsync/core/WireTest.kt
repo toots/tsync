@@ -42,6 +42,7 @@ internal class ProcessCore(private val binary: String, private val home: File, p
     override fun size(handle: Long): Long = error("not driven by the wire suite")
     override fun read(handle: Long, offset: Long, length: Int, dest: ByteArray): Int = error("not driven by the wire suite")
     override fun close(handle: Long): Int = error("not driven by the wire suite")
+    override fun setupLink(link: String): String = error("not driven by the wire suite")
 }
 
 /**

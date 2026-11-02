@@ -158,6 +158,40 @@ let () =
                 | L.Unusable { name; reason } -> p "unusable %s: %s" name reason)
               payload.entries
         | Error e -> p "round trip failed: %s" e);
+      p "\n== the answer the Android app reads (§6.3)";
+      (match
+         Yojson.Safe.from_string (Tsync_android.Android_host.setup_link text)
+       with
+        | `Assoc l ->
+            let names k =
+              match List.assoc_opt k l with
+                | Some (`List items) ->
+                    List.map
+                      (fun i ->
+                        match i with
+                          | `Assoc f -> (
+                              match List.assoc_opt "name" f with
+                                | Some (`String n) -> (
+                                    n
+                                    ^ (match List.assoc_opt "url" f with
+                                      | Some (`String u) when u = url ->
+                                          " (url)"
+                                      | _ -> "")
+                                    ^
+                                      match List.assoc_opt "vault" f with
+                                      | Some _ -> " (vault)"
+                                      | None -> "")
+                                | _ -> "?")
+                          | _ -> "?")
+                      items
+                | _ -> []
+            in
+            p "keys %s" (String.concat ", " (List.map fst l));
+            p "domains %s" (String.concat ", " (names "domains"));
+            p "about %s" (String.concat ", " (names "about"))
+        | _ -> p "not an object");
+      p "refused: %s"
+        (Tsync_android.Android_host.setup_link "https://h.example");
       p "\n== nothing in clear (§8)";
       let body =
         Bigstring.to_string
