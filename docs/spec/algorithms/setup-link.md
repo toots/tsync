@@ -191,9 +191,11 @@ write: a join that adds nothing writes nothing.
   set up, 1 otherwise.
 - **The wizard**, on a new config file, asks first for a setup link (blank to set up by hand) and
   joins it before its other questions.
-- **The Windows installer** offers an optional page with a setup-link field. Its next step joins the
-  link before the service starts ([cloud-files §14.1](../frontends/cloud-files.md#141-package)); a
-  failure is shown on the page, which can be left blank to finish without one.
+- **The Windows installer** offers an optional setup-link page once the programs are installed
+  ([cloud-files §14.1](../frontends/cloud-files.md#141-package)). Its Next joins the link, then
+  restarts the service so the new domains start ([07 §2.7](../07-daemon-cli.md#27-runtime-paths)); a
+  failure is shown and the page stays, and it can be left blank to finish without one. An unattended
+  install takes the link as `/LINK=`, and logs a failure to join without failing the install.
 - **The Android app's Setup** ([android-app §10.7](../frontends/android-app.md#107-setup-and-settings))
   offers *Scan setup code*, with the scanner the vault's *Add* uses, and accepts a pasted setup link
   in its URL field. Opening the link fills the server and secret; a payload of several domains fills

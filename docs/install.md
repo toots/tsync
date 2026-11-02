@@ -27,7 +27,7 @@ The builds are signed with tsync's own certificate, which Windows does not know.
 Import-Certificate -FilePath $HOME\Downloads\tsync-development.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
-Without it, setup fails to register tsync with Windows' cloud files support. Then run `tsync-setup.exe`. Windows may say *Windows protected your PC*: choose *More info*, then *Run anyway*. Setup needs no administrator rights. It installs the programs into `%LOCALAPPDATA%\Programs\tsync`, puts them on your `PATH` (open a new terminal to pick it up), and registers a background service and the [tray](desktop.md#windows), both started at sign-in.
+Without it, setup fails to register tsync with Windows' cloud files support. Then run `tsync-setup.exe`. Windows may say *Windows protected your PC*: choose *More info*, then *Run anyway*. Setup needs no administrator rights. It installs the programs into `%LOCALAPPDATA%\Programs\tsync`, puts them on your `PATH` (open a new terminal to pick it up), and registers a background service and the [tray](desktop.md#windows), both started at sign-in. Its last page asks for a [setup link](server.md#from-a-setup-link): paste the one you were given and its folders appear in Explorer, or leave it blank and [configure tsync](getting-started.md) yourself.
 
 Running a newer `tsync-setup.exe` upgrades in place. Uninstall from *Settings → Apps → Installed apps → tsync*. Files that were on disk stay as plain files in the folder, files that were only in the cloud are removed from it, and your config stays.
 
