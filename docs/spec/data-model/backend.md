@@ -259,7 +259,8 @@ objects added, existing ones immutable).
 
 ### 2.18 Share
 
-- **Represents** a public, expiring link to one file or one folder.
+- **Represents** a public, expiring link to one file or one folder, or a setup link
+  ([setup-link](../algorithms/setup-link.md)), which names no item.
 - **Identity** a random token. Shares are **not** scoped by domain on the store (one shared tree per
   store, so IAM rules and lifecycle rules take one literal prefix); the body names its domain.
 - **Attributes** format version, domain, expiry time, type, display filename, and a reference: for a file

@@ -367,12 +367,13 @@ any non-empty lowercase hex token of at most 64 characters (caller-supplied toke
 ```json
 {"v":1,"expires":1767225600,"domain":"Files","type":"file","key":"tsync/Files/manifests/<folder id>/<leaf hash>","filename":"report.pdf"}
 {"v":1,"expires":1767225600,"domain":"Files","type":"dir","folderId":"<folder id>","filename":"2024.zip"}
+{"v":1,"expires":1767225600,"domain":"Files","type":"setup","sealed":"<base64url>"}
 ```
 
 - `expires`: seconds since the epoch. A share of the whole domain has `folderId = ".tsync-root"` and
   `filename = "<domain>.zip"`.
 - **Reader**: `v` MUST be `1`; `domain` MUST be a valid domain name; for `file`, `key` MUST lie under
-  `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)).
+  `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)); for `setup`, `sealed` follows [setup-link §4](algorithms/setup-link.md#4-sealed-manifest).
   Otherwise the share is refused. Unknown fields are ignored.
 - **Artifacts**: `tsync/shares/cache/<token>.data` (a download of that share) and
   `tsync/shares/cache/<h1>-<h2>.data` (a file by whole-file digest), and the **preview image**

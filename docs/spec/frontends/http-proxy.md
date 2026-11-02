@@ -15,6 +15,7 @@ The http-proxy frontend is an HTTP(S) server that does both:
 - **Store server.** An authenticated, admission-bounded re-export of each served domain's *composite store*. Bytes in, bytes out. It does not present the checkout, the mirror or item references; a remote client runs its own core against it as an ordinary `http-proxy` backend.
 - **Share server.** With `shares: true`, `/s/<token>…`, unauthenticated, token as credential: file download with ranges, viewer page for a media file, folder browse page, folder listing JSON, per-child bytes, streamed ZIP of a folder.
 - **Status page.** `/` serves a static login page that signs `/stats` requests in the browser.
+- **Setup links.** `/join/<token>`, unauthenticated, whatever `shares` says: the page of a setup link and its sealed payload ([setup-link §7](../algorithms/setup-link.md#7-the-page)).
 
 It is not a presenter of files: it installs no request-handler hooks, answers no item references and keeps no view that change notices refresh.
 
@@ -224,7 +225,7 @@ Capability rules (token, expiry, revocation, domain confinement, manifest valida
 2. Read `tsync/shares/<token>` from the route's store, never the mirror. Absent → 404.
 3. Parse and validate per [security §6.3](../algorithms/security-model.md#63-a-share-never-leaves-its-domain): unparseable or invalid → 502 `corrupt share manifest`; another domain → 404.
 4. Expiry: missing, non-numeric or past → 410 `link expired` ([security §6.2](../algorithms/security-model.md#62-lifetime)).
-5. `type` = `file` (target: the manifest key) or `dir` (target: the folder id); else 502 `unknown share type`.
+5. `type` = `file` (target: the manifest key) or `dir` (target: the folder id); `setup` → 404, as an absent token ([setup-link §4](../algorithms/setup-link.md#4-sealed-manifest)); else 502 `unknown share type`.
 
 Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `internal error`, logged.
 
