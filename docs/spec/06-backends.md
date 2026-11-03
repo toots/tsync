@@ -270,8 +270,9 @@ The registry and the drain hooks are one per process.
 Uploads over a network link are paced by the uplink governor. The seam between a store and the governor is an **admission**, a value handed to each store at construction:
 
 ```
-admission = { acquire(class, bytes) -- suspends until the bytes may be sent, or fails STOPPING
+admission = { acquire(class, bytes) -- suspends until the attempt may start, or fails STOPPING
               try_acquire(class, bytes) -- takes admission now if the budget allows, else refuses; never waits
+              pace(ticket, bytes) -- suspends until the next slice of a chunk may be written, or fails STOPPING
               completed(bytes, elapsed)
               abandoned(bytes)
               waiting() }
@@ -281,6 +282,7 @@ Rules:
 
 - Every store with a link gets its link's admission. A store without a link (a filesystem store) gets none, and is neither gated nor counted.
 - **Per attempt.** Every request attempt that carries a body upstream MUST be admitted before it is sent, for its body size plus the governor's per-request overhead ([algorithms/uplink-governor.md](algorithms/uplink-governor.md)). This includes retries, the upload half of an emulated copy, job objects, markers, log entries and takeovers. It then reports exactly once: `completed` with the time from admission to answer, or `abandoned`.
+- **Paced chunks.** A chunk body MUST be written in slices, each after its `pace` returns, of at most the size the governor sets ([algorithms/uplink-governor.md §4.1](algorithms/uplink-governor.md#41-admission)). A driver whose transport cannot write a body in slices cannot carry a link. Bodies that are not chunks are written whole.
 - **Modes.** A write is issued in one of two modes. `wait` acquires. `best_effort` uses `try_acquire` for every attempt, and when admission is refused the operation fails CANCELLED ("not admitted") without sending. Best-effort writes are for work that another mechanism redoes, such as chunk forwards to copies.
 - **Atomicity.** `try_acquire` takes the admission in the same step as it checks it. There is no separate check that a later acquire has to honour.
 - **Reads are never gated.** A user is waiting on them.
