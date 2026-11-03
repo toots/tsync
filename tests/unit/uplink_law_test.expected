@@ -46,3 +46,6 @@ idle: drains to 6 ms
 fresh saved state starts at 1.60 MiB/s
 then steps ×1.25
 state older than a day starts cold: 0.25 MiB/s
+== 8 MiB chunks on an 8 MiB/s link with a 250 ms buffer, minutes 3 to 5
+paced slices: carries 0.80 of the link (at headroom true), capacity 1.07 of it (true)
+whole bodies, the case pacing exists for: carries 0.17 of the link (at headroom false), capacity 0.10 of it (false)

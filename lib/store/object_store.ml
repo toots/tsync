@@ -9,7 +9,7 @@ type raw_entry = {
 }
 
 type verbs = {
-  put : Key.t -> Bigstring.t -> unit;
+  put : pace:(int -> int) -> Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
   put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
   get_opt : Key.t -> Bigstring.t option;
@@ -111,15 +111,15 @@ let make ~name ~admission ?share_url v =
               Uplink.admitted admission mode
                 ~chunk:(Key.chunk_of k <> None)
                 (Bigstring.length body)
-                (fun () ->
-                  v.put k body;
+                (fun pace ->
+                  v.put ~pace k body;
                   up (Bigstring.length body))));
       put_if_absent =
         (fun k body ->
           ladder "put_if_absent" (fun () ->
               let r =
                 Uplink.admitted admission Wait ~chunk:false
-                  (Bigstring.length body) (fun () ->
+                  (Bigstring.length body) (fun _ ->
                     let r = v.put_if_absent k body in
                     up (Bigstring.length body);
                     r)
@@ -130,7 +130,7 @@ let make ~name ~admission ?share_url v =
         (fun k body expected ->
           ladder "put_if_unchanged" (fun () ->
               Uplink.admitted admission Wait ~chunk:false
-                (Bigstring.length body) (fun () ->
+                (Bigstring.length body) (fun _ ->
                   let r =
                     v.put_if_unchanged k body
                       (Option.bind expected (fun (e : Store.entry) -> e.etag))

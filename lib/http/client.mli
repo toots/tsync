@@ -24,12 +24,15 @@ type response = {
   body : Tsync_core.Bigstring.t;
 }
 
-(** [headers] is computed inside the stall timeout, per attempt. [progress] is
-    called for every piece sent or received. *)
+(** [headers] is computed inside the stall timeout, per attempt. [pace] is
+    called with the bytes left before each slice of the body is written, may
+    wait, and returns that slice's length (uplink-governor §4.1); by default the
+    whole body goes at once. *)
 val request :
   ?stall:float ->
   ?max_body:int ->
   ?headers:(unit -> Codec.headers) ->
+  ?pace:(int -> int) ->
   ?body:Tsync_core.Bigstring.t ->
   endpoint ->
   meth:string ->

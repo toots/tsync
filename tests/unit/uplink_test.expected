@@ -3,12 +3,16 @@ admits 1500 at 0: true
 admits 1000 at 0: false, waits 0.50s
 admits 1000 at 0.5: true
 a body over the bucket alone: true
-then the window blocks: waits until a completion
+then the window blocks: true
 after its completion, debt paid by 100s: true
+a 20000 B chunk takes only its overhead: true
+its slices pay for its bytes: spends 1000 at 0: false, at 2.1: true
+slices: 4096 at 1000 B/s, 1048576 at 100 MiB/s, 3000 of 3000 left
 == gate at 1 MiB/s
-4 MiB in 512 KiB bodies: about 2 s (the burst is 2 s of rate)
-a best-effort body beyond the budget: refused
-two chunks in line, then two bodies that are not: admitted as log entry, tree record, chunk 1, chunk 2
+4 MiB in paced 512 KiB chunks: about 2 s (the burst is 2 s of rate)
+a best-effort log entry beyond the budget: refused
+a log entry asked mid-chunk passes before its next slice: true
+two chunks in flight take slices in turn: true
 a disabled link admits at once: true
 == lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s
 three waiting: 333 333 333 (sum 1000)

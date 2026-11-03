@@ -118,11 +118,11 @@ let path t = function
       ^ uri_encode ~keep_slash:true (Key.to_string k)
 
 (* Signed per attempt, so a retry is never stale by the ladder's delays. *)
-let call t ?(headers = []) ?body ?(payload_hash = empty_payload) ?(query = [])
-    ~meth key =
+let call t ?(headers = []) ?pace ?body ?(payload_hash = empty_payload)
+    ?(query = []) ~meth key =
   let path = path t key and query = canonical_query query in
   let target = if query = "" then path else path ^ "?" ^ query in
-  Client.request t.api ~meth ?body target ~headers:(fun () ->
+  Client.request t.api ~meth ?pace ?body target ~headers:(fun () ->
       let time = Unix.gettimeofday () in
       let sent =
         ("x-amz-date", amz_date time)
@@ -191,12 +191,12 @@ let get_opt t k =
     | { status = 404; _ } -> None
     | r -> fail ~op:"get" r
 
-let put_request t ?(headers = []) k body =
+let put_request t ?(headers = []) ?pace k body =
   let payload_hash =
     if t.unsigned_payload then "UNSIGNED-PAYLOAD"
     else Digestif.SHA256.(to_hex (digest_bigstring body))
   in
-  call t ~meth:"PUT" ~body ~payload_hash ~headers (Some k)
+  call t ~meth:"PUT" ?pace ~body ~payload_hash ~headers (Some k)
 
 let claim_retries = 3
 
@@ -529,8 +529,8 @@ let create ~domain ~admission ~name fields =
   Object_store.make ~name ~admission ?share_url:(str "shareUrl")
     {
       put =
-        (fun k body ->
-          let r = put_request t k body in
+        (fun ~pace k body ->
+          let r = put_request t ~pace k body in
           if not (success r.status) then fail ~op:"put" r);
       put_if_absent =
         (fun k body ->

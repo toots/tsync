@@ -188,3 +188,100 @@ let () =
     L.restore (settings ()) ~now:0. ~capacity:(4. *. mib) ~saved_at:(-90000.)
   in
   p "state older than a day starts cold: %s" (mbs (L.rate law))
+
+(* Law and budget together against a bottleneck that carries whatever the
+   sender hands it at line speed, up to its buffer, as TCP does: 8 MiB chunks,
+   at most four open, a probe only while bytes are in flight. *)
+module B = Uplink.Budget
+
+type body = { mutable unhanded : int; mutable undelivered : int; at : float }
+type piece = { body : body; mutable left : int }
+
+let bodies ~paced =
+  let capacity = 8. *. mib and base = 0.009 and buffer = 0.25 in
+  let dt = 0.01 and chunk = 8 * 1024 * 1024 in
+  let law = L.create (settings ()) ~now:0. in
+  let budget = B.create ~rate:(L.rate law) ~now:0. in
+  let handed = Queue.create () in
+  let queued = ref 0 and delivered = ref 0 and now = ref 0. in
+  let open_count = ref 0 in
+  let hand b n =
+    b.unhanded <- b.unhanded - n;
+    Queue.push { body = b; left = n } handed;
+    queued := !queued + n
+  in
+  let delay () =
+    base +. (Float.min (float_of_int !queued) (buffer *. capacity) /. capacity)
+  in
+  let deliver p d =
+    p.left <- p.left - d;
+    p.body.undelivered <- p.body.undelivered - d;
+    queued := !queued - d;
+    delivered := !delivered + d;
+    if p.body.undelivered = 0 then (
+      L.completed law ~now:!now (float_of_int chunk) ~elapsed:(!now -. p.body.at);
+      B.release budget chunk;
+      decr open_count)
+  in
+  let drain () =
+    let rec go room =
+      match Queue.peek_opt handed with
+        | Some p when room > 0 ->
+            let d = min p.left room in
+            deliver p d;
+            if p.left = 0 then ignore (Queue.pop handed);
+            go (room - d)
+        | Some _ | None -> ()
+    in
+    go (int_of_float (capacity *. dt))
+  in
+  let writing = Queue.create () in
+  let step () =
+    while !open_count < 4 && B.admits budget ~now:!now ~chunk:paced chunk do
+      B.take budget ~now:!now ~chunk:paced chunk;
+      let b = { unhanded = chunk; undelivered = chunk; at = !now } in
+      incr open_count;
+      if paced then Queue.push b writing else hand b chunk
+    done;
+    let rec slices () =
+      match Queue.peek_opt writing with
+        | Some b ->
+            let s = B.slice budget ~remaining:b.unhanded in
+            if B.spends budget ~now:!now s then (
+              B.spend budget ~now:!now s;
+              hand b s;
+              ignore (Queue.pop writing);
+              if b.unhanded > 0 then Queue.push b writing;
+              slices ())
+        | None -> ()
+    in
+    slices ();
+    drain ();
+    now := !now +. dt
+  in
+  let mean_rate = ref 0. and samples = ref 0 in
+  for tick = 1 to 150 do
+    let before = !delivered in
+    for _ = 1 to int_of_float (L.tick_interval /. dt) do
+      step ()
+    done;
+    if !open_count > 0 then L.observe_delay law "store" (delay ());
+    L.tick law ~now:!now ~limited:true ~busy:(!open_count > 0);
+    B.set_rate budget ~now:!now (L.rate law);
+    if tick > 90 then (
+      mean_rate :=
+        !mean_rate +. (float_of_int (!delivered - before) /. L.tick_interval);
+      incr samples)
+  done;
+  ( !mean_rate /. float_of_int !samples /. capacity,
+    Option.value ~default:0. (L.capacity law) /. capacity )
+
+let () =
+  p "== 8 MiB chunks on an 8 MiB/s link with a 250 ms buffer, minutes 3 to 5";
+  let show name (carried, measured) =
+    p "%s: carries %.2f of the link (at headroom %b), capacity %.2f of it (%b)"
+      name carried (carried >= 0.7) measured
+      (measured >= 0.7 && measured <= 1.3)
+  in
+  show "paced slices" (bodies ~paced:true);
+  show "whole bodies, the case pacing exists for" (bodies ~paced:false)

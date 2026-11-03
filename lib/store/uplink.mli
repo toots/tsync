@@ -1,6 +1,7 @@
-(** Upload admission per network link (spec algorithms/uplink-governor.md): a
-    token bucket with an in-flight window, a FIFO line that small bodies may
-    pass by a bounded amount, and the delay-driven law setting the rate.
+(** Upload admission and pacing per network link (spec
+    algorithms/uplink-governor.md): a token bucket with an in-flight window,
+    three FIFO lines (bodies that are not chunks, chunks, the slices of admitted
+    chunks), and the delay-driven law setting the rate.
 
     The supervisor is the governor owner: it runs each link's law and splits its
     rate among the processes that lease from it. Every other process leases, and
@@ -39,13 +40,19 @@ val renewal : Uplink_lease.request -> Uplink_lease.answer option
 
 type ticket
 
-(** Suspends until the bytes may be sent; STOPPING once the process stops. A
-    body that is not a [chunk] is admitted before every waiting chunk
-    (uplink-governor §4.3). *)
+(** Suspends until the attempt may start; STOPPING once the process stops. A
+    body that is not a [chunk] is billed whole and admitted before every waiting
+    chunk and slice; a chunk is billed its overhead, then each slice through
+    {!pace} (uplink-governor §4.1, §4.3). *)
 val acquire : t -> chunk:bool -> int -> ticket
 
 (** Admitted now or refused, never waits. *)
 val try_acquire : t -> chunk:bool -> int -> ticket option
+
+(** Suspends until the next slice of a chunk may be written, and returns its
+    length, at most [remaining]; a ticket that is not a chunk's, or a disabled
+    link's, gets [remaining] at once. STOPPING once the process stops. *)
+val pace : t -> ticket -> remaining:int -> int
 
 val completed : t -> ticket -> unit
 val abandoned : t -> ticket -> unit
@@ -55,8 +62,10 @@ val waiting : t -> int
 
 (** One attempt carrying [bytes] upstream, admitted per [mode] and reported
     exactly once; a best-effort attempt refused admission is cancelled without
-    running. *)
-val admitted : t -> Store.mode -> chunk:bool -> int -> (unit -> 'a) -> 'a
+    running. The attempt is handed its {!pace}, which the writer calls before
+    every slice of the body. *)
+val admitted :
+  t -> Store.mode -> chunk:bool -> int -> ((int -> int) -> 'a) -> 'a
 
 type link_state = [ `Ramping | `Steady | `Backing_off | `Leased ]
 type limit = Uplink_law.limit = Configured | Measured | Estimating
@@ -103,8 +112,15 @@ module Budget : sig
   type t
 
   val create : rate:float -> now:float -> t
-  val admits : t -> now:float -> int -> bool
-  val take : t -> now:float -> int -> unit
+  val fits : t -> int -> bool
+  val admits : t -> now:float -> chunk:bool -> int -> bool
+  val take : t -> now:float -> chunk:bool -> int -> unit
+  val spends : t -> now:float -> int -> bool
+  val spend : t -> now:float -> int -> unit
+
+  (** The next slice of a chunk with [remaining] bytes left to write. *)
+  val slice : t -> remaining:int -> int
+
   val release : t -> int -> unit
   val wait_for : t -> now:float -> int -> float
   val set_rate : t -> now:float -> float -> unit

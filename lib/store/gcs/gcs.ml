@@ -77,9 +77,9 @@ type t = {
 let success s = s >= 200 && s < 300
 
 (* §2: a 401 means the token was rejected; one fresh token, one more try. *)
-let call t ?(headers = []) ?body ~meth target =
+let call t ?(headers = []) ?pace ?body ~meth target =
   let send tok =
-    Tsync_http.Client.request t.api ~meth ?body target ~headers:(fun () ->
+    Tsync_http.Client.request t.api ~meth ?pace ?body target ~headers:(fun () ->
         headers
         @
           match tok with
@@ -124,8 +124,8 @@ let get_opt t k =
     | { status = 404; _ } -> None
     | r -> fail ~op:"get" r
 
-let upload t ?(extra = "") k body =
-  call t ~meth:"POST" ~body
+let upload t ?(extra = "") ?pace k body =
+  call t ~meth:"POST" ?pace ~body
     ~headers:[("content-type", "application/octet-stream")]
     (Printf.sprintf "/upload/storage/v1/b/%s/o?uploadType=media&name=%s%s"
        (segment t.bucket)
@@ -338,8 +338,8 @@ let create ~domain:_ ~admission ~name fields =
   Tsync_store.Object_store.make ~name ~admission ?share_url:(str "shareUrl")
     {
       put =
-        (fun k body ->
-          let r = upload t k body in
+        (fun ~pace k body ->
+          let r = upload t ~pace k body in
           if not (success r.status) then fail ~op:"put" r);
       put_if_absent = put_if_absent t;
       put_if_unchanged = put_if_unchanged t;
