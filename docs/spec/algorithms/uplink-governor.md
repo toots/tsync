@@ -36,7 +36,7 @@ Non-goals:
 ## 2. System model and assumptions
 
 - **A1 One bottleneck per link.** All stores naming one link share one bottleneck queue. Different links are independent paths, and a store sits on exactly one link. Stores on one link may be at different network distances, so each has its own base round-trip time.
-- **A2 Bodies are opaque and written in slices.** An upload attempt is one request, answered only after the whole body arrived. The transport writes the body in slices, each when the governor allows it. Its timeout is a **stall detector**: it fires after STALL_TIMEOUT with no progress, and a request slice accepted by the transport is progress ([01 §10](../01-core.md#10-http-request-discipline)). Time spent waiting for admission, before the request starts, is outside the detector.
+- **A2 Bodies are opaque and written in slices.** An upload attempt is one request, answered only after the whole body arrived. The transport writes the body in slices, each when the governor allows it. Its timeout is a **stall detector**: it fires after STALL_TIMEOUT with no progress, and a request slice accepted by the transport is progress ([01 §10](../01-core.md#10-http-request-discipline)). Time spent waiting for the governor, for admission or for a slice, is outside the detector: the wait is local, and says nothing about the link.
 - **A3 Completion is observable per attempt.** For every admitted attempt the sender learns once whether it was answered, and after how long, or abandoned. Every attempt, retries included, is admitted ([06-backends.md](../06-backends.md) admission seam).
 - **A4 Delay is observable only by probing.** The signal is the round-trip time of a small, idempotent metadata read of a key every store holds (the domain cursor). It carries the bottleneck's queue on the request path, plus propagation, plus server time. Probes are billed requests, so they are sent only while bytes are in flight.
 - **A5 Foreign traffic is invisible except through delay.**
@@ -94,7 +94,7 @@ t := try_acquire(class, bytes + REQUEST_OVERHEAD) -- best effort: admitted now, 
 - **Billing by class.** A body that is not a chunk is billed whole at admission and written without pacing: it is small, and G7 wants it out first. A chunk is billed REQUEST_OVERHEAD at admission and each slice as it is paced, so its bytes reach the transport at the granted rate rather than at line speed.
 - **Slice size.** A slice is at most `max(MIN_SLICE, share_rate · SLICE_TIME)` bytes, taken at the time of the call. A slice sent at line speed `L` then adds at most `slice / L` of queue: below SLICE_TIME whenever the share exceeds `MIN_SLICE / SLICE_TIME`, and one MIN_SLICE of queue below it.
 - The writer MUST call `pace` for every slice of a chunk, retries included, and MUST NOT write a slice before its `pace` returns. A `pace` that fails STOPPING ends the attempt, which reports `abandoned`.
-- `try_acquire` checks and takes in one atomic step. A refusal sets `held_back` and counts one drop.
+- `try_acquire` checks and takes in one atomic step. A refusal sets `held_back` and counts one drop. A chunk is admitted by it only while the bucket holds its whole body, or a full bucket, as a body that is not a chunk would be: best effort uses spare rate, never a share of it. Once admitted, it pays by slices like any chunk.
 - The caller MUST report every ticket exactly once. A leaked ticket keeps its bytes in flight and can close the window for good.
 - REQUEST_OVERHEAD bills request headers, framing and the round trip, so a flood of tiny writes is paced too.
 - A disabled link admits at once without touching the budget.
@@ -129,11 +129,12 @@ set_rate(r)  = refill at the old rate; share_rate = max(1 B/s, r); tokens = min(
 ### 4.3 Gate: three FIFO lines
 
 ```
-next()   = first non-empty                                → the head of first, if budget.admits(first, it), else none
-           chunks non-empty ∧ budget.admits(chunk, head)  → the head of chunks
-           slices non-empty ∧ budget.spends(head)         → the head of slices
-           otherwise                                      → none
-due(w)   = w is the head of its line ∧ every line ahead of it is empty, or its head is held only by the window
+window_bound(l, w) = l ≠ slices ∧ ¬budget.fits(w.bytes)   -- only a completion can admit it
+unblocked(l)       = for every line before l (first, then chunks): it is empty,
+                     or l = slices and its head is window_bound
+next()   = the first line, in the order first, chunks, slices, whose head is unblocked and ready:
+           budget.admits(class, head) for first and chunks, budget.spends(head) for slices
+due(w)   = the line of w is empty ∧ unblocked(line of w)
 
 acquire(c, b):
   if due(new waiter) ∧ budget.admits(c, b):       -- check and take in one step
@@ -150,7 +151,7 @@ pace(ticket, s):
 pump():  while (w = next()) exists:
              pop w; take (first, chunks) or spend (slices) its bytes; wake(w)
 arm():   if not armed:
-             w = least budget.wait_for over the heads that next() would consider, a chunk head only if budget.fits it
+             w = least budget.wait_for of the heads that are not window_bound, for what each is billed
              if some: armed = true; after max(w, 1 ms): armed = false; pump(); arm()
              -- none: every head is window-bound, and only a completion can help
 left(ticket, answered, elapsed):
@@ -159,7 +160,7 @@ left(ticket, answered, elapsed):
 fail_waiting(kind):  wake every queued waiter of every line with kind, having taken nothing
 ```
 
-- **Ordering.** Each line is FIFO. Nothing passes while a body waits in `first` (G7): no chunk is admitted and no slice is written. A chunk waiting for admission comes before the slices of chunks already admitted, since admitting it takes only REQUEST_OVERHEAD; a chunk held by the window lets the slices pass. Slices of several admitted chunks are served in the order they were asked, so concurrent chunks progress in turn. The class is what the body is, never its size: a commit must not wait behind the content of the next one.
+- **Ordering.** Each line is FIFO, and nothing passes the head of a line. Nothing passes a body waiting in `first` (G7): no chunk is admitted and no slice is written, unless that body is held only by the window, which only a completion can open and a completion needs the slices to go. A chunk waiting for admission comes before the slices of chunks already admitted, since admitting it takes only REQUEST_OVERHEAD; a chunk held by the window lets the slices pass too. Neither a window-bound body nor a window-bound chunk lets a chunk be admitted. Slices of several admitted chunks are served in the order they were asked, so concurrent chunks progress in turn. The class is what the body is, never its size: a commit must not wait behind the content of the next one.
 - **Timers.** One timer at most. A refill-bound head is woken by the timer, a window-bound head by the completion that frees space. Every rate change is followed by `pump` and `arm`.
 - **Demand.** `held_back` records that some body or slice had to wait, or was refused, since the flag was last read. It is the governor's only demand signal. A report's `waiting` counts the waiters of every line.
 
@@ -343,8 +344,8 @@ Per link: `enabled`, `state` (`ramping`, `steady`, `backingOff`, or `leased`), `
 ### 5.1 Safety
 
 - **S1 Writing never exceeds the budget.** Over any interval `[t₀, t₁]` a process hands the transport at most `burst + share_rate·(t₁ − t₀)` bytes plus one oversize body's debt, overheads included: tokens are earned only by refill, an admission takes its full bill, and every slice takes its size before it is written. `in_flight ≤ max(window, largest single body)`. Both rest on check-then-take being one step, which `acquire`, `try_acquire` and `pace` guarantee.
-- **S2 No body waits forever while others pass.** Within a line nothing passes the head. A chunk waits only while bodies of `first` do, and those are finite: each follows from content already uploaded or from a peer's entry. A refill-bound head has an armed timer, and a window-bound head has bytes in flight whose ticket will pump.
-- **S3 Deliverability (G5).** Slices are served in turn, so an admitted chunk writes a slice at least every `n · slice / share_rate` for `n` chunks in flight, and each written slice is progress for the stall detector. A chunk shorter than a slice is written as one slice of its own size, so `n · slice ≤ in_flight ≤ window`, and the gap stays below `STALL_TIMEOUT · WINDOW_SAFETY` however slow the granted rate; a lone body larger than the window has `n = 1` and a gap of one slice time. A chunk slower in total than STALL_TIMEOUT is therefore never cut for being paced. When the link drains slower than the rate, the transport stops accepting slices, and the resulting timeout is exactly the signal that cuts the rate.
+- **S2 No body waits forever while others pass.** Within a line nothing passes the head. A head held by the window lets only slices pass, and those slices complete the chunks whose window it waits for. A chunk waits only while bodies of `first` do, and those are finite: each follows from content already uploaded or from a peer's entry. A refill-bound head has an armed timer, and a window-bound head has bytes in flight whose ticket will pump.
+- **S3 Deliverability (G5).** The stall detector measures only the link: a slice written is progress, and a wait for the governor is outside it (A2). A paced chunk therefore fails only when the transport stops accepting its slices, never for being paced slowly, after a rate cut or behind bodies of `first`. The window bounds how long an admitted body stays open: slices are served in turn, a chunk shorter than a slice is one slice, so `n · slice ≤ in_flight ≤ window` for `n` chunks in flight, and everything in flight crosses within `STALL_TIMEOUT · WINDOW_SAFETY` at the rate granted at admission. When the link drains slower than the rate, the transport stops accepting slices, and the resulting timeout is exactly the signal that cuts the rate.
 - **S4 Rate bounds.** After every tick, `min_rate ≤ rate ≤ max_rate`, `rate ≥ DECREASE_FLOOR × previous rate` unless `min_rate` lifts it, and `share_rate ≥ 1 B/s`.
 - **S5 Growth only under demand (G4).** The rate grows only if some party was held back since the last step and bytes completed within RATE_WINDOW. An idle or trickling process holds its rate.
 - **S6 Retries are paced.** Every attempt is admitted and reported, and every slice of it paced, so the admitted volume is the volume sent.
@@ -480,12 +481,12 @@ Counts are idempotent where it matters: tickets report once, `held_back` is spen
 An implementation MUST exhibit:
 
 - **Budget.** Full at birth (BURST_SECONDS of rate); an oversize body that is not a chunk is admitted on a full bucket and its debt is paid before the next; a chunk's admission takes REQUEST_OVERHEAD and each slice its size; the long-run rate holds; window = `STALL_TIMEOUT · WINDOW_SAFETY · rate`; a lone oversize body passes when nothing is in flight; a rate change keeps earned tokens and clips the depth; the rate floor is 1 B/s.
-- **Gate.** FIFO order within each line; with a chunk and a log entry both waiting, the log entry is admitted first whatever their sizes and arrival order, and so is every later body that is not a chunk; a log entry asked while a chunk is mid-body is admitted before that chunk's next slice; two admitted chunks alternate slices; a window-bound chunk head does not hold slices back; a slice that waited sets `held_back`; a head blocked by the window is woken by a completion; `try_acquire` takes atomically, and a refusal counts a drop; `fail_waiting` fails every waiter having taken nothing; a disabled link's tickets release nothing.
+- **Gate.** FIFO order within each line; with a chunk and a log entry both waiting, the log entry is admitted first whatever their sizes and arrival order, and so is every later body that is not a chunk; a log entry asked while a chunk is mid-body is admitted before that chunk's next slice; a body that is not a chunk asked after another never passes it; a body of `first` held by a full window lets the slices of the chunks in flight go, and is admitted once they complete; two admitted chunks alternate slices; a window-bound head does not hold slices back and arms no timer; a best-effort chunk is refused while the bucket cannot hold its whole body; a slice that waited sets `held_back`; a head blocked by the window is woken by a completion; `try_acquire` takes atomically, and a refusal counts a drop; `fail_waiting` fails every waiter having taken nothing; a disabled link's tickets release nothing.
 - **Law, driven against a simulated fluid link on a fake clock.** A doubling first ramp; steady within 40 s at headroom of the measured capacity with the queue drained; lowering to a competing share and recovering within a probe interval; a timeout halves the rate, holds 10 s, then ramps; no tick lowers the rate by more than DECREASE_FLOOR; a `maxRate` ceiling is reported `configured`; the `minRate` floor holds; no growth without being held back or without completions; base delay learnt, and a standing queue held for longer than BASE_WINDOW raises the effective baseline by at most BASE_MAX_RISE per window; a held-down near store does not cut; no samples while busy holds `queueing`.
 - **Lease.** An even split among waiting parties; the floor for an idle party; 1.25× use for a mover; the leftover shared; grants summing to the total with floors included; a newcomer answered from an immediate re-split; a row dropped at once when its pid is gone and after LEASE_TTL of silence; `heldBack` spent by one split; old report and answer shapes read as specified.
 - **Modes.** Two missed renewals keep a lessee Leased, the third makes it Local; a refusal makes it Local at once; a Local process takes the governor lock when it is free; the owner probes on behalf of a busy lessee; cuts are per link; one request renews every link.
 - **Restart.** A law with fresh saved state starts at `RESTORE_FRACTION · headroom · capacity` with ×1.25 steps; stale or missing state starts cold.
-- **Pacing.** A chunk of many times the bucket is handed to the transport over `size / share_rate`, never faster than the bucket allows, in slices of at most `max(MIN_SLICE, share_rate · SLICE_TIME)`; a slice is never written before its `pace` returns; `pace` on a disabled link returns at once; `fail_waiting` fails a waiting slice and its attempt reports `abandoned`; a chunk paced for longer than STALL_TIMEOUT is not cut by the stall detector.
+- **Pacing.** A chunk of many times the bucket is handed to the transport over `size / share_rate`, never faster than the bucket allows, in slices of at most `max(MIN_SLICE, share_rate · SLICE_TIME)`; a slice is never written before its `pace` returns; `pace` on a disabled link returns at once; `fail_waiting` fails a waiting slice and its attempt reports `abandoned`; a slice that waits for the governor longer than STALL_TIMEOUT does not fail its request, while a transport that stops accepting slices still does; a `pace` that fails STOPPING on a pooled connection is not taken for a dead connection, and the request is not sent again.
 - **Law and pacer together, against a simulated link with a buffer and line-rate transmission, chunks of several times the bucket, and probes only while bytes are in flight.** The rate settles at headroom of the link's capacity, `C` is not lowered while no foreign traffic is present, and the queue stays below the target.
 - **Retries.** A retried upload attempt is admitted and reported again, and its slices paced again.
 
