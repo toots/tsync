@@ -11,8 +11,8 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | One attempt, admitted and reported once | `Uplink.admitted`, called by `Object_store.make` inside `Retry.ladder`, so a retry is admitted again, and by `request` in `http_proxy/http_proxy_client.ml` |
 | A store without a link | `Uplink.none` |
 | Store → link wiring, probe | `create_store` in `lib/domain/domain.ml`: `Uplink.link`, then `Uplink.attach` with a `head_opt` of the domain cursor and the store's `Health.t` |
-| Budget (§4.2) | `Uplink.Budget` (`create`, `admits`, `take`, `release`, `wait_for`, `set_rate`); `burst_seconds`, `stall_timeout`, `window_safety` |
-| Gate (§4.3) | the lines `first` and `chunks`, `head_line`, `room`, `take_now`, `pump`, `arm`, `left` in `uplink.ml`; the class is the `~chunk` argument of `acquire` and `admitted` |
+| Budget (§4.2) | `Uplink.Budget` (`create`, `fits`, `admits`, `take`, `spends`, `spend`, `slice`, `release`, `wait_for`, `set_rate`); `burst_seconds`, `stall_timeout`, `window_safety`, `slice_time`, `min_slice` |
+| Gate (§4.3) | the lines `first`, `chunks` and `slices`, `next`, `room`, `enter`, `await_turn`, `pump`, `arm`, `left` in `uplink.ml`; the class is the `~chunk` argument of `acquire` and `admitted`; `pace` serves the slices, and `admitted` hands it to the attempt, which passes it to `Tsync_http.Client.request ~pace` |
 | Law (§4.4) | `Uplink_law`: `tick`, `completed`, `observe_delay`, `timed_out`, `rate`, `phase`, `capacity`, `queueing`, `achieved`, `limit`, `base_delay`; the signal filter is `filter` |
 | Report, split, wire shapes (§4.5) | `Uplink_lease`: `report`, `wants`, `split`, `request`, `answer`, `grant`, their JSON codecs, `default_link` for the flat shape |
 | Modes | `Uplink.own`, `Uplink.lease`, `Uplink.renewal`; `set_mode`, `renew`; `missed_before_local`, `renewal_timeout`, `local_retry` |

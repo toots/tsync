@@ -3,6 +3,7 @@ open Tsync_http
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let finished = Atomic.make 0
+let received = Atomic.make ""
 
 let handler (r : Server.request) read_body : Server.response =
   match r.path with
@@ -18,6 +19,9 @@ let handler (r : Server.request) read_body : Server.response =
     | "/echo" ->
         let body = Bigstring.to_string (read_body ~limit:16) in
         Server.text 200 (Printf.sprintf "%s %s %S" r.meth r.query body)
+    | "/keep" ->
+        Atomic.set received (Bigstring.to_string (read_body ~limit:max_int));
+        Server.text 200 "kept"
     | "/peer" -> Server.text 200 r.peer
     | "/host" ->
         Server.text 200
@@ -79,6 +83,46 @@ let () =
       show (Client.request e ~meth:"HEAD" "/echo");
       show (Client.request e ~meth:"GET" "/stream");
       show (Client.request e ~meth:"GET" "/nothing");
+      p "== a paced body is written slice by slice, each when its pace returns";
+      let body = String.init 300_000 (fun i -> Char.chr (i * 7 mod 251)) in
+      let calls = ref 0 in
+      let pace remaining =
+        incr calls;
+        min remaining 7_000
+      in
+      ignore
+        (Client.request e ~meth:"PUT" ~pace ~body:(Bigstring.of_string body)
+           "/keep");
+      p "  arrived intact: %b, in %d slices (%d expected)"
+        (Atomic.get received = body)
+        !calls
+        ((300_000 + 6_999) / 7_000);
+      let slow remaining =
+        Rt.sleep 0.4;
+        min remaining 1_000
+      in
+      p "  paced for 2 s under a 1 s stall timeout, each slice within it: %s"
+        (match
+           Client.request ~stall:1. e ~meth:"PUT" ~pace:slow
+             ~body:(Bigstring.of_string (String.make 5_000 'p'))
+             "/keep"
+         with
+          | r ->
+              Printf.sprintf "%d, %b" r.status
+                (Atomic.get received = String.make 5_000 'p')
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind);
+      let stuck remaining =
+        Rt.sleep 1.3;
+        remaining
+      in
+      p "  a slice that waits past the stall timeout: %s"
+        (match
+           Client.request ~stall:1. e ~meth:"PUT" ~pace:stuck
+             ~body:(Bigstring.of_string "late")
+             "/keep"
+         with
+          | r -> Printf.sprintf "delivered %d" r.status
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind);
       p
         "== a stream's resources are released whether or not its body is \
          written";

@@ -3,75 +3,124 @@ open Tsync_store
 module B = Uplink.Budget
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
+let mib = 1024 * 1024
+
+let link name =
+  let rate = float_of_int mib in
+  Uplink.link name
+    {
+      enabled = true;
+      law =
+        {
+          headroom = 0.8;
+          target_delay = 0.05;
+          min_rate = rate;
+          max_rate = Some rate;
+        };
+    }
+
+(* A writer that asks [pace] before each slice, as the HTTP client does. *)
+let send ?(on_slice = fun _ -> ()) link ~chunk bytes =
+  Uplink.admitted link Wait ~chunk bytes (fun pace ->
+      let rec go remaining =
+        if remaining > 0 then (
+          let len = pace remaining in
+          on_slice len;
+          go (remaining - len))
+      in
+      go bytes)
 
 let () =
   p "== budget (uplink-governor §4.2), 1000 B/s: burst 2000, window 30000";
   let b = B.create ~rate:1000. ~now:0. in
-  p "admits 1500 at 0: %b" (B.admits b ~now:0. 1500);
-  B.take b ~now:0. 1500;
-  p "admits 1000 at 0: %b, waits %.2fs" (B.admits b ~now:0. 1000)
+  p "admits 1500 at 0: %b" (B.admits b ~now:0. ~chunk:false 1500);
+  B.take b ~now:0. ~chunk:false 1500;
+  p "admits 1000 at 0: %b, waits %.2fs"
+    (B.admits b ~now:0. ~chunk:false 1000)
     (B.wait_for b ~now:0. 1000);
-  p "admits 1000 at 0.5: %b" (B.admits b ~now:0.5 1000);
+  p "admits 1000 at 0.5: %b" (B.admits b ~now:0.5 ~chunk:false 1000);
   B.release b 1500;
   let big = B.create ~rate:1000. ~now:0. in
-  p "a body over the bucket alone: %b" (B.admits big ~now:0. 50_000);
-  B.take big ~now:0. 50_000;
-  p "then the window blocks: waits %s"
-    (let w = B.wait_for big ~now:100. 100 in
-     if w = infinity then "until a completion" else string_of_float w);
+  p "a body over the bucket alone: %b"
+    (B.admits big ~now:0. ~chunk:false 50_000);
+  B.take big ~now:0. ~chunk:false 50_000;
+  p "then the window blocks: %b" (not (B.fits big 100));
   B.release big 50_000;
-  p "after its completion, debt paid by 100s: %b" (B.admits big ~now:100. 100);
+  p "after its completion, debt paid by 100s: %b"
+    (B.admits big ~now:100. ~chunk:false 100);
+  let c = B.create ~rate:1000. ~now:0. in
+  B.take c ~now:0. ~chunk:true 20_000;
+  p "a 20000 B chunk takes only its overhead: %b" (B.spends c ~now:0. 900);
+  B.spend c ~now:0. 2000;
+  let at_once = B.spends c ~now:0. 1000 in
+  let later = B.spends c ~now:2.1 1000 in
+  p "its slices pay for its bytes: spends 1000 at 0: %b, at 2.1: %b" at_once
+    later;
+  p "slices: %d at 1000 B/s, %d at 100 MiB/s, %d of 3000 left"
+    (B.slice c ~remaining:max_int)
+    (let f = B.create ~rate:(100. *. float_of_int mib) ~now:0. in
+     B.slice f ~remaining:max_int)
+    (B.slice c ~remaining:3000);
   p "== gate at 1 MiB/s";
   Rt.run_sync (fun () ->
-      let link =
-        let mib = 1024. *. 1024. in
-        Uplink.link "test"
-          {
-            enabled = true;
-            law =
-              {
-                headroom = 0.8;
-                target_delay = 0.05;
-                min_rate = mib;
-                max_rate = Some mib;
-              };
-          }
-      in
+      let l = link "test" in
       let t0 = Rt.now () in
-      List.iter
-        (fun _ ->
-          let tk = Uplink.acquire link ~chunk:true (512 * 1024) in
-          Uplink.completed link tk)
-        (List.init 8 Fun.id);
+      List.iter (fun _ -> send l ~chunk:true (512 * 1024)) (List.init 8 Fun.id);
       let took = Rt.now () -. t0 in
-      p "4 MiB in 512 KiB bodies: %s"
+      p "4 MiB in paced 512 KiB chunks: %s"
         (if took > 1.6 && took < 2.8 then "about 2 s (the burst is 2 s of rate)"
          else Printf.sprintf "%.2fs" took);
-      p "a best-effort body beyond the budget: %s"
-        (match Uplink.try_acquire link ~chunk:true (8 * 1024 * 1024) with
+      p "a best-effort log entry beyond the budget: %s"
+        (match Uplink.try_acquire l ~chunk:false (8 * mib) with
           | Some _ -> "admitted"
           | None -> "refused");
-      (* The budget is spent: each body below waits about a second for its
-         megabyte, long after all four are in line. *)
-      let order = ref [] and m = Mutex.create () in
-      let waiter name ~chunk =
-        let w =
-          Rt.async (fun () ->
-              let tk = Uplink.acquire link ~chunk (1024 * 1024) in
-              Mutex.protect m (fun () -> order := name :: !order);
-              Uplink.completed link tk)
-        in
-        Rt.sleep 0.05;
-        w
+      (* The bucket is spent: the chunk below is mid-body, its next slice
+         waiting, when the log entry is asked. *)
+      let entry_asked = ref infinity and entry_in = ref infinity in
+      let late_slices = ref 0 in
+      let chunk =
+        Rt.async (fun () ->
+            send l ~chunk:true mib ~on_slice:(fun _ ->
+                let now = Rt.now () in
+                if now > !entry_asked && now < !entry_in then incr late_slices))
       in
-      let first_chunk = waiter "chunk 1" ~chunk:true in
-      let second_chunk = waiter "chunk 2" ~chunk:true in
-      let entry = waiter "log entry" ~chunk:false in
-      let record = waiter "tree record" ~chunk:false in
-      let waiters = [first_chunk; second_chunk; entry; record] in
-      List.iter Rt.Promise.await waiters;
-      p "two chunks in line, then two bodies that are not: admitted as %s"
-        (String.concat ", " (List.rev !order));
+      Rt.sleep 0.2;
+      entry_asked := Rt.now ();
+      send l ~chunk:false (256 * 1024) ~on_slice:(fun _ ->
+          entry_in := Rt.now ());
+      Rt.Promise.await chunk;
+      p "a log entry asked mid-chunk passes before its next slice: %b"
+        (!late_slices = 0 && !entry_in < infinity);
+      let order = ref [] and m = Mutex.create () in
+      let writer name =
+        Rt.async (fun () ->
+            send l ~chunk:true (256 * 1024) ~on_slice:(fun _ ->
+                Mutex.protect m (fun () -> order := name :: !order)))
+      in
+      let a = writer 'a' and b = writer 'b' in
+      Rt.Promise.await a;
+      Rt.Promise.await b;
+      let seq = List.rev !order in
+      (* After the first writer's burst, while both have slices left: a writer
+         woken but not yet asking again can let the other take two in a row. *)
+      let rec after_burst = function
+        | x :: (y :: _ as rest) when x = y -> after_burst rest
+        | l -> l
+      in
+      let rec until_one_left acc = function
+        | x :: rest when List.mem (if x = 'a' then 'b' else 'a') rest ->
+            until_one_left (x :: acc) rest
+        | _ -> List.rev acc
+      in
+      let both = until_one_left [] (after_burst seq) in
+      let rec longest_run best run = function
+        | x :: (y :: _ as rest) ->
+            let run = if x = y then run + 1 else 1 in
+            longest_run (max best run) run rest
+        | _ -> best
+      in
+      p "two chunks in flight take slices in turn: %b"
+        (List.length both > 20 && longest_run 1 1 both <= 2);
       p "a disabled link admits at once: %b"
         (let u =
            Uplink.link "open"
@@ -86,7 +135,8 @@ let () =
                  };
              }
          in
-         Uplink.try_acquire u ~chunk:true (1 lsl 40) <> None))
+         let tk = Uplink.acquire u ~chunk:true (1 lsl 40) in
+         Uplink.pace u tk ~remaining:(1 lsl 40) = 1 lsl 40))
 
 module Lease = Uplink_lease
 

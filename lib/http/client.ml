@@ -137,18 +137,26 @@ let link fmt = Fail.raise_ Fail.Link fmt
 
 (* 01 §10: request-body bytes accepted by the socket are progress, so a slow
    uplink sending a large body never reads as a stall. *)
-let write_body ~progress t body =
-  let slice = 65536 in
-  let rec go off =
-    if off < Bigstring.length body then (
-      let len = min slice (Bigstring.length body - off) in
+let write_body ~progress ~pace t body =
+  let piece = 65536 in
+  let rec write off stop =
+    if off < stop then (
+      let len = min piece (stop - off) in
       Transport.write t (Bigstring.sub body ~off ~len);
       progress ();
-      go (off + len))
+      write (off + len) stop)
+  in
+  let rec go off =
+    let remaining = Bigstring.length body - off in
+    if remaining > 0 then (
+      let granted = max 1 (min remaining (pace remaining)) in
+      write off (off + granted);
+      go (off + granted))
   in
   go 0
 
-let exchange ~max_body e c ~progress ~meth ~target ~headers ~body ~reused =
+let exchange ~max_body e c ~progress ~pace ~meth ~target ~headers ~body ~reused
+    =
   let b = Buffer.create 256 in
   let head =
     [("host", e.authority)]
@@ -165,7 +173,7 @@ let exchange ~max_body e c ~progress ~meth ~target ~headers ~body ~reused =
     head;
   (try
      Transport.write_string c.t (Buffer.contents b);
-     Option.iter (write_body ~progress c.t) body
+     Option.iter (write_body ~progress ~pace c.t) body
    with e when reused && not (Rt.is_cancelled e) -> raise Dead_before_answer);
   let head =
     match Codec.read_head ~limit:65536 c.reader with
@@ -206,7 +214,7 @@ let exchange ~max_body e c ~progress ~meth ~target ~headers ~body ~reused =
    nothing at all; only then is the request sent again, on a fresh one, with
    headers made again so that a signature is as fresh as the attempt. *)
 let request ?(stall = default_stall) ?(max_body = max_int)
-    ?(headers = fun () -> []) ?body e ~meth target =
+    ?(headers = fun () -> []) ?(pace = Fun.id) ?body e ~meth target =
   Rt.Semaphore.with_slot e.slots (fun () ->
       try
         Rt.with_stall_timeout stall (fun progress ->
@@ -214,8 +222,8 @@ let request ?(stall = default_stall) ?(max_body = max_int)
               let headers = headers () in
               progress ();
               match
-                exchange ~max_body e c ~progress ~meth ~target ~headers ~body
-                  ~reused
+                exchange ~max_body e c ~progress ~pace ~meth ~target ~headers
+                  ~body ~reused
               with
                 | r, keep ->
                     if keep then put_idle e c else Transport.close c.t;

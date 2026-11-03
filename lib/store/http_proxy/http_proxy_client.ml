@@ -92,9 +92,9 @@ let request ?(mode = Store.Wait) ?(chunk = false) ?(headers = []) t ~meth
   in
   (* Counted once answered: an attempt that never reached the peer sent
      nothing. *)
-  let send () =
+  let send pace =
     let r =
-      Tsync_http.Client.request ~stall:stall_timeout t.endpoint ~meth
+      Tsync_http.Client.request ~stall:stall_timeout ~pace t.endpoint ~meth
         ?body:(if meth = "PUT" || meth = "POST" then Some body else None)
         ~headers:(fun () ->
           headers @ W.sign ~secret:t.secret ~meth ~target body)
@@ -104,7 +104,7 @@ let request ?(mode = Store.Wait) ?(chunk = false) ?(headers = []) t ~meth
     r
   in
   let r =
-    if Bigstring.length body = 0 then send ()
+    if Bigstring.length body = 0 then send Fun.id
     else Uplink.admitted t.admission mode ~chunk (Bigstring.length body) send
   in
   ignore (Atomic.fetch_and_add t.traffic.downloaded (Bigstring.length r.body));

@@ -5,6 +5,10 @@
   200 ""
   200 "one two three" (chunked)
   404 "not found\n"
+== a paced body is written slice by slice, each when its pace returns
+  arrived intact: true, in 43 slices (43 expected)
+  paced for 2 s under a 1 s stall timeout, each slice within it: 200, true
+  a slice that waits past the stall timeout: refused: transient/link
 == a stream's resources are released whether or not its body is written
   200 "body" (chunked)
   200 "" (chunked)

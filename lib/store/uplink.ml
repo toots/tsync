@@ -6,6 +6,8 @@ let burst_seconds = 2.
 let stall_timeout = 60.
 let window_safety = 0.5
 let request_overhead = 1024
+let slice_time = 0.01
+let min_slice = 4096
 let missed_before_local = 3
 let renewal_timeout = 1.
 let local_retry = 30.
@@ -35,24 +37,35 @@ module Budget = struct
   (* A body larger than the bucket needs only a full one; the excess is debt. *)
   let asks t b = Float.min (float_of_int b) (burst t)
 
-  let window_admits t b =
-    t.in_flight = 0 || float_of_int (t.in_flight + b) <= window t
+  (* §4.1: a chunk pays for its bytes slice by slice, through [spend]. *)
+  let bill ~chunk b = if chunk then request_overhead else b
+  let fits t b = t.in_flight = 0 || float_of_int (t.in_flight + b) <= window t
 
-  let admits t ~now b =
+  let admits t ~now ~chunk b =
     refill t ~now;
-    t.tokens >= asks t b && window_admits t b
+    t.tokens >= asks t (bill ~chunk b) && fits t b
 
-  let take t ~now b =
+  let take t ~now ~chunk b =
     refill t ~now;
-    t.tokens <- t.tokens -. float_of_int b;
+    t.tokens <- t.tokens -. float_of_int (bill ~chunk b);
     t.in_flight <- t.in_flight + b
+
+  let spends t ~now s =
+    refill t ~now;
+    t.tokens >= asks t s
+
+  let spend t ~now s =
+    refill t ~now;
+    t.tokens <- t.tokens -. float_of_int s
+
+  let slice t ~remaining =
+    min remaining (max min_slice (int_of_float (t.rate *. slice_time)))
 
   let release t b = t.in_flight <- max 0 (t.in_flight - b)
 
   let wait_for t ~now b =
     refill t ~now;
-    if not (window_admits t b) then infinity
-    else Float.max 0. ((asks t b -. t.tokens) /. t.rate)
+    Float.max 0. ((asks t b -. t.tokens) /. t.rate)
 
   let set_rate t ~now r =
     refill t ~now;
@@ -81,6 +94,7 @@ type gate = {
   budget : Budget.t;
   first : waiter Queue.t;
   chunks : waiter Queue.t;
+  slices : waiter Queue.t;
   mutable armed : bool;
   mutable law : Law.t;
   mutable used : bool;
@@ -96,7 +110,7 @@ type gate = {
 }
 
 type t = Open | Governed of gate
-type ticket = { taken : int; at : float }
+type ticket = { taken : int; at : float; chunk : bool }
 type mode = Owner | Leased | Local
 
 (* Process-wide governor state (§3), guarded by [proc_m]. *)
@@ -155,6 +169,7 @@ let create_gate name settings =
     budget = Budget.create ~rate:(Law.rate law) ~now;
     first = Queue.create ();
     chunks = Queue.create ();
+    slices = Queue.create ();
     armed = false;
     law;
     used = false;
@@ -180,43 +195,105 @@ let link name s =
             Hashtbl.replace links name t;
             t)
 
-(* §4.3: two FIFO lines, chunks last. *)
-let head_line g = if Queue.is_empty g.first then g.chunks else g.first
-let waiting_in g = Queue.length g.first + Queue.length g.chunks
+(* §4.3: three FIFO lines, served first, then chunks, then slices. *)
+type line = First | Chunk | Slice
+
+let queue g = function
+  | First -> g.first
+  | Chunk -> g.chunks
+  | Slice -> g.slices
+
+let waiting_in g =
+  Queue.length g.first + Queue.length g.chunks + Queue.length g.slices
+
+let ready g line bytes =
+  let now = Rt.now () in
+  match line with
+    | First -> Budget.admits g.budget ~now ~chunk:false bytes
+    | Chunk -> Budget.admits g.budget ~now ~chunk:true bytes
+    | Slice -> Budget.spends g.budget ~now bytes
+
+let charge g line bytes =
+  let now = Rt.now () in
+  match line with
+    | First -> Budget.take g.budget ~now ~chunk:false bytes
+    | Chunk -> Budget.take g.budget ~now ~chunk:true bytes
+    | Slice -> Budget.spend g.budget ~now bytes
+
+(* A chunk head held only by the window lets the slices pass. *)
+let passable g line w =
+  match line with
+    | Chunk -> not (Budget.fits g.budget w.bytes)
+    | First | Slice -> false
+
+(* The lines a waiter on [line] must find empty, or passable, to go at once. *)
+let ahead = function
+  | First -> []
+  | Chunk -> [First; Chunk]
+  | Slice -> [First; Chunk; Slice]
+
+let clear_ahead g line =
+  List.for_all
+    (fun l ->
+      match Queue.peek_opt (queue g l) with
+        | None -> true
+        | Some w -> l <> line && passable g l w)
+    (ahead line)
+
+(* The head [pump] serves next: nothing passes a waiting body of [first]. *)
+let next g =
+  let head line =
+    match Queue.peek_opt (queue g line) with
+      | Some w when ready g line w.bytes -> Some (line, w)
+      | _ -> None
+  in
+  if not (Queue.is_empty g.first) then head First
+  else (match head Chunk with Some _ as h -> h | None -> head Slice)
 
 (* Called under [g.m]. *)
 let rec pump g =
-  let line = head_line g in
-  match Queue.peek_opt line with
-    | Some w when Budget.admits g.budget ~now:(Rt.now ()) w.bytes ->
-        ignore (Queue.pop line);
-        if Rt.Promise.try_resolve w.wake (Ok ()) then
-          Budget.take g.budget ~now:(Rt.now ()) w.bytes;
+  match next g with
+    | Some (line, w) ->
+        ignore (Queue.pop (queue g line));
+        if Rt.Promise.try_resolve w.wake (Ok ()) then charge g line w.bytes;
         pump g
-    | _ -> ()
+    | None -> ()
 
-(* One timer at most; a head blocked by the window waits for a completion. *)
+(* One timer at most; heads blocked by the window wait for a completion. *)
 and arm g =
+  let refill_bound =
+    if not (Queue.is_empty g.first) then [(First, Queue.peek g.first)]
+    else
+      List.filter_map
+        (fun line ->
+          match Queue.peek_opt (queue g line) with
+            | Some w when not (passable g line w) -> Some (line, w)
+            | _ -> None)
+        [Chunk; Slice]
+  in
+  let wait (line, w) =
+    let billed =
+      match line with
+        | Chunk -> Budget.bill ~chunk:true w.bytes
+        | First | Slice -> w.bytes
+    in
+    Budget.wait_for g.budget ~now:(Rt.now ()) billed
+  in
   if not g.armed then (
-    match Queue.peek_opt (head_line g) with
-      | Some w ->
-          let delay = Budget.wait_for g.budget ~now:(Rt.now ()) w.bytes in
-          if delay < infinity then (
-            g.armed <- true;
-            Rt.timer ~execution:`Direct (Float.max 0.001 delay) (fun () ->
-                Mutex.protect g.m (fun () ->
-                    g.armed <- false;
-                    pump g;
-                    arm g)))
-      | None -> ())
+    match List.map wait refill_bound with
+      | [] -> ()
+      | delays ->
+          g.armed <- true;
+          Rt.timer ~execution:`Direct
+            (Float.max 0.001 (List.fold_left Float.min infinity delays))
+            (fun () ->
+              Mutex.protect g.m (fun () ->
+                  g.armed <- false;
+                  pump g;
+                  arm g)))
 
-(* §4.3: no chunk is admitted while a body that is not one waits. *)
-let room g ~chunk b =
-  Queue.is_empty g.first
-  && ((not chunk) || Queue.is_empty g.chunks)
-  && Budget.admits g.budget ~now:(Rt.now ()) b
-
-let take_now g b = Budget.take g.budget ~now:(Rt.now ()) b
+let line_of ~chunk = if chunk then Chunk else First
+let room g line b = clear_ahead g line && ready g line b
 
 let own_report g ~timeouts ~probes =
   let r =
@@ -553,64 +630,70 @@ let used g =
     true)
   else false
 
+(* Called under [g.m]: [None] when the bytes were charged at once. *)
+let enter g line b =
+  if room g line b then (
+    charge g line b;
+    None)
+  else (
+    let w = { bytes = b; wake = Rt.Promise.create () } in
+    g.held_back <- true;
+    Queue.push w (queue g line);
+    arm g;
+    Some w)
+
+(* A waiter cancelled while in line leaves it having taken nothing. *)
+let await_turn g line w =
+  let unregister =
+    Stop.on_request (fun () ->
+        ignore (Rt.Promise.try_resolve w.wake (Error Stop.Stopping)))
+  in
+  Fun.protect ~finally:unregister (fun () ->
+      match Rt.Promise.await w.wake with
+        | Ok () -> ()
+        | Error e -> raise e
+        | exception e ->
+            Mutex.protect g.m (fun () ->
+                if not (Rt.Promise.try_resolve w.wake (Error e)) then (
+                  match line with
+                    | First | Chunk -> Budget.release g.budget w.bytes
+                    | Slice -> ());
+                let q = queue g line in
+                let kept = Queue.create () in
+                Queue.iter (fun x -> if x != w then Queue.push x kept) q;
+                Queue.clear q;
+                Queue.transfer kept q;
+                pump g;
+                arm g);
+            raise e)
+
 let acquire t ~chunk bytes =
   let b = bytes + request_overhead in
   match t with
-    | Open -> { taken = 0; at = 0. }
-    | Governed g -> (
+    | Open -> { taken = 0; at = 0.; chunk }
+    | Governed g ->
+        let line = line_of ~chunk in
         let first, waiter =
           Mutex.protect g.m (fun () ->
               let first = used g in
-              if room g ~chunk b then (
-                take_now g b;
-                (first, None))
-              else (
-                let w = { bytes = b; wake = Rt.Promise.create () } in
-                g.held_back <- true;
-                Queue.push w (if chunk then g.chunks else g.first);
-                arm g;
-                (first, Some w)))
+              (first, enter g line b))
         in
         if first then ensure_ticking ();
-        match waiter with
-          | None -> { taken = b; at = Rt.now () }
-          | Some w ->
-              let unregister =
-                Stop.on_request (fun () ->
-                    ignore (Rt.Promise.try_resolve w.wake (Error Stop.Stopping)))
-              in
-              Fun.protect ~finally:unregister (fun () ->
-                  match Rt.Promise.await w.wake with
-                    | Ok () -> { taken = b; at = Rt.now () }
-                    | Error e -> raise e
-                    | exception e ->
-                        (* A waiter cancelled while in line leaves it having
-                           taken nothing. *)
-                        Mutex.protect g.m (fun () ->
-                            if not (Rt.Promise.try_resolve w.wake (Error e))
-                            then Budget.release g.budget b;
-                            let line = if chunk then g.chunks else g.first in
-                            let kept = Queue.create () in
-                            Queue.iter
-                              (fun x -> if x != w then Queue.push x kept)
-                              line;
-                            Queue.clear line;
-                            Queue.transfer kept line;
-                            pump g;
-                            arm g);
-                        raise e))
+        Option.iter (await_turn g line) waiter;
+        { taken = b; at = Rt.now (); chunk }
 
 let try_acquire t ~chunk bytes =
   let b = bytes + request_overhead in
   match t with
-    | Open -> Some { taken = 0; at = 0. }
+    | Open -> Some { taken = 0; at = 0.; chunk }
     | Governed g ->
+        let line = line_of ~chunk in
         let first, ticket =
           Mutex.protect g.m (fun () ->
               let first = used g in
-              if room g ~chunk b then (
-                take_now g b;
-                (first, Some { taken = b; at = Rt.now () }))
+              if room g line b then (
+                charge g line b;
+                (first, Some { taken = b; at = Rt.now (); chunk }))
               else (
                 g.held_back <- true;
                 g.drops <- g.drops + 1;
@@ -618,6 +701,18 @@ let try_acquire t ~chunk bytes =
         in
         if first then ensure_ticking ();
         ticket
+
+let pace t ticket ~remaining =
+  match t with
+    | Governed g when ticket.chunk ->
+        let waiter, s =
+          Mutex.protect g.m (fun () ->
+              let s = Budget.slice g.budget ~remaining in
+              (enter g Slice s, s))
+        in
+        Option.iter (await_turn g Slice) waiter;
+        s
+    | Governed _ | Open -> remaining
 
 let left t ticket ~answered =
   match t with
@@ -649,7 +744,7 @@ let admitted t (mode : Store.mode) ~chunk bytes f =
             | Some ticket -> ticket
             | None -> raise Rt.Cancelled)
   in
-  match f () with
+  match f (fun remaining -> pace t ticket ~remaining) with
     | v ->
         completed t ticket;
         v
