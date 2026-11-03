@@ -17,10 +17,12 @@ type raw_entry = {
 }
 
 (** Each verb is one attempt: a transient failure raises for the ladder, a clean
-    absence is [None] or [false]. *)
+    absence is [None] or [false].
+
+    - [put] hands [pace] to the HTTP client, which calls it before each slice of
+      the body. *)
 type verbs = {
   put : pace:(int -> int) -> Key.t -> Bigstring.t -> unit;
-      (** [pace] goes to the HTTP client, which calls it before each slice *)
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
   put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
       (** the service's precondition on the version named, or on no live object

@@ -89,8 +89,9 @@ let () =
       send l ~chunk:false (256 * 1024) ~on_slice:(fun _ ->
           entry_in := Rt.now ());
       Rt.Promise.await chunk;
+      (* One slice granted just before the entry may run just after it. *)
       p "a log entry asked mid-chunk passes before its next slice: %b"
-        (!late_slices = 0 && !entry_in < infinity);
+        (!late_slices <= 1 && !entry_in < infinity);
       let order = ref [] and m = Mutex.create () in
       let writer name =
         Rt.async (fun () ->
@@ -121,6 +122,59 @@ let () =
       in
       p "two chunks in flight take slices in turn: %b"
         (List.length both > 20 && longest_run 1 1 both <= 2);
+      (* A few hundred KiB back in the bucket: its overhead fits, the body
+         does not. *)
+      Rt.sleep 0.3;
+      p "a best-effort chunk larger than what the bucket holds: %s"
+        (match Uplink.try_acquire l ~chunk:true (2 * mib) with
+          | Some tk ->
+              Uplink.abandoned l tk;
+              "admitted"
+          | None -> "refused");
+      (* 1 MiB/s gives a 30 MiB window: one chunk fills it, then a log entry
+         waits for the window while that chunk still has slices to write. *)
+      let w = link "window" in
+      let big = Uplink.acquire w ~chunk:true ((30 * mib) - 4096) in
+      let entry =
+        Rt.async (fun () ->
+            Uplink.completed w (Uplink.acquire w ~chunk:false mib))
+      in
+      Rt.sleep 0.05;
+      p "a log entry held by a full window lets the chunk's slices go: %s"
+        (match
+           Rt.with_timeout 3. (fun () ->
+               for _ = 1 to 20 do
+                 ignore (Uplink.pace w big ~remaining:mib)
+               done)
+         with
+          | () -> "true"
+          | exception Rt.Timeout -> "false, stuck");
+      Uplink.completed w big;
+      p "  and is admitted once the chunk completes: %b"
+        (match Rt.with_timeout 3. (fun () -> Rt.Promise.await entry) with
+          | () -> true
+          | exception Rt.Timeout -> false);
+      (* A large log entry waits for the bucket; small ones asked after it must
+         not pass it. *)
+      let f = link "fifo" in
+      Uplink.completed f (Uplink.acquire f ~chunk:false (2 * mib));
+      let order = ref [] in
+      let asked name bytes =
+        let r =
+          Rt.async (fun () ->
+              let tk = Uplink.acquire f ~chunk:false bytes in
+              order := name :: !order;
+              Uplink.completed f tk)
+        in
+        Rt.sleep 0.05;
+        r
+      in
+      let large = asked "large" mib in
+      let smalls = List.map (fun n -> asked n 1024) ["small 1"; "small 2"] in
+      List.iter Rt.Promise.await (large :: smalls);
+      (* The two small ones are woken in order but may run in either. *)
+      p "a large log entry is not passed by smaller ones asked after it: %b"
+        (match List.rev !order with "large" :: _ -> true | _ -> false);
       p "a disabled link admits at once: %b"
         (let u =
            Uplink.link "open"

@@ -220,35 +220,31 @@ let charge g line bytes =
     | Chunk -> Budget.take g.budget ~now ~chunk:true bytes
     | Slice -> Budget.spend g.budget ~now bytes
 
-(* A chunk head held only by the window lets the slices pass. *)
-let passable g line w =
+(* Only a completion can admit it, and a completion needs slices to go. *)
+let window_bound g line w =
   match line with
-    | Chunk -> not (Budget.fits g.budget w.bytes)
-    | First | Slice -> false
+    | First | Chunk -> not (Budget.fits g.budget w.bytes)
+    | Slice -> false
 
-(* The lines a waiter on [line] must find empty, or passable, to go at once. *)
-let ahead = function
-  | First -> []
-  | Chunk -> [First; Chunk]
-  | Slice -> [First; Chunk; Slice]
+let before = function First -> [] | Chunk -> [First] | Slice -> [First; Chunk]
 
-let clear_ahead g line =
+(* Whether a waiter on [line] may go past what waits on the lines before it:
+   only a slice passes, and only a head held by the window. *)
+let unblocked g line =
   List.for_all
     (fun l ->
       match Queue.peek_opt (queue g l) with
         | None -> true
-        | Some w -> l <> line && passable g l w)
-    (ahead line)
+        | Some w -> line = Slice && window_bound g l w)
+    (before line)
 
-(* The head [pump] serves next: nothing passes a waiting body of [first]. *)
 let next g =
-  let head line =
-    match Queue.peek_opt (queue g line) with
-      | Some w when ready g line w.bytes -> Some (line, w)
-      | _ -> None
-  in
-  if not (Queue.is_empty g.first) then head First
-  else (match head Chunk with Some _ as h -> h | None -> head Slice)
+  List.find_map
+    (fun line ->
+      match Queue.peek_opt (queue g line) with
+        | Some w when unblocked g line && ready g line w.bytes -> Some (line, w)
+        | _ -> None)
+    [First; Chunk; Slice]
 
 (* Called under [g.m]. *)
 let rec pump g =
@@ -259,28 +255,24 @@ let rec pump g =
         pump g
     | None -> ()
 
-(* One timer at most; heads blocked by the window wait for a completion. *)
+(* One timer at most; a head held by the window waits for a completion. *)
 and arm g =
   let refill_bound =
-    if not (Queue.is_empty g.first) then [(First, Queue.peek g.first)]
-    else
-      List.filter_map
-        (fun line ->
-          match Queue.peek_opt (queue g line) with
-            | Some w when not (passable g line w) -> Some (line, w)
-            | _ -> None)
-        [Chunk; Slice]
-  in
-  let wait (line, w) =
-    let billed =
-      match line with
-        | Chunk -> Budget.bill ~chunk:true w.bytes
-        | First | Slice -> w.bytes
-    in
-    Budget.wait_for g.budget ~now:(Rt.now ()) billed
+    List.filter_map
+      (fun line ->
+        match Queue.peek_opt (queue g line) with
+          | Some w when not (window_bound g line w) ->
+              let billed =
+                match line with
+                  | Slice -> w.bytes
+                  | First | Chunk -> Budget.bill ~chunk:(line = Chunk) w.bytes
+              in
+              Some (Budget.wait_for g.budget ~now:(Rt.now ()) billed)
+          | _ -> None)
+      [First; Chunk; Slice]
   in
   if not g.armed then (
-    match List.map wait refill_bound with
+    match refill_bound with
       | [] -> ()
       | delays ->
           g.armed <- true;
@@ -293,7 +285,9 @@ and arm g =
                   arm g)))
 
 let line_of ~chunk = if chunk then Chunk else First
-let room g line b = clear_ahead g line && ready g line b
+
+let room g line b =
+  Queue.is_empty (queue g line) && unblocked g line && ready g line b
 
 let own_report g ~timeouts ~probes =
   let r =
@@ -691,7 +685,10 @@ let try_acquire t ~chunk bytes =
         let first, ticket =
           Mutex.protect g.m (fun () ->
               let first = used g in
-              if room g line b then (
+              if
+                room g line b
+                && ((not chunk) || Budget.spends g.budget ~now:(Rt.now ()) b)
+              then (
                 charge g line b;
                 (first, Some { taken = b; at = Rt.now (); chunk }))
               else (
