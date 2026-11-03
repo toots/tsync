@@ -156,27 +156,28 @@ let () =
         (match Rt.with_timeout 3. (fun () -> Rt.Promise.await entry) with
           | () -> true
           | exception Rt.Timeout -> false);
-      (* A large log entry waits for the bucket; small ones asked after it must
+      (* A large log entry waits for the bucket; a small one asked after it must
          not pass it. *)
       let f = link "fifo" in
       Uplink.completed f (Uplink.acquire f ~chunk:false (2 * mib));
-      let order = ref [] in
-      let asked name bytes =
+      let asked bytes =
         let r =
           Rt.async (fun () ->
               let tk = Uplink.acquire f ~chunk:false bytes in
-              order := name :: !order;
-              Uplink.completed f tk)
+              let still_waiting = Uplink.waiting f in
+              Uplink.completed f tk;
+              still_waiting)
         in
         Rt.sleep 0.05;
         r
       in
-      let large = asked "large" mib in
-      let smalls = List.map (fun n -> asked n 1024) ["small 1"; "small 2"] in
-      List.iter Rt.Promise.await (large :: smalls);
-      (* The two small ones are woken in order but may run in either. *)
-      p "a large log entry is not passed by smaller ones asked after it: %b"
-        (match List.rev !order with "large" :: _ -> true | _ -> false);
+      let large = asked mib in
+      let small = asked 1024 in
+      ignore (Rt.Promise.await large);
+      (* A task resumes late, so a count read once admitted can only shrink: a
+         small one admitted ahead of the large one sees it still waiting. *)
+      p "a large log entry is not passed by a small one asked after it: %b"
+        (Rt.Promise.await small = 0);
       p "a disabled link admits at once: %b"
         (let u =
            Uplink.link "open"
