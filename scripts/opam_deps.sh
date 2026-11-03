@@ -18,7 +18,10 @@ for pkg in ffmpeg-av ffmpeg-avcodec ffmpeg-avfilter ffmpeg-avutil ffmpeg-swscale
   opam pin list --short | grep -qx "$pkg" ||
     opam pin -ny "$pkg" git+https://github.com/savonet/ocaml-ffmpeg.git#main
 done
-opam update
+opam update --repositories
+# A pin a cached switch holds as updated from a working directory, as duppy's
+# pin-depends was, is refreshed only when named.
+opam update --development $(opam pin list --short)
 opam upgrade -y
 opam install --deps-only -y "$@"
 
