@@ -16,7 +16,7 @@ two chunks in flight take slices in turn: true
 a best-effort chunk larger than what the bucket holds: refused
 a log entry held by a full window lets the chunk's slices go: true
   and is admitted once the chunk completes: true
-a large log entry is not passed by smaller ones asked after it: true
+a large log entry is not passed by a small one asked after it: true
 a disabled link admits at once: true
 == lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s
 three waiting: 333 333 333 (sum 1000)
