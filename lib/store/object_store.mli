@@ -22,7 +22,7 @@ type raw_entry = {
     - [put] hands [pace] to the HTTP client, which calls it before each slice of
       the body. *)
 type verbs = {
-  put : pace:(int -> int) -> Key.t -> Bigstring.t -> unit;
+  put : pace:(int -> int) option -> Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
   put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
       (** the service's precondition on the version named, or on no live object

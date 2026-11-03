@@ -9,7 +9,7 @@ type raw_entry = {
 }
 
 type verbs = {
-  put : pace:(int -> int) -> Key.t -> Bigstring.t -> unit;
+  put : pace:(int -> int) option -> Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
   put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
   get_opt : Key.t -> Bigstring.t option;

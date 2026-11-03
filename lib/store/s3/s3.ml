@@ -530,7 +530,7 @@ let create ~domain ~admission ~name fields =
     {
       put =
         (fun ~pace k body ->
-          let r = put_request t ~pace k body in
+          let r = put_request t ?pace k body in
           if not (success r.status) then fail ~op:"put" r);
       put_if_absent =
         (fun k body ->

@@ -63,9 +63,9 @@ val waiting : t -> int
 (** One attempt carrying [bytes] upstream, admitted per [mode] and reported
     exactly once; a best-effort attempt refused admission is cancelled without
     running. The attempt is handed its {!pace}, which the writer calls before
-    every slice of the body. *)
+    every slice of the body, or [None] when nothing would ever make it wait. *)
 val admitted :
-  t -> Store.mode -> chunk:bool -> int -> ((int -> int) -> 'a) -> 'a
+  t -> Store.mode -> chunk:bool -> int -> ((int -> int) option -> 'a) -> 'a
 
 type link_state = [ `Ramping | `Steady | `Backing_off | `Leased ]
 type limit = Uplink_law.limit = Configured | Measured | Estimating
