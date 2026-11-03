@@ -13,6 +13,10 @@ slices: 4096 at 1000 B/s, 1048576 at 100 MiB/s, 3000 of 3000 left
 a best-effort log entry beyond the budget: refused
 a log entry asked mid-chunk passes before its next slice: true
 two chunks in flight take slices in turn: true
+a best-effort chunk larger than what the bucket holds: refused
+a log entry held by a full window lets the chunk's slices go: true
+  and is admitted once the chunk completes: true
+a large log entry is not passed by smaller ones asked after it: true
 a disabled link admits at once: true
 == lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s
 three waiting: 333 333 333 (sum 1000)

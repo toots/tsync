@@ -8,7 +8,9 @@
 == a paced body is written slice by slice, each when its pace returns
   arrived intact: true, in 43 slices (43 expected)
   paced for 2 s under a 1 s stall timeout, each slice within it: 200, true
-  a slice that waits past the stall timeout: refused: transient/link
+  a slice that waits for the governor past the stall timeout: delivered 200
+  while a peer silent past it still is: refused: transient/link
+  a pace stopping on a pooled connection: stopped, attempted 1 time(s)
 == a stream's resources are released whether or not its body is written
   200 "body" (chunked)
   200 "" (chunked)

@@ -135,9 +135,23 @@ exception Dead_before_answer
 
 let link fmt = Fail.raise_ Fail.Link fmt
 
+(* A failure of [pace] is the caller's, never a connection found dead. *)
+exception Paced of exn
+
+(* Waiting for the governor is not the link stalling, so it beats progress. *)
+let paced ~stall ~progress pace remaining =
+  let rec beat () =
+    Rt.sleep (stall /. 4.);
+    progress ();
+    beat ()
+  in
+  match Rt.first [(fun () -> pace remaining); beat] with
+    | granted -> granted
+    | exception e when not (Rt.is_cancelled e) -> raise (Paced e)
+
 (* 01 §10: request-body bytes accepted by the socket are progress, so a slow
    uplink sending a large body never reads as a stall. *)
-let write_body ~progress ~pace t body =
+let write_body ~stall ~progress ~pace t body =
   let piece = 65536 in
   let rec write off stop =
     if off < stop then (
@@ -149,14 +163,19 @@ let write_body ~progress ~pace t body =
   let rec go off =
     let remaining = Bigstring.length body - off in
     if remaining > 0 then (
-      let granted = max 1 (min remaining (pace remaining)) in
+      let granted =
+        match pace with
+          | Some pace ->
+              max 1 (min remaining (paced ~stall ~progress pace remaining))
+          | None -> remaining
+      in
       write off (off + granted);
       go (off + granted))
   in
   go 0
 
-let exchange ~max_body e c ~progress ~pace ~meth ~target ~headers ~body ~reused
-    =
+let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
+    ~reused =
   let b = Buffer.create 256 in
   let head =
     [("host", e.authority)]
@@ -173,8 +192,10 @@ let exchange ~max_body e c ~progress ~pace ~meth ~target ~headers ~body ~reused
     head;
   (try
      Transport.write_string c.t (Buffer.contents b);
-     Option.iter (write_body ~progress ~pace c.t) body
-   with e when reused && not (Rt.is_cancelled e) -> raise Dead_before_answer);
+     Option.iter (write_body ~stall ~progress ~pace c.t) body
+   with
+    | Paced e -> raise e
+    | e when reused && not (Rt.is_cancelled e) -> raise Dead_before_answer);
   let head =
     match Codec.read_head ~limit:65536 c.reader with
       | Some h -> h
@@ -214,7 +235,7 @@ let exchange ~max_body e c ~progress ~pace ~meth ~target ~headers ~body ~reused
    nothing at all; only then is the request sent again, on a fresh one, with
    headers made again so that a signature is as fresh as the attempt. *)
 let request ?(stall = default_stall) ?(max_body = max_int)
-    ?(headers = fun () -> []) ?(pace = Fun.id) ?body e ~meth target =
+    ?(headers = fun () -> []) ?pace ?body e ~meth target =
   Rt.Semaphore.with_slot e.slots (fun () ->
       try
         Rt.with_stall_timeout stall (fun progress ->
@@ -222,8 +243,8 @@ let request ?(stall = default_stall) ?(max_body = max_int)
               let headers = headers () in
               progress ();
               match
-                exchange ~max_body e c ~progress ~pace ~meth ~target ~headers
-                  ~body ~reused
+                exchange ~stall ~max_body e c ~progress ~pace ~meth ~target
+                  ~headers ~body ~reused
               with
                 | r, keep ->
                     if keep then put_idle e c else Transport.close c.t;

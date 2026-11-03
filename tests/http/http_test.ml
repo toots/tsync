@@ -115,7 +115,7 @@ let () =
         Rt.sleep 1.3;
         remaining
       in
-      p "  a slice that waits past the stall timeout: %s"
+      p "  a slice that waits for the governor past the stall timeout: %s"
         (match
            Client.request ~stall:1. e ~meth:"PUT" ~pace:stuck
              ~body:(Bigstring.of_string "late")
@@ -123,6 +123,27 @@ let () =
          with
           | r -> Printf.sprintf "delivered %d" r.status
           | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind);
+      p "  while a peer silent past it still is: %s"
+        (match Client.request ~stall:1. e ~meth:"GET" "/slow" with
+          | r -> Printf.sprintf "delivered %d" r.status
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind);
+      ignore (Client.request e ~meth:"GET" "/echo");
+      let asked = ref 0 in
+      let stopping _ =
+        incr asked;
+        raise Stop.Stopping
+      in
+      let outcome =
+        match
+          Client.request e ~meth:"PUT" ~pace:stopping
+            ~body:(Bigstring.of_string "x") "/keep"
+        with
+          | _ -> "delivered"
+          | exception Stop.Stopping -> "stopped"
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind
+      in
+      p "  a pace stopping on a pooled connection: %s, attempted %d time(s)"
+        outcome !asked;
       p
         "== a stream's resources are released whether or not its body is \
          written";
