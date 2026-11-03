@@ -741,7 +741,13 @@ let admitted t (mode : Store.mode) ~chunk bytes f =
             | Some ticket -> ticket
             | None -> raise Rt.Cancelled)
   in
-  match f (fun remaining -> pace t ticket ~remaining) with
+  let pace =
+    match t with
+      | Governed _ when chunk ->
+          Some (fun remaining -> pace t ticket ~remaining)
+      | Governed _ | Open -> None
+  in
+  match f pace with
     | v ->
         completed t ticket;
         v

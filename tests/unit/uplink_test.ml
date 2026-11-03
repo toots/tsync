@@ -24,7 +24,9 @@ let send ?(on_slice = fun _ -> ()) link ~chunk bytes =
   Uplink.admitted link Wait ~chunk bytes (fun pace ->
       let rec go remaining =
         if remaining > 0 then (
-          let len = pace remaining in
+          let len =
+            Option.fold ~none:remaining ~some:(fun pace -> pace remaining) pace
+          in
           on_slice len;
           go (remaining - len))
       in
