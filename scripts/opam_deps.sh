@@ -20,8 +20,9 @@ for pkg in ffmpeg-av ffmpeg-avcodec ffmpeg-avfilter ffmpeg-avutil ffmpeg-swscale
 done
 opam update --repositories
 # A pin a cached switch holds as updated from a working directory, as duppy's
-# pin-depends was, is refreshed only when named.
-opam update --development $(opam pin list --short)
+# pin-depends was, is refreshed only when named; opam knows only installed ones.
+pins=$(opam list --pinned --installed --short | tr -d '\r')
+[ -z "$pins" ] || opam update --development $pins
 opam upgrade -y
 opam install --deps-only -y "$@"
 
