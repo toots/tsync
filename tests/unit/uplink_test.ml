@@ -94,36 +94,24 @@ let () =
       (* One slice granted just before the entry may run just after it. *)
       p "a log entry asked mid-chunk passes before its next slice: %b"
         (!late_slices <= 1 && !entry_in < infinity);
-      let order = ref [] and m = Mutex.create () in
-      let writer name =
+      (* Taking turns, the other writer is all but done when the first ends; a
+         task resuming late shifts that by a slice or two, not by half. *)
+      let slices = [| Atomic.make 0; Atomic.make 0 |] in
+      let other_at_first_end = Atomic.make (-1) in
+      let writer i =
         Rt.async (fun () ->
             send l ~chunk:true (256 * 1024) ~on_slice:(fun _ ->
-                Mutex.protect m (fun () -> order := name :: !order)))
+                Atomic.incr slices.(i));
+            ignore
+              (Atomic.compare_and_set other_at_first_end (-1)
+                 (Atomic.get slices.(1 - i))))
       in
-      let a = writer 'a' and b = writer 'b' in
+      let a = writer 0 and b = writer 1 in
       Rt.Promise.await a;
       Rt.Promise.await b;
-      let seq = List.rev !order in
-      (* After the first writer's burst, while both have slices left: a writer
-         woken but not yet asking again can let the other take two in a row. *)
-      let rec after_burst = function
-        | x :: (y :: _ as rest) when x = y -> after_burst rest
-        | l -> l
-      in
-      let rec until_one_left acc = function
-        | x :: rest when List.mem (if x = 'a' then 'b' else 'a') rest ->
-            until_one_left (x :: acc) rest
-        | _ -> List.rev acc
-      in
-      let both = until_one_left [] (after_burst seq) in
-      let rec longest_run best run = function
-        | x :: (y :: _ as rest) ->
-            let run = if x = y then run + 1 else 1 in
-            longest_run (max best run) run rest
-        | _ -> best
-      in
+      let each = min (Atomic.get slices.(0)) (Atomic.get slices.(1)) in
       p "two chunks in flight take slices in turn: %b"
-        (List.length both > 20 && longest_run 1 1 both <= 2);
+        (each > 10 && Atomic.get other_at_first_end >= each / 2);
       (* A few hundred KiB back in the bucket: its overhead fits, the body
          does not. *)
       Rt.sleep 0.3;
