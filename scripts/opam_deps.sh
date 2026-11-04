@@ -12,17 +12,13 @@ cd "$(dirname "$0")/.."
 export OPAMYES=1
 
 opam pin -ny .
-# Pinning again would fetch the new sources itself, and the update below would
-# then find nothing to rebuild.
+# Pinned to a commit, as duppy is in tsync.opam: a bump changes the files every
+# CI cache key hashes, so a cached switch never holds an older one.
+ffmpeg=git+https://github.com/savonet/ocaml-ffmpeg.git#6144d04d83b28d11cb3ce792b701e18e0a40ad4b
 for pkg in ffmpeg-av ffmpeg-avcodec ffmpeg-avfilter ffmpeg-avutil ffmpeg-swscale; do
-  opam pin list --short | grep -qx "$pkg" ||
-    opam pin -ny "$pkg" git+https://github.com/savonet/ocaml-ffmpeg.git#main
+  opam pin -ny "$pkg" "$ffmpeg"
 done
-opam update --repositories
-# A pin a cached switch holds as updated from a working directory, as duppy's
-# pin-depends was, is refreshed only when named; opam knows only installed ones.
-pins=$(opam list --pinned --installed --short | tr -d '\r')
-[ -z "$pins" ] || opam update --development $pins
+opam update
 opam upgrade -y
 opam install --deps-only -y "$@"
 

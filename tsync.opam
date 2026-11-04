@@ -36,7 +36,7 @@ depends: [
 ]
 # duppy is released from liquidsoap's repository; until a release, its main.
 pin-depends: [
-  ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#main"]
+  ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#29e87bebed4f8b9a9711a2e29a0fca3b0d40f275"]
 ]
 # Each rebuilds tsync when it appears, which links its library in. The TLS
 # libraries stand for their packages, which may not appear in both lists.
