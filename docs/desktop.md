@@ -1,4 +1,4 @@
-# macOS and the Linux desktop
+# macOS, Windows and the Linux desktop
 
 ## macOS
 
@@ -24,6 +24,40 @@ tsync fileprovider purge
 ```
 
 It unregisters the domains, stops the service, and removes the app and the data directory. `config.json` stays, so installing again picks up where you were. If it cannot remove the `/usr/local/bin/tsync` link, it prints the command that does.
+
+## Windows
+
+**Explorer.** Each domain is a folder, `%USERPROFILE%\tsync\<domain>` unless its [`syncRoot`](config.md#frontend-options) says otherwise, registered with Windows the way OneDrive's is. The *Status* column shows a cloud for a file that is online-only and a check for one on this PC. Right-click for *Always keep on this device*, which downloads a file or a whole folder and keeps it, and *Free up space*, which makes it online-only again. Opening an online-only file downloads it first. There is no share link entry: use `tsync share`.
+
+A link stored by another machine is not shown in the folder, and a link you put in the folder is skipped: Windows has no place for one in a cloud folder.
+
+**Editing large files.** As on macOS, tsync reads a changed file whole, and uploads only the chunks that changed.
+
+### Windows tray
+
+The tray shows an icon in the notification area, light or dark to suit the taskbar, for idle, transferring, paused or unreachable. Click it for the same menu as on Linux:
+
+- Clicking a domain opens its folder in Explorer. Clicking a file opens its folder with the file selected; it never opens the file.
+- *Stats* is a short form of `tsync status`, read when you open the menu.
+- *Hold changes* is `tsync pause` for every domain.
+- *One-time codes* appears for a domain that uses `totp`. Clicking a code copies it, marked so that clipboard history and the cloud clipboard keep no copy. A locked domain's *Locked — unlock…* asks for the passphrase in a small window, and for the vault's secret key the first time on this PC.
+- Messages, such as a code that could not be copied, appear as notifications from the icon.
+- *Quit* closes the tray only. Syncing continues.
+
+Setup starts the tray at sign-in. To turn that off, switch off *tsync-tray* in *Settings → Apps → Startup*. To start it again by hand, run `tsync-tray`. Its warnings go to `%LOCALAPPDATA%\tsync\logs\tray.log`.
+
+### Repairs
+
+```powershell
+tsync cloudfiles reimport   # Explorer is missing items, or shows ones that are gone
+tsync cloudfiles reset      # rebuild the folder from the domain
+```
+
+`reimport` compares the folder with the domain and changes what differs. `reset` empties the folder and lets it fill again from the domain as you browse it; it is refused while the folder holds a change the domain does not have yet, so nothing is lost.
+
+### Uninstall
+
+Uninstall from *Settings → Apps → Installed apps → tsync*. Each folder is released from Windows: files that were on disk stay as plain files, files that were only in the cloud are removed, and the folder itself stays. Your config stays in `%LOCALAPPDATA%\tsync\config.json`. If something could not be released, it is listed in `%TEMP%\tsync-purge.err`.
 
 ## Linux desktop
 

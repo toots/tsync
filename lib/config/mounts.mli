@@ -2,9 +2,14 @@
     asked to be mounted, and which configured domains the kernel mount table
     lists as mounted now. *)
 
-(** The [mountPoint] of the domain's [fuse] frontend without trailing slashes,
-    else [$HOME/tsync/<domain>]; [None] without a [fuse] frontend. *)
+(** The folder the domain is shown at: its [fuse] frontend's [mountPoint]
+    without trailing slashes, else its {!sync_root} when it has a [cloud_files]
+    frontend; [None] with neither. *)
 val configured : Config.domain -> string option
+
+(** The folder a domain presents through Cloud Files (cloud-files §6):
+    [syncRoot], else [%USERPROFILE%\tsync\<domain>]. *)
+val sync_root : Config.domain -> string
 
 (** The configured domain whose mount point holds [path], with the rest of the
     path: the mount point itself or a prefix of it followed by [/], the longest

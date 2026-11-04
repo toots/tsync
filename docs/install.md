@@ -17,6 +17,20 @@ Approve the extension once in **System Settings → General → Login Items & Ex
 
 Uninstall with `tsync fileprovider purge`. It removes the app, the service and the local data, and keeps your config. With Homebrew, run `brew uninstall --cask tsync` after it; on its own, that does not unregister the folders.
 
+## Windows
+
+Download [`tsync-setup.exe`](https://github.com/toots/tsync/releases/download/nightly/tsync-setup.exe) and its certificate, [`tsync-development.cer`](https://github.com/toots/tsync/releases/download/nightly/tsync-development.cer). It needs Windows 10 version 2004 or later, or Windows 11, on x86-64; Windows on ARM runs it through its x64 emulation.
+
+The builds are signed with tsync's own certificate, which Windows does not know. Trust it once, in a PowerShell opened with *Run as administrator*:
+
+```powershell
+Import-Certificate -FilePath $HOME\Downloads\tsync-development.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+```
+
+Without it, setup fails to register tsync with Windows' cloud files support. Then run `tsync-setup.exe`. Windows may say *Windows protected your PC*: choose *More info*, then *Run anyway*. Setup needs no administrator rights. It installs the programs into `%LOCALAPPDATA%\Programs\tsync`, puts them on your `PATH` (open a new terminal to pick it up), and registers a background service and the [tray](desktop.md#windows), both started at sign-in.
+
+Running a newer `tsync-setup.exe` upgrades in place. Uninstall from *Settings → Apps → Installed apps → tsync*. Files that were on disk stay as plain files in the folder, files that were only in the cloud are removed from it, and your config stays.
+
 ## Linux
 
 Packages exist for Debian 13, Ubuntu 26.04 and Fedora 44, on x86-64 and arm64. Add the repository, then install:

@@ -671,7 +671,7 @@ let host ~mount domains ~run =
             Some
               {
                 Tsync_status.Status_report.kind = "fuse";
-                pid = Some (Unix.getpid ());
+                pid = Some (Pid.self ());
                 mount = Some mount_point;
                 port = None;
                 open_handles = Some (Atomic.get t.open_handles);
@@ -681,10 +681,13 @@ let host ~mount domains ~run =
                 read_only = None;
                 shares = None;
                 unanswered = false;
+                unpresented = None;
+                untaken = None;
+                pending_folders = None;
               });
       }
     in
-    let go () =
+    let go _handler =
       prepare mount_point;
       Fs.rm_rf t.scratch_dir;
       Rt.spawn ~name:"fuse failures" report_failures;

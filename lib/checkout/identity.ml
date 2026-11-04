@@ -61,11 +61,11 @@ let lease t =
   in
   t.block <- go (highest_block t.dir + 1);
   t.next <- 0;
-  t.pid <- Unix.getpid ()
+  t.pid <- Pid.self ()
 
 let mint t =
   Mutex.protect t.m (fun () ->
-      if t.pid <> Unix.getpid () || t.next >= block_size then lease t;
+      if t.pid <> Pid.self () || t.next >= block_size then lease t;
       let counter = (t.block * block_size) + t.next in
       t.next <- t.next + 1;
       Folder_id.mint ~uuid:t.uuid ~counter)

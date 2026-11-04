@@ -6,26 +6,27 @@ open Tsync_owner
 open Cli
 
 (* 07 §2.7: the service log. An agent registered through SMAppService cannot
-   name a path under the user's home for its output, so the service opens the
-   log itself when it is not run from a terminal. *)
+   name a path under the user's home for its output, and a Windows service has
+   no console, so the service opens the log itself when it is not run from a
+   terminal. *)
 let log_to_service_file () =
-  if not (Unix.isatty Unix.stderr) then (
-    let dir = Filename.concat (Paths.home ()) "Library/Logs" in
-    let rec mkdir_p d =
-      if not (Sys.file_exists d) then (
-        mkdir_p (Filename.dirname d);
-        try Unix.mkdir d 0o755 with Unix.Unix_error (EEXIST, _, _) -> ())
-    in
-    mkdir_p dir;
-    let fd =
-      Unix.openfile
-        (Filename.concat dir "tsync-daemon.log")
-        [O_WRONLY; O_APPEND; O_CREAT; O_CLOEXEC]
-        0o644
-    in
-    Fs.with_fd fd (fun fd ->
-        Unix.dup2 ~cloexec:false fd Unix.stdout;
-        Unix.dup2 ~cloexec:false fd Unix.stderr))
+  match Paths.service_log () with
+    | Some file when not (Unix.isatty Unix.stderr) ->
+        (* security-model §7.1: on Windows this can be the first folder made
+           under the one that holds the config, which must be private. *)
+        Fs.mkdir_p ~durable:false (Filename.dirname file);
+        let fd = Fs.unix_openfile file [O_WRONLY; O_APPEND; O_CREAT] 0o644 in
+        Fs.with_fd fd (fun fd ->
+            Unix.dup2 ~cloexec:false fd Unix.stdout;
+            Unix.dup2 ~cloexec:false fd Unix.stderr)
+    | _ -> ()
+
+(* cloud-files §5.2: Windows runs each owner as the windowed program beside
+   this one, so none shows a console or takes a console interrupt. *)
+let child_exe () =
+  if Sys.win32 then
+    Filename.concat (Filename.dirname Sys.executable_name) "tsyncd.exe"
+  else Sys.executable_name
 
 (* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
    governor, starts the store server as its child when a domain is served over
@@ -69,15 +70,19 @@ let no_domains () = Config.of_string {|{"domains":[]}|}
 
 (* 07 §3.1 *)
 let start mount tls verbose =
-  if Fs.is_macos then log_to_service_file ();
+  log_to_service_file ();
   set_verbose verbose;
   Atomic.set Log.min_level Log.Debug;
   match Paths.read_config () with
+    (* 07 §3.1: a config that cannot be read is a config error, not a crash. *)
+    | exception Fail.E f ->
+        prerr_endline ("tsync: " ^ f.reason);
+        78
     | None when Fs.is_macos ->
         prerr_endline "tsync: no config; serving the menu until one exists";
         macos_service tls (no_domains ())
     | Some text when Fs.is_macos -> (
-        match Config.of_string text with
+        match Config.of_user_string text with
           | exception Config.Invalid e ->
               prerr_endline ("tsync: " ^ e);
               78
@@ -86,14 +91,16 @@ let start mount tls verbose =
         prerr_endline "tsync: no config; nothing to start";
         0
     | Some text -> (
-        match Config.of_string text with
+        match Config.of_user_string text with
           | exception Config.Invalid e ->
               prerr_endline ("tsync: " ^ e);
               78
-          | { domains = []; _ } ->
+          | { domains = []; _ } as config ->
+              Owner.service_starting config;
               prerr_endline "tsync: no domains configured; nothing to start";
               0
           | config -> (
+              Owner.service_starting config;
               let refusal =
                 List.find_map
                   (fun (d : Config.domain) ->
@@ -116,7 +123,7 @@ let start mount tls verbose =
                     ignore (Fs.raise_nofile 65536);
                     Owner.stop_on_signals ();
                     run (fun () ->
-                        Tsync_supervisor.Supervisor.run ~exe:Sys.executable_name
+                        Tsync_supervisor.Supervisor.run ~exe:(child_exe ())
                           config
                           (Tsync_supervisor.Supervisor.assign ?mount ?tls config))
               ))

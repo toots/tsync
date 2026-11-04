@@ -5,8 +5,8 @@ icon name, a tooltip and a list of rows. It knows nothing of D-Bus, of a toolkit
 domain's folder is. Every string a user reads in a status menu is produced here, so that the
 platforms cannot drift apart.
 
-Two clients draw it: the Linux tray ([linux-tray.md](linux-tray.md)), which evaluates the model
-itself, and the macOS menu ([file-provider.md §10](file-provider.md#10-menu-bar)), which receives
+Three clients draw it: the Linux tray ([linux-tray.md](linux-tray.md)) and the Windows tray
+([cloud-files.md §15](cloud-files.md#15-tray)), which evaluate the model themselves, and the macOS menu ([file-provider.md §10](file-provider.md#10-menu-bar)), which receives
 its output as JSON (§8) from the owner.
 
 Inputs are the `status`, `stats` and `totp_list` replies of the request handler

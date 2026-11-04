@@ -20,7 +20,7 @@ let submission_id () =
   let us = Int64.of_float (Unix.gettimeofday () *. 1e6) in
   Printf.sprintf "%020Ld-%08d-%d" us
     (Atomic.fetch_and_add seq 1 mod 100000000)
-    (Unix.getpid ())
+    (Pid.self ())
 
 let submitter_pid id =
   match String.split_on_char '-' id with
@@ -113,9 +113,7 @@ module Records = struct
 
   (* A submitter holds its record's lock while the record must not run. *)
   let is_held t id =
-    match
-      Fs.opt (fun () -> Unix.openfile (path t id) [O_RDONLY; O_CLOEXEC] 0)
-    with
+    match Fs.opt (fun () -> Fs.unix_openfile (path t id) [O_RDONLY] 0) with
       | None -> false
       | Some fd ->
           Fs.with_fd fd (fun fd ->

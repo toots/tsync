@@ -68,6 +68,10 @@ let spawn exe r =
       (Array.of_list (exe :: r.child.args))
       Unix.stdin Unix.stdout Unix.stderr
   in
+  (try Fs.end_with_this_process pid
+   with Unix.Unix_error (e, _, _) ->
+     Log.warn "pid %d will outlive this supervisor: %s" pid
+       (Unix.error_message e));
   Log.info "started %s (pid %d)" (String.concat " " r.child.args) pid;
   r.pid <- Some pid;
   r.started <- Rt.now ()
@@ -146,7 +150,16 @@ let stop_children children =
         Option.iter (fun pid -> try Unix.kill pid s with _ -> ()) r.pid)
       children
   in
-  signal Sys.sigterm;
+  if Sys.win32 then
+    (* No SIGTERM on Windows: each child is asked through its socket, all at
+        once (cloud-files §5.2). *)
+    List.iter
+      (fun r ->
+        if r.pid <> None then
+          Rt.spawn ~name:"stop child" (fun () ->
+              Ipc.advisory r.child.socket (`Assoc [("action", `String "stop")])))
+      children
+  else signal Sys.sigterm;
   let deadline = Rt.now () +. Stop.grace +. reap_margin in
   let alive () = List.exists (fun r -> r.pid <> None) children in
   while alive () && Rt.now () < deadline do
@@ -197,7 +210,7 @@ let live_jobs () =
     (fun j ->
       if j.report.state = `Running then
         now -. j.at < Float.max job_stale_min (4. *. job_report_interval)
-        || Fs.pid_alive j.report.pid
+        || Pid.alive j.report.pid
       else now -. j.at < job_keep)
     (Atomic.get jobs)
 
@@ -257,7 +270,7 @@ let machine_report arg children : R.machine =
   let processes =
     {
       R.role = "supervisor";
-      pid = Some (Unix.getpid ());
+      pid = Some (Pid.self ());
       serves = [];
       error = None;
       self = Some own;

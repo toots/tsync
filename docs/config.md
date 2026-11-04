@@ -58,9 +58,11 @@ One JSON object. `tsync build-info` prints its location. Keys that are not liste
 | `follow` | The target's content is stored under the link's name. A dangling link is skipped. | Refused |
 | `skip` | Ignored, and counted in the summary | Refused |
 
-A symlink another machine stored under `keep` is shown as a symlink everywhere.
+A symlink another machine stored under `keep` is shown as a symlink everywhere but on Windows, which leaves it out of the folder. On Windows `keep` is read as `skip`, with a warning.
 
 ## Backend types
+
+On Windows a config naming a `local` backend is refused: a Windows PC keeps no store of its own, and reaches its storage through a bucket or a tsync server.
 
 **`s3`**
 
@@ -103,7 +105,7 @@ The service must support conditional writes (`PUT` with `If-None-Match: *`), as 
 
 ## Frontend options
 
-A frontend is written as its name, `"fuse"`, or as an object with options, `{ "type": "fuse", … }`. A domain has at most one of `fuse` and `file_provider`, and may have `http-proxy` beside it.
+A frontend is written as its name, `"fuse"`, or as an object with options, `{ "type": "fuse", … }`. A domain has at most one of `fuse`, `file_provider` and `cloud_files`, and may have `http-proxy` beside it, except on Windows, which refuses `http-proxy`.
 
 **`fuse`** (Linux)
 
@@ -121,6 +123,14 @@ With `allowOther` and the default modes, other users can read and not write. A s
 The mount calls itself `fuse.sshfs` on purpose. File managers generate a thumbnail for every file on a filesystem they take for local, which downloads the whole folder you are looking at. They leave `sshfs` alone. Set `"mountSubtype": "tsync"` if you want thumbnails.
 
 **`file_provider`** (macOS) has no options.
+
+**`cloud_files`** (Windows)
+
+| Option | Default | Meaning |
+|---|---|---|
+| `syncRoot` | `%USERPROFILE%\tsync\<domain>` | The folder shown in Explorer, an absolute path |
+
+Changing `syncRoot` moves the domain at the next start. The old folder is released once every change in it has reached the domain: files on disk stay there as plain files. Until then the domain stays at the old folder.
 
 **`http-proxy`**
 
@@ -144,14 +154,14 @@ The mount calls itself `fuse.sshfs` on purpose. File managers generate a thumbna
 
 ## Files and paths
 
-| | Linux | macOS |
-|---|---|---|
-| Config | `~/.config/tsync/config.json` | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` |
-| Data | `~/.local/share/tsync` | `tsync/` beside the config |
-| Cache | `~/.cache/tsync` | `cache/` inside the data directory |
-| Folder | `~/tsync/<domain>` | under `~/Library/CloudStorage/` |
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Config | `~/.config/tsync/config.json` | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` | `%LOCALAPPDATA%\tsync\config.json` |
+| Data | `~/.local/share/tsync` | `tsync/` beside the config | `%LOCALAPPDATA%\tsync\data` |
+| Cache | `~/.cache/tsync` | `cache/` inside the data directory | `%LOCALAPPDATA%\tsync\cache` |
+| Folder | `~/tsync/<domain>` | under `~/Library/CloudStorage/` | `%USERPROFILE%\tsync\<domain>` |
 
-On Linux these follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME`.
+On Linux and Windows these follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME`.
 
 The **cache** holds downloaded content and can be lost: it is fetched again. The **data** directory holds your edits that are not uploaded yet and the record of work in progress. Do not delete it while anything is pending in `tsync status`.
 

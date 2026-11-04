@@ -1,17 +1,10 @@
 open Tsync_core
-open Tsync_config
-open Tsync_ipc
-open Tsync_owner
 open Tsync_dbus
 open Tsync_menu
+open Tsync_tray_core
 module M = Menu_model
 
 (* §10. *)
-let poll_interval = 3.
-let status_deadline = 1.5
-let stats_deadline = 4.
-let pause_deadline = 5.
-let stats_debounce = 1.
 let file_manager_timeout = 5.
 let watcher_timeout = 5.
 let item_path = "/StatusNotifierItem"
@@ -26,8 +19,6 @@ let watcher_path = "/StatusNotifierWatcher"
 let properties_interface = "org.freedesktop.DBus.Properties"
 let error name = "org.freedesktop.DBus.Error." ^ name
 
-type domain = { name : string; socket : string; configured : string option }
-
 (* [lock] guards every mutable field and the layout; it is never held across
    a wait. *)
 type t = {
@@ -35,18 +26,13 @@ type t = {
   item_name : string;
   lock : Mutex.t;
   layout : Layout.t;
-  mutable icon : string;
+  mutable icon : M.state;
   mutable tooltip : string;
-  mutable domains : domain list;
-  mutable reported_mounts : (string * string) list;
-  mutable stats_started : float;
-  mutable unlocking : bool;
-  mutable code_domains : string list;  (** at the last refresh (§6.5) *)
-  refreshing : Rt.Fmutex.t;
-  finished : int Rt.Promise.t;
+  mutable core : Tray_core.t option;
 }
 
 let locked t f = Mutex.protect t.lock f
+let core t = Option.get t.core
 
 let emit t ~path ~interface ~member values =
   Bus.send t.bus (Dbus.signal ~path ~interface ~member values)
@@ -168,58 +154,6 @@ let show t ~folder path =
           | exception Unix.Unix_error (e, _, _) ->
               Log.warn "tray: cannot run xdg-open: %s" (Unix.error_message e))
 
-let mount_point t name =
-  locked t (fun () ->
-      match List.assoc_opt name t.reported_mounts with
-        | Some m -> Some m
-        | None ->
-            Option.bind
-              (List.find_opt (fun d -> d.name = name) t.domains)
-              (fun d -> d.configured))
-
-(* One request to every domain's owner at the same time, in the owner's own
-   encoding. *)
-let ask_all t ~deadline request =
-  let domains = locked t (fun () -> t.domains) in
-  let request = Protocol.encode request in
-  List.combine domains
-    (Rt.map_concurrently (fun d -> Ipc.ask ~deadline d.socket request) domains)
-
-(* A config that cannot be used is no domains, whatever the reason (§5.2). *)
-let configured_domains () =
-  let none reason =
-    Log.once ("tray-config:" ^ reason) Log.Warn "tray: no domains: %s" reason;
-    []
-  in
-  match Paths.read_config ~interactive:false () with
-    | None -> none ("no config at " ^ Paths.config_file ())
-    | Some text -> (
-        match Config.of_string text with
-          | config ->
-              List.map
-                (fun (d : Config.domain) ->
-                  {
-                    name = Domain_name.to_string d.name;
-                    socket = Paths.owner_socket d.name;
-                    configured = Mounts.configured d;
-                  })
-                config.domains
-          | exception Config.Invalid reason -> none reason)
-    | exception e -> none (Fail.classify e).reason
-
-let string_field name = function
-  | `Assoc l -> (
-      match List.assoc_opt name l with Some (`String s) -> Some s | _ -> None)
-  | _ -> None
-
-(* §6.5: whether a status reply lists totp among the extensions in force. *)
-let lists_totp = function
-  | `Assoc l -> (
-      match List.assoc_opt "extensions" l with
-        | Some (`List e) -> List.mem (`String "totp") e
-        | _ -> false)
-  | _ -> false
-
 let on_path program =
   List.exists
     (fun dir -> dir <> "" && Sys.file_exists (Filename.concat dir program))
@@ -244,43 +178,10 @@ let code_domains listed =
                 "tray: no one-time codes: they are copied on Wayland only";
               [])
 
-let refresh t =
-  Rt.Fmutex.with_lock t.refreshing @@ fun () ->
-  let domains = try configured_domains () with _ -> [] in
-  let replies =
-    Rt.map_concurrently
-      (fun d ->
-        Ipc.ask ~deadline:status_deadline d.socket (Protocol.encode Status))
-      domains
-  in
-  let answers =
-    List.map2
-      (fun d reply -> (d, reply, Option.bind reply M.status_of_json))
-      domains replies
-  in
-  let codes =
-    code_domains
-      (List.filter_map
-         (fun (d, reply, status) ->
-           match (status, reply) with
-             | Some _, Some reply when lists_totp reply -> Some d.name
-             | _ -> None)
-         answers)
-  in
-  let menu =
-    M.render ~quit:"Quit tsync tray" ~codes
-      (List.map (fun (d, _, status) -> (d.name, status)) answers)
-  in
+(* A refresh's menu, drawn: new icon and tooltip signalled, the rows held back
+   while the menu is open (§4.3). *)
+let set_menu t (menu : M.t) =
   locked t (fun () ->
-      t.domains <- domains;
-      t.code_domains <- codes;
-      t.reported_mounts <-
-        List.filter_map
-          (fun (d, reply, status) ->
-            match (status, Option.bind reply (string_field "mount")) with
-              | Some _, Some mount -> Some (d.name, mount)
-              | _ -> None)
-          answers;
       if menu.icon <> t.icon then (
         t.icon <- menu.icon;
         item_signal t "NewIcon");
@@ -309,59 +210,6 @@ let notify t summary body =
     | Ok _ -> ()
     | Error reason ->
         Log.warn "tray: %s: %s (no notification: %s)" summary body reason
-
-let domain_named t name =
-  locked t (fun () -> List.find_opt (fun d -> d.name = name) t.domains)
-
-(* The owner's typed answer to one request, or its failure. *)
-let ask_domain ~deadline d request =
-  match Ipc.ask ~deadline d.socket (Protocol.encode request) with
-    | None -> Error "tsync is not answering"
-    | Some reply -> (
-        match Protocol.decode_reply request reply with
-          | answer -> Ok answer
-          | exception Fail.E f -> Error f.reason)
-
-let mark d =
-  match ask_domain ~deadline:stats_deadline d (Vault_status `Auto) with
-    | Ok { appearance = Some { icon = Some png; _ }; _ } -> Some png
-    | Ok { appearance = Some { color; _ }; _ } -> Mark.glyph color
-    | _ -> None
-
-(* One code domain's answer at an opening. *)
-type code_answer = { domain : string; codes : M.codes; mark : string option }
-
-(* §6.5: rows from an earlier opening are never shown again. *)
-let fetch_codes t =
-  let domains =
-    locked t (fun () ->
-        List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
-  in
-  if domains <> [] then (
-    ignore
-      (change_layout t (fun layout ->
-           Layout.set_children layout Show_codes M.codes_placeholder));
-    let answers =
-      Rt.map_concurrently
-        (fun d ->
-          let codes =
-            M.codes_of_json
-              (Ipc.ask ~deadline:stats_deadline d.socket
-                 (Protocol.encode (Totp_list { filter = None; pull = `Auto })))
-          in
-          { domain = d.name; codes; mark = mark d })
-        domains
-    in
-    Atomic.set marks
-      (List.filter_map
-         (fun a -> Option.map (fun m -> (a.domain, m)) a.mark)
-         answers);
-    let rows =
-      M.codes ~add:false (List.map (fun a -> (a.domain, a.codes)) answers)
-    in
-    ignore
-      (change_layout t (fun layout ->
-           Layout.set_children layout Show_codes rows)))
 
 (* The helper's standard output, or [None] when it failed or was closed; its
    exit is awaited on a thread of its own, since a dialog stays open for as long
@@ -411,21 +259,13 @@ let helper ?input ?(capture = true) program arguments =
 
 (* security-model §10.6: the code goes on standard input, never in arguments,
    and the clipboard is never cleared. *)
-let copy_code t domain id =
-  match domain_named t domain with
-    | None -> ()
-    | Some d -> (
-        match ask_domain ~deadline:stats_deadline d (Totp_code id) with
-          | Error reason -> notify t "The code was not copied" reason
-          | Ok { code; _ } -> (
-              match
-                helper ~input:code ~capture:false "wl-copy"
-                  ["--sensitive"; "--type"; "text/plain"]
-              with
-                | Some _ -> ()
-                | None ->
-                    notify t "The code was not copied" "wl-copy did not take it"
-              ))
+let copy code =
+  match
+    helper ~input:code ~capture:false "wl-copy"
+      ["--sensitive"; "--type"; "text/plain"]
+  with
+    | Some _ -> Ok ()
+    | None -> Error "wl-copy did not take it"
 
 let dialog ~title text =
   Option.map
@@ -435,137 +275,19 @@ let dialog ~title text =
       else answer)
     (helper "kdialog" ["--title"; title; "--password"; text])
 
-let unlock_deadline = 120.
-
-(* §6.5: [sentence] is the owner's word on the previous attempt. *)
-let rec unlock_dialogs ?sentence ~enrolled t d =
-  let title = "Unlock " ^ d.name in
-  let above text =
-    match sentence with Some s -> s ^ "\n\n" ^ text | None -> text
-  in
-  match dialog ~title (above ("The passphrase of " ^ d.name ^ "'s vault")) with
-    | None -> ()
-    | Some passphrase -> (
-        let secret_key =
-          if enrolled then Some ""
-          else dialog ~title "This machine also needs the vault's secret key"
-        in
-        match secret_key with
-          | None -> ()
-          | Some secret_key -> (
-              let request =
-                Protocol.Vault_unlock
-                  {
-                    passphrase;
-                    secret_key =
-                      (if secret_key = "" then None else Some secret_key);
-                  }
-              in
-              match
-                Ipc.ask ~deadline:unlock_deadline d.socket
-                  (Protocol.encode request)
-              with
-                | None ->
-                    notify t
-                      ("Unlocking " ^ d.name ^ " failed")
-                      "tsync is not answering"
-                | Some reply -> (
-                    match Protocol.failure_of_reply reply with
-                      | None -> ()
-                      | Some { kind = Denied | Invalid; reason; _ } ->
-                          unlock_dialogs ~sentence:reason ~enrolled t d
-                      | Some f ->
-                          notify t ("Unlocking " ^ d.name ^ " failed") f.reason)
-              ))
-
-let unlock t domain =
-  let start =
-    locked t (fun () ->
-        if t.unlocking then false
-        else (
-          t.unlocking <- true;
-          true))
-  in
-  if start then
-    Fun.protect
-      ~finally:(fun () -> locked t (fun () -> t.unlocking <- false))
-      (fun () ->
-        match domain_named t domain with
-          | None -> ()
-          | Some d -> (
-              let run_cli = "Run tsync vault unlock in a terminal." in
-              match
-                ask_domain ~deadline:stats_deadline d (Vault_status `Auto)
-              with
-                | Error reason ->
-                    notify t ("Cannot unlock " ^ domain) (reason ^ " " ^ run_cli)
-                | Ok _ when not (on_path "kdialog") ->
-                    notify t
-                      ("Cannot unlock " ^ domain)
-                      ("kdialog is not installed. " ^ run_cli)
-                | Ok status -> unlock_dialogs ~enrolled:status.enrolled t d))
-
-let fetch_stats t =
-  let due =
-    locked t (fun () ->
-        let now = Rt.now () in
-        if now -. t.stats_started < stats_debounce then false
-        else (
-          t.stats_started <- now;
-          true))
-  in
-  if due then (
-    Rt.spawn ~name:"tray stats" (fun () ->
-        let rows =
-          M.stats
-            (List.filter_map
-               (fun (_, reply) -> Option.bind reply M.stats_of_json)
-               (ask_all t ~deadline:stats_deadline (Stats [])))
-        in
-        ignore
-          (change_layout t (fun layout ->
-               Layout.set_children layout Show_stats rows)));
-    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t))
-
-let set_paused t paused =
-  List.iter
-    (fun (d, reply) ->
-      let refused why =
-        Log.warn "tray: %s did not %s: %s" d.name
-          (if paused then "hold" else "resume")
-          why
-      in
-      match Option.map Protocol.failure_of_reply reply with
-        | None -> refused "no answer"
-        | Some None -> ()
-        | Some (Some failure) -> refused failure.reason)
-    (ask_all t ~deadline:pause_deadline (Pause paused));
-  refresh t
-
-let run_action t : M.action -> unit = function
-  | Nothing | Show_stats | Show_codes | Add_code _ -> ()
-  | Copy_code { domain; id } -> copy_code t domain id
-  | Unlock domain -> unlock t domain
-  | Quit -> ignore (Rt.Promise.try_resolve t.finished 0)
-  | Set_paused paused -> set_paused t paused
-  | Open_folder name -> Option.iter (show t ~folder:true) (mount_point t name)
-  | Reveal { domain; rel } ->
-      Option.iter
-        (fun m -> show t ~folder:false (Filename.concat m rel))
-        (mount_point t domain)
-
 (* §4.4. Answers whether the layout under [id] changed, and the work to start
    once the reply is sent. *)
 let opening t id =
   let changed =
     change_layout t (fun layout -> Layout.opening layout ~now:(Rt.now ()) id)
   in
-  (changed, fun () -> fetch_stats t)
+  (changed, fun () -> Tray_core.opened (core t))
 
 let click t id =
   match locked t (fun () -> Layout.find t.layout id) with
     | Some { entry = Item { enabled = true; action; _ }; _ } ->
-        Rt.spawn ~name:"tray action" (fun () -> run_action t action)
+        Rt.spawn ~name:"tray action" (fun () ->
+            Tray_core.run_action (core t) action)
     | _ -> ()
 
 type answer =
@@ -707,7 +429,7 @@ let item_properties t =
     ("Title", String "tsync");
     ("Status", String "Active");
     ("WindowId", Int32 0);
-    ("IconName", String icon);
+    ("IconName", String (M.icon_name icon));
     ("IconPixmap", pixmaps);
     ("OverlayIconName", String "");
     ("AttentionIconName", String "");
@@ -951,17 +673,25 @@ let claim bus name =
     | Ok [Uint32 _] -> `Taken
     | _ -> `Failed
 
-let poll t =
-  let rec loop due =
-    (try refresh t
-     with e when not (Rt.is_cancelled e) ->
-       Log.warn "tray: refresh failed: %s" (Printexc.to_string e));
-    let now = Rt.now () in
-    let due = Float.max (due +. poll_interval) now in
-    Rt.sleep (due -. now);
-    loop due
-  in
-  loop (Rt.now ())
+(* The Linux platform of the shared tray (linux-tray.md §5–§7). *)
+let platform t =
+  {
+    Tray_core.menu = set_menu t;
+    children =
+      (fun action rows ->
+        ignore
+          (change_layout t (fun layout ->
+               Layout.set_children layout action rows)));
+    marks = Some (Atomic.set marks);
+    notify = notify t;
+    copy;
+    show = show t;
+    ask_secret = dialog;
+    can_ask =
+      (fun () ->
+        if on_path "kdialog" then Ok () else Error "kdialog is not installed.");
+    code_domains;
+  }
 
 let serve bus =
   let t =
@@ -971,21 +701,17 @@ let serve bus =
         Printf.sprintf "org.kde.StatusNotifierItem-%d-1" (Unix.getpid ());
       lock = Mutex.create ();
       layout = Layout.create ();
-      icon = "tsync-idle-symbolic";
+      icon = `Idle;
       tooltip = "tsync";
-      domains = [];
-      reported_mounts = [];
-      stats_started = neg_infinity;
-      unlocking = false;
-      code_domains = [];
-      refreshing = Rt.Fmutex.create ();
-      finished = Rt.Promise.create ();
+      core = None;
     }
   in
+  let core = Tray_core.create ~quit:"Quit tsync tray" (platform t) in
+  t.core <- Some core;
   let exported = ref [] in
   Rt.spawn ~name:"tray bus" (fun () ->
       Bus.serve bus (fun message -> dispatch t !exported message);
-      ignore (Rt.Promise.try_resolve t.finished 0));
+      ignore (Rt.Promise.try_resolve (Tray_core.finished core) 0));
   match claim bus "org.tsync.Tray" with
     | `Taken ->
         print_endline "tsync-tray is already running";
@@ -1015,8 +741,8 @@ let serve bus =
                       "tray: no StatusNotifier host is running, so nothing \
                        will draw the icon; on GNOME this needs the \
                        AppIndicator extension");
-              Rt.spawn ~name:"tray poll" (fun () -> poll t);
-              Rt.Promise.await t.finished)
+              Rt.spawn ~name:"tray poll" (fun () -> Tray_core.poll core);
+              Rt.Promise.await (Tray_core.finished core))
 
 let run () =
   match Dbus.session_address () with

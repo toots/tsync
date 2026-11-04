@@ -6,13 +6,24 @@ let rec without_trailing_slashes path =
     without_trailing_slashes (String.sub path 0 (n - 1))
   else path
 
+let sync_root (d : Config.domain) =
+  let options =
+    Option.fold ~none:[]
+      ~some:(fun (f : Config.frontend) -> f.options)
+      (Config.frontend d "cloud_files")
+  in
+  match Config.fstr options "syncRoot" with
+    | Some p when String.trim p <> "" -> p
+    | _ -> Paths.mount_point d.name
+
 let configured (d : Config.domain) =
-  Option.map
-    (fun (f : Config.frontend) ->
-      match Config.fstr f.options "mountPoint" with
-        | Some m -> without_trailing_slashes m
-        | None -> Paths.mount_point d.name)
-    (Config.frontend d "fuse")
+  match Config.frontend d "fuse" with
+    | Some f -> (
+        match Config.fstr f.options "mountPoint" with
+          | Some m -> Some (without_trailing_slashes m)
+          | None -> Some (Paths.mount_point d.name))
+    | None ->
+        Option.map (fun _ -> sync_root d) (Config.frontend d "cloud_files")
 
 let holding (config : Config.t) path =
   List.filter_map
@@ -116,5 +127,5 @@ let mount_points ?(table = "/proc/self/mountinfo") () =
                   if List.mem mount_point mounted then
                     Some (mount_point, Paths.owner_socket d.name)
                   else None))
-            (Config.of_string text).domains
+            (Config.of_user_string text).domains
   with _ -> []

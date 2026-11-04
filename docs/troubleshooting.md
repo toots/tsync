@@ -17,6 +17,9 @@
 | A share link or `tsync versions` misses a change the other machines already have | The machine that made it went offline too soon. It catches up when that machine is back, or within about a quarter of an hour. |
 | This machine does not show what another one did | `tsync sync`; if it still differs, `tsync sync --full`. |
 | Finder disagrees with the store (macOS) | `tsync fileprovider reimport`, then `tsync fileprovider reset`. |
+| Explorer disagrees with the store (Windows) | `tsync cloudfiles reimport`, then `tsync cloudfiles reset`. |
+| Setup says registering tsync failed (Windows) | The certificate is not trusted yet. See [install on Windows](install.md#windows). |
+| "… is a local store, which Windows does not hold" | A Windows PC reaches its storage through a bucket or a tsync server. See [backend types](config.md#backend-types). |
 | A client gets "unauthorized" from a server | The secrets differ, the domain names differ, or the clocks are more than 5 minutes apart. |
 | Uploads to a server fail behind nginx | Raise `client_max_body_size`. |
 | A client refuses its server's `url` | It must be `https://`. |
@@ -29,3 +32,4 @@
 | `tsync share` says sharing is not available | Nothing serves links. See [share links](sharing.md#share-links). |
 | No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log in again. |
 | No tray icon elsewhere | Run `tsync-tray -v` in a terminal. |
+| No tray icon on Windows | Look under the taskbar's ^ arrow, then run `tsync-tray`; `%LOCALAPPDATA%\tsync\logs\tray.log` says what went wrong. |

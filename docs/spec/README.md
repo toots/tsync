@@ -47,8 +47,8 @@ The constraints that shape everything:
 5. **Stored data outlives implementations.** Data written to a store, and the state a machine keeps
    locally, MUST be usable as-is by any conforming implementation: no migration, no conversion
    step. Formats are defined generally enough that data already written is valid under them.
-6. **Each OS presents files its own way** (FUSE on Linux, File Provider on macOS, DocumentsProvider
-   on Android, HTTP for other tsync clients). The core does not depend on which.
+6. **Each OS presents files its own way** (FUSE on Linux, File Provider on macOS, Cloud Files on
+   Windows, DocumentsProvider on Android, HTTP for other tsync clients). The core does not depend on which.
 
 ## 2. Design principles
 
@@ -104,7 +104,7 @@ The constraints that shape everything:
 | **cursor** | One store object holding a head number: a hint that peers should look. |
 | **applied log** | The owner's log of every change made to its local tree; the change feed frontends read. |
 | **converge** | Recover, run the cycle (arrive, push, project), run maintenance. Done by the domain's owner. |
-| **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `http-proxy`, `android`. |
+| **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `cloud_files`, `http-proxy`, `android`. |
 | **extension / vault** | An optional package keeping small secret records (`totp`, `passwords`) in a domain's hidden `/.tsync-ext/` folder; the vault is the encryption they share. |
 | **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `i:<fileId>` (a local id kept across renames), or `f:<parentFolderId>/<leaf>`. |
 | **uplink governor** | Admits uploads on a network link at a rate chosen from measured queueing delay. |
@@ -117,7 +117,7 @@ Dependencies point downwards only.
 
 ```
  ┌───────────────────────────────────────────────────────────────────────────────┐
- │ Frontends and hosts: fuse · file_provider · http-proxy · android              │  frontends/
+ │ Frontends, hosts: fuse · file_provider · cloud_files · http-proxy · android   │  frontends/
  ├───────────────────────────────────────────────────────────────────────────────┤
  │ Frontend contract: descriptor · shared request handler                        │  08
  ├───────────────────────────────────────────────────────────────────────────────┤
@@ -169,7 +169,7 @@ nothing depends on them except the CLI and the request handler.
 | [s3](backends/s3.md) | AWS S3 and S3-compatible services | [file-provider](frontends/file-provider.md) | macOS File Provider: app, extension and owner |
 | [gcs](backends/gcs.md) | Google Cloud Storage | [http-proxy](frontends/http-proxy.md) | the store server, share links and status page |
 | [object-store-common](backends/object-store-common.md) | what s3 and gcs share, and the bucket-side functions | [android](frontends/android.md), [android-app](frontends/android-app.md) | the owner embedded in the Android app; the app itself |
-| [http-proxy](backends/http-proxy.md) | another tsync machine; owns the wire protocol | | |
+| [http-proxy](backends/http-proxy.md) | another tsync machine; owns the wire protocol | [cloud-files](frontends/cloud-files.md) | the Windows host: Cloud Files sync roots, the platform layer, the tray |
 
 Clients of the owner that are not frontends:
 
@@ -230,6 +230,7 @@ Every host runs the same core; they differ in which roles their processes hold.
 |---|---|
 | Linux | A supervisor holding the uplink governor; one owner process per domain, which hosts the domain's FUSE mount (or runs headless for a domain with no presenting frontend); at most one store server. |
 | macOS | One service process owns every domain, hosts the File Provider side and holds the uplink governor; a sandboxed extension and app are clients of it. |
+| Windows | A supervisor started at logon; one owner process per domain, which hosts the domain's sync root. No local store and no store server ([cloud-files](frontends/cloud-files.md#2-what-a-windows-host-holds)). |
 | Android | The app process owns its domain, with a lazy tree (folders read from the store when opened) and no background cycle; the UI and the DocumentsProvider call it directly. |
 | One-shot command | Asks the running owner, or takes ownership for its own duration when none runs. |
 
@@ -290,7 +291,7 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 | IPC envelope, error codes, actions, item rows, anchors, events | [07 §4](07-daemon-cli.md), [08](08-frontends.md), [failure-model](algorithms/failure-model.md) |
 | http-proxy wire protocol | [backends/http-proxy](backends/http-proxy.md) |
 | Uplink lease messages | [uplink-governor](algorithms/uplink-governor.md) |
-| Host-specific state (macOS, Android) | [file-provider](frontends/file-provider.md), [android-app](frontends/android-app.md) |
+| Host-specific state (macOS, Windows, Android) | [file-provider](frontends/file-provider.md), [cloud-files](frontends/cloud-files.md), [android-app](frontends/android-app.md) |
 | Vault keyring and record envelope; extension records | [extensions/vault](extensions/vault.md), [extensions/totp](extensions/totp.md), [extensions/passwords](extensions/passwords.md) |
 
 ## 8. Building an implementation

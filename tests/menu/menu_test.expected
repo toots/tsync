@@ -22,7 +22,7 @@
 180000 -> 2d 2h
 -1 -> undefined
 nan -> undefined
-1e+13 -> undefined
+10000000000000 -> undefined
 
 == formatters: time left
 100 at 10/s -> under a minute left

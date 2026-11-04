@@ -65,7 +65,7 @@ let rec wait_gone file deadline =
 let remove_link () =
   match Unix.lstat cli_link with
     | { st_kind = S_LNK; _ } -> (
-        match Unix.unlink cli_link with
+        match Fs.unix_unlink cli_link with
           | () -> ()
           | exception Unix.Unix_error ((EACCES | EPERM), _, _) ->
               say "Remove the command-line link with: sudo rm %s" cli_link)

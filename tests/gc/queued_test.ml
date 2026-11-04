@@ -124,8 +124,16 @@ let () =
               | Some g -> g mod 2 = 0
               | None -> false)
       in
-      let collect () =
+      (* A settle the previous jobs spawned may hold the run lock a moment. *)
+      let rec run ?(n = 100) () =
         match Collector.run c with
+          | Error Busy when n > 0 ->
+              Rt.sleep 0.1;
+              run ~n:(n - 1) ()
+          | r -> r
+      in
+      let collect () =
+        match run () with
           | Ok [s] ->
               Printf.sprintf "%s, %d reclaimed"
                 (match s.outcome with
