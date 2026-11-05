@@ -196,7 +196,7 @@ Only `GET` matches these paths.
 |---|---|
 | `GET /`, `GET /index.html` | 200 HTML status login page ([frontend §A10](../frontends/http-proxy.md)). |
 | `GET\|HEAD /s/<token>[/<sub>]` | Public share links when some route on the listener serves shares, else 404. Semantics in [the frontend](../frontends/http-proxy.md); capability rules in [security §6](../algorithms/security-model.md#6-share-capabilities). |
-| `GET\|HEAD /join/<token>[?json=1]` | A setup link's page, or its sealed payload with `json` ([setup-link §7](../algorithms/setup-link.md#7-the-page)). A capability: a server without it answers 404. |
+| `GET\|HEAD /join/<token>[?json=1]`, `/join/<token>/preview` | A setup link's page, or its sealed payload with `json`, or its card image ([setup-link §7](../algorithms/setup-link.md#7-the-page)). A capability: a server without it answers 404. |
 
 A client composes a share URL as `<its configured url>/s/<token>` when the server answered `{"self":true}` (behind TLS termination the server cannot know its public URL), or `<url>/<token>` from `{"url":…}`.
 

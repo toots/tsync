@@ -44,6 +44,10 @@ cache-control: no-store
 referrer-policy: no-referrer
 x-content-type-options: nosniff
 names photos: true, notes: true, a secret: false
+og:title: Set up tsync: photos, notes
+og:image ends with /join/<token>/preview: true
+preview: 200 image/png, a PNG: true
+unknown token's preview: 404
 json: 200
 unknown token: 404
 
