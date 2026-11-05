@@ -223,6 +223,12 @@ write: a join that adds nothing writes nothing.
   Android: install, then *Scan setup code*; macOS and Linux: `tsync config join '<link>'`, the link
   filled in from the page's address). Without a fragment the page says the link is incomplete and
   shows no QR code.
+- **Link card**: the page's head carries `og:title` (*Set up tsync: * then the names of `about`, comma
+  separated; *Set up tsync* when empty), `og:description`, `og:type` `website`, `twitter:card`
+  `summary` and `og:image`, the absolute `<scheme>://<host>/join/<token>/preview` built as for a
+  share ([frontends/http-proxy §A9.6](../frontends/http-proxy.md)), each escaped as an attribute.
+  `GET|HEAD /join/<token>/preview` answers a live link's token with the generic card image of
+  [frontends/http-proxy §A9.8](../frontends/http-proxy.md), `image/png`, and is dispatched like the page.
 - Headers: those of [security §13](security-model.md#13-html-and-browser-facing-output), plus
   `Cache-Control: no-store` and
   `Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'`.

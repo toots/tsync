@@ -1069,6 +1069,9 @@ let self_url (l : Proxy_options.listener) =
     (if l.tls = None then "http" else "https")
     host l.port
 
+let listener_tls t =
+  match t.listener with Some l -> l.tls <> None | None -> false
+
 (* §A9.1: with several share-serving routes, the one whose domain the token's
    manifest names answers, else the first, so its refusal is the answer. *)
 let serve_share t (r : Server.request) params rest =
@@ -1111,9 +1114,7 @@ let serve_share t (r : Server.request) params rest =
   match
     Share_server.handle
       ?self:(Option.map self_url t.listener)
-      share
-      ~tls:(match t.listener with Some l -> l.tls <> None | None -> false)
-      ~max_zip_members r ~token ~sub params
+      share ~tls:(listener_tls t) ~max_zip_members r ~token ~sub params
     |> count_bytes [t.total] ~written:0
   with
     | { body = Stream s; _ } as response ->
@@ -1139,7 +1140,7 @@ let serve_share t (r : Server.request) params rest =
 
 (* setup-link §7: the first route whose share store holds a setup link naming
    its domain, whatever its [shares]. *)
-let serve_setup t (r : Server.request) params token =
+let serve_setup t (r : Server.request) params rest =
   if r.meth <> "GET" && r.meth <> "HEAD" then
     answer (text 405 "method not allowed");
   count t "page";
@@ -1152,8 +1153,16 @@ let serve_setup t (r : Server.request) params token =
           | Ok s when Domain_name.equal s.domain route.domain -> Some s
           | _ -> None)
   in
+  let token, what =
+    match String.split_on_char '/' rest with
+      | [token] when List.assoc_opt "json" params = Some "1" -> (token, `Json)
+      | [token] -> (token, `Page)
+      | [token; "preview"] -> (token, `Preview)
+      | _ -> ("", `Page)
+  in
   Setup_page.answer
-    ~json:(List.assoc_opt "json" params = Some "1")
+    ~origin:(Share_server.origin ~tls:(listener_tls t) r)
+    ~token what
     (Option.bind (Key.share token) (fun k ->
          List.find_map (fun route -> held route k) t.routes))
 

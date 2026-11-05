@@ -259,6 +259,26 @@ let () =
         (contains html "\"photos\"")
         (contains html "\"notes\"")
         (contains html secret);
+      let tag property =
+        let prefix = Printf.sprintf {|property="%s" content="|} property in
+        match Text.find_from html prefix 0 with
+          | Some i ->
+              let start = i + String.length prefix in
+              String.sub html start (String.index_from html start '"' - start)
+          | None -> "-"
+      in
+      p "og:title: %s" (tag "og:title");
+      p "og:image ends with /join/<token>/preview: %b"
+        (String.ends_with
+           ~suffix:("/join/" ^ link.token ^ "/preview")
+           (tag "og:image"));
+      let status, headers, card = get ("/join/" ^ link.token ^ "/preview") in
+      p "preview: %d %s, a PNG: %b" status
+        (Option.value ~default:"-"
+           (Tsync_http.Codec.header headers "content-type"))
+        (String.starts_with ~prefix:"\x89PNG" card);
+      let status, _, _ = get ("/join/" ^ String.make 32 'f' ^ "/preview") in
+      p "unknown token's preview: %d" status;
       let status, _, _ = get ("/join/" ^ link.token ^ "?json=1") in
       p "json: %d" status;
       let status, _, _ = get ("/join/" ^ String.make 32 'f') in
