@@ -617,8 +617,9 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
   **identity package**: a sparse package whose external location is the programs folder, declaring
   `tsyncd.exe` as its application, signed with the same certificate. Only `tsyncd.exe` runs with
   package identity; nothing is virtualised, so the CLI and the owners share one data directory.
-- It creates the scheduled task (§14.2), sets the tray's autostart value, then starts the task and
-  the tray.
+- It creates the scheduled task (§14.2), sets the tray's autostart value, and starts the task and
+  the tray; then it offers an optional setup-link page
+  ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)).
 - With no config, or no domain configured, the supervisor exits 0
   ([07 §3.1](../07-daemon-cli.md#31-tsync-start-the-supervisor)); a configuration takes effect when
   the service is next started.

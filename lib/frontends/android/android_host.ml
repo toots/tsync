@@ -271,3 +271,57 @@ let read handle ~off buffer =
   on_owner
     ~failed:(fun e -> -errno_of e)
     (fun owner -> read_in owner handle ~off buffer)
+
+module L = Tsync_setup_link.Setup_link
+
+(* setup-link §6.3: the app joins one domain, so each joinable one is offered
+   with the server it is reached through. *)
+let opened (stored : L.stored) (payload : L.payload) =
+  let about =
+    match Yojson.Safe.from_string (L.stored_to_string stored) with
+      | `Assoc l -> Option.value ~default:(`List []) (List.assoc_opt "about" l)
+      | _ -> `List []
+  in
+  let domains, skipped =
+    List.partition_map
+      (function
+        | L.Joinable ({ backends = b :: _; _ } as d) ->
+            Left
+              (`Assoc
+                 [
+                   ("name", `String (Domain_name.to_string d.name));
+                   ("url", `String b.url);
+                   ("secret", `String b.secret);
+                 ])
+        | L.Joinable d ->
+            Right
+              (`Assoc
+                 [
+                   ("name", `String (Domain_name.to_string d.name));
+                   ("reason", `String "it has no backend");
+                 ])
+        | L.Unusable { name; reason } ->
+            Right (`Assoc [("name", `String name); ("reason", `String reason)]))
+      payload.entries
+  in
+  `Assoc
+    [
+      ("from", `String payload.from);
+      ("domains", `List domains);
+      ("skipped", `List skipped);
+      ("about", about);
+    ]
+
+let setup_link text =
+  let answer =
+    match
+      Rt.run_sync (fun () ->
+          Result.bind (L.link_of_string text) (fun link ->
+              Result.bind (L.fetch link) (fun stored ->
+                  Result.map (opened stored) (L.open_ link stored))))
+    with
+      | Ok json -> json
+      | Error e -> `Assoc [("error", `String e)]
+      | exception e -> `Assoc [("error", `String (sentence e))]
+  in
+  Yojson.Safe.to_string answer

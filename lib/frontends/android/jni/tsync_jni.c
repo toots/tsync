@@ -303,6 +303,13 @@ Java_org_feverdreamtv_tsync_bridge_Native_nativeRequest(JNIEnv *env,
 }
 
 JNIEXPORT jbyteArray JNICALL
+Java_org_feverdreamtv_tsync_bridge_Native_nativeSetupLink(JNIEnv *env,
+                                                          jclass class,
+                                                          jbyteArray link) {
+  return text_call(env, "setup_link", link);
+}
+
+JNIEXPORT jbyteArray JNICALL
 Java_org_feverdreamtv_tsync_bridge_Native_nativeStatus(JNIEnv *env,
                                                        jclass class) {
   return text_call(env, "status", NULL);

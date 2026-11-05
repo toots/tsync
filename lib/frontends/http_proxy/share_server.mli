@@ -35,6 +35,15 @@ val handle :
   (string * string) list ->
   Tsync_http.Server.response
 
+(** The scheme and host a request reached this listener by, as a forwarding
+    proxy names them, for a page's absolute URLs. *)
+val origin : tls:bool -> Tsync_http.Server.request -> string
+
+(** The generic card image (§A9.8), PNG bytes. *)
+val card : string Lazy.t
+
+val html_escape : string -> string
+
 (**/**)
 
 val parse_range :

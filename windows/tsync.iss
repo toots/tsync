@@ -44,6 +44,9 @@ Source: "uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"" -ProgramDir ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "tsync-uninstall"
 
 [Code]
+var
+  LinkPage: TInputQueryWizardPage;
+
 function PowerShell(Script: String; var Code: Integer): Boolean;
 begin
   Result := Exec('powershell.exe',
@@ -61,6 +64,54 @@ begin
     Exec(ExpandConstant('{app}\tsync.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Exec('taskkill.exe', '/IM tsync-tray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := '';
+end;
+
+{ setup-link §6.3: after the programs are in place, so the CLI can join; /LINK= gives it unattended. }
+procedure InitializeWizard;
+begin
+  LinkPage := CreateInputQueryPage(wpInstalling, 'Setup link',
+    'Were you given a tsync setup link?',
+    'Paste it to set up the folders it names. Leave it blank to set tsync up later.');
+  LinkPage.Add('Setup link:', False);
+  LinkPage.Values[0] := ExpandConstant('{param:LINK}');
+end;
+
+{ 07 §2.7: a changed config takes effect when the service starts again. }
+function Join(Link: String; var Output: String): Boolean;
+var
+  Code: Integer;
+  LogFile: String;
+  Text: AnsiString;
+begin
+  StringChangeEx(Link, '"', '', True);
+  LogFile := ExpandConstant('{tmp}\join.log');
+  Result := Exec(ExpandConstant('{cmd}'),
+    '/C ""' + ExpandConstant('{app}\tsync.exe') + '" config join "' + Link + '" > "' + LogFile + '" 2>&1"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+  if LoadStringFromFile(LogFile, Text) then
+    Output := String(Text)
+  else
+    Output := 'tsync config join failed (exit ' + IntToStr(Code) + ')';
+  if Result then
+  begin
+    Exec(ExpandConstant('{app}\tsync.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Exec('schtasks.exe', '/Run /TN \tsync\service', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
+  Log(Output);
+end;
+
+{ A silent install clicks through this page too: a refused link is logged and the install still finishes. }
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Output: String;
+begin
+  Result := True;
+  if (CurPageID = LinkPage.ID) and (Trim(LinkPage.Values[0]) <> '') then
+    if not Join(Trim(LinkPage.Values[0]), Output) and not WizardSilent then
+    begin
+      MsgBox(Output, mbError, MB_OK);
+      Result := False;
+    end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

@@ -18,6 +18,13 @@ val check_config : ?candidate:string -> string -> string
 val boot : ?pull_params:Pulls.params -> string -> string
 
 val request : string -> string
+
+(** setup-link §6.3: fetches and opens a setup link, before any config exists;
+    JSON
+    [{"from","domains":[{"name","url","secret"}],"skipped":[{"name",
+     "reason"}],"about"}], or [{"error"}] with the sentence to show. *)
+val setup_link : string -> string
+
 val status : unit -> string
 
 (** A handle > 0, or −errno. *)

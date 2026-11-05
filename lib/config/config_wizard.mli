@@ -22,9 +22,24 @@ val edit :
   Yojson.Safe.t option ->
   Yojson.Safe.t option
 
+(** setup-link §6.2: a new domain named [name] over [backends], with the
+    wizard's defaults and the frontends that present on [system]. *)
+val joined_domain :
+  ?system:[ `Linux | `Macos | `Windows ] ->
+  name:string ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t
+
+(** A config with no domain, holding the globals no question decides. *)
+val new_config : unit -> Yojson.Safe.t
+
 (** What is written: per-link settings no backend uses dropped, then the
     parser's own validation; [Error] names what is wrong. *)
 val prepare : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+(** {!prepare}, then written over the config file; the config as the daemon will
+    read it. *)
+val write : Yojson.Safe.t -> (Config.t, string) result
 
 (** The stores of backend type [btype] in a deployment's outputs, as JSON text
     (spec 11 §11): each store's name with the backend fields it decides, [None]

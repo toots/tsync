@@ -1,0 +1,60 @@
+== link parsing (§2)
+https                    ok
+under a base path        ok
+http to loopback         ok
+http elsewhere           This is not a tsync setup link
+no fragment              This is not a tsync setup link
+short key                This is not a tsync setup link
+upper-case token         This is not a tsync setup link
+a share link             This is not a tsync setup link
+
+== round trip (§3, §4, §6.1)
+link parses back: true
+from laptop
+joinable photos: server url=true secret=true
+joinable notes: server url=true secret=true
+
+== the answer the Android app reads (§6.3)
+keys from, domains, skipped, about
+domains photos (url), notes (url)
+about photos, notes (vault)
+refused: {"error":"This is not a tsync setup link"}
+
+== nothing in clear (§8)
+manifest holds a secret: false, the url: false, the key: false
+
+== integrity (§4)
+one byte altered: This setup link is damaged; copy it whole
+under another token: This setup link is damaged; copy it whole
+
+== confinement (security §6.4)
+written with another domain's secret: refused/denied
+/s/<token>: 404
+a share-space listing shows it: false
+
+== on a member (§4 placement)
+landed on the member: true
+served: ok
+
+== the page (§7)
+status 200
+content-type: text/html; charset=utf-8
+content-security-policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'
+cache-control: no-store
+referrer-policy: no-referrer
+x-content-type-options: nosniff
+names photos: true, notes: true, a secret: false
+og:title: Set up tsync: photos, notes
+og:image ends with /join/<token>/preview: true
+preview: 200 image/png, a PNG: true
+unknown token's preview: 404
+json: 200
+unknown token: 404
+
+== lifetime (§4, §5.2)
+expired page: 410
+expired fetch: true
+revoked fetch: This setup link was revoked, or never existed
+
+== joined domains (§6.2)
+accepted; photos: frontends presenter, versioning true, extensions the main's

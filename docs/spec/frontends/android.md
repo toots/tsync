@@ -260,6 +260,7 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 |---|---|---|---|
 | `check_config(domain, candidate?)` | domain; optionally a config's text | `""` or error text | Loads and validates the config, or the candidate text in its place, and selects the domain, starting nothing, writing nothing and taking no lock. Callable before or after boot. |
 | `boot(domain)` | domain | `""` or error text | §3.1. |
+| `setup_link(link)` | a setup link | JSON | Fetches and opens it ([setup-link §6.1](../algorithms/setup-link.md#61-opening-a-link)), before or after boot, writing nothing: `{"from","domains":[{"name","url","secret"}],"skipped":[{"name","reason"}],"about"}`, each joinable domain with its first backend's server, or `{"error"}` with the sentence to show. |
 | `request(json)` | request | reply | One request, one reply, through the shared handler ([08 §3.3](../08-frontends.md#33-actions)). |
 | `status()` | — | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |
 | `open(ref)` | reference | handle > 0, or −errno | Resolves the file's current version (§3.2 rule 3, §3.3) and pins it to a new handle. |

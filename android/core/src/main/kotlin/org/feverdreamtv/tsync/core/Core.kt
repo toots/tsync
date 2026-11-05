@@ -13,6 +13,9 @@ interface Core {
 
     fun request(json: String): String
 
+    /** Fetches and opens a setup link (setup-link §6.3), before any config exists; read by [SetupLink.parse]. */
+    fun setupLink(link: String): String
+
     fun status(): String
 
     /** @return a handle > 0, or -errno. */

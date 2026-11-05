@@ -105,9 +105,18 @@ try {
   Import-Certificate -FilePath (Join-Path (Split-Path $Setup) 'tsync-development.cer') `
     -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
   # -Wait would also wait for the tray setup starts.
-  $p = Start-Process $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$Work\setup.log" -PassThru
-  $p.WaitForExit()
+  # setup-link §6.3: a link the CLI refuses is reported in the setup log and leaves the install and the config as they were.
+  $p = Start-Process $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$Work\setup.log", '/LINK=https://example.invalid/join/abc#x' -PassThru
+  if (-not $p.WaitForExit(300000)) {
+    Step 'setup has not finished after 5 minutes; still running:'
+    Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'tsync|cmd|setup|\.tmp' } |
+      ForEach-Object { Step "  $($_.ProcessId) <- $($_.ParentProcessId) $($_.CommandLine)" }
+    if (Test-Path "$Work\setup.log") { Get-Content "$Work\setup.log" -Tail 30 | ForEach-Object { Step "  $_" } }
+    $p.Kill()
+    throw 'setup hung'
+  }
   Check 'setup exits 0' ($p.ExitCode -eq 0)
+  Check 'the setup log has the refused link' (Select-String -Quiet -Path "$Work\setup.log" -Pattern 'not a tsync setup link')
 
   Step 'seeding the domain'
   & $tsync stop 2>$null
