@@ -5,6 +5,7 @@
 
 (executable
  (name tray_test)
+ (modules tray_test)
  (enabled_if
   (= %{system} linux))
  (libraries
@@ -41,3 +42,18 @@
   (= %{system} linux))
  (action
   (diff tray_test.expected tray_test.output)))
+
+(executable
+ (name core_config_test)
+ (modules core_config_test)
+ (libraries tsync_core tsync_tray_core unix))
+
+(rule
+ (with-stdout-to
+  core_config_test.output
+  (run ./core_config_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff core_config_test.expected core_config_test.output)))
