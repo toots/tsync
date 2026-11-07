@@ -9,15 +9,14 @@ $cer = Join-Path $ProgramDir 'tsync-development.cer'
 $thumbprint = (New-Object Security.Cryptography.X509Certificates.X509Certificate2 $cer).Thumbprint
 $trusted = "Cert:\LocalMachine\TrustedPeople\$thumbprint"
 if (-not (Test-Path $trusted)) {
-  $import = "Import-Certificate -FilePath '$($cer.Replace("'", "''"))' -CertStoreLocation Cert:\LocalMachine\TrustedPeople"
-  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($import))
   try {
-    Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden `
-      -ArgumentList '-NoProfile', '-EncodedCommand', $encoded
+    $p = Start-Process certutil.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
+      -ArgumentList '-addstore', 'TrustedPeople', "`"$cer`""
   } catch {
     throw "tsync's certificate was not trusted, so Windows refuses its package: $($_.Exception.Message)"
   }
-  if (-not (Test-Path $trusted)) { throw "tsync's certificate is still not trusted, so Windows refuses its package." }
+  if ($p.ExitCode) { throw "Trusting tsync's certificate failed (certutil exited $($p.ExitCode)), so Windows refuses its package." }
+  if (-not (Test-Path $trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
 }
 
 Add-AppxPackage -Path (Join-Path $ProgramDir 'tsync-identity.msix') `
