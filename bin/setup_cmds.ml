@@ -134,9 +134,24 @@ let edit_config ~advanced () =
                       path;
                     0))
 
+let summarise_config () =
+  run (fun () ->
+      print_endline (Config_summary.render (config ()));
+      0)
+
 let config_cmd =
-  let edit =
-    Arg.(value & flag & info ["edit"] ~doc:"Edit the config through prompts.")
+  let mode =
+    Arg.(
+      value
+      & vflag `Show
+          [
+            (`Edit, info ["edit"] ~doc:"Edit the config through prompts.");
+            ( `Summary,
+              info ["summary"]
+                ~doc:
+                  "Print each domain's folder, storage and features in plain \
+                   words." );
+          ])
   in
   let advanced =
     Arg.(
@@ -149,9 +164,12 @@ let config_cmd =
   Cmd.group
     ~default:
       Term.(
-        const (fun edit advanced ->
-            if edit then edit_config ~advanced () else show_config ())
-        $ edit $ advanced)
+        const (fun mode advanced ->
+            match mode with
+              | `Edit -> edit_config ~advanced ()
+              | `Summary -> summarise_config ()
+              | `Show -> show_config ())
+        $ mode $ advanced)
     (Cmd.info "config"
        ~doc:
          "Print the config, secrets masked, edit it, or share or join a setup \

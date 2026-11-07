@@ -145,10 +145,19 @@ begin
   Result := (PageID = LinkPage.ID) and (RegisterFailure <> '');
 end;
 
+{ The last page shows what this machine syncs, as tsync config --summary words it. }
 procedure CurPageChanged(CurPageID: Integer);
+var
+  Summary: String;
 begin
-  if (CurPageID = wpFinished) and (RegisterFailure <> '') then
-    WizardForm.FinishedLabel.Caption := 'tsync was installed but could not be registered with Windows. Run setup again to retry.';
+  if CurPageID <> wpFinished then
+    Exit;
+  if RegisterFailure <> '' then
+    WizardForm.FinishedLabel.Caption := 'tsync was installed but could not be registered with Windows. Run setup again to retry.'
+  else if Captured('"' + ExpandConstant('{app}\tsync.exe') + '" config --summary', 'tsync config', Summary) then
+    WizardForm.FinishedLabel.Caption := 'tsync is installed and syncs:' + #13#10#13#10 + Summary
+  else
+    WizardForm.FinishedLabel.Caption := 'tsync is installed. No folders are set up yet: run setup again with a setup link.';
 end;
 
 function GetCustomSetupExitCode: Integer;

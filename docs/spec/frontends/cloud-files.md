@@ -624,7 +624,8 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
   registering the identity package, adds it to the machine's `TrustedPeople` store when it is not
   there, through one elevated step the user consents to. Refused, nothing is registered.
 - When registering fails, the installer says why, skips the setup-link page and exits non-zero; the
-  programs stay, and running it again retries.
+  programs stay, and running it again retries. Otherwise its last page shows `tsync config
+  --summary`.
 - It creates the scheduled task (§14.2), sets the tray's autostart value, and starts the task and
   the tray; then it offers an optional setup-link page
   ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)).

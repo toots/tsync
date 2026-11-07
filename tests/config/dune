@@ -75,3 +75,18 @@
  (alias runtest)
  (action
   (diff host_refusal_test.expected host_refusal_test.output)))
+
+(executable
+ (name summary_test)
+ (modules summary_test)
+ (libraries tsync_config tsync_catalog))
+
+(rule
+ (with-stdout-to
+  summary_test.output
+  (run ./summary_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff summary_test.expected summary_test.output)))
