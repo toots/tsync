@@ -336,6 +336,8 @@ def content_type(cache_key, name, size):
 
 
 HLS_MIME = "application/vnd.apple.mpegurl"
+# Shortcut files naming a web address: .url, .webloc, .desktop.
+LINK_MIMES = {"application/x-mswinurl", "application/x-webloc", "application/x-desktop"}
 # object-store-common §6: a playlist is answered whole, never redirected.
 PLAYLIST_MAX_BYTES = 1024 * 1024
 
@@ -355,14 +357,16 @@ def preview_kind(mime):
         return "pdf"
     if mime == "text/html":
         return "html"
+    if mime in LINK_MIMES:
+        return "link"
     return "text"  # text/plain, application/json, application/xml
 
 
 def is_media(name):
     """Whether a shared file opens the viewer page rather than downloading:
-    what a browser plays or displays by itself."""
+    what a browser plays or displays by itself, or a link file the page follows."""
     mime = mime_type(name)
-    return mime is not None and preview_kind(mime) in ("image", "audio", "video", "pdf")
+    return mime is not None and preview_kind(mime) in ("image", "audio", "video", "pdf", "link")
 
 
 # ext -> preview kind, injected into browse.html so the front end has no
@@ -392,7 +396,12 @@ def json_response(obj):
 def html_response(body):
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "private"},
+        "headers": {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "private",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
         "body": body,
     }
 

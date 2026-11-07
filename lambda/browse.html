@@ -268,6 +268,7 @@
         hls: "🎬",
         pdf: "📕",
         html: "🌐",
+        link: "🔗",
         text: "📄",
       };
 
@@ -434,6 +435,28 @@
           body.textContent = "Preview failed (" + e.message + ")";
           return;
         }
+        if (k === "link" || k === "html") {
+          const current = ++previewing;
+          let target;
+          try {
+            target = linkTarget(f.name, await smallText(url));
+          } catch (e) {
+            if (k === "link") {
+              body.textContent = "Could not read this link file (" + e.message + ")";
+              return;
+            }
+          }
+          if (current !== previewing) return;
+          if (target) {
+            body.textContent = "Opening " + target + "…";
+            location.replace(target);
+            return;
+          }
+          if (k === "link") {
+            body.textContent = "This link file names no web address to open.";
+            return;
+          }
+        }
         let el;
         if (k === "image") el = new Image();
         else if (k === "pdf") el = document.createElement("iframe");
@@ -448,6 +471,35 @@
         el.src = url;
         body.innerHTML = "";
         body.appendChild(el);
+      }
+      // Bumped by each preview and by closing the dialog, so a link that
+      // resolves after the visitor moved on does not take the page away.
+      let previewing = 0;
+      async function smallText(url) {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(r.status);
+        if (Number(r.headers.get("content-length")) > 65536) throw new Error("too large");
+        return r.text();
+      }
+      // The absolute web address a link file or an HTML redirect page names: a
+      // URL= line (.url, .desktop), a plist string (.webloc), a meta refresh.
+      // Only http(s), so a javascript: address cannot run on this origin.
+      function linkTarget(name, text) {
+        const ext = name.split(".").pop().toLowerCase();
+        const doc = (type) => new DOMParser().parseFromString(text, type);
+        let raw;
+        if (ext === "webloc") raw = doc("text/xml").querySelector("string")?.textContent;
+        else if (ext === "url" || ext === "desktop") raw = text.match(/^\s*URL\s*=(.*)$/im)?.[1];
+        else {
+          const refresh = doc("text/html").querySelector('meta[http-equiv="refresh" i]');
+          raw = refresh?.content.match(/url\s*=\s*['"]?([^'"]+)/i)?.[1];
+        }
+        try {
+          const u = new URL(raw.trim());
+          return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+        } catch {
+          return null;
+        }
       }
       // Played from `p/`, so the playlist's relative URIs resolve to their own
       // files in the share. hls.js fetches segments by script, through the
@@ -489,6 +541,7 @@
       }
       document.getElementById("pvx").onclick = () => pv.close();
       pv.addEventListener("close", () => {
+        previewing++;
         AudioPlayer.stop();
         document.getElementById("pvb").innerHTML = "";
       });

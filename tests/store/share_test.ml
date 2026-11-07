@@ -293,6 +293,9 @@ let () =
       "a.mp4";
       "a.jpg";
       "a.pdf";
+      "a.URL";
+      "a.webloc";
+      "a.desktop";
       "a.m3u8";
       "a.txt";
       "a.html";

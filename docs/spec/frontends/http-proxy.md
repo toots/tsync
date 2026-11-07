@@ -245,6 +245,8 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 
 A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media.
 
+A **link file** is one whose name maps to `application/x-mswinurl` (`.url`), `application/x-webloc` (`.webloc`) or `application/x-desktop` (`.desktop`): a shortcut naming a web address. A file share of one is answered like a media file's, so a browser gets the page, which follows the link.
+
 An **HLS playlist** is a file whose name maps to `application/vnd.apple.mpegurl` (`.m3u8`). It is not a media file: alone it is a list of names, and a file share of one downloads it.
 
 A request is **asked for by a browser** when its `Accept` header lists `text/html` explicitly, as a navigation does, or when its `User-Agent` contains, ignoring case, the name of a link-preview fetcher: `facebookexternalhit`, `Facebot`, `Twitterbot`, `WhatsApp`, `Slackbot`, `TelegramBot`, `Discordbot`, `LinkedInBot`, `SkypeUriPreview`. These fetch a link to build the card a chat application shows, and only the page carries what the card is made of. `*/*`, another type or no header is not. Anything else that follows the link (a command-line client, an image element) is answered the file itself. Both answers of a media file's `""` carry `vary: accept, user-agent`.
@@ -271,7 +273,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 
 | placeholder | value | escaping |
 |---|---|---|
-| `__PREVIEW_KINDS__` | JSON: extension → `image`/`audio`/`video`/`hls`/`pdf`/`html`/`text` | JSON-in-HTML |
+| `__PREVIEW_KINDS__` | JSON: extension → `image`/`audio`/`video`/`hls`/`pdf`/`html`/`link`/`text` | JSON-in-HTML |
 | `__PLAYER_JS__` | the embedded player script | none (constant) |
 | `__OG_TITLE__` | the title: for a folder, manifest `filename` without extension; for a file, `filename` whole | HTML text/attribute |
 | `__OG_DESC__` | `Shared folder · tsync`, or `Shared file · tsync` | HTML text/attribute |
@@ -285,6 +287,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 - **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
 - In folder mode, an HLS playlist plays like a video from its `p/<path>` URL, so the segments, variant playlists and keys it names by relative URI are fetched from the same share. The page plays it with hls.js, loaded on first use from a pinned CDN URL with a subresource-integrity hash and no referrer (the page's URL is a credential); where hls.js cannot run (no Media Source Extensions) or fails to load, with the browser's own HLS player; a browser with neither (`canPlayType("application/vnd.apple.mpegurl")` empty) is shown a sentence saying so, never an empty player.
 - **File mode** shows no listing: it asks `f?json=1` for the URL, displays the file in the page by its preview kind without starting playback, and offers `download`. The page carries nothing of the file but its name.
+- In either mode, opening a link file reads its bytes and replaces the page with the address it names: the `URL=` line of a `.url` or `.desktop` (key matched ignoring case and surrounding spaces), the first plist `<string>` of an XML `.webloc`. In folder mode, an HTML file whose `<meta http-equiv="refresh">` names a `url=` is followed the same way; any other HTML file, or one whose bytes cannot be read, is shown in a frame with every sandbox restriction. Only an absolute `http:` or `https:` address is followed. A link file naming anything else, or nothing, is shown a sentence saying so beside the download, and one whose bytes cannot be read a sentence saying that. A link that resolves after the visitor closed its preview is dropped.
 - In either mode, a browser that reports no PDF viewer (`navigator.pdfViewerEnabled` false, as on phones) is sent to the file's download (`download` in file mode, `f?path=…&dl=1` in folder mode) and shown a sentence saying so beside the download, never an empty frame.
 
 ### A9.7 ZIP of a folder
