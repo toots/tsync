@@ -136,7 +136,7 @@ let mime = Mime.of_name
 
 (* Shortcut files naming a web address: .url, .webloc, .desktop. *)
 let link_mimes =
-  [ "application/x-mswinurl"; "application/x-webloc"; "application/x-desktop" ]
+  ["application/x-mswinurl"; "application/x-webloc"; "application/x-desktop"]
 
 let preview_kind m =
   if String.starts_with ~prefix:"image/" m then Some "image"
