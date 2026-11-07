@@ -243,6 +243,7 @@ def test_media_file_share_opens_the_viewer(s3):
     assert page["statusCode"] == 200
     assert page["headers"]["Vary"] == "Accept, User-Agent"
     assert "text/html" in page["headers"]["Content-Type"]
+    assert page["headers"]["Referrer-Policy"] == "no-referrer"
     assert '"file": true' in page["body"]
     assert "Shared file" in page["body"]
     assert "</script>.mp3" not in page["body"]
