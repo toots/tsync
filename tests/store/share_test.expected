@@ -19,6 +19,9 @@ a.MP3        true
 a.mp4        true
 a.jpg        true
 a.pdf        true
+a.URL        true
+a.webloc     true
+a.desktop    true
 a.m3u8       false
 a.txt        false
 a.html       false

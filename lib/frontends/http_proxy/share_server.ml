@@ -134,6 +134,10 @@ let claims t token =
 
 let mime = Mime.of_name
 
+(* Shortcut files naming a web address: .url, .webloc, .desktop. *)
+let link_mimes =
+  [ "application/x-mswinurl"; "application/x-webloc"; "application/x-desktop" ]
+
 let preview_kind m =
   if String.starts_with ~prefix:"image/" m then Some "image"
   else if String.starts_with ~prefix:"audio/" m then Some "audio"
@@ -141,14 +145,16 @@ let preview_kind m =
   else if m = "application/vnd.apple.mpegurl" then Some "hls"
   else if m = "application/pdf" then Some "pdf"
   else if String.starts_with ~prefix:"text/html" m then Some "html"
+  else if List.mem m link_mimes then Some "link"
   else if String.starts_with ~prefix:"text/" m || m = "application/json" then
     Some "text"
   else None
 
-(* §A9.3: what a browser plays or displays by itself. *)
+(* §A9.3: what a browser plays or displays by itself, or a link file the page
+   follows. *)
 let media name =
   match Option.bind (mime name) preview_kind with
-    | Some ("image" | "audio" | "video" | "pdf") -> true
+    | Some ("image" | "audio" | "video" | "pdf" | "link") -> true
     | _ -> false
 
 let html_escape s =
