@@ -18,6 +18,7 @@ enough to implement tsync from first principles in any language.
   an implementation MUST exhibit. [09](09-tests.md) says how conformance is checked.
 - Internal concurrency, pool sizes and memory strategies are left to implementations. Only limits
   another party can observe are specified.
+- Possible improvements not yet specified are listed in [later.md](later.md).
 
 ---
 
