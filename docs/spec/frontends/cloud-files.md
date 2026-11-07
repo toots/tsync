@@ -617,6 +617,9 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
   **identity package**: a sparse package whose external location is the programs folder, declaring
   `tsyncd.exe` as its application, signed with the same certificate. Only `tsyncd.exe` runs with
   package identity; nothing is virtualised, so the CLI and the owners share one data directory.
+- The identity package declares a `windows.cloudFiles` extension whose handlers name a CLSID
+  nothing implements: Windows 10 refuses to register a sync root for a package without one
+  (`E_BOUNDS`), and tsync provides no shell handlers.
 - Until the certificate chains to a root Windows trusts, the installer carries it and, before
   registering the identity package, adds it to the machine's `TrustedPeople` store when it is not
   there, through one elevated step the user consents to. Refused, nothing is registered.
