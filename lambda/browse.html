@@ -268,6 +268,7 @@
         hls: "🎬",
         pdf: "📕",
         html: "🌐",
+        link: "🔗",
         text: "📄",
       };
 
@@ -434,6 +435,14 @@
           body.textContent = "Preview failed (" + e.message + ")";
           return;
         }
+        if (k === "link" || k === "html") {
+          const target = await linkTarget(f.name, url);
+          if (target) return openLink(body, target);
+          if (k === "link") {
+            body.textContent = "This link file names no web address to open.";
+            return;
+          }
+        }
         let el;
         if (k === "image") el = new Image();
         else if (k === "pdf") el = document.createElement("iframe");
@@ -448,6 +457,42 @@
         el.src = url;
         body.innerHTML = "";
         body.appendChild(el);
+      }
+      // The web address a link file or an HTML redirect page names: a URL=
+      // line (.url, .desktop), a plist string (.webloc), a meta refresh (HTML).
+      // Only http(s), so a javascript: address cannot run on this origin.
+      async function linkTarget(name, url) {
+        let text;
+        try {
+          const r = await fetch(url);
+          if (!r.ok || Number(r.headers.get("content-length")) > 65536) return null;
+          text = await r.text();
+        } catch {
+          return null;
+        }
+        const ext = name.split(".").pop().toLowerCase();
+        const doc = (type) => new DOMParser().parseFromString(text, type);
+        let raw;
+        if (ext === "webloc") raw = doc("text/xml").querySelector("string")?.textContent;
+        else if (ext === "url" || ext === "desktop") raw = text.match(/^URL=(.*)$/m)?.[1];
+        else {
+          const refresh = doc("text/html").querySelector('meta[http-equiv="refresh" i]');
+          raw = refresh?.content.match(/url\s*=\s*['"]?([^'"]+)/i)?.[1];
+        }
+        try {
+          const u = new URL(raw.trim());
+          return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+        } catch {
+          return null;
+        }
+      }
+      // No referrer: the page's URL is a credential.
+      function openLink(body, target) {
+        body.textContent = "Opening " + target + "…";
+        const a = Object.assign(document.createElement("a"), { href: target, rel: "noreferrer" });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       }
       // Played from `p/`, so the playlist's relative URIs resolve to their own
       // files in the share. hls.js fetches segments by script, through the

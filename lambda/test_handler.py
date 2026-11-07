@@ -257,6 +257,16 @@ def test_media_file_share_opens_the_viewer(s3):
     assert follow(s3, resp)[0] == b"audiodata"
 
 
+def test_link_file_share_opens_the_page(s3):
+    h = load_handler()
+    assert {h.PREVIEW_KINDS[e] for e in ("url", "webloc", "desktop")} == {"link"}
+    body = b"[InternetShortcut]\r\nURL=https://example.org/\r\n"
+    key = put_file(s3, "r", "Song Book.url", [("llll-8888", body)])
+    tok = file_share(s3, "a8", key, "Song Book.url")
+    assert h.handler(event(tok, accept=BROWSER), None)["statusCode"] == 200
+    assert "attachment" in h.handler(event(tok), None)["headers"]["Location"]
+
+
 def test_link_preview_fetcher_gets_the_page(s3):
     h = load_handler()
     key = put_file(s3, "r", "clip.mp4", [("pppp-c1", b"video")])
