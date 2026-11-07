@@ -396,7 +396,12 @@ def json_response(obj):
 def html_response(body):
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "private"},
+        "headers": {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "private",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
         "body": body,
     }
 
