@@ -7,10 +7,15 @@ $ErrorActionPreference = 'Stop'
 # trusted for the machine, which takes an administrator's consent.
 $cer = Join-Path $ProgramDir 'tsync-development.cer'
 $thumbprint = (New-Object Security.Cryptography.X509Certificates.X509Certificate2 $cer).Thumbprint
-$trusted = "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+# The store itself, as Windows PowerShell has no Cert: drive until its module loads.
+function Trusted {
+  $store = New-Object Security.Cryptography.X509Certificates.X509Store 'TrustedPeople', 'LocalMachine'
+  $store.Open('ReadOnly')
+  try { $store.Certificates.Find('FindByThumbprint', $thumbprint, $false).Count -gt 0 } finally { $store.Close() }
+}
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
   [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not (Test-Path $trusted)) {
+if (-not (Trusted)) {
   if ($admin) {
     certutil.exe -addstore TrustedPeople $cer
     $code = $LASTEXITCODE
@@ -25,7 +30,7 @@ if (-not (Test-Path $trusted)) {
     $code = $p.ExitCode
   }
   if ($code) { throw "Trusting tsync's certificate failed (certutil exited $code), so Windows refuses its package." }
-  if (-not (Test-Path $trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
+  if (-not (Trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
 }
 
 Add-AppxPackage -Path (Join-Path $ProgramDir 'tsync-identity.msix') `
