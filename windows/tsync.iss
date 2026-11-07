@@ -28,8 +28,12 @@ MinVersion=10.0.19041
 ChangesEnvironment=yes
 OutputDir={#Output}
 OutputBaseFilename=tsync-setup
-UninstallDisplayIcon={app}\tsyncd.exe
+UninstallDisplayIcon={app}\tsync.ico
 WizardStyle=modern
+; Made by scripts/make-installer-images.sh.
+SetupIconFile=installer\tsync.ico
+WizardImageFile=installer\wizard-1.bmp,installer\wizard-2.bmp
+WizardSmallImageFile=installer\wizard-small-1.bmp,installer\wizard-small-2.bmp
 #ifdef Sign
 SignTool=tsync
 SignedUninstaller=yes
@@ -39,6 +43,7 @@ SignedUninstaller=yes
 Source: "{#Source}\*"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "tsync-development.cer"; DestDir: "{app}"; Flags: ignoreversion
+Source: "installer\tsync.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallRun]
