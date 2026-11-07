@@ -8,14 +8,23 @@ $ErrorActionPreference = 'Stop'
 $cer = Join-Path $ProgramDir 'tsync-development.cer'
 $thumbprint = (New-Object Security.Cryptography.X509Certificates.X509Certificate2 $cer).Thumbprint
 $trusted = "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+  [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not (Test-Path $trusted)) {
-  try {
-    $p = Start-Process certutil.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
-      -ArgumentList '-addstore', 'TrustedPeople', "`"$cer`""
-  } catch {
-    throw "tsync's certificate was not trusted, so Windows refuses its package: $($_.Exception.Message)"
+  if ($admin) {
+    certutil.exe -addstore TrustedPeople $cer
+    $code = $LASTEXITCODE
+  } else {
+    try {
+      $p = Start-Process certutil.exe -Verb RunAs -PassThru -WindowStyle Hidden `
+        -ArgumentList '-addstore', 'TrustedPeople', "`"$cer`""
+    } catch {
+      throw "tsync's certificate was not trusted, so Windows refuses its package: $($_.Exception.Message)"
+    }
+    $p.WaitForExit()
+    $code = $p.ExitCode
   }
-  if ($p.ExitCode) { throw "Trusting tsync's certificate failed (certutil exited $($p.ExitCode)), so Windows refuses its package." }
+  if ($code) { throw "Trusting tsync's certificate failed (certutil exited $code), so Windows refuses its package." }
   if (-not (Test-Path $trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
 }
 
