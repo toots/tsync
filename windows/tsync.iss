@@ -38,6 +38,7 @@ SignedUninstaller=yes
 [Files]
 Source: "{#Source}\*"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "tsync-development.cer"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallRun]
@@ -46,13 +47,26 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 [Code]
 var
   LinkPage: TInputQueryWizardPage;
+  { What registering tsync printed when it failed, else empty. }
+  RegisterFailure: String;
 
-function PowerShell(Script: String; var Code: Integer): Boolean;
+{ Runs a command line through cmd, its output in Output whether or not it succeeds. }
+function Captured(CommandLine, Name: String; var Output: String): Boolean;
+var
+  Code: Integer;
+  LogFile: String;
+  Text: AnsiString;
 begin
-  Result := Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\' + Script) +
-    '" -ProgramDir "' + ExpandConstant('{app}') + '"',
+  LogFile := ExpandConstant('{tmp}\' + Name + '.log');
+  Result := Exec(ExpandConstant('{cmd}'), '/C "' + CommandLine + ' > "' + LogFile + '" 2>&1"',
     '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+  if LoadStringFromFile(LogFile, Text) then
+    Output := Trim(String(Text))
+  else
+    Output := '';
+  if (Output = '') and not Result then
+    Output := Name + ' failed (exit ' + IntToStr(Code) + ')';
+  Log(Output);
 end;
 
 { The running service and tray hold the programs open, so they stop before the programs are replaced. }
@@ -80,24 +94,15 @@ end;
 function Join(Link: String; var Output: String): Boolean;
 var
   Code: Integer;
-  LogFile: String;
-  Text: AnsiString;
 begin
   StringChangeEx(Link, '"', '', True);
-  LogFile := ExpandConstant('{tmp}\join.log');
-  Result := Exec(ExpandConstant('{cmd}'),
-    '/C ""' + ExpandConstant('{app}\tsync.exe') + '" config join "' + Link + '" > "' + LogFile + '" 2>&1"',
-    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
-  if LoadStringFromFile(LogFile, Text) then
-    Output := String(Text)
-  else
-    Output := 'tsync config join failed (exit ' + IntToStr(Code) + ')';
+  Result := Captured('"' + ExpandConstant('{app}\tsync.exe') + '" config join "' + Link + '"',
+    'tsync config join', Output);
   if Result then
   begin
     Exec(ExpandConstant('{app}\tsync.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec('schtasks.exe', '/Run /TN \tsync\service', '', SW_HIDE, ewWaitUntilTerminated, Code);
   end;
-  Log(Output);
 end;
 
 { A silent install clicks through this page too: a refused link is logged and the install still finishes. }
@@ -114,10 +119,37 @@ begin
     end;
 end;
 
+{ The programs stay installed when registering fails, so running setup again retries it. }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Code: Integer;
+  Output: String;
 begin
-  if (CurStep = ssPostInstall) and not PowerShell('install.ps1', Code) then
-    RaiseException('Registering tsync failed (exit ' + IntToStr(Code) + '); see the setup log.');
+  if (CurStep = ssPostInstall) and not Captured('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "'
+      + ExpandConstant('{app}\install.ps1') + '" -ProgramDir "' + ExpandConstant('{app}') + '"',
+      'install.ps1', Output) then
+  begin
+    RegisterFailure := Output;
+    if not WizardSilent then
+      MsgBox('tsync could not be registered with Windows:' + #13#10#13#10 + Output
+        + #13#10#13#10 + 'Run setup again to retry.', mbError, MB_OK);
+  end;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = LinkPage.ID) and (RegisterFailure <> '');
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (RegisterFailure <> '') then
+    WizardForm.FinishedLabel.Caption := 'tsync was installed but could not be registered with Windows. Run setup again to retry.';
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if RegisterFailure <> '' then
+    Result := 1
+  else
+    Result := 0;
 end;

@@ -158,17 +158,19 @@ jobs:
           if ($LASTEXITCODE) { throw 'building the installer failed' }
           Copy-Item windows\tsync-development.cer installer\
 
-      # The certificate is trusted as on a test machine; then each step of
-      # install.ps1 and uninstall.ps1 is checked for what it leaves behind.
+      # Setup trusts its certificate itself, on a runner without asking; then
+      # each step of install.ps1 and uninstall.ps1 is checked for what it leaves.
       - name: The installer installs and uninstalls
         shell: pwsh
         run: |
-          Import-Certificate -FilePath windows\tsync-development.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $thumbprint = (Get-PfxCertificate windows\tsync-development.cer).Thumbprint
+          if (Test-Path "Cert:\LocalMachine\TrustedPeople\$thumbprint") { throw 'the certificate is trusted before setup runs' }
           $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
           # -Wait would also wait for the tray setup starts.
           $p = Start-Process installer\tsync-setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/LOG=$env:RUNNER_TEMP\setup.log" -PassThru
           $p.WaitForExit()
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log"; throw "setup exited $($p.ExitCode)" }
+          if (-not (Test-Path "Cert:\LocalMachine\TrustedPeople\$thumbprint")) { throw 'setup did not trust the certificate' }
           $package = Get-AppxPackage -Name org.feverdreamtv.tsync
           if (-not $package) { throw 'the identity package is not registered' }
           "identity package: $($package.PackageFullName), status $($package.Status)"

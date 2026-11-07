@@ -3,6 +3,23 @@
 param([Parameter(Mandatory)] [string] $ProgramDir)
 $ErrorActionPreference = 'Stop'
 
+# cloud-files §14.1: the identity package installs only once its certificate is
+# trusted for the machine, which takes an administrator's consent.
+$cer = Join-Path $ProgramDir 'tsync-development.cer'
+$thumbprint = (New-Object Security.Cryptography.X509Certificates.X509Certificate2 $cer).Thumbprint
+$trusted = "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+if (-not (Test-Path $trusted)) {
+  $import = "Import-Certificate -FilePath '$($cer.Replace("'", "''"))' -CertStoreLocation Cert:\LocalMachine\TrustedPeople"
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($import))
+  try {
+    Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden `
+      -ArgumentList '-NoProfile', '-EncodedCommand', $encoded
+  } catch {
+    throw "tsync's certificate was not trusted, so Windows refuses its package: $($_.Exception.Message)"
+  }
+  if (-not (Test-Path $trusted)) { throw "tsync's certificate is still not trusted, so Windows refuses its package." }
+}
+
 Add-AppxPackage -Path (Join-Path $ProgramDir 'tsync-identity.msix') `
   -ExternalLocation $ProgramDir -ForceUpdateFromAnyVersion
 
