@@ -57,6 +57,7 @@
             <desktop3:ThumbnailProviderHandler Clsid="20000000-0000-0000-0000-000000000001" />
             <desktop3:ExtendedPropertyHandler Clsid="20000000-0000-0000-0000-000000000001" />
             <desktop3:BannersHandler Clsid="20000000-0000-0000-0000-000000000001" />
+            <desktop3:CloudFilesContextMenus />
           </desktop3:CloudFiles>
         </desktop3:Extension>
       </Extensions>
