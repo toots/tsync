@@ -20,7 +20,7 @@ type t = {
 let probe d (store : Store.t) = ignore (store.head_opt (Key.cursor d))
 
 (* 05 §3.2: parsing registered the type, so the driver is linked. *)
-let create_store config d (b : Config.backend) =
+let create_store ~cache_root config d (b : Config.backend) =
   let admission =
     match b.link with
       | None -> Uplink.none
@@ -29,8 +29,9 @@ let create_store config d (b : Config.backend) =
             (Config.uplink_settings (Config.link_settings config link))
   in
   let store =
-    (Option.get (Driver.find b.btype)).create ~domain:d ~admission ~name:b.bname
-      b.fields
+    (Option.get (Driver.find b.btype)).create
+      ~spill:(Filename.concat cache_root "spill")
+      ~domain:d ~admission ~name:b.bname b.fields
   in
   Uplink.attach admission ~store:b.bname
     ~probe:(fun () -> probe d store)
@@ -74,7 +75,7 @@ let build ?(owner = true) ?(poke = ignore) ?cache_root ?data_dir
           {
             Composite.name = b.bname;
             role = b.role;
-            store = create_store config d b;
+            store = create_store ~cache_root config d b;
           } ))
       dom.backends
   in
