@@ -134,7 +134,7 @@ class Backup(private val context: Context) {
                 discover()
                 val outcome = process(userInitiated, stopped)
                 prefs.lastOutcome = describe(outcome)
-                outcome.more || !Processing.settled(db.records())
+                outcome.more || !Processing.settled(served())
             } catch (e: Exception) {
                 Log.w(Tsync.TAG, "camera backup pass failed", e)
                 prefs.lastOutcome = context.getString(R.string.backup_pass_failed, e.message ?: e.toString())
@@ -151,15 +151,20 @@ class Backup(private val context: Context) {
         context.getString(R.string.backup_more).takeIf { outcome.more },
     ).joinToString(", ")
 
+    /** No pass waits on the records of a removed domain. */
+    private fun served(names: List<String> = tsync.config.names()): List<Record> = Processing.served(db.records(), names)
+
     private fun process(userInitiated: Boolean, stopped: () -> Boolean): PassOutcome {
         val started = System.currentTimeMillis()
-        val first = tsync.config.names().firstOrNull()
+        val names = tsync.config.names()
         val folders = HashMap<String, Folders>()
+        // A domain's boot refusal, asked once per pass.
+        val refused = HashMap<String, String>()
         var uploaded = 0
         var failed = 0
         var more = false
         var refusal: String? = null
-        for (record in Processing.due(db.records(), started)) {
+        for (record in Processing.due(served(names), started)) {
             val now = System.currentTimeMillis()
             val row = media.row(record.volume, record.mediaId)
             if (row == null || Processing.step(row, now) != Step.UPLOAD) {
@@ -168,10 +173,11 @@ class Backup(private val context: Context) {
             }
             // app §11.6: each record goes to its own domain, booted by the pass. One that cannot
             // boot leaves its records as they are, as a pass that fails does.
-            val domain = tsync.domain(record.domain ?: first ?: break)
-            val boot = domain.boot()
-            if (boot != Boot.Ready) {
-                refusal = (boot as? Boot.Failed)?.reason ?: context.getString(R.string.provider_not_set_up)
+            val domain = tsync.domain(record.domain ?: names.firstOrNull() ?: break)
+            val unbooted = refused[domain.name] ?: (domain.boot() as? Boot.Failed)?.reason
+            if (unbooted != null) {
+                refused[domain.name] = unbooted
+                refusal = unbooted
                 more = true
                 continue
             }
@@ -227,7 +233,7 @@ class Backup(private val context: Context) {
         val settings = prefs.settings
         if (!settings.enabled) return context.getString(R.string.backup_off)
         if (target() == null) return context.getString(R.string.backup_pick_domain)
-        val records = db.records()
+        val records = served()
         val failed = records.filter { it.state == State.FAILED }
         val waiting = records.count { it.state == State.PENDING }
         val main = when {

@@ -55,5 +55,12 @@ object Processing {
             elapsedMs < Parameters.PASS_TIME_BUDGET_MS &&
             freeBytes >= 2 * itemSize
 
+    /**
+     * The records of the domains [names] holds, a record naming none being the first's. Those of
+     * a removed domain stay as they are until a config names it again (app §6.1).
+     */
+    fun served(records: Collection<Record>, names: List<String>): List<Record> =
+        records.filter { (it.domain ?: names.firstOrNull()) in names }
+
     fun settled(records: Collection<Record>): Boolean = records.none { it.state == State.PENDING || it.state == State.FAILED }
 }
