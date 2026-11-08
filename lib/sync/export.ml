@@ -102,8 +102,8 @@ module Make (C : Context.S) = struct
 
   let regular_of_size path size =
     match Unix.lstat path with
-      | { st_kind = S_REG; st_size; _ } when st_size = size ->
-          Some (Fs.times path).mtime
+      | { st_kind = S_REG; st_size; _ } when st_size = size -> (
+          try Some (Fs.times path).mtime with Fail.E _ -> None)
       | _ | (exception Unix.Unix_error _) -> None
 
   let export_one ~narrate ~cancelled ~cache_root f =
@@ -148,6 +148,10 @@ module Make (C : Context.S) = struct
                 in
                 if (not fresh_ok) && resume = None then (
                   Fs.unlink_quiet record;
+                  (* The bytes are there; a change of the creation time alone
+                     is not. *)
+                  (try Fs.set_times f.dest (Manifest.times m)
+                   with Fail.E _ -> ());
                   Already_there)
                 else (
                   let done_ =
