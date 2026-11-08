@@ -26,6 +26,10 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
     Step "published: $((Published) -join ', ')"
   }
   Step 'status:'; & $tsync status 2>&1 | Out-String | Write-Host
+  if ($log -and (Test-Path $log)) {
+    Step 'why folders stay pending:'
+    Select-String -Path $log -Pattern 'cloud_files: applying' | Select-Object -Last 10 | ForEach-Object Line
+  }
   throw "FAILED within $seconds s: $what"
 }
 
@@ -205,6 +209,26 @@ try {
   Until 'a domain change appears in the sync root' {
     (Test-Path (Join-Path $root 'peer.txt')) -and
       ((Get-Content -Raw (Join-Path $root 'peer.txt')) -eq 'from elsewhere')
+  } 90
+
+  Step 'updating a placeholder from the domain'
+  $remote = Join-Path $root 'remote.txt'
+  $source = Join-Path $Work 'remote'
+  New-Item -ItemType Directory -Force $source | Out-Null
+  Set-Content -NoNewline -Path (Join-Path $source 'remote.txt') -Value 'first'
+  & $tsync import $source --domain docs
+  Until 'a file imported elsewhere appears in the sync root' { Test-Path $remote } 90
+  Set-Content -NoNewline -Path (Join-Path $source 'remote.txt') -Value 'second, and longer'
+  & $tsync import $source --domain docs --force-rehash
+  Check 'a forced import beside the running owner exits 0' ($LASTEXITCODE -eq 0)
+  Until 'a domain edit reaches the placeholder' {
+    ((Get-Item $remote).Length -eq 18) -and ((Get-Content -Raw $remote) -eq 'second, and longer')
+  } 90
+  $written = [DateTime]::new(2002, 3, 4, 5, 6, 7, [DateTimeKind]::Utc)
+  (Get-Item (Join-Path $source 'remote.txt')).LastWriteTimeUtc = $written
+  & $tsync import $source --domain docs --force-rehash
+  Until 'a domain change of time alone reaches the placeholder' {
+    [Math]::Abs(((Get-Item $remote).LastWriteTimeUtc - $written).TotalSeconds) -lt 1
   } 90
 
   Step 'pinning'
