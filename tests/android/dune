@@ -62,6 +62,31 @@
  (action
   (diff bridge_test.expected bridge_test.output)))
 
+; Two domains booted in one process.
+
+(executable
+ (name domains_test)
+ (modules domains_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_catalog
+  tsync_android
+  tsync_android_bridge
+  threads.posix
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  domains_test.output
+  (run ./domains_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff domains_test.expected domains_test.output)))
+
 ; The command group, one spawned process per call.
 
 (executable

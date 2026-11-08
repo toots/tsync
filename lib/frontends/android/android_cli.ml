@@ -78,7 +78,7 @@ let session ~domain ref_ =
               with
                 | [Some off; Some len] when off >= 0 && len > 0 -> (
                     let buffer = Bigstring.create len in
-                    match Android_host.read_in owner handle ~off buffer with
+                    match Android_host.read_in handle ~off buffer with
                       | n when n >= 0 ->
                           say (Ipc.ok [("length", `Int n)]);
                           print_string

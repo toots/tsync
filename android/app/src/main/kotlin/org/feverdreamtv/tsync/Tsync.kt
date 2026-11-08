@@ -54,7 +54,7 @@ sealed interface Notice {
 class Tsync private constructor(val context: Context) {
     val home: File = context.filesDir
     val config = ConfigStore(home)
-    val core: Core = NativeCore
+    val core: Core = NativeCore { domain }
     val client = Client(core)
     val vault = Vault(client)
     val passwords = Passwords(client)

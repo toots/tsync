@@ -261,32 +261,37 @@ static jbyteArray error_or_null(JNIEnv *env, const char *name,
   return text != NULL && (*env)->GetArrayLength(env, text) == 0 ? NULL : text;
 }
 
-/* candidate: the config text to check in place of the config, or null. */
-JNIEXPORT jbyteArray JNICALL
-Java_org_feverdreamtv_tsync_bridge_Native_nativeCheckConfig(
-    JNIEnv *env, jclass class, jbyteArray domain, jbyteArray candidate) {
+/* The domain, then after a NUL the rest when it is not null. */
+static jbyteArray domain_call(JNIEnv *env, const char *name, jbyteArray domain,
+                              jbyteArray rest) {
   static const char not_started[] = "the core is not initialised";
-  size_t domain_length, candidate_length = 0, length = 0;
+  size_t domain_length, rest_length = 0, length = 0;
   char *domain_bytes = copy_bytes(env, domain, &domain_length);
-  char *candidate_bytes =
-      candidate == NULL ? NULL : copy_bytes(env, candidate, &candidate_length);
-  size_t arg_length =
-      domain_length + (candidate == NULL ? 0 : 1 + candidate_length);
+  char *rest_bytes = rest == NULL ? NULL : copy_bytes(env, rest, &rest_length);
+  size_t arg_length = domain_length + (rest == NULL ? 0 : 1 + rest_length);
   char *arg = malloc(arg_length + 1);
   if (arg == NULL)
     abort();
   memcpy(arg, domain_bytes, domain_length + 1);
-  if (candidate_bytes != NULL)
-    memcpy(arg + domain_length + 1, candidate_bytes, candidate_length);
-  char *text = tsync_bridge_text("check_config", arg, arg_length, &length);
+  if (rest_bytes != NULL)
+    memcpy(arg + domain_length + 1, rest_bytes, rest_length);
+  char *text = tsync_bridge_text(name, arg, arg_length, &length);
   free(arg);
   free(domain_bytes);
-  free(candidate_bytes);
+  free(rest_bytes);
   if (text == NULL)
     return to_array(env, not_started, sizeof not_started - 1);
-  jbyteArray result = length == 0 ? NULL : to_array(env, text, length);
+  jbyteArray result = to_array(env, text, length);
   free(text);
   return result;
+}
+
+/* candidate: the config text to check in place of the config, or null. */
+JNIEXPORT jbyteArray JNICALL
+Java_org_feverdreamtv_tsync_bridge_Native_nativeCheckConfig(
+    JNIEnv *env, jclass class, jbyteArray domain, jbyteArray candidate) {
+  jbyteArray text = domain_call(env, "check_config", domain, candidate);
+  return text != NULL && (*env)->GetArrayLength(env, text) == 0 ? NULL : text;
 }
 
 JNIEXPORT jbyteArray JNICALL
@@ -298,8 +303,9 @@ Java_org_feverdreamtv_tsync_bridge_Native_nativeBoot(JNIEnv *env, jclass class,
 JNIEXPORT jbyteArray JNICALL
 Java_org_feverdreamtv_tsync_bridge_Native_nativeRequest(JNIEnv *env,
                                                         jclass class,
+                                                        jbyteArray domain,
                                                         jbyteArray json) {
-  return text_call(env, "request", json);
+  return domain_call(env, "request", domain, json);
 }
 
 JNIEXPORT jbyteArray JNICALL
@@ -311,8 +317,9 @@ Java_org_feverdreamtv_tsync_bridge_Native_nativeSetupLink(JNIEnv *env,
 
 JNIEXPORT jbyteArray JNICALL
 Java_org_feverdreamtv_tsync_bridge_Native_nativeStatus(JNIEnv *env,
-                                                       jclass class) {
-  return text_call(env, "status", NULL);
+                                                       jclass class,
+                                                       jbyteArray domain) {
+  return text_call(env, "status", domain);
 }
 
 JNIEXPORT jbyteArray JNICALL
@@ -323,11 +330,15 @@ Java_org_feverdreamtv_tsync_bridge_Native_nativeNextNotice(JNIEnv *env,
 
 JNIEXPORT jlong JNICALL
 Java_org_feverdreamtv_tsync_bridge_Native_nativeOpen(JNIEnv *env, jclass class,
+                                                     jbyteArray domain,
                                                      jbyteArray ref) {
-  size_t length;
-  char *bytes = copy_bytes(env, ref, &length);
-  long handle = tsync_bridge_open(bytes, length);
-  free(bytes);
+  size_t domain_length, ref_length;
+  char *domain_bytes = copy_bytes(env, domain, &domain_length);
+  char *ref_bytes = copy_bytes(env, ref, &ref_length);
+  long handle =
+      tsync_bridge_open(domain_bytes, domain_length, ref_bytes, ref_length);
+  free(domain_bytes);
+  free(ref_bytes);
   return handle;
 }
 

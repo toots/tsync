@@ -1,5 +1,5 @@
 == before boot
-  request                            {"ok":false,"code":"internal","error":"the core is not booted"}
+  request                            {"ok":false,"code":"internal","error":"docs is not booted"}
   open                               -5
   check_config                       ""
   check_config of another domain     "domain not found: nope"

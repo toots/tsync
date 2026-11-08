@@ -14,10 +14,13 @@ val init : trust_store:string -> transfer_root:string -> unit
 val check_config : ?candidate:string -> string -> string
 
 (** [""] once the domain is owned and its handler answers (android §3.1);
-    idempotent, concurrent callers wait for the first. *)
+    idempotent per domain, concurrent callers wait for the first. A domain
+    booted stays booted for the life of the process. *)
 val boot : ?pull_params:Pulls.params -> string -> string
 
-val request : string -> string
+(** [request], [status] and [open_] name a booted domain, and refuse one that is
+    not as every entry does. *)
+val request : string -> string -> string
 
 (** setup-link §6.3: fetches and opens a setup link, before any config exists;
     JSON
@@ -25,10 +28,11 @@ val request : string -> string
      "reason"}],"about"}], or [{"error"}] with the sentence to show. *)
 val setup_link : string -> string
 
-val status : unit -> string
+val status : string -> string
 
-(** A handle > 0, or −errno. *)
-val open_ : string -> int
+(** A handle > 0, or −errno; unique across domains, so the calls on a handle
+    take none. *)
+val open_ : string -> string -> int
 
 val size : int -> int
 
@@ -46,7 +50,7 @@ val frontend : unit -> Tsync_status.Status_report.frontend option
 val request_in : Owner.embedded -> string -> string
 val status_in : Owner.embedded -> string
 val open_in : Owner.embedded -> string -> int
-val read_in : Owner.embedded -> int -> off:int -> Tsync_core.Bigstring.t -> int
+val read_in : int -> off:int -> Tsync_core.Bigstring.t -> int
 
 (** The config and the domain a name selects, validated for this frontend. *)
 val load :
