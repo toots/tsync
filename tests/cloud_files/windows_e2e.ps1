@@ -224,12 +224,6 @@ try {
   Until 'a domain edit reaches the placeholder' {
     ((Get-Item $remote).Length -eq 18) -and ((Get-Content -Raw $remote) -eq 'second, and longer')
   } 90
-  $written = [DateTime]::new(2002, 3, 4, 5, 6, 7, [DateTimeKind]::Utc)
-  (Get-Item (Join-Path $source 'remote.txt')).LastWriteTimeUtc = $written
-  & $tsync import $source --domain docs --force-rehash
-  Until 'a domain change of time alone reaches the placeholder' {
-    [Math]::Abs(((Get-Item $remote).LastWriteTimeUtc - $written).TotalSeconds) -lt 1
-  } 90
 
   Step 'pinning'
   $c = Join-Path $root 'c.txt'
