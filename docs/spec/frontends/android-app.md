@@ -168,6 +168,8 @@ follows this rule rather than failing as a whole when the store is silent; the c
   finishes every activity and exits the process, or "Later", which keeps serving that domain as it
   booted until the process dies. The platform is told the provider's roots changed
   either way.
+- Joining a domain that is still served since its removal offers the same restart: until then it
+  is served with the settings it booted with.
 - Removing a domain deletes its entry from the config, nothing else: its local state, staged bodies
   and intents stay until a config names it again.
 

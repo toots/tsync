@@ -70,7 +70,7 @@ import org.feverdreamtv.tsync.core.backup.BackupSettings
 
 /** Shown alone until a config names a domain, with the core's sentence for one that does not load (app §10.2, §10.7). */
 @Composable
-fun SetupScreen(tsync: Tsync, refusal: String?, replace: Boolean, onJoined: () -> Unit) {
+fun SetupScreen(tsync: Tsync, refusal: String?, replace: Boolean, onJoined: (List<String>) -> Unit) {
     Screen(stringResource(R.string.setup_title)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp)) {
             refusal?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -84,7 +84,7 @@ fun SetupScreen(tsync: Tsync, refusal: String?, replace: Boolean, onJoined: () -
  * setup-link §6.3). There is no manual entry. A domain the config already names is not offered.
  */
 @Composable
-private fun JoinForm(tsync: Tsync, replace: Boolean, onJoined: () -> Unit) {
+private fun JoinForm(tsync: Tsync, replace: Boolean, onJoined: (List<String>) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var link by rememberSaveable { mutableStateOf("") }
@@ -166,7 +166,7 @@ private fun JoinForm(tsync: Tsync, replace: Boolean, onJoined: () -> Unit) {
                 busy = false
                 if (failure == null) {
                     tsync.notifyRoots()
-                    onJoined()
+                    onJoined(joining.map { it.domain })
                 }
             }
         }) { Text(stringResource(R.string.setup_join)) }
@@ -184,7 +184,8 @@ fun SettingsScreen(tsync: Tsync, domains: List<String>, outer: PaddingValues, on
     var storage by remember { mutableStateOf<Map<String, Storage?>>(emptyMap()) }
     var adding by rememberSaveable { mutableStateOf(false) }
     var removing by remember { mutableStateOf<String?>(null) }
-    var restart by remember { mutableStateOf(false) }
+    // The restart prompt's text: a removed domain stops being served, a joined one is served anew.
+    var restart by remember { mutableStateOf<Int?>(null) }
     var freeing by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(domains) {
         config = withContext(Dispatchers.IO) { tsync.config.read() }
@@ -204,7 +205,12 @@ fun SettingsScreen(tsync: Tsync, domains: List<String>, outer: PaddingValues, on
         BackHandler { adding = false }
         Screen(stringResource(R.string.add_domain), outer, onBack = { adding = false }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
-                JoinForm(tsync, replace = false, onJoined = { adding = false; onConfigChanged() })
+                JoinForm(tsync, replace = false, onJoined = { joined ->
+                    adding = false
+                    // app §6.1: a domain still served since its removal keeps its old settings until a restart.
+                    if (joined.any { tsync.domain(it).boot == Boot.Ready }) restart = R.string.restart_rejoined_text
+                    onConfigChanged()
+                })
             }
         }
         return
@@ -280,25 +286,25 @@ fun SettingsScreen(tsync: Tsync, domains: List<String>, outer: PaddingValues, on
                         if (refusal != null) return@launch tsync.report(refusal, failed = true)
                         // The platform is told either way; a booted domain serves as it booted until the process dies.
                         tsync.notifyRoots()
-                        if (tsync.domain(name).boot == Boot.Ready) restart = true
+                        if (tsync.domain(name).boot == Boot.Ready) restart = R.string.restart_text
                         onConfigChanged()
                     }
                 }) { Text(stringResource(R.string.remove)) }
             },
         )
     }
-    if (restart) AlertDialog(
-        onDismissRequest = { restart = false },
+    restart?.let { text -> AlertDialog(
+        onDismissRequest = { restart = null },
         title = { Text(stringResource(R.string.restart_title)) },
-        text = { Text(stringResource(R.string.restart_text)) },
-        dismissButton = { TextButton(onClick = { restart = false }) { Text(stringResource(R.string.later)) } },
+        text = { Text(stringResource(text)) },
+        dismissButton = { TextButton(onClick = { restart = null }) { Text(stringResource(R.string.later)) } },
         confirmButton = {
             TextButton(onClick = {
                 (context as? Activity)?.finishAffinity()
                 Runtime.getRuntime().exit(0)
             }) { Text(stringResource(R.string.restart_now)) }
         },
-    )
+    ) }
     freeing?.let { name ->
         AlertDialog(
             onDismissRequest = { freeing = null },

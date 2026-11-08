@@ -86,10 +86,14 @@ class ConfigStoreTest {
 
     @Test
     fun removingDeletesOnlyThatEntry() {
-        store.add(listOf(docs, photos), "Pixel", check = accept)
-        assertEquals("nope", store.remove("docs") { _, _ -> "nope" })
-        assertEquals(listOf(docs, photos), store.read())
-        assertNull(store.remove("docs") { domain, _ -> assertEquals("photos", domain); null })
+        val music = photos.copy(domain = "music")
+        store.add(listOf(docs, photos, music), "Pixel", check = accept)
+        assertEquals("music: nope", store.remove("docs") { domain, _ -> "nope".takeIf { domain == "music" } })
+        assertEquals(listOf(docs, photos, music), store.read())
+        val checked = mutableListOf<String>()
+        assertNull(store.remove("docs") { domain, _ -> checked += domain; null })
+        assertEquals(listOf("photos", "music"), checked)
+        assertNull(store.remove("music", accept))
         assertEquals(listOf(photos), store.read())
         assertNull(store.remove("photos", accept))
         assertEquals(emptyList(), store.read())

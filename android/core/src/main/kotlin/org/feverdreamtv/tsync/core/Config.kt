@@ -86,13 +86,13 @@ class ConfigStore(home: File) {
         return null
     }
 
-    /** Deletes [name]'s entry and nothing else. @return the core's sentence when it refuses what is left */
+    /** Deletes [name]'s entry and nothing else. @return the refused domain and the core's sentence when it refuses what is left */
     @Synchronized
     fun remove(name: String, check: (String, String) -> String?): String? {
         val (clientName, domains) = decoded() ?: return null
         val kept = domains.filter { it.domain != name }
         val candidate = ServerConfig.encode(clientName ?: "android", kept)
-        kept.firstOrNull()?.let { first -> check(first.domain, candidate)?.let { return it } }
+        for (domain in kept) check(domain.domain, candidate)?.let { return "${domain.domain}: $it" }
         write(candidate)
         return null
     }

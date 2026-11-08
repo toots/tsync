@@ -132,6 +132,7 @@
     <string name="free_up_text">Every downloaded file is removed from this phone, including files made available offline. Files waiting to upload are kept.</string>
     <string name="restart_title">Restart tsync?</string>
     <string name="restart_text">The domain stops being served when tsync restarts. Until then it is served as before.</string>
+    <string name="restart_rejoined_text">The domain is served with its new settings when tsync restarts. Until then it is served as before.</string>
     <string name="restart_now">Restart now</string>
     <string name="about_version">Version %1$s</string>
     <string name="about_commit">Built from commit %1$s</string>
