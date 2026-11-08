@@ -13,6 +13,7 @@ let tick_interval = 2.
 let probe_timeout = 10.
 let gain = 0.25
 let decrease_floor = 0.5
+let capacity_floor = 0.8
 let base_cell = 60.
 let base_cells = 10
 let base_window = base_cell *. float_of_int base_cells
@@ -167,12 +168,16 @@ let tick t ~now ~limited ~busy =
   let next =
     match t.phase with
       | Ramping ->
-          if q > target && t.over_target >= 2 then (
+          if q > target && t.over_target >= 2 && limited then (
             let step = if t.never_saturated then 2. else 1. +. gain in
             t.never_saturated <- false;
-            let est = r /. Float.sqrt step in
-            let est = if a > 0. then Float.min est (2. *. a) else est in
+            let est = Float.min (r /. Float.sqrt step) (2. *. a) in
             let c = Float.max a est in
+            let c =
+              match t.capacity with
+                | Some old -> Float.max c (capacity_floor *. old)
+                | None -> c
+            in
             t.capacity <- Some c;
             enter t Steady ~now;
             h *. c)
@@ -180,10 +185,15 @@ let tick t ~now ~limited ~busy =
             r *. if t.never_saturated then 2. else 1. +. gain
           else r
       | Steady ->
+          (* A stall lowers [a] along with the queue, so C is lowered once per
+             episode over the target, and by at most [capacity_floor]. *)
           if q <= target then t.settled <- true
-          else if t.settled && t.over_target >= 2 && a > 0. then
+          else if t.settled && t.over_target = 2 && limited then
             t.capacity <-
-              Some (match t.capacity with Some c -> Float.min c a | None -> a);
+              Some
+                (match t.capacity with
+                  | Some c -> Float.max (Float.min c a) (capacity_floor *. c)
+                  | None -> a);
           if now -. t.since >= probe_up_every then enter t Ramping ~now;
           if off > 0. && not limited then r else r *. (1. +. (gain *. off))
       | Backing_off ->

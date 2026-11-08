@@ -12,7 +12,7 @@ let settings ?max_rate ?(min_rate = 64. *. kib) () =
    proportion to what each sender offers, whose buffer holds [buffer_delay]
    seconds before TCP holds the senders back. *)
 type link = {
-  capacity : float;
+  mutable capacity : float;
   mutable base : float;
   mutable queue : float;
   mutable competitor : float;
@@ -24,6 +24,9 @@ type sim = {
   mutable now : float;
   mutable sent : float;
   mutable worst_cut : float;
+  (* What the sender has to send per second; below the rate, it is not held
+     back. *)
+  mutable offer : float;
 }
 
 let sim ?(settings = settings ()) ?law ~capacity () =
@@ -33,13 +36,14 @@ let sim ?(settings = settings ()) ?law ~capacity () =
     now = 0.;
     sent = 0.;
     worst_cut = 1.;
+    offer = infinity;
   }
 
 let buffer_delay = 0.25
 
 let second s ~demand =
   let l = s.link in
-  let own = if demand then L.rate s.law else 0. in
+  let own = if demand then Float.min s.offer (L.rate s.law) else 0. in
   let offered = own +. l.competitor in
   let drained = Float.min l.capacity (offered +. l.queue) in
   l.queue <-
@@ -58,7 +62,9 @@ let tick ?(demand = true) ?(probe = true) s =
   s.sent <- 0.;
   if probe && demand then L.observe_delay s.law "gcs" (delay s);
   let before = L.rate s.law in
-  L.tick s.law ~now:s.now ~limited:demand ~busy:demand;
+  L.tick s.law ~now:s.now
+    ~limited:(demand && s.offer >= L.rate s.law)
+    ~busy:demand;
   s.worst_cut <- Float.min s.worst_cut (L.rate s.law /. before)
 
 let run ?demand ?probe s secs =
@@ -174,6 +180,29 @@ let () =
     "0.2 s of standing delay for 1200 s (two windows) raises the baseline %.0f \
      ms, at most %.0f"
     (risen *. 1000.) (2. *. 50.);
+
+  p "== Wi-Fi stalls: 4 s at 0.5 MiB/s every 50 s on an 8 MiB/s link";
+  let s = sim ~capacity:(8. *. mib) () in
+  s.link.base <- 0.005;
+  run s 60.;
+  let least = ref infinity in
+  for i = 0 to 299 do
+    s.link.capacity <- (if i mod 25 < 2 then 0.5 *. mib else 8. *. mib);
+    tick s;
+    least := Float.min !least (Option.get (L.capacity s.law))
+  done;
+  p "capacity stays above a third of the link: %b (least %s)"
+    (!least >= 8. /. 3. *. mib)
+    (mbs !least);
+
+  p "== a competitor fills the link while the sender has little to send";
+  let s = sim ~capacity:(8. *. mib) () in
+  run s 60.;
+  let c = Option.get (L.capacity s.law) in
+  s.offer <- 0.5 *. mib;
+  s.link.competitor <- 8. *. mib;
+  run s 20.;
+  p "capacity kept: %b" (Option.get (L.capacity s.law) >= 0.9 *. c);
 
   p "== restart";
   let law =
