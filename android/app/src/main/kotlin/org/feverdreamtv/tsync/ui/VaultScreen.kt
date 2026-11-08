@@ -172,7 +172,8 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     val shown = views.orEmpty()
     val tabs = listOf("totp", "passwords").filter { t -> shown.any { t in it.extensions } }
     val current = if (tab in tabs || tabs.isEmpty()) tab else tabs.first()
-    val inTab = shown.filter { current in it.extensions || it.status == null || tabs.isEmpty() }
+    // A domain that cannot say which extensions it uses shows its refusal under every tab.
+    val inTab = shown.filter { current in it.extensions || it.extensions.isEmpty() || tabs.isEmpty() }
     // A new record goes to the first domain, in config order, using the extension.
     val addTo = shown.firstOrNull { "totp" in it.extensions }
     Scaffold(
@@ -247,19 +248,16 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
 
 /** One domain's status and extensions; null when it uses no extension, which takes it out of the set (app §2). */
 private fun ask(tsync: Tsync, domain: Served, pull: Pull, previous: VaultView?): VaultView? {
+    // Asked whatever the status says, so a vault that cannot answer still counts as using them.
+    val extensions = tsync.extensions(domain).ifEmpty { previous?.extensions.orEmpty() }
     val status = try {
         domain.vault.status(pull)
     } catch (e: CoreException) {
         // A last view stays shown over a refusal; without one the refusal is.
-        return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, emptyList(), false)
+        return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, extensions, false)
     }
     tsync.noteVault(domain.name, status != null)
     status ?: return null
-    val extensions = try {
-        domain.client.stats().extensions
-    } catch (e: CoreException) {
-        previous?.extensions.orEmpty()
-    }
     return VaultView(domain, status, null, extensions, previous?.settled == true || pull == Pull.DEFAULT)
 }
 
