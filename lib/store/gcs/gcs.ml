@@ -310,7 +310,7 @@ let list_page t ~prefix ~token ~max =
             | _ -> None ))
     | r -> fail ~op:"list" r
 
-let create ~domain:_ ~admission ~name fields =
+let create ?spill ~domain:_ ~admission ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)
@@ -329,7 +329,7 @@ let create ~domain:_ ~admission ~name fields =
     else e
   in
   let auth = Option.map Gcs_auth.create (str "serviceAccountKey") in
-  let api = Tsync_http.Client.endpoint endpoint in
+  let api = Tsync_http.Client.endpoint ?spill endpoint in
   if auth = None && not (Field_spec.is_loopback (Tsync_http.Client.host api))
   then
     Fail.invalid

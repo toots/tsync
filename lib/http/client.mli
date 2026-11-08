@@ -7,8 +7,12 @@
 type endpoint
 
 (** [url] is [http(s)://host[:port][/base]]; the base path prefixes every
-    target. [ca_file] replaces the system trust store. *)
-val endpoint : ?ca_file:string -> ?max_connections:int -> string -> endpoint
+    target. [ca_file] replaces the system trust store. With [spill], a
+    successful response body of 256 KiB or more, or of unannounced length, is
+    written to an unlinked file in that directory and answered as its mapping.
+*)
+val endpoint :
+  ?ca_file:string -> ?max_connections:int -> ?spill:string -> string -> endpoint
 
 val base_path : endpoint -> string
 val host : endpoint -> string

@@ -4,6 +4,10 @@ let idle_limit = 60.
 let default_stall = 60.
 let excerpt_length = 200
 
+(* A body this large or of unannounced length goes to a file: below it the
+   file costs more than the memory it saves. *)
+let spill_min = 256 * 1024
+
 type conn = {
   t : Transport.t;
   reader : Codec.reader;
@@ -19,9 +23,20 @@ type endpoint = {
   url : string;
   idle : conn list Atomic.t;
   slots : Rt.Semaphore.t;
+  spill : string option;
 }
 
-let endpoint ?ca_file ?(max_connections = 32) url =
+(* An open file cannot be unlinked on Windows, so bodies stay in memory there.
+   A crash between creating a spill file and unlinking it leaves a temporary
+   named after the dead process, which the sweep removes. *)
+let spill_dir = function
+  | Some dir when not Sys.win32 ->
+      Fs.mkdir_p dir;
+      Fs.sweep_temps dir;
+      Some dir
+  | _ -> None
+
+let endpoint ?ca_file ?(max_connections = 32) ?spill url =
   let scheme, rest =
     match String.index_opt url ':' with
       | Some i when i + 2 < String.length url && String.sub url i 3 = "://" ->
@@ -85,6 +100,7 @@ let endpoint ?ca_file ?(max_connections = 32) url =
     url;
     idle = Atomic.make [];
     slots = Rt.Semaphore.create ~name:("http " ^ host) max_connections;
+    spill = spill_dir spill;
   }
 
 let base_path e = e.base
@@ -179,6 +195,21 @@ let write_body ~stall ~progress ~pace t body =
   in
   go 0
 
+(* 01 §10: the body is written to an unlinked file as it arrives and answered
+   as its mapping, so it never sits in memory. *)
+let spill_body ~dir ~max_body reader framing =
+  let path = Fs.temp_in dir in
+  Fs.with_fd
+    (Fs.openfile ~perm:0o600 path [O_RDWR; O_CREAT; O_EXCL])
+    (fun fd ->
+      Fs.unlink_quiet path;
+      let written = ref 0 in
+      Codec.stream_body ~limit:max_body reader framing (fun view ->
+          let len = Bigstring.length view in
+          Fs.pwrite_all fd view ~boff:0 ~len ~off:!written;
+          written := !written + len);
+      Fs.map_fd fd)
+
 let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
     ~reused =
   let b = Buffer.create 256 in
@@ -227,7 +258,15 @@ let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
     then `Length 0
     else Codec.framing headers
   in
-  let body = Codec.read_body ~limit:max_body c.reader framing in
+  let spills =
+    match framing with `Length n -> n >= spill_min | `Chunked | `Eof -> true
+  in
+  let body =
+    match e.spill with
+      | Some dir when status / 100 = 2 && spills ->
+          spill_body ~dir ~max_body c.reader framing
+      | _ -> Codec.read_body ~limit:max_body c.reader framing
+  in
   let keep =
     framing <> `Eof
     && (match Codec.header headers "connection" with

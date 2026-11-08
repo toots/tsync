@@ -4,6 +4,7 @@ type t = {
   fields : Field_spec.field list;
   linkless : bool;
   create :
+    ?spill:string ->
     domain:Domain_name.t ->
     admission:Uplink.t ->
     name:string ->

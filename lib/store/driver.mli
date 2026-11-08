@@ -8,12 +8,14 @@ type t = {
   fields : Field_spec.field list;
   linkless : bool;  (** a local store: no network link to govern *)
   create :
+    ?spill:string ->
     domain:Domain_name.t ->
     admission:Uplink.t ->
     name:string ->
     (string * Field_spec.value) list ->
     Store.t;
-      (** reaches no network and touches no file *)
+      (** reaches no network and touches no file; [spill] is where a remote
+          driver's HTTP client writes large bodies (Client.endpoint) *)
 }
 
 (** At module initialisation, before any fiber runs. *)
