@@ -34,13 +34,16 @@ process loads, and three things follow:
 
 ## 2. Ownership and process model
 
-- **The host process owns its domain.** At boot it takes the domain's ownership lock
+- **The host process owns the domains it boots.** Booting a domain takes its ownership lock
   ([07 §2.3](../07-daemon-cli.md#23-the-ownership-lock)) with role `app` and no socket, and holds it
-  for the life of the process; process death releases it. Only this process changes the domain's
-  local state.
+  for the life of the process; process death releases it. Only this process changes a booted
+  domain's local state.
 - There is no stop and no drain. Process death is a crash-stop; the next boot recovers
   ([07 §3.6](../07-daemon-cli.md#36-embedded-host-android)).
-- One booted domain per process: the one the host names, or the only one the config names.
+- Any number of booted domains per process, each booted by name when the host first needs it
+  (§3.1). Every booted domain has its own owner; the process's uplink admission is shared by all of
+  them ([uplink-governor.md](../algorithms/uplink-governor.md)), as in any process serving several
+  domains.
 - The frontend's descriptor ([08 §2.1](../08-frontends.md#21-frontend-descriptor)): presenting,
   per-domain, serving `Commands` (`tsync start` refuses it), tree `Pulled` (`tsync sync` refuses it),
   availability as the core computes it.
@@ -52,11 +55,13 @@ process loads, and three things follow:
 
 ### 3.1 Boot
 
-Boot is idempotent within a process; concurrent callers wait for the first.
+Boot is per domain and idempotent within a process: concurrent callers for one domain wait for the
+first, and domains boot independently. A domain once booted stays booted until the process dies.
+Steps 1 and 3's scheduler are the process's and happen at the first boot only.
 
 1. Install the log sink and the notice sink (§4), before anything that can fail.
-2. Load and validate the config; apply its TLS settings; take the ownership lock; build the domain
-   over the lazy tree.
+2. Load and validate the config; at the first boot, apply its TLS settings; take the domain's
+   ownership lock; build the domain over the lazy tree.
 3. Start the scheduler on a thread of its own
    ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)), run local recovery
    ([04 §4.10](../04-checkout-cache.md#410-owner-start-local-recovery)), start the upload queue,
@@ -69,9 +74,10 @@ Boot is idempotent within a process; concurrent callers wait for the first.
    every owner runs ([07 §6](../07-daemon-cli.md#6-maintenance)).
 
 - A failure in steps 1–3 is answered to the caller as text, the lock released, and a later boot may
-  succeed. A lock held by another process is such a failure, naming the holder.
-- A config changed after boot is not picked up: the process serves the config it booted with until
-  it dies.
+  succeed. A lock held by another process is such a failure, naming the holder. One domain failing
+  to boot leaves the others as they are.
+- A booted domain does not pick up a config changed after its boot: it serves the config it booted
+  with until the process dies. A domain booted later reads the config as it is then.
 - If the scheduler itself dies the process exits
   ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)); the host is restarted by the platform at
   its next use, and boots again.
@@ -214,10 +220,9 @@ Before the core initialises:
    fails, naming the trust store, when the file is missing or holds no certificate.
 3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`.
 4. **A notice sink** (§4.2).
-5. The name of the domain to serve (empty = the only one the config names).
-6. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
-   one directory under home that every `staging` and `dest` path MUST lie in.
-7. **A keystore** of three calls, the vault's on this host
+5. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
+   one directory under home that every `staging` and `dest` path MUST lie in, shared by every domain.
+6. **A keystore** of three calls, the vault's on this host
    ([vault §6.1](../extensions/vault.md#61-the-keystore)): `put(domain, keyId, K)`,
    `get(domain) → (keyId, K) or none` and `delete(domain)`. The host seals K with AES-GCM under a
    non-exportable Android Keystore key that needs no user authentication (the owner reads it
@@ -258,16 +263,19 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 
 | Operation | In | Out | Semantics |
 |---|---|---|---|
-| `check_config(domain, candidate?)` | domain; optionally a config's text | `""` or error text | Loads and validates the config, or the candidate text in its place, and selects the domain, starting nothing, writing nothing and taking no lock. Callable before or after boot. |
+| `check_config(domain, candidate?)` | domain; optionally a config's text | `""` or error text | Loads and validates the config, or the candidate text in its place, and selects the domain, starting nothing, writing nothing and taking no lock. Callable before or after any boot. |
 | `boot(domain)` | domain | `""` or error text | §3.1. |
 | `setup_link(link)` | a setup link | JSON | Fetches and opens it ([setup-link §6.1](../algorithms/setup-link.md#61-opening-a-link)), before or after boot, writing nothing: `{"from","domains":[{"name","url","secret"}],"skipped":[{"name","reason"}],"about"}`, each joinable domain with its first backend's server, or `{"error"}` with the sentence to show. |
-| `request(json)` | request | reply | One request, one reply, through the shared handler ([08 §3.3](../08-frontends.md#33-actions)). |
-| `status()` | — | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |
-| `open(ref)` | reference | handle > 0, or −errno | Resolves the file's current version (§3.2 rule 3, §3.3) and pins it to a new handle. |
+| `request(domain, json)` | domain, request | reply | One request, one reply, through the domain's handler ([08 §3.3](../08-frontends.md#33-actions)). |
+| `status(domain)` | domain | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |
+| `open(domain, ref)` | domain, reference | handle > 0, or −errno | Resolves the file's current version (§3.2 rule 3, §3.3) and pins it to a new handle. |
 | `size(handle)` | handle | size, or −errno | The size of the handle's version. |
 | `read(handle, offset, length, dest)` | | bytes served, or −errno | Bytes `[offset, offset+n)` of the handle's version. Short only at end of content; 0 past it. Each handle is its own read stream for read-ahead. |
 | `close(handle)` | handle | 0 | Forgets the handle. Idempotent. |
 
+- **A domain not booted** is refused by `request` (UNPREPARED, saying the domain is not booted),
+  `status` (that sentence) and `open` (EIO), as every entry is total; the caller boots it first.
+- **Handles are the process's**, unique across domains: `size`, `read` and `close` take no domain.
 - **A handle serves one version.** Size and bytes both come from the version resolved at open, never
   from a later one. If that version's bytes become unavailable (a staged body replaced meanwhile),
   reads fail with EIO rather than mixing versions.
@@ -338,6 +346,9 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 - A second process cannot own the domain while a host does; a desktop command meeting an `app`
   holder is refused naming it, and otherwise owns the domain for its duration.
 - Deferred replica or backfill work left by a killed process is completed after the next boot.
+- Two domains booted in one process each answer their own requests and notices; a domain whose
+  boot fails (its lock held elsewhere, a refused backend) leaves the other serving, and a call
+  naming a domain not booted is refused as §5 says.
 - Every bridge entry is total, before boot included; a non-JSON request is answered with the exact
   `invalid JSON` reply.
 - Concurrent reads from foreign threads return exact bytes; a read after close is −EBADF; an open of

@@ -197,10 +197,11 @@ write: a join that adds nothing writes nothing.
   failure is shown and the page stays, and it can be left blank to finish without one. An unattended
   install takes the link as `/LINK=`, and logs a failure to join without failing the install.
 - **The Android app's Setup** ([android-app §10.7](../frontends/android-app.md#107-setup-and-settings))
-  offers *Scan setup code*, with the scanner the vault's *Add* uses, and accepts a pasted setup link
-  in its URL field. Opening the link fills the server and secret; a payload of several domains fills
-  the choice of domains, each with its name and mark from `about`, one domain selects it. The app configures one domain, so the rest of the
-  payload is not joined there. The sealed payload is opened by the core.
+  offers *Scan setup code*, with the scanner the vault's *Add* uses, and accepts a pasted setup link;
+  a link is the only way the app adds a domain. The opened payload's domains are offered, each with
+  its name and mark from `about`, those the app already configures left out; several may be
+  picked and each is joined over the server it is offered with. The sealed payload is opened by
+  the core.
 
 ---
 
