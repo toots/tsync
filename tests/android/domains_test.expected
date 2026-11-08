@@ -4,7 +4,7 @@
   open on photos                 -5
   status of photos               photos is not booted
 == a boot that fails
-  boot laptop                    "laptop is not configured with the android frontend"
+  boot laptop                    "laptop is owned by another process"
   docs still answers             ok
 == both booted
   boot photos                    ""

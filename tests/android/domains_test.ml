@@ -1,6 +1,7 @@
 (* android §9, Ownership and boot: two domains booted in one process, each
    answering its own requests, handles and notices, and a failed boot leaving
-   the other serving. *)
+   the other serving. The failing domain is owned elsewhere, a refusal that
+   holds whichever frontends the binary was built with. *)
 
 open Tsync_core
 open Tsync_android
@@ -82,12 +83,12 @@ let read handle =
   let n = Android_host.read handle ~off:0 buffer in
   if n < 0 then string_of_int n else Bigstring.to_string ~off:0 ~len:n buffer
 
-let domain ?(frontends = {|["android"]|}) name =
+let domain name =
   Printf.sprintf
     {|{"name":"%s","symlinks":"skip","versioning":true,"extensions":[],
-       "frontends":%s,
+       "frontends":["android"],
        "backends":[{"type":"local","name":"main","role":"main","path":"%s/%s"}]}|}
-    name frontends root name
+    name root name
 
 let () =
   Fs.rm_rf root;
@@ -99,8 +100,11 @@ let () =
     [("HOME", "home"); ("XDG_DATA_HOME", "data"); ("XDG_CACHE_HOME", "cache")];
   Unix.putenv "TSYNC_CONFIG_JSON"
     (Printf.sprintf {|{"name":"phone","domains":[%s,%s,%s]}|} (domain "docs")
-       (domain "photos")
-       (domain ~frontends:{|["fuse"]|} "laptop"));
+       (domain "photos") (domain "laptop"));
+  (* flock is per open file: this descriptor holds laptop as another owner would. *)
+  let lock = Tsync_config.Paths.ownership_lock (Domain_name.v "laptop") in
+  Fs.mkdir_p ~perm:0o700 (Filename.dirname lock);
+  let held = Option.get (Fs.lifetime_lock lock) in
   Tsync_android_bridge.Android_bridge.started ();
   p "== one domain booted";
   p "  %-30s %S" "boot docs" (Android_host.boot "docs");
@@ -130,5 +134,6 @@ let () =
   p "  %-30s %s" "read" (read handle);
   ignore (Android_host.close handle);
   p "  %-30s %s" "read after close" (read handle);
+  Unix.close held;
   Test_support.finish root;
   exit 0

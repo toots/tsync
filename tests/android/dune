@@ -70,6 +70,7 @@
  (libraries
   test_support
   tsync_core
+  tsync_config
   tsync_catalog
   tsync_android
   tsync_android_bridge
