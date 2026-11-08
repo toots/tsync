@@ -206,18 +206,17 @@ limited     = limited ∧ achieved > 0               -- demand AND bytes are mov
 
 case phase of
  Ramping:                                          -- ceiling lifted
-   if q > T ∧ over_target ≥ 2:                     -- the edge, confirmed on two ticks
+   if q > T ∧ over_target ≥ 2 ∧ limited:          -- the edge, confirmed on two ticks
        step = never_saturated ? 2 : 1+g;  never_saturated = false
-       est  = r / √step                            -- geometric mean of the last two steps
-       if achieved > 0: est = min(est, 2·achieved)
-       C    = max(achieved, est)                   -- replaces the old estimate
+       est  = min(r / √step, 2·achieved)           -- geometric mean of the last two steps
+       C    = max(achieved, est, CAPACITY_FLOOR·C) -- replaces the old estimate, C unknown counts 0
        enter Steady;  next = h·C
    elif q ≤ T/2 ∧ limited: next = r · (never_saturated ? 2 : 1+g)
    else:                   next = r
  Steady:
    if q ≤ T: settled = true
-   elif settled ∧ over_target ≥ 2 ∧ achieved > 0:
-       C = min(C, achieved)                        -- someone else took a share
+   elif settled ∧ over_target = 2 ∧ limited:       -- once per episode over T
+       C = max(min(C, achieved), CAPACITY_FLOOR·C) -- someone else took a share
    if now − since ≥ PROBE_UP_EVERY: enter Ramping  -- periodic ceiling lift
    next = (off > 0 ∧ ¬limited) ? r : r·(1 + g·off)     -- ×[0.75, 1.25]
  BackingOff:
@@ -233,6 +232,7 @@ timed_out():  if achieved > 0: C = min(C, achieved)
 enter(p):     phase = p; since = now; settled = false
 ```
 
+- **Capacity floor.** A Wi-Fi stall raises the queue and lowers `achieved` on the same ticks, so reading `C` off `achieved` then would set the capacity to the stall's throughput and hold it there until the next probe. Instead `C` is lowered once per episode over the target, on the tick that confirms it, and by at most CAPACITY_FLOOR, at a ramp's end as in Steady. The queue a stall leaves keeps the signal over the target for several ticks, so a per-tick bound would still compound. A share someone else keeps taking is still found: the rate falls by up to ×0.75 per tick while the queue stands, and each later climb back into that queue is a new episode that lowers `C` again. Both rules act only while `limited`, since a queue that builds while the sender offers less than its rate is not the sender's edge, and bytes not offered say nothing about the link.
 - **Decrease floor.** No tick lowers the rate by more than DECREASE_FLOOR. A ramp end, a lowered capacity, or a timeout that leaves the rate far above the new ceiling brings it down over a few ticks, halving at most each time. A single noisy tick therefore cannot collapse the rate, and a real queue still takes it down geometrically.
 - **One timeout cut per step**, however many timeouts occurred (§4.6).
 
@@ -356,7 +356,7 @@ Per link: `enabled`, `state` (`ramping`, `steady`, `backingOff`, or `leased`), `
 Model the bottleneck as a fluid queue draining at the available capacity `A` (link capacity minus foreign load).
 
 - **Equilibrium is at the ceiling, not at the target.** With `C ≈ A`, the ceiling `h·C < A`, so arrivals are below service and the queue drains. `q → 0` gives `off → +1`, the controller asks for growth under demand, and the ceiling clips it. The steady state is `r* = h·C` with a near-zero queue. `T` is the alarm threshold that says a queue is building, and headroom is the margin that keeps it from forming. This differs from LEDBAT, whose equilibrium holds `T` of standing queue.
-- **Recovery from overshoot.** When `A < r` the queue grows until `q > T`. In Steady each tick multiplies the rate by at least 0.75, so it falls below `A` within `⌈log_{0.75}(A/r)⌉` ticks. Once settled and then over target for two ticks, `C := min(C, achieved) ≤ A`, and the operating point re-forms below the new `A`. The queue is non-increasing from the first tick at which `r < A`, and strictly decreasing at rate `≥ (1 − h)·A` once `r ≤ h·A`.
+- **Recovery from overshoot.** When `A < r` the queue grows until `q > T`. In Steady each tick multiplies the rate by at least 0.75, so it falls below `A` within `⌈log_{0.75}(A/r)⌉` ticks. Once settled and then over target for two ticks, `C := max(min(C, achieved), CAPACITY_FLOOR·C)`, once per such episode, so `C ≤ A` within `⌈log_{CAPACITY_FLOOR}(A/C)⌉` episodes, and the operating point re-forms below the new `A`. The queue is non-increasing from the first tick at which `r < A`, and strictly decreasing at rate `≥ (1 − h)·A` once `r ≤ h·A`.
 - **Bounded ramp overshoot.** A ramp step happens only at `q ≤ T/2`, and the end requires `q > T` twice. The first ramp (×2) can overshoot by 4 to 8 times, the analogue of slow start. Later ramps (×1.25) overshoot by at most about 2 times. Steady inherits the ramp's queue, but `settled` stays false until it drains, so the self-built queue is not taken for a foreign share.
 - **The wire carries the rate.** Chunk bytes reach the transport in slices at `share_rate`, so the bottleneck sees the granted rate plus slice-sized bursts of at most SLICE_TIME of queue, never a whole body at line speed. A probe taken while a chunk is in flight therefore reads the standing queue at the chosen rate, which is the quantity the law controls. Bodies that are not chunks still go whole; they are small, and their queue lasts one body.
 - **Estimation bias.** The estimate `rate/√step` is clamped to `[achieved, 2·achieved]`, so it cannot be read off a rate that no data met. Detection lag biases it high by up to `√step`, which headroom absorbs. A sender with one body in flight at a time can bias it low, which the next periodic ramp corrects.
@@ -370,7 +370,7 @@ Model the bottleneck as a fluid queue draining at the available capacity `A` (li
 | **Idle link** | No probes. `queueing` halves each tick, the rate holds, `C` is kept. Periodic ramps lift the ceiling, but nothing grows without demand. |
 | **Burst after idle** | The bucket is full: up to `burst` bytes, and at least one body's admission, go at once, then slices follow the refill pace, capped by the window. The first probe comes at most one TICK after bytes are in flight. A baseline measured earlier still holds, and can only fall or rise slowly (§4.4). |
 | **Link gets faster** | Found by the next periodic ramp, at most about PROBE_UP_EVERY plus the ramp's length later. |
-| **Link gets slower / foreign traffic appears** | The queue rises; the rate shrinks up to ×0.75 per tick, then `C := min(C, achieved)`. A loss-based foreign flow keeps the queue high, so tsync falls to `min_rate` and stays there: scavenger behaviour. |
+| **Link gets slower / foreign traffic appears** | The queue rises; the rate shrinks up to ×0.75 per tick, and `C` follows `achieved` down by at most ×CAPACITY_FLOOR per episode over the target. A loss-based foreign flow keeps the queue high, so tsync falls to `min_rate` and stays there: scavenger behaviour. |
 | **Foreign traffic leaves** | Delay falls and the rate climbs back to the lowered ceiling. The ceiling itself lifts at the next periodic ramp. |
 | **Stalled request** | Its bytes stay in flight, and its next slice is not accepted by the transport; a full window waits for its ticket, not a timer. When the stall detector fires, the store's timeout count rises and the next step halves the rate. The retry is admitted afresh. |
 | **Many small bodies** | Each costs its payload plus REQUEST_OVERHEAD in tokens. Those that are not chunks are admitted before any waiting chunk and before the next slice of any admitted one. |
@@ -392,7 +392,7 @@ Each link has its own law, budget, line, baselines and lessee table. Timeouts an
 ### 5.6 Fairness against other senders
 
 - **Loss-based TCP** drives the queue to the buffer's depth. tsync reads that as a persistent queue and backs off to `min_rate`: deliberately a lower-than-best-effort sender.
-- **Another tsync machine, or a LEDBAT flow.** Both see the same queue and both cut; each lowers `C` to its own `achieved`. There is no equal-split guarantee. The periodic ramps re-contest the link every minute. A latecomer may take a standing queue for its baseline; the bounded baseline rise (§4.4) keeps the incumbent from adopting that queue quickly as its own baseline.
+- **Another tsync machine, or a LEDBAT flow.** Both see the same queue and both cut; each lowers `C` toward its own `achieved`. There is no equal-split guarantee. The periodic ramps re-contest the link every minute. A latecomer may take a standing queue for its baseline; the bounded baseline rise (§4.4) keeps the incumbent from adopting that queue quickly as its own baseline.
 - **The floor.** tsync never fully yields: against a saturating flow it still sends `min_rate`, so it always makes progress.
 
 ---
@@ -433,6 +433,7 @@ Counts are idempotent where it matters: tickets report once, `held_back` is spen
 | Confirmation | 2 ticks over T | To end a ramp and to lower `C` in Steady. |
 | EWMA weight | ½ per tick | Queue-signal smoothing. |
 | DECREASE_FLOOR | 0.5 | MUST be in (0, 1). Largest cut in one tick; the timeout cut. |
+| CAPACITY_FLOOR | 0.8 | MUST be in (0, 1). Largest cut of `C` in one episode over the target, a timeout aside. |
 | BASE_CELL × BASE_CELLS = BASE_WINDOW | 60 s × 10 = 600 s | Memory of the per-path minimum. |
 | BASE_MAX_RISE | `T` per BASE_WINDOW | How fast an effective baseline may rise. |
 | RATE_WINDOW | 10 s (1 s cells) | `achieved` averaging. |
@@ -482,7 +483,7 @@ An implementation MUST exhibit:
 
 - **Budget.** Full at birth (BURST_SECONDS of rate); an oversize body that is not a chunk is admitted on a full bucket and its debt is paid before the next; a chunk's admission takes REQUEST_OVERHEAD and each slice its size; the long-run rate holds; window = `STALL_TIMEOUT · WINDOW_SAFETY · rate`; a lone oversize body passes when nothing is in flight; a rate change keeps earned tokens and clips the depth; the rate floor is 1 B/s.
 - **Gate.** FIFO order within each line; with a chunk and a log entry both waiting, the log entry is admitted first whatever their sizes and arrival order, and so is every later body that is not a chunk; a log entry asked while a chunk is mid-body is admitted before that chunk's next slice; a body that is not a chunk asked after another never passes it; a body of `first` held by a full window lets the slices of the chunks in flight go, and is admitted once they complete; two admitted chunks alternate slices; a window-bound head does not hold slices back and arms no timer; a best-effort chunk is refused while the bucket cannot hold its whole body; a slice that waited sets `held_back`; a head blocked by the window is woken by a completion; `try_acquire` takes atomically, and a refusal counts a drop; `fail_waiting` fails every waiter having taken nothing; a disabled link's tickets release nothing.
-- **Law, driven against a simulated fluid link on a fake clock.** A doubling first ramp; steady within 40 s at headroom of the measured capacity with the queue drained; lowering to a competing share and recovering within a probe interval; a timeout halves the rate, holds 10 s, then ramps; no tick lowers the rate by more than DECREASE_FLOOR; a `maxRate` ceiling is reported `configured`; the `minRate` floor holds; no growth without being held back or without completions; base delay learnt, and a standing queue held for longer than BASE_WINDOW raises the effective baseline by at most BASE_MAX_RISE per window; a held-down near store does not cut; no samples while busy holds `queueing`.
+- **Law, driven against a simulated fluid link on a fake clock.** A doubling first ramp; steady within 40 s at headroom of the measured capacity with the queue drained; lowering to a competing share and recovering within a probe interval; a timeout halves the rate, holds 10 s, then ramps; no tick lowers the rate by more than DECREASE_FLOOR; a `maxRate` ceiling is reported `configured`; the `minRate` floor holds; no growth without being held back or without completions; base delay learnt, and a standing queue held for longer than BASE_WINDOW raises the effective baseline by at most BASE_MAX_RISE per window; a held-down near store does not cut; no samples while busy holds `queueing`; a link of 8 MiB/s dropping to 0.5 MiB/s for 4 s every 50 s keeps `C` above a third of the link; a competitor filling the link while the sender offers less than its rate leaves `C` where it was.
 - **Lease.** An even split among waiting parties; the floor for an idle party; 1.25× use for a mover; the leftover shared; grants summing to the total with floors included; a newcomer answered from an immediate re-split; a row dropped at once when its pid is gone and after LEASE_TTL of silence; `heldBack` spent by one split; old report and answer shapes read as specified.
 - **Modes.** Two missed renewals keep a lessee Leased, the third makes it Local; a refusal makes it Local at once; a Local process takes the governor lock when it is free; the owner probes on behalf of a busy lessee; cuts are per link; one request renews every link.
 - **Restart.** A law with fresh saved state starts at `RESTORE_FRACTION · headroom · capacity` with ×1.25 steps; stale or missing state starts cold.

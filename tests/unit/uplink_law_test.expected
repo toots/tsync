@@ -14,17 +14,17 @@
   t= 26 rate 3.98 MiB/s   queueing   7 ms  steady
   t= 28 rate 4.53 MiB/s   queueing   3 ms  steady
   t= 30 rate 3.39 MiB/s   queueing 127 ms  steady
-  t= 32 rate 2.87 MiB/s   queueing  63 ms  steady
-  t= 34 rate 2.87 MiB/s   queueing  32 ms  steady
-  t= 36 rate 2.87 MiB/s   queueing  16 ms  steady
-  t= 38 rate 2.87 MiB/s   queueing   8 ms  steady
-  t= 40 rate 2.87 MiB/s   queueing   4 ms  steady
+  t= 32 rate 3.17 MiB/s   queueing  63 ms  steady
+  t= 34 rate 3.46 MiB/s   queueing  32 ms  steady
+  t= 36 rate 3.62 MiB/s   queueing  16 ms  steady
+  t= 38 rate 3.62 MiB/s   queueing   8 ms  steady
+  t= 40 rate 3.62 MiB/s   queueing   4 ms  steady
 steady at headroom of the measured capacity: true, queue drained: true
-capacity 3.58 MiB/s
+capacity 4.53 MiB/s
 base delay learnt: 30 ms
 limit: measured
 == a competitor takes half of the link at t=40
-yields to its share: 1.85 MiB/s (true)
+yields to its share: 1.39 MiB/s (true)
 after it leaves, back within a probe interval and a ramp: true
 == a timeout
 halves: true, backing off
@@ -42,10 +42,14 @@ busy, probes held down: true
 idle: drains to 6 ms
 == a standing queue does not become the baseline
 0.2 s of standing delay for 1200 s (two windows) raises the baseline 53 ms, at most 100
+== Wi-Fi stalls: 4 s at 0.5 MiB/s every 50 s on an 8 MiB/s link
+capacity stays above a third of the link: true (least 3.10 MiB/s)
+== a competitor fills the link while the sender has little to send
+capacity kept: true
 == restart
 fresh saved state starts at 1.60 MiB/s
 then steps ×1.25
 state older than a day starts cold: 0.25 MiB/s
 == 8 MiB chunks on an 8 MiB/s link with a 250 ms buffer, minutes 3 to 5
-paced slices: carries 0.80 of the link (at headroom true), capacity 1.07 of it (true)
-whole bodies, the case pacing exists for: carries 0.17 of the link (at headroom false), capacity 0.10 of it (false)
+paced slices: carries 0.80 of the link (at headroom true), capacity 0.96 of it (true)
+whole bodies, the case pacing exists for: carries 0.18 of the link (at headroom false), capacity 0.24 of it (false)
