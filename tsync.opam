@@ -34,9 +34,9 @@ depends: [
   # OpenSSL is the default and `tsync start --tls` chooses.
   ("tsync-tls" | "tsync-ssl")
 ]
-# duppy is released from liquidsoap's repository; until a release, its main.
+# duppy is released from liquidsoap's repository; until a release, a commit of its main.
 pin-depends: [
-  ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#main"]
+  ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#1b4268f0b67a51c8b6bac59cc5b90aaf9156a7a6"]
 ]
 # Each rebuilds tsync when it appears, which links its library in. The TLS
 # libraries stand for their packages, which may not appear in both lists.

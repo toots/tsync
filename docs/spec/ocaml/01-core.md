@@ -140,8 +140,9 @@ Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are s
 - **A cancelled wait withdraws itself.** `Rt.suspend`'s `register` returns how to remove what it
   queued, and every queue honours it (`Fmutex`, `Semaphore`, `Signal`, `Promise`,
   `Health.on_trip` through `Retry.until_held`). A hand-off whose waiter answers `false` goes to the
-  next one, so a slot is never given to a fiber that left. A descriptor wait is re-armed every 30 s
-  so a cancelled one does not stay registered.
+  next one, so a slot is never given to a fiber that left. A descriptor wait or a sleep withdraws
+  its duppy task, so a cancelled one leaves nothing registered and its descriptor may be closed at
+  once.
 - **`Rt.first` cancels its losers and waits for them**, so none outlives the call holding a
   descriptor its caller is about to close. `~detach:true` is for a loser cancellation cannot
   interrupt, a blocking system call: the store probe, the status probes.
