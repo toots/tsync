@@ -623,6 +623,9 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
 - Until the certificate chains to a root Windows trusts, the installer carries it and, before
   registering the identity package, adds it to the machine's `TrustedPeople` store when it is not
   there, through one elevated step the user consents to. Refused, nothing is registered.
+- Installing over an earlier install stops the service and the tray before replacing the
+  programs, then registers the identity package again, closing any `tsyncd.exe` still running with
+  its identity: Windows refuses to update a package one of its applications holds.
 - When registering fails, the installer says why, skips the setup-link page and exits non-zero; the
   programs stay, and running it again retries. Otherwise its last page shows `tsync config
   --summary`.

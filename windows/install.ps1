@@ -33,8 +33,9 @@ if (-not (Trusted)) {
   if (-not (Trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
 }
 
+# A tsyncd setup stopped can still be exiting, and its identity blocks the update.
 Add-AppxPackage -Path (Join-Path $ProgramDir 'tsync-identity.msix') `
-  -ExternalLocation $ProgramDir -ForceUpdateFromAnyVersion
+  -ExternalLocation $ProgramDir -ForceUpdateFromAnyVersion -ForceApplicationShutdown
 
 $path = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = @($path -split ';' | Where-Object { $_ -ne '' })
