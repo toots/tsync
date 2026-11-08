@@ -35,13 +35,20 @@ val seconds : int -> float
     agree. *)
 val creation : mtime:int -> int -> int
 
+(** [t] carried over a file that holds [held]: a creation time never moves later
+    (02 §2.6). *)
+val carried_over : held:times -> times -> times
+
 (** Of the link itself, not its target. *)
 val times : string -> times
 
 val ftimes : Unix.file_descr -> times
 
-(** Of the link itself, like {!times}. [created] is set where the platform can:
-    Windows and macOS. *)
+(** Whether {!set_times} sets [created]: Windows and macOS. Linux keeps a
+    creation time but offers no call to set one. *)
+val sets_created : bool
+
+(** Of the link itself, like {!times}; [created] only where {!sets_created}. *)
 val set_times : string -> times -> unit
 
 val exists : string -> bool

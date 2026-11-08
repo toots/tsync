@@ -4,9 +4,7 @@
 open Tsync_core
 
 let p fmt = Printf.printf fmt
-
-(* Linux keeps a creation time but offers no way to set one. *)
-let sets_created = Sys.win32 || Fs.is_macos
+let sets_created = Fs.sets_created
 
 let birth_seconds_from_stat path =
   let ic = Unix.open_process_args_in "stat" [| "stat"; "-c"; "%W"; path |] in

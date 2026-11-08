@@ -78,6 +78,8 @@ type times = { mtime : int; created : int }
 let created_floor = 315_619_200_000_000_000
 let creation ~mtime created = if created < created_floor then mtime else created
 let times_of (mtime, created) = { mtime; created = creation ~mtime created }
+let sets_created = Sys.win32 || is_macos
+let carried_over ~held t = { t with created = min held.created t.created }
 let now () = Int.of_float (Unix.gettimeofday () *. 1e9)
 let seconds ns = Float.of_int ns /. 1e9
 let times p = times_of (sys (fun () -> times_ p))

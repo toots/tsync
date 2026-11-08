@@ -12,12 +12,12 @@ type local =
       (** chunk keys, cut at the manifest's chunk size it is compared with *)
   | Unhashed
 
-type source = Missing | Dir | File of local | Key of Manifest.t
+type source = Missing | Dir | File of local * Fs.times | Key of Manifest.t
 
 type target =
   | Absent of side
   | Dir_at of side
-  | File_at of local
+  | File_at of local * Fs.times
   | Key_at of Manifest.t
 
 type skip =
@@ -32,6 +32,9 @@ type decision =
   | Skip of skip
   | Make_dir of side
   | Identical
+  | Retime_in_domain of Manifest.t
+      (** the target's content with the source's times, installed *)
+  | Retime_local of Fs.times  (** the source's times, set on the local file *)
   | Copy_manifest of Manifest.t
   | Rename_in_domain of Manifest.t
   | Upload of [ `Fresh | `Replacing ]
@@ -50,7 +53,8 @@ type endpoint = { side : side; path : string }
 
 type report = {
   copied : int;
-      (** uploads, manifest copies, renames, assembled and patched files *)
+      (** uploads, manifest copies, renames, assembled, patched and retimed
+          files *)
   identical : int;
   skipped : (string * string) list;  (** path and why *)
   dirs : int;

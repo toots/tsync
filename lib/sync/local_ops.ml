@@ -426,15 +426,13 @@ module Make (C : Engine_ctx.S) = struct
   let carried path (t : Fs.times) =
     let held =
       match Staged.read staged path with
-        | `Edit e -> Some e.times.created
+        | `Edit e -> Some e.times
         | `Absent | `Unparseable -> (
             match Mirror.file mirror path with
-              | `File m -> Some m.created
+              | `File m -> Some (Manifest.times m)
               | `Dir | `Absent | `Corrupt -> None)
     in
-    match held with
-      | Some c when c < t.created -> { t with created = c }
-      | _ -> t
+    match held with Some held -> Fs.carried_over ~held t | None -> t
 
   let stat_of_manifest (m : Manifest.t) =
     {

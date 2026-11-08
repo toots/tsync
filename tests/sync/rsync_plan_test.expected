@@ -26,4 +26,9 @@ domain file onto an unhashed local file        assemble f
 local file to nothing locally                  skip: neither side is in the domain
 local file onto a local file                   skip: neither side is in the domain
 local file to the domain, moved                upload, fresh; the source is dropped
+local file equal to the domain's, other times  give f the times 7000000000, 0
+domain file onto the same content, other times give g the times 7000000000, 0
+domain file, the target created earlier        identical
+domain file onto an equal local file, 1 s apart identical
+domain file onto an equal local file, 9 s apart set the local times 7000000000, 7000000000
 folder, moved                                  make a domain folder

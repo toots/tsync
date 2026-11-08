@@ -306,3 +306,25 @@
  (alias runtest)
  (action
   (diff export_times_test.expected export_times_test.output)))
+
+(executable
+ (name rsync_times_test)
+ (modules rsync_times_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  rsync_times_test.output
+  (run ./rsync_times_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rsync_times_test.expected rsync_times_test.output)))
