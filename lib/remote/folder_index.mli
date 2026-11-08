@@ -3,12 +3,14 @@
     a folder read costs one listing and one read. *)
 
 (** Full stored key, entity tag, body. *)
-type entry = { key : string; etag : string; body : string }
+type entry = { key : string; etag : string; body : Tsync_core.Bigstring.t }
 
-val encode : entry list -> string
+(** One buffer of exactly the encoded size. *)
+val encode : entry list -> Tsync_core.Bigstring.t
 
-(** Any parse error means no index. *)
-val decode : string -> entry list option
+(** Any parse error means no index. Bodies are views of the index, so a mapped
+    index is never copied whole. *)
+val decode : Tsync_core.Bigstring.t -> entry list option
 
 (** [index_max_bytes]: an index listed larger is not read. *)
 val max_bytes : int
