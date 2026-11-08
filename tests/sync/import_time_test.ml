@@ -70,7 +70,7 @@ let () =
       ignore (A.import src);
       A.drain ~grace:10. ();
       ignore (B.resync ());
-      let written = 1015218367_123456789 in
+      let written = 1015218367_123456700 in
       Fs.set_times path { mtime = written; created = written };
       ignore (A.import ~force_rehash:true src);
       A.drain ~grace:10. ();

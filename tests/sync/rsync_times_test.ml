@@ -71,7 +71,7 @@ let () =
       and domain = { Rsync_plan.side = Domain; path = "" } in
       report "into the domain" (A.rsync ~src:(local src) ~dst:domain ());
       A.drain ~grace:10. ();
-      let written = 1_015_218_367_123_456_789 in
+      let written = 1_015_218_367_123_456_700 in
       Fs.set_times path { mtime = written; created = written };
       report "the same bytes, other times"
         (A.rsync ~src:(local src) ~dst:domain ());

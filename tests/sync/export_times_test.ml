@@ -54,7 +54,7 @@ let () =
   let path = Filename.concat src "a.txt" in
   Out_channel.with_open_bin path (fun oc -> output_string oc "alpha");
   let times =
-    { Fs.mtime = 1_015_218_367_123_456_789; created = 900_000_000_000_000_000 }
+    { Fs.mtime = 1_015_218_367_123_456_700; created = 900_000_000_000_000_000 }
   in
   Fs.set_times path times;
   Rt.run_sync (fun () ->

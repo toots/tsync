@@ -231,6 +231,7 @@ and take_file t path (st : Cf.state) parent_ref =
                      {
                        at = Ref id.ref_;
                        staging;
+                       created = None;
                        base = Some id.content_id;
                        exclusive = false;
                        aside = false;
@@ -242,6 +243,7 @@ and take_file t path (st : Cf.state) parent_ref =
                      {
                        at = Child { parent_ref; name = Filename.basename path };
                        staging;
+                       created = None;
                        base = None;
                        exclusive = false;
                        aside = true;
