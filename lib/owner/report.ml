@@ -57,16 +57,22 @@ let create (domain : Domain.t) engine ~frontend =
 
 let corrupted_sample = 1000
 
+(* A store verifies its own writes, or its bucket function, once confirmed,
+   verifies each chunk as it lands (gc §5.7). *)
+let verified t (member : Composite.member) =
+  (member.store.capabilities (Key.domain_prefix t.domain.name)).verified
+  || Composite.function_confirmed t.domain.composite member
+
 (* 07 §5.5: a store that verifies nothing and holds no marker was looked at by
    nobody, which is not clean. *)
-let corrupted t (store : Store.t) : R.corrupted =
-  let d = t.domain.name in
+let corrupted t (member : Composite.member) : R.corrupted =
+  let d = t.domain.name and store = member.store in
   match
     Rt.with_timeout ~detach:true probe_wait (fun () ->
         List.length
           (store.list_prefix ~max_keys:(corrupted_sample + 1) (Key.corrupted d)))
   with
-    | 0 when not (store.capabilities (Key.domain_prefix d)).verified ->
+    | 0 when not (verified t member) ->
         Not_checked "the store verifies no write and no verification has run"
     | n ->
         Checked
@@ -87,7 +93,7 @@ let refresh_probe t s =
   in
   let corrupted =
     match reach with
-      | R.Reachable _ -> corrupted t store
+      | R.Reachable _ -> corrupted t s.member
       | Unreachable reason -> Not_checked reason
   in
   Mutex.protect s.m (fun () ->
