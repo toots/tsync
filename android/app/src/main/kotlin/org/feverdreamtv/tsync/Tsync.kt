@@ -186,13 +186,13 @@ class Tsync private constructor(val context: Context) {
     }
 
     /** The vault domains using [extension], in config order (extensions README §6.1). */
-    fun using(extension: String): List<Served> = vaults().filter { extension in extensions(it) }
+    fun using(extension: String): List<Served> = vaults().filter { extensions(it)?.contains(extension) == true }
 
-    /** The extensions a booted [domain] uses here (05 §2.1 rule 5); none when it cannot say. */
-    fun extensions(domain: Served): List<String> = try {
+    /** The extensions a booted [domain] uses here (05 §2.1 rule 5); null when it cannot say. */
+    fun extensions(domain: Served): List<String>? = try {
         domain.client.stats().extensions
     } catch (e: CoreException) {
-        emptyList()
+        null
     }
 
     /** Records whether [domain]'s `vault_status` answered, so later readers boot it (app §2). */

@@ -248,17 +248,17 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
 
 /** One domain's status and extensions; null when it uses no extension, which takes it out of the set (app §2). */
 private fun ask(tsync: Tsync, domain: Served, pull: Pull, previous: VaultView?): VaultView? {
-    // Asked whatever the status says, so a vault that cannot answer still counts as using them.
-    val extensions = tsync.extensions(domain).ifEmpty { previous?.extensions.orEmpty() }
+    // Asked on a refusal too, so a vault that cannot answer still counts as using them.
+    fun extensions() = tsync.extensions(domain) ?: previous?.extensions.orEmpty()
     val status = try {
         domain.vault.status(pull)
     } catch (e: CoreException) {
         // A last view stays shown over a refusal; without one the refusal is.
-        return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, extensions, false)
+        return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, extensions(), false)
     }
     tsync.noteVault(domain.name, status != null)
     status ?: return null
-    return VaultView(domain, status, null, extensions, previous?.settled == true || pull == Pull.DEFAULT)
+    return VaultView(domain, status, null, extensions(), previous?.settled == true || pull == Pull.DEFAULT)
 }
 
 /**

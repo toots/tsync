@@ -172,14 +172,18 @@ class Backup(private val context: Context) {
                 continue
             }
             // app §11.6: each record goes to its own domain, booted by the pass. One that cannot
-            // boot leaves its records as they are, as a pass that fails does.
-            val domain = tsync.domain(record.domain ?: names.firstOrNull() ?: break)
-            val unbooted = refused[domain.name] ?: (domain.boot() as? Boot.Failed)?.reason
-            if (unbooted != null) {
-                refused[domain.name] = unbooted
-                refusal = unbooted
-                more = true
-                continue
+            // boot leaves its records as they are, as a pass that fails does; one removed since
+            // the pass began is left as a removed domain's are.
+            val domain = tsync.domain(record.domain ?: names.first())
+            when (val boot = refused[domain.name]?.let { Boot.Failed(it) } ?: domain.boot()) {
+                Boot.Ready -> {}
+                Boot.NoConfig -> continue
+                is Boot.Failed -> {
+                    refused[domain.name] = boot.reason
+                    refusal = boot.reason
+                    more = true
+                    continue
+                }
             }
             val staged = domain.ask { status() }.pendingBytes
             val free = tsync.ingest.intents.stagingDirectory.usableSpace
@@ -232,8 +236,9 @@ class Backup(private val context: Context) {
     fun statusLine(): String {
         val settings = prefs.settings
         if (!settings.enabled) return context.getString(R.string.backup_off)
-        if (target() == null) return context.getString(R.string.backup_pick_domain)
-        val records = served()
+        val names = tsync.config.names()
+        if (target(names) == null) return context.getString(R.string.backup_pick_domain)
+        val records = served(names)
         val failed = records.filter { it.state == State.FAILED }
         val waiting = records.count { it.state == State.PENDING }
         val main = when {
