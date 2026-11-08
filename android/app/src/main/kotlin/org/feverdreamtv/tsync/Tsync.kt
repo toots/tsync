@@ -162,13 +162,13 @@ class Tsync private constructor(val context: Context) {
     /** Fetches and opens a setup link (setup-link §6.3), which needs no domain booted. */
     fun setupLink(link: String): String {
         prepare()
-        return Native.nativeSetupLink(link.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
+        return NativeCore.setupLink(link)
     }
 
-    /** The core's verdict on a config on disk that names no domain it can read: its load fails before any domain is looked up. */
+    /** The core's verdict on a config file that does not decode. */
     fun configRefusal(): String? = try {
         prepare()
-        NativeCore("").checkConfig()
+        NativeCore.checkFile()
     } catch (e: Throwable) {
         e.message ?: e.toString()
     }
