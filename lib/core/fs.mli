@@ -19,7 +19,8 @@ val stat_opt : string -> Unix.LargeFile.stats option
 val lstat_opt : string -> Unix.LargeFile.stats option
 
 (** A file's times in nanoseconds since the epoch (02 §2.6). [created] is the
-    [mtime] where the platform keeps no creation time. *)
+    [mtime] where the platform keeps no creation time, or keeps one before
+    1980-01-02, the unset value of FAT and the zero of others. *)
 type times = { mtime : int; created : int }
 
 (** The wall clock, as [times] counts. *)

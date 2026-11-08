@@ -73,7 +73,13 @@ let exists p = stat_opt p <> None
 
 type times = { mtime : int; created : int }
 
-let times_of (mtime, created) = { mtime; created }
+(* 1980-01-02: a creation time before it is FAT's unset 1980-01-01, read in
+   whatever zone the mount gives, or another platform's zero. *)
+let created_floor = 315_619_200_000_000_000
+
+let times_of (mtime, created) =
+  { mtime; created = (if created < created_floor then mtime else created) }
+
 let now () = Int.of_float (Unix.gettimeofday () *. 1e9)
 let seconds ns = Float.of_int ns /. 1e9
 let times p = times_of (sys (fun () -> times_ p))

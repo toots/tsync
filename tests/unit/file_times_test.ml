@@ -38,6 +38,12 @@ let () =
   p "the creation time reads back as set, where the platform sets it: %b\n"
     (if sets_created then same read.created set.created
      else read.created = born.created);
+  (* FAT's unset creation time, which reads as none; checked where it can be set. *)
+  let unset = { set with created = 315_532_800_000_000_000 } in
+  Fs.set_times path unset;
+  p "an unset creation time reads as the mtime: %b\n"
+    ((not sets_created) || (Fs.times path).created = (Fs.times path).mtime);
+  Fs.set_times path set;
   let fd = Unix.openfile path [O_RDONLY] 0 in
   p "a descriptor reads the same times: %b\n" (Fs.ftimes fd = read);
   Unix.close fd;

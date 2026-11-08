@@ -211,7 +211,8 @@ it was uploaded; only an edit made through a frontend records the time of the ed
 
 **created.** `created` is the time the file was created where it was first written, carried
 like `mtime`: whatever carries an existing file in MUST record its creation time, or its `mtime`
-when the platform keeps none, the latest time it can have been created. A file created through a
+when the platform keeps none, the latest time it can have been created. A creation time before
+1980-01-02 is a platform's unset value (FAT's 1980-01-01 in any zone, a zero) and counts as none. A file created through a
 frontend records the time of its creation; an edit keeps the `created` of the file it changes, and
 a file carried over another never takes a later `created` than the one it replaces.
 
