@@ -404,7 +404,8 @@ take(item):
       folder that already existed
   file (placeholder or not):
     wait until it is settled: unchanged for TAKE_SETTLE and openable without sharing write
-    u = its update sequence number; copy it into the take staging directory
+    u = its update sequence number; copy it into the take staging directory, keeping its last
+      write time, which the domain records as the item's mtime
     not a placeholder → write(parentRef, name, staging, aside: true)
     placeholder       → write(ref, staging, base: its contentId)
     landed = the reply's aside when present, else its item  # the item the file's bytes now are

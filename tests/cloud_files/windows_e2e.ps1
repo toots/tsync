@@ -174,6 +174,18 @@ try {
     (PublishedText 'made\inner.txt') -eq 'inside'
   } 90
 
+  Step 'copying an old file into the sync root'
+  $old = Join-Path $Work 'old.txt'
+  Set-Content -NoNewline -Path $old -Value 'from 2001'
+  $written = [DateTime]::new(2001, 2, 3, 4, 5, 6, [DateTimeKind]::Utc)
+  (Get-Item $old).LastWriteTimeUtc = $written
+  # Copy-Item keeps the last write time, as Explorer does.
+  Copy-Item $old (Join-Path $root 'old.txt')
+  Until 'a copied file reaches the domain' { (PublishedText 'old.txt') -eq 'from 2001' } 90
+  $exported = (Get-Item (Join-Path (Exported) 'old.txt')).LastWriteTimeUtc
+  Check "a copied file keeps its last write time in the domain (got $($exported.ToString('o')))" `
+    ([Math]::Abs(($exported - $written).TotalSeconds) -lt 1)
+
   Step 'saving through a temporary file'
   $temporary = Join-Path $root 'new.txt.saving'
   Set-Content -NoNewline -Path $temporary -Value 'saved whole'
