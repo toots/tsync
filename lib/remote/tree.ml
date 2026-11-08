@@ -70,7 +70,7 @@ module Make (C : Context.S) = struct
                       None
                   | None -> None)
             | Some b -> (
-                match classify_child b with
+                match classify_child (Bigstring.to_string b) with
                   | `Unclassifiable -> (
                       match on_unusable with
                         | Skip r ->
@@ -120,7 +120,7 @@ module Make (C : Context.S) = struct
       List.find_opt (fun (e : Store.entry) -> Key.equal e.key key) listed
     with
       | Some e when e.size <= Folder_index.max_bytes && indexing () -> (
-          match Option.bind (get key) Folder_index.decode with
+          match Option.bind (store.get_opt key) Folder_index.decode with
             | Some entries ->
                 let t = Hashtbl.create (List.length entries) in
                 List.iter
@@ -149,9 +149,7 @@ module Make (C : Context.S) = struct
     let need = List.filter (fun e -> from_index e = None) listing in
     let read = Hashtbl.create (List.length need) in
     List.iter
-      (fun (k, b) ->
-        Hashtbl.replace read (Key.to_string k)
-          (Option.map Bigstring.to_string b))
+      (fun (k, b) -> Hashtbl.replace read (Key.to_string k) b)
       (Store.read_many store need);
     let bodies =
       List.map
@@ -177,9 +175,7 @@ module Make (C : Context.S) = struct
               | _ -> None)
           (List.combine listing bodies)
       in
-      try
-        store.put (Key.index d id)
-          (Bigstring.of_string (Folder_index.encode entries))
+      try store.put (Key.index d id) (Folder_index.encode entries)
       with e when not (Rt.is_cancelled e) ->
         Log.debug "folder index of %s not written: %s" (Folder_id.to_string id)
           (Printexc.to_string e));
