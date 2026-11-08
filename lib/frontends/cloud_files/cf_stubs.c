@@ -713,8 +713,8 @@ CAMLprim value tsync_cf_create_bytecode(value *argv, int argn) {
 }
 
 /* New metadata and identity for an in-sync placeholder, dehydrated when
-   [_dehydrate]; [false] when the item changed since [_usn], which leaves it as
-   it was (§10.2). */
+   [_dehydrate]; 1 when the item changed since [_usn] and 2 when it is held
+   for writing, either of which leaves it as it was (§10.2). */
 CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, value _size,
                                        value _mtime, value _identity, value _read_only,
                                        value _dehydrate) {
@@ -743,12 +743,13 @@ CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, v
   caml_acquire_runtime_system();
   free(path);
   free(identity);
-  if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) ||
-      hr == HRESULT_FROM_WIN32(ERROR_CLOUD_FILE_NOT_IN_SYNC))
-    CAMLreturn(Val_false);
+  if (hr == HRESULT_FROM_WIN32(ERROR_CLOUD_FILE_NOT_IN_SYNC))
+    CAMLreturn(Val_int(1));
+  if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION))
+    CAMLreturn(Val_int(2));
   if (FAILED(hr))
     fail_hresult("updating a placeholder", hr);
-  CAMLreturn(Val_true);
+  CAMLreturn(Val_int(0));
 }
 
 CAMLprim value tsync_cf_refresh_bytecode(value *argv, int argn) {

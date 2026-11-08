@@ -258,11 +258,16 @@ let create dir (p : placeholder) =
   create_ dir p.name p.is_dir p.size p.mtime p.identity p.read_only
 
 external refresh_ :
-  string -> int64 -> bool -> int -> float -> string -> bool -> bool -> bool
+  string -> int64 -> bool -> int -> float -> string -> bool -> bool -> int
   = "tsync_cf_refresh_bytecode" "tsync_cf_refresh_native"
 
 let refresh path ~usn (p : placeholder) ~dehydrate =
-  refresh_ path usn p.is_dir p.size p.mtime p.identity p.read_only dehydrate
+  match
+    refresh_ path usn p.is_dir p.size p.mtime p.identity p.read_only dehydrate
+  with
+    | 0 -> `Updated
+    | 1 -> `Changed
+    | _ -> `Held_open
 
 external revert : string -> unit = "tsync_cf_revert"
 

@@ -174,15 +174,22 @@ let execute t dir usns (action : Apply_plan.action) =
         (* §11: under a pinned folder it is made whole, which the take decides. *)
         Take.schedule t.take (path name);
         None
-    | Refresh { name; row } | Update { name; row } ->
+    | Refresh { name; row } | Update { name; row } -> (
         let dehydrate = match action with Refresh _ -> true | _ -> false in
         let usn = Option.value ~default:(-1L) (Hashtbl.find_opt usns name) in
-        if Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate then (
-          if dehydrate then Take.schedule t.take (path name);
-          None)
-        else (
+        let refused why =
           Take.schedule t.take (path name);
-          Some (name ^ " changed or is held open, so it was not updated"))
+          Some
+            (Printf.sprintf "%s's %s was not updated: %s (usn %Ld)" name
+               (if dehydrate then "content" else "metadata")
+               why usn)
+        in
+        match Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate with
+          | `Updated ->
+              if dehydrate then Take.schedule t.take (path name);
+              None
+          | `Changed -> refused "it changed since it was read"
+          | `Held_open -> refused "it is held open for writing")
     | Delete name ->
         if all_in_sync (path name) then (
           remove (path name);
