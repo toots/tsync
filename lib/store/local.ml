@@ -431,7 +431,7 @@ let () =
       fields;
       linkless = true;
       create =
-        (fun ~domain:_ ~admission:_ ~name fields ->
+        (fun ?spill:_ ~domain:_ ~admission:_ ~name fields ->
           let verify_writes =
             match List.assoc_opt "verifyWrites" fields with
               | Some (Field_spec.B b) -> b
