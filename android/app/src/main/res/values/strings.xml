@@ -108,6 +108,7 @@
     <string name="back_up_now">Back up now</string>
     <string name="setup_title">Join a domain</string>
     <string name="setup_link">Setup link</string>
+    <string name="config_unreadable">The config cannot be read. Joining a setup link replaces it.</string>
     <string name="setup_open_link">Open link</string>
     <string name="setup_join">Join</string>
     <string name="setup_link_nothing">This link offers no domain to join here.</string>

@@ -159,8 +159,8 @@ fun TsyncTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-/** The configured domains; [unreadable] when a config file exists that does not decode. */
-private data class Started(val domains: List<String>, val unreadable: Boolean, val refusal: String?)
+/** The configured domains; [refusal] says why a config file that exists does not decode. */
+private data class Started(val domains: List<String>, val refusal: String?)
 
 @Composable
 private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink: String?, onCodeLinkDone: () -> Unit, onShareDone: () -> Unit) {
@@ -172,8 +172,8 @@ private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink
     LaunchedEffect(attempt) {
         started = withContext(Dispatchers.IO) {
             val domains = tsync.config.names()
-            val unreadable = tsync.config.unreadable()
-            Started(domains, unreadable, if (unreadable) tsync.configRefusal() else null)
+            val refusal = if (tsync.config.unreadable()) tsync.configRefusal() ?: context.getString(R.string.config_unreadable) else null
+            Started(domains, refusal)
         }
     }
     NotificationPermission(tsync)
@@ -181,7 +181,7 @@ private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink
     when {
         state == null -> Screen(stringResource(R.string.app_name)) { Loading(it) }
         // A config that does not load leads to Setup with the core's reason; joining replaces it.
-        state.domains.isEmpty() -> SetupScreen(tsync, state.refusal, replace = state.unreadable, onJoined = { started = null; attempt++ })
+        state.domains.isEmpty() -> SetupScreen(tsync, state.refusal, onJoined = { started = null; attempt++ })
         shared != null -> SaveTarget(tsync, state.domains, shared, onShareDone)
         else -> {
             Main(tsync, state.domains, requested, onConfigChanged = { attempt++ })
