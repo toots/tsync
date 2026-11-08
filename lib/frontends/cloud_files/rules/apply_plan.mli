@@ -9,7 +9,7 @@ type row = {
   is_dir : bool;
   is_link : bool;
   size : int;
-  mtime : float;
+  times : Tsync_core.Fs.times;
   content_id : string option;
   read_only : bool;
 }
@@ -21,7 +21,7 @@ type child = {
   owed : bool;
   identity : Identity.t option;
   size : int;
-  mtime : float;
+  times : Tsync_core.Fs.times;
   read_only : bool;
 }
 

@@ -173,20 +173,21 @@ requires rewriting a valid existing file into another form.
 
 ### 2.5 Staged manifest
 
-Version 2, one JSON object per locally edited path:
+Version 3, one JSON object per locally edited path:
 
 ```json
-{"v":2,"name":"report.txt","size":34,"mtime":1727600000.25,"chunkSize":8388608,
+{"v":3,"name":"report.txt","size":34,"mtimeNs":1727600000250000000,"createdNs":1727500000000000000,"chunkSize":8388608,
  "slots":[{}, {"u":"9f3c1a2b4d5e6f70"}, {"u":"9f3c1a2b4d5e6f70","o":8388608}, {"z":true}],
  "uploaded":"<base64 of a manifest body>"}
 ```
 
 | Field | Meaning | Reader rule |
 |---|---|---|
-| `v` | format version, `2`; writers MUST write it | greater than 2: unparseable (set aside). Readers SHOULD accept it absent or below 2, meaning 2 |
+| `v` | format version, `3`; writers MUST write it | another version: unparseable (set aside). Readers SHOULD accept it absent, meaning 3 |
 | `name` | real leaf; stamped on every write and move | required string |
 | `size` | the file's size; authoritative (not derived from body lengths) | required integer ≥ 0 |
-| `mtime` | seconds since the epoch (wall time) | required number, integer or fractional |
+| `mtimeNs` | nanoseconds since the epoch (wall time) | required integer |
+| `createdNs` | the file's creation time, nanoseconds since the epoch ([02](02-remote-model.md) §2.6) | required integer |
 | `chunkSize` | chunk size of the edit; writers MUST write it | integer > 0. Readers SHOULD accept it absent, meaning the default chunk size ([01](01-core.md)) |
 | `slots` | one slot per chunk index | array; absent (and no `whole`): empty |
 | `whole` | body id of a whole-file body | string; when present, `slots` is ignored |

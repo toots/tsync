@@ -68,7 +68,9 @@ let () =
   in
   let cs = Chunking.chunk_size_min in
   let manifest name =
-    (Manifest.make ~name ~size:0 ~mtime:0. ~chunk_size:cs
+    (Manifest.make ~name ~size:0
+       ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+       ~chunk_size:cs
        [Chunk_key.of_body ""])
       .body
   in

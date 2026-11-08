@@ -10,7 +10,8 @@ let row : row =
     name = "big.txt";
     kind = `File;
     size = 24;
-    mtime = 1400000000.;
+    times =
+      { mtime = 1_400_000_000_000_000_000; created = 1_300_000_000_000_000_000 };
     etag = "1294bbe85c2f380b";
     is_uploaded = true;
     content_id = Some "1294bbe85c2f380b";
@@ -119,6 +120,7 @@ let cases =
           {
             at = Child at;
             staging = "/tmp/s";
+            created = Some 1_200_000_000_000_000_000;
             base = Some "abcd";
             exclusive = false;
             aside = true;
@@ -126,7 +128,11 @@ let cases =
           },
         {
           size = 24;
-          mtime = 1400000000.;
+          times =
+            {
+              mtime = 1_400_000_000_000_000_000;
+              created = 1_300_000_000_000_000_000;
+            };
           item = row;
           aside = Some { row with name = "big (conflicted copy).txt" };
         } );
@@ -135,12 +141,13 @@ let cases =
           {
             at = Ref row.ref_;
             staging = "/tmp/s";
+            created = None;
             base = None;
             exclusive = false;
             aside = false;
             await = false;
           },
-        { size = 24; mtime = 1400000000.; item = row; aside = None } );
+        { size = 24; times = row.times; item = row; aside = None } );
     Case
       ( Mkdir { at; exclusive = false; aside = true },
         { item = dir; aside = Some { dir with name = "d (conflicted copy)" } }

@@ -116,11 +116,12 @@ both directions, including in events it receives ([file-provider.md](frontends/f
 One shape for `stat`, listings, mutation replies and change ops, fields in this order:
 
 ```
-ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds), etag, isUploaded,
+ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtimeNs, createdNs, etag, isUploaded,
 [contentId], [symlinkTarget], [readOnly: true], [availability, [pinnedUntil]]
 ```
 
-- **Directory**: size 0, mtime 0.0, etag = its folder id, isUploaded true. Constant for the
+- `mtimeNs` and `createdNs` are integers, nanoseconds since the epoch ([02](02-remote-model.md) §2.6).
+- **Directory**: size 0, mtimeNs and createdNs 0, etag = its folder id, isUploaded true. Constant for the
   folder's lifetime, so a watcher is not told a directory changed on every look.
 - **Root**: `ref` and `parentRef` `root`, name = the domain name, etag `.tsync-root`.
 - **File**: etag = the content hash of the mirror entry's manifest (16 hex digits), so identical
@@ -145,7 +146,8 @@ ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds)
 
 ```json
 {"ok":true,"ref":"i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384","parentRef":"d:9f3a","name":"big.txt","kind":"file","size":24,
- "mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"online-only"}
+ "mtimeNs":1400000000000000000,"createdNs":1300000000000000000,"etag":"1294bbe85c2f380b","isUploaded":true,
+ "availability":"online-only"}
 ```
 
 ### 2.4 Error codes
@@ -181,7 +183,7 @@ or unknown code as `internal`.
   make a whole-domain listing quadratic in its size).
 - **Kept walk file** (owner-local, in the domain's scratch directory): line 1
   `{"walk":"<ms>","skipped":<n>}`; then one JSON entry per line, sorted by path:
-  `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtime":F}` or
+  `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtimeNs":T}` or
   `{"path":"sub","container":"<id>","kind":"dir"}`. JSON keeps a name containing a newline on one
   line. Written atomically by a first page; never invalidated by changes (the change feed covers
   them, because the anchor is taken before page 1).
@@ -252,7 +254,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length, item` (served length, short only at end of file; the row of the version served) | B |
 | `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
 | `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
-| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtime, item`; the staging file is adopted by rename, its last write time becoming the item's mtime, so a frontend copying a file into staging keeps the file's ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm03)) | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
+| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `createdNs?`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtimeNs, createdNs, item`; the staging file is adopted by rename, its times becoming the item's, so a frontend copying a file into staging keeps the file's; `createdNs` stands for the creation time where the staging file cannot hold it. A file written over another never takes a later creation time than the one it replaces ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm04)) | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
 | `mkdir` | `parentRef`, `name`, `exclusive?`, `aside?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
 | `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`), `dstBase?` or `aside?` | `item` at the destination; a folder keeps its id, a file its file id | M |

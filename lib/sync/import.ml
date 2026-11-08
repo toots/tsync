@@ -15,8 +15,7 @@ module Make (C : Engine_ctx.S) = struct
             match Bulk.local_symlinks () with
               | `Skip -> Skipped_symlink
               | `Keep ->
-                  Bulk.install_link run rel ~target
-                    ~mtime:(Unix.lstat path).st_mtime;
+                  Bulk.install_link run rel ~target ~times:(Fs.times path);
                   Imported 0
               | `Follow -> (
                   match Unix.stat path with

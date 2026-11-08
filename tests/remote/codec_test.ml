@@ -24,16 +24,26 @@ let () =
   p "== manifest example (02 §2.6)\n";
   let ck = Chunk_key.of_body "hello world" in
   let m =
-    Manifest.make ~name:"hello.txt" ~size:11 ~mtime:1759140000.5
+    Manifest.make ~name:"hello.txt" ~size:11
+      ~times:
+        {
+          Tsync_core.Fs.mtime = 1_759_140_000_500_000_000;
+          created = 1_759_000_000_000_000_000;
+        }
       ~chunk_size:8388608 [ck]
   in
   p "h = %s-%s, %d bytes\n" m.h1 m.h2 (String.length m.body);
   hexdump m.body;
   p "empty regular file names the empty chunk once; h1 = %s\n"
-    (Manifest.make ~name:"e" ~size:0 ~mtime:0. ~chunk_size:8388608
-       [Chunk_key.empty])
+    (Manifest.make ~name:"e" ~size:0
+       ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+       ~chunk_size:8388608 [Chunk_key.empty])
       .h1;
-  let l = Manifest.symlink ~name:"l" ~mtime:0. "target" in
+  let l =
+    Manifest.symlink ~name:"l"
+      ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+      "target"
+  in
   p "symlink: count %d, size %d, link %s\n" l.count l.size (Option.get l.link);
   p "\n== readers refuse\n";
   let b = m.body in
@@ -42,8 +52,8 @@ let () =
       p "%-22s %s\n" what
         (if Manifest.decode body = None then "refused" else "ACCEPTED"))
     [
-      ("short", String.sub b 0 71);
-      ("other magic", "tsyncm04" ^ String.sub b 8 (String.length b - 8));
+      ("short", String.sub b 0 79);
+      ("other magic", "tsyncm03" ^ String.sub b 8 (String.length b - 8));
       ( "negative size",
         let x = Bytes.of_string b in
         Bytes.set_int64_le x 8 (-1L);

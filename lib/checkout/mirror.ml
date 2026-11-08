@@ -421,8 +421,9 @@ let list t rel =
                 | _ -> None))
           names
 
-let dir_mtime t rel =
-  match Fs.lstat_opt (path t rel) with Some st -> st.st_mtime | None -> 0.
+let dir_times t rel =
+  try Fs.times (path t rel)
+  with Fail.E { kind = Absent; _ } -> { Fs.mtime = 0; created = 0 }
 
 (* 04 §4.9 [rebuild]: re-derive every reverse entry from the markers; a folder
    without a marker cuts its subtree's chain. *)

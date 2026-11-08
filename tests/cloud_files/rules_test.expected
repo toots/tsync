@@ -75,6 +75,8 @@ a peer renamed and edited it
   refresh b.txt
 only its time changed
   update a.txt
+only its creation time changed
+  update a.txt
 a row with no time is not compared on it
   nothing
 an owed child is taken, and a row of its name not created

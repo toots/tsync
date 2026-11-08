@@ -68,7 +68,9 @@ let () =
       let content name body =
         Log_entry.Known
           (R.upload_chunks ~name ~size:(String.length body) ~chunk_size:8
-             ~mtime:1. (fun _ -> Bytes (Bigstring.of_string body)))
+             ~times:
+               { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+             (fun _ -> Bytes (Bigstring.of_string body)))
       in
       let commit ?(project = true) n commands =
         ignore

@@ -51,8 +51,8 @@ let mtime (module E : Engine.S) name =
   match
     List.find_opt (fun (e : E.entry) -> e.name = name) (E.list_children "")
   with
-    | Some e -> e.st.mtime
-    | None -> nan
+    | Some e -> e.st.times.mtime
+    | None -> -1
 
 let () =
   Fs.rm_rf root;
@@ -70,8 +70,8 @@ let () =
       ignore (A.import src);
       A.drain ~grace:10. ();
       ignore (B.resync ());
-      let written = 1015218367. in
-      Unix.utimes path written written;
+      let written = 1015218367_123456789 in
+      Fs.set_times path { mtime = written; created = written };
       ignore (A.import ~force_rehash:true src);
       A.drain ~grace:10. ();
       ignore (B.resync ());

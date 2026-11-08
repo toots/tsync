@@ -221,7 +221,12 @@ let () =
           {|{"v":1,"domain":"m","type":"file","key":"%s","filename":"f.mkv"}|}
           (Key.to_string file)
       in
-      let file_body = (Manifest.symlink ~name:"f" ~mtime:0. "t").body in
+      let file_body =
+        (Manifest.symlink ~name:"f"
+           ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+           "t")
+          .body
+      in
       Contract.put m file file_body;
       p "a link before the member holds its file: %s\n"
         (match Contract.put m link manifest with

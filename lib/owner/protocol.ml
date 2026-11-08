@@ -14,7 +14,7 @@ type row = {
   name : string;
   kind : [ `Dir | `File | `Symlink ];
   size : int;
-  mtime : float;
+  times : Fs.times;
   etag : string;
   is_uploaded : bool;
   content_id : string option;
@@ -42,7 +42,7 @@ type listing = Listed of page | Walk_stale
 
 (** [aside]: the row of the item made at the conflicted-copy name, when the
     action landed there (08 §3.3). *)
-type written = { size : int; mtime : float; item : row; aside : row option }
+type written = { size : int; times : Fs.times; item : row; aside : row option }
 
 (** The item at the destination, and [aside] as for {!written}. *)
 type placed = { item : row; aside : row option }
@@ -268,6 +268,8 @@ type _ request =
   | Write : {
       at : target;  (** a file by [Ref], or a place by [Child] *)
       staging : string;
+      created : int option;
+          (** the file's creation time, where the staging file cannot hold it *)
       base : string option;
       exclusive : bool;
       aside : bool;
@@ -638,6 +640,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Write r ->
       target_fields r.at
       @ [("staging", `String r.staging); ("exclusive", `Bool r.exclusive)]
+      @ opt "createdNs" (fun c -> `Int c) r.created
       @ opt "base" (fun b -> `String b) r.base
       @ (if r.aside then [("aside", `Bool true)] else [])
       @ if r.await then [("await", `Bool true)] else []
@@ -718,6 +721,7 @@ let decode j =
              {
                at = target_of j;
                staging = required j "staging";
+               created = int j "createdNs";
                base = str j "base";
                exclusive = flag j "exclusive";
                aside = flag j "aside";
@@ -917,6 +921,13 @@ let kind_name = function
   | `File -> "file"
   | `Symlink -> "symlink"
 
+let times_fields (t : Fs.times) =
+  [("mtimeNs", `Int t.mtime); ("createdNs", `Int t.created)]
+
+let times_of_fields j =
+  let ns k = Option.value ~default:0 (int j k) in
+  { Fs.mtime = ns "mtimeNs"; created = ns "createdNs" }
+
 let row_fields r =
   [
     ("ref", `String r.ref_);
@@ -924,10 +935,9 @@ let row_fields r =
     ("name", `String r.name);
     ("kind", `String (kind_name r.kind));
     ("size", `Int r.size);
-    ("mtime", `Float r.mtime);
-    ("etag", `String r.etag);
-    ("isUploaded", `Bool r.is_uploaded);
   ]
+  @ times_fields r.times
+  @ [("etag", `String r.etag); ("isUploaded", `Bool r.is_uploaded)]
   @ opt "contentId" (fun c -> `String c) r.content_id
   @ opt "symlinkTarget" (fun t -> `String t) r.symlink_target
   @ (if r.read_only then [("readOnly", `Bool true)] else [])
@@ -950,7 +960,7 @@ let row_of_fields j =
         | Some "symlink" -> `Symlink
         | _ -> `File);
     size = Option.value ~default:0 (int j "size");
-    mtime = Option.value ~default:0. (number j "mtime");
+    times = times_of_fields j;
     etag = Option.value ~default:"" (str j "etag");
     is_uploaded = flag j "isUploaded";
     content_id = str j "contentId";
@@ -1280,7 +1290,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                 ])
     | Write _ ->
         ok
-          ([("size", `Int reply.size); ("mtime", `Float reply.mtime)]
+          ((("size", `Int reply.size) :: times_fields reply.times)
           @ item reply.item @ aside_field reply.aside)
     | Evict _ ->
         ok [("evicted", `Int reply.succeeded); ("failed", `Int reply.failed)]
@@ -1611,7 +1621,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Write _ ->
         {
           size = count "size" j;
-          mtime = Option.value ~default:0. (number j "mtime");
+          times = times_of_fields j;
           item = item ();
           aside = aside ();
         }

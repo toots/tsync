@@ -14,10 +14,10 @@ val identity : value -> string option
 (** Same content identity (conflict-resolution §2). *)
 val alike : value -> value -> bool
 
-(** Alike, with the same time where both are {!Known}. *)
+(** Alike, with the same times where both are {!Known}. *)
 val equal : value -> value -> bool
 
-(** Of two alike values, the one with the later time. *)
+(** Of two alike values: the later [mtime] and the earlier [created]. *)
 val join : value -> value -> value
 
 type command = value Algebra.command

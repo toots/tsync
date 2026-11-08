@@ -1,0 +1,4 @@
+the creation time is the one stat reports: true
+the mtime reads back to the nanosecond: true
+the creation time reads back as set, where the platform sets it: true
+a descriptor reads the same times: true

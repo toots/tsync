@@ -90,7 +90,8 @@ let rec scrub = function
         (List.map
            (fun (k, v) ->
              match (k, v) with
-               | ("mtime" | "pinnedUntil"), `Float _ -> (k, `String "<t>")
+               | ("mtimeNs" | "createdNs"), `Int _ | "pinnedUntil", `Float _ ->
+                   (k, `String "<t>")
                | ("localPath" | "error"), `String s ->
                    let r = String.length root in
                    let s =

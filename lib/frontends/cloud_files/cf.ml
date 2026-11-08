@@ -132,7 +132,7 @@ type placeholder = {
   name : string;
   is_dir : bool;
   size : int;
-  mtime : float;
+  times : Fs.times;
   identity : string;
   read_only : bool;
 }
@@ -142,7 +142,7 @@ external transfer_placeholders_ :
   int64 ->
   int64 ->
   int32 ->
-  (string * bool * int * float * string * bool) array ->
+  (string * bool * int * Fs.times * string * bool) array ->
   unit = "tsync_cf_transfer_placeholders"
 
 let transfer_placeholders c (r : request) status entries =
@@ -150,7 +150,7 @@ let transfer_placeholders c (r : request) status entries =
     (Array.of_list
        (List.map
           (fun p ->
-            (p.name, p.is_dir, p.size, p.mtime, p.identity, p.read_only))
+            (p.name, p.is_dir, p.size, p.times, p.identity, p.read_only))
           entries))
 
 external transfer_data_ :
@@ -251,19 +251,19 @@ let set_identity ?size h ~placeholder identity ~in_sync =
   set_identity_ h placeholder identity in_sync (Option.value ~default:(-1) size)
 
 external create_ :
-  string -> string -> bool -> int -> float -> string -> bool -> unit
+  string -> string -> bool -> int -> Fs.times -> string -> bool -> unit
   = "tsync_cf_create_bytecode" "tsync_cf_create_native"
 
 let create dir (p : placeholder) =
-  create_ dir p.name p.is_dir p.size p.mtime p.identity p.read_only
+  create_ dir p.name p.is_dir p.size p.times p.identity p.read_only
 
 external refresh_ :
-  string -> int64 -> bool -> int -> float -> string -> bool -> bool -> int
+  string -> int64 -> bool -> int -> Fs.times -> string -> bool -> bool -> int
   = "tsync_cf_refresh_bytecode" "tsync_cf_refresh_native"
 
 let refresh path ~usn (p : placeholder) ~dehydrate =
   match
-    refresh_ path usn p.is_dir p.size p.mtime p.identity p.read_only dehydrate
+    refresh_ path usn p.is_dir p.size p.times p.identity p.read_only dehydrate
   with
     | 0 -> `Updated
     | 1 -> `Changed

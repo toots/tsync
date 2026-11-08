@@ -17,6 +17,25 @@ val opt : (unit -> 'a) -> 'a option
 
 val stat_opt : string -> Unix.LargeFile.stats option
 val lstat_opt : string -> Unix.LargeFile.stats option
+
+(** A file's times in nanoseconds since the epoch (02 §2.6). [created] is the
+    [mtime] where the platform keeps no creation time. *)
+type times = { mtime : int; created : int }
+
+(** The wall clock, as [times] counts. *)
+val now : unit -> int
+
+(** Seconds, for the interfaces that take a float. *)
+val seconds : int -> float
+
+(** Of the link itself, not its target. *)
+val times : string -> times
+
+val ftimes : Unix.file_descr -> times
+
+(** [created] is set where the platform can: Windows and macOS. *)
+val set_times : string -> times -> unit
+
 val exists : string -> bool
 val is_dir : string -> bool
 

@@ -95,7 +95,8 @@ let () =
         (Key.child d Folder_id.root "kept.txt")
         (Bigstring.of_string
            (Manifest.make ~name:"kept.txt" ~size:Chunking.chunk_size_min
-              ~mtime:0. ~chunk_size:Chunking.chunk_size_min [live])
+              ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+              ~chunk_size:Chunking.chunk_size_min [live])
              .body);
       Atomic.set function_on false;
       Composite.start with_bucket.composite;

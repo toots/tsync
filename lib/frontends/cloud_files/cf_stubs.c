@@ -303,15 +303,18 @@ CAMLprim value tsync_cf_ack(value _key, value _transfer, value _request,
   CAMLreturn(Val_unit);
 }
 
-/* Unix seconds as the 100 ns intervals since 1601 Windows counts. */
-static LONGLONG file_time(double seconds) {
-  return (LONGLONG)((seconds + 11644473600.0) * 10000000.0);
-}
+/* Nanoseconds since the Unix epoch as the 100 ns intervals since 1601 Windows
+   counts. */
+static LONGLONG file_time(intnat ns) { return (LONGLONG)(ns / 100) + 116444736000000000LL; }
 
-static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, double mtime,
+/* [_times] is an [Fs.times]: { mtime; created }, in nanoseconds. */
+static LONGLONG written_of(value _times) { return file_time(Long_val(Field(_times, 0))); }
+static LONGLONG created_of(value _times) { return file_time(Long_val(Field(_times, 1))); }
+
+static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, value _times,
                           BOOL read_only);
 
-/* [_entries]: an array of (name, is_dir, size, mtime, identity, read_only). */
+/* [_entries]: an array of (name, is_dir, size, times, identity, read_only). */
 CAMLprim value tsync_cf_transfer_placeholders(value _key, value _transfer,
                                               value _request, value _status,
                                               value _entries) {
@@ -327,7 +330,7 @@ CAMLprim value tsync_cf_transfer_placeholders(value _key, value _transfer,
   for (mlsize_t i = 0; i < count; i++) {
     value _e = Field(_entries, i);
     CF_PLACEHOLDER_CREATE_INFO *ph = &placeholders[i];
-    LONGLONG when = file_time(Double_val(Field(_e, 3)));
+    LONGLONG written = written_of(Field(_e, 3)), made = created_of(Field(_e, 3));
     names[i] = utf16_of_value(Field(_e, 0));
     mlsize_t identity_length = caml_string_length(Field(_e, 4));
     identities[i] = malloc(identity_length == 0 ? 1 : identity_length);
@@ -338,10 +341,10 @@ CAMLprim value tsync_cf_transfer_placeholders(value _key, value _transfer,
     ph->FileIdentity = identities[i];
     ph->FileIdentityLength = (DWORD)identity_length;
     ph->Flags = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
-    ph->FsMetadata.BasicInfo.CreationTime.QuadPart = when;
-    ph->FsMetadata.BasicInfo.LastWriteTime.QuadPart = when;
-    ph->FsMetadata.BasicInfo.LastAccessTime.QuadPart = when;
-    ph->FsMetadata.BasicInfo.ChangeTime.QuadPart = when;
+    ph->FsMetadata.BasicInfo.CreationTime.QuadPart = made;
+    ph->FsMetadata.BasicInfo.LastWriteTime.QuadPart = written;
+    ph->FsMetadata.BasicInfo.LastAccessTime.QuadPart = written;
+    ph->FsMetadata.BasicInfo.ChangeTime.QuadPart = written;
     ph->FsMetadata.BasicInfo.FileAttributes =
         (Bool_val(Field(_e, 1)) ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL) |
         (Bool_val(Field(_e, 5)) ? FILE_ATTRIBUTE_READONLY : 0);
@@ -662,14 +665,14 @@ CAMLprim value tsync_cf_set_identity(value _handle, value _placeholder, value _i
   CAMLreturn(Val_unit);
 }
 
-static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, double mtime,
+static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, value _times,
                           BOOL read_only) {
-  LONGLONG when = file_time(mtime);
+  LONGLONG written = written_of(_times);
   memset(m, 0, sizeof *m);
-  m->BasicInfo.CreationTime.QuadPart = when;
-  m->BasicInfo.LastWriteTime.QuadPart = when;
-  m->BasicInfo.LastAccessTime.QuadPart = when;
-  m->BasicInfo.ChangeTime.QuadPart = when;
+  m->BasicInfo.CreationTime.QuadPart = created_of(_times);
+  m->BasicInfo.LastWriteTime.QuadPart = written;
+  m->BasicInfo.LastAccessTime.QuadPart = written;
+  m->BasicInfo.ChangeTime.QuadPart = written;
   m->BasicInfo.FileAttributes = (is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL) |
                                 (read_only ? FILE_ATTRIBUTE_READONLY : 0);
   m->FileSize.QuadPart = is_dir ? 0 : size;
@@ -677,8 +680,8 @@ static void fill_metadata(CF_FS_METADATA *m, BOOL is_dir, LONGLONG size, double 
 
 /* One placeholder made in [_dir] outside any callback, in sync (§10.2). */
 CAMLprim value tsync_cf_create_native(value _dir, value _name, value _is_dir, value _size,
-                                      value _mtime, value _identity, value _read_only) {
-  CAMLparam5(_dir, _name, _is_dir, _size, _mtime);
+                                      value _times, value _identity, value _read_only) {
+  CAMLparam5(_dir, _name, _is_dir, _size, _times);
   CAMLxparam2(_identity, _read_only);
   load_api();
   wchar_t *dir = utf16_of_value(_dir), *name = utf16_of_value(_name);
@@ -692,7 +695,7 @@ CAMLprim value tsync_cf_create_native(value _dir, value _name, value _is_dir, va
   ph.FileIdentity = identity;
   ph.FileIdentityLength = (DWORD)length;
   ph.Flags = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
-  fill_metadata(&ph.FsMetadata, Bool_val(_is_dir), Long_val(_size), Double_val(_mtime),
+  fill_metadata(&ph.FsMetadata, Bool_val(_is_dir), Long_val(_size), _times,
                 Bool_val(_read_only));
   DWORD processed = 0;
   caml_release_runtime_system();
@@ -716,9 +719,9 @@ CAMLprim value tsync_cf_create_bytecode(value *argv, int argn) {
    [_dehydrate]; 1 when the item changed since [_usn] and 2 when it is held
    for writing, either of which leaves it as it was (§10.2). */
 CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, value _size,
-                                       value _mtime, value _identity, value _read_only,
+                                       value _times, value _identity, value _read_only,
                                        value _dehydrate) {
-  CAMLparam5(_path, _usn, _is_dir, _size, _mtime);
+  CAMLparam5(_path, _usn, _is_dir, _size, _times);
   CAMLxparam3(_identity, _read_only, _dehydrate);
   load_api();
   wchar_t *path = utf16_of_value(_path);
@@ -728,7 +731,7 @@ CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, v
     caml_raise_out_of_memory();
   memcpy(identity, String_val(_identity), length);
   CF_FS_METADATA metadata;
-  fill_metadata(&metadata, Bool_val(_is_dir), Long_val(_size), Double_val(_mtime),
+  fill_metadata(&metadata, Bool_val(_is_dir), Long_val(_size), _times,
                 Bool_val(_read_only));
   LONGLONG usn = Int64_val(_usn);
   LONG flags = CF_UPDATE_FLAG_MARK_IN_SYNC | (Bool_val(_dehydrate) ? CF_UPDATE_FLAG_DEHYDRATE : 0);

@@ -311,7 +311,8 @@ t1
 |---|---|
 | name | the presented name (§7.1) |
 | file size | `size`, exactly the bytes a fetch delivers |
-| last write and creation time | `mtime`; the time the placeholder is made when `mtime` ≤ 0 |
+| last write time | `mtimeNs`; the time the placeholder is made when it is 0 |
+| creation time | `createdNs`; the same fallback |
 | attributes | directory for a folder; read-only when `readOnly` |
 | identity | §8.1 |
 

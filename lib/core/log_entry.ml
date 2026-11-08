@@ -13,11 +13,19 @@ let alike a b =
 (* An identity carries no time, so it is equal to every alike manifest. *)
 let equal a b =
   alike a b
-  && match (a, b) with Known a, Known b -> a.mtime = b.mtime | _ -> true
+  &&
+    match (a, b) with
+    | Known a, Known b -> Manifest.times a = Manifest.times b
+    | _ -> true
 
+(* conflict-resolution §2: the later mtime, the earlier creation time. *)
 let join a b =
   match (a, b) with
-    | Known a, Known b -> if b.mtime > a.mtime then Known b else Known a
+    | Known a, Known b ->
+        let later = if b.mtime > a.mtime then b else a in
+        Known
+          (Manifest.with_times later
+             { mtime = later.mtime; created = min a.created b.created })
     | Known _, _ -> a
     | _ -> b
 

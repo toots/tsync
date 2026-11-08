@@ -724,8 +724,10 @@ let () =
           end in
           let module R = Remote.Make (C) in
           let m =
-            R.upload_chunks ~name:"g" ~size:4 ~chunk_size:4 ~mtime:1. (fun _ ->
-                Bytes (Bigstring.of_string "dead"))
+            R.upload_chunks ~name:"g" ~size:4 ~chunk_size:4
+              ~times:
+                { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+              (fun _ -> Bytes (Bigstring.of_string "dead"))
           in
           ignore
             (Log_store.create_entry (log root) 2
@@ -859,8 +861,8 @@ let () =
                 (fun (e : E.entry) -> e.name = "f")
                 (E.list_children "")
             with
-              | Some e -> e.st.mtime
-              | None -> nan
+              | Some e -> e.st.times.mtime
+              | None -> -1
           in
           write a "f" "abcd";
           Rt.sleep 0.05;

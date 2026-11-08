@@ -56,7 +56,7 @@ type placeholder = {
   name : string;
   is_dir : bool;
   size : int;
-  mtime : float;
+  times : Tsync_core.Fs.times;
   identity : string;
   read_only : bool;
 }

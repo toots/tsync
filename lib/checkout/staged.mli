@@ -20,13 +20,13 @@ type state = Owed | Uploaded of Manifest.t
 type edit = {
   name : string;
   size : int;  (** authoritative *)
-  mtime : float;
+  times : Fs.times;
   chunk_size : int;
   content : content;
   state : state;
 }
 
-(** Version 2 JSON. *)
+(** Version 3 JSON. *)
 val encode : edit -> string
 
 (** [None] for a body that must be set aside (unparseable, or a newer version).

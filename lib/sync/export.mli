@@ -17,8 +17,8 @@ type report = {
   cancelled : bool;
 }
 
-(** [EXPORT_MTIME_SLACK]. *)
-val mtime_slack : float
+(** [EXPORT_MTIME_SLACK], in nanoseconds. *)
+val mtime_slack : int
 
 (** [EXPORT_RECORD_GRACE]: 30 days. *)
 val record_grace : float

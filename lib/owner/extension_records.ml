@@ -138,7 +138,7 @@ module Make (R : RECORD) = struct
   (* README §4.6: each record as opened, by domain and file, until its K is
      forgotten. [pinned] is when a lazy tree's pin was last renewed (§4.5). *)
   type cached = {
-    version : string * string option * int * float * bool;
+    version : string * string option * int * Fs.times * bool;
     key_id : string;
     record : R.t option;
     pinned : float;
@@ -226,7 +226,7 @@ module Make (R : RECORD) = struct
         else (
           let version =
             Tsync_sync.Local_ops.
-              (st.etag, st.content_id, st.size, st.mtime, st.staged)
+              (st.etag, st.content_id, st.size, st.times, st.staged)
           in
           let path = Names.join folder name in
           let key = (ctx.domain, name) in

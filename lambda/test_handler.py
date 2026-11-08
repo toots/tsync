@@ -92,7 +92,7 @@ def _chunk_key(h):
     return CHUNK_PREFIX + key[:3] + "/" + key
 
 
-def _file_body(name, chunks, mtime=1_700_000_000.0, symlink=None, size=None):
+def _file_body(name, chunks, mtime=1_700_000_000_000_000_000, symlink=None, size=None):
     if symlink is not None:
         chunks = []
         size = len(symlink)
@@ -101,6 +101,7 @@ def _file_body(name, chunks, mtime=1_700_000_000.0, symlink=None, size=None):
         size=size if size is not None else sum(len(c[1]) for c in chunks),
         chunk_size=CHUNK_SIZE,
         mtime=mtime,
+        created=mtime,
         h1=_slug(name),
         h2="0" * 16,
         symlink=symlink,

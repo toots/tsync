@@ -11,9 +11,12 @@ let cs = Chunking.chunk_size_min
 let file name chunks =
   Manifest.make ~name
     ~size:(List.length chunks * cs)
-    ~mtime:0. ~chunk_size:cs (List.map ck chunks)
+    ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+    ~chunk_size:cs (List.map ck chunks)
 
-let link name target = Manifest.symlink ~name ~mtime:0. target
+let link name target =
+  Manifest.symlink ~name ~times:{ Tsync_core.Fs.mtime = 0; created = 0 } target
+
 let ab = file "f" ["a"; "b"]
 let ac = file "f" ["a"; "c"]
 let to_x = link "l" "x"

@@ -4,7 +4,7 @@ type row = {
   is_dir : bool;
   is_link : bool;
   size : int;
-  mtime : float;
+  times : Tsync_core.Fs.times;
   content_id : string option;
   read_only : bool;
 }
@@ -14,7 +14,7 @@ type child = {
   owed : bool;
   identity : Identity.t option;
   size : int;
-  mtime : float;
+  times : Tsync_core.Fs.times;
   read_only : bool;
 }
 
@@ -30,11 +30,14 @@ type action =
   | Create of { name : string; row : row }
 
 (* §8.2: a row with no time gave its placeholder the time it was made, which
-   is not compared. *)
+   is not compared; a placeholder holds a time to 100 ns. *)
 let metadata_differs (c : child) (row : row) =
+  let apart a b = abs (a - b) >= 100 in
   (not row.is_dir)
   && (c.size <> row.size
-     || (row.mtime > 0. && Float.abs (c.mtime -. row.mtime) > 0.001)
+     || row.times.mtime > 0
+        && (apart c.times.mtime row.times.mtime
+           || apart c.times.created row.times.created)
      || c.read_only <> row.read_only)
 
 let content_differs (id : Identity.t) (row : row) =

@@ -8,7 +8,8 @@ import java.io.File
 class FakeCore(private val domain: String = "Family Photos") : Core {
     class Node(val ref: String, var parent: String, var name: String, val dir: Boolean) {
         var content = ByteArray(0)
-        var mtime = 0.0
+        var mtimeNs = 0L
+        var createdNs = 0L
     }
 
     val nodes = linkedMapOf("root" to Node("root", "root", domain, true))
@@ -60,7 +61,8 @@ class FakeCore(private val domain: String = "Family Photos") : Core {
 
     fun row(node: Node): JSONObject {
         val row = JSONObject().put("ref", node.ref).put("parentRef", node.parent).put("name", node.name)
-            .put("kind", if (node.dir) "dir" else "file").put("size", node.content.size).put("mtime", node.mtime)
+            .put("kind", if (node.dir) "dir" else "file").put("size", node.content.size)
+            .put("mtimeNs", node.mtimeNs).put("createdNs", node.createdNs)
             .put("etag", if (node.dir) node.ref else contentId(node)).put("isUploaded", true)
         if (!node.dir) row.put("contentId", contentId(node)).put("availability", "cached")
         return row
@@ -117,8 +119,10 @@ class FakeCore(private val domain: String = "Family Photos") : Core {
             if (existing != null && request.optBoolean("exclusive", false)) throw Refusal("exists", "the name is taken", existing)
             existing ?: add(parent.ref, request.getString("name"))
         }
+        val fresh = node.content.isEmpty() && node.mtimeNs == 0L
         node.content = staging.readBytes()
-        node.mtime = staging.lastModified() / 1000.0
+        node.mtimeNs = staging.lastModified() * 1_000_000
+        node.createdNs = request.optLong("createdNs", if (fresh) node.mtimeNs else node.createdNs)
         staging.delete()
         return node
     }

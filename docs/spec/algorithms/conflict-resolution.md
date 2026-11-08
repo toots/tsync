@@ -77,9 +77,10 @@ entries: the conflicted copy the other client published.
 
 - **Equality of file values.** Two manifests are **alike** when their **content identity** is:
   the pair of whole-file digests `h1`, `h2` ([02](../02-remote-model.md) §2.1). They are **equal**
-  when they are alike and their `mtime` is the same. A change of `mtime` alone is a change, and is
-  published.
-- **Join.** The join of two alike manifests is the content with the later `mtime`.
+  when they are alike and their `mtime` and `created` are the same. A change of times alone is a
+  change, and is published.
+- **Join.** The join of two alike manifests is the content with the later `mtime` and the earlier
+  `created`. Each field moves one way, so the join is commutative, associative and idempotent.
 - A guard is a content identity ([03](../03-journal-sync.md) §2.3), so the main compares guards as
   alike.
 - A staged edit whose manifest is not built yet has no identity and differs from every value. Two

@@ -44,7 +44,9 @@ struct Row: Equatable {
     let name: String
     let kind: Kind
     let size: Int64
-    let mtime: Double
+    /// Nanoseconds since the epoch; 0 for a folder.
+    let mtimeNs: Int64
+    let createdNs: Int64
     let etag: String
     let isUploaded: Bool
     let contentId: String?
@@ -67,7 +69,8 @@ struct Row: Equatable {
         default: kind = .file
         }
         size = (json["size"] as? NSNumber)?.int64Value ?? 0
-        mtime = (json["mtime"] as? NSNumber)?.doubleValue ?? 0
+        mtimeNs = (json["mtimeNs"] as? NSNumber)?.int64Value ?? 0
+        createdNs = (json["createdNs"] as? NSNumber)?.int64Value ?? 0
         etag = json["etag"] as? String ?? ""
         isUploaded = json["isUploaded"] as? Bool ?? false
         contentId = json["contentId"] as? String

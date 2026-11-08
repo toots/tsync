@@ -145,7 +145,7 @@ class TsyncDocumentsProvider : DocumentsProvider() {
             .add(Document.COLUMN_FLAGS, flags)
         if (!item.isDir) {
             row.add(Document.COLUMN_SIZE, item.size)
-            if (item.mtime != 0.0) row.add(Document.COLUMN_LAST_MODIFIED, item.mtimeMillis)
+            if (item.mtimeNs != 0L) row.add(Document.COLUMN_LAST_MODIFIED, item.mtimeMillis)
         }
         parents[id] = domain.documentId(item.parentRef)
     }

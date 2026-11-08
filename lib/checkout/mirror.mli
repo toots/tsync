@@ -95,7 +95,7 @@ type child = {
 val list : t -> string -> child list
 
 (** The time the folder's set of children last changed here. *)
-val dir_mtime : t -> string -> float
+val dir_times : t -> string -> Fs.times
 
 (** The live id, else the id last removed from this path. *)
 val lookup_id_removed : t -> string -> Folder_id.t option

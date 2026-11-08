@@ -7,7 +7,7 @@ type content = Published of Manifest.t | Staged_edit of Staged.edit
 type stat = {
   kind : [ `Dir | `File | `Symlink ];
   size : int;
-  mtime : float;
+  times : Fs.times;
   content_id : string option;
   etag : string;
   staged : bool;
@@ -414,11 +414,33 @@ module Make (C : Engine_ctx.S) = struct
         | `File -> `File
         | `Absent -> if Staged.edit staged path <> None then `File else `Absent)
 
+  (* 02 §2.6: a file made here is created now; an edit keeps its creation. *)
+  let new_times () =
+    let now = Fs.now () in
+    { Fs.mtime = now; created = now }
+
+  let edited (t : Fs.times) = { t with mtime = Fs.now () }
+
+  (* 02 §2.6: a file carried over the one at [path] never moves its creation
+     time later. *)
+  let carried path (t : Fs.times) =
+    let held =
+      match Staged.read staged path with
+        | `Edit e -> Some e.times.created
+        | `Absent | `Unparseable -> (
+            match Mirror.file mirror path with
+              | `File m -> Some m.created
+              | `Dir | `Absent | `Corrupt -> None)
+    in
+    match held with
+      | Some c when c < t.created -> { t with created = c }
+      | _ -> t
+
   let stat_of_manifest (m : Manifest.t) =
     {
       kind = (if m.link <> None then `Symlink else `File);
       size = m.size;
-      mtime = m.mtime;
+      times = Manifest.times m;
       content_id = Some m.h1;
       etag = m.h1;
       staged = false;
@@ -463,7 +485,7 @@ module Make (C : Engine_ctx.S) = struct
           {
             kind = `Dir;
             size = 0;
-            mtime = Mirror.dir_mtime mirror path;
+            times = Mirror.dir_times mirror path;
             content_id = None;
             etag = "";
             staged = false;
@@ -478,7 +500,7 @@ module Make (C : Engine_ctx.S) = struct
                 {
                   kind = `File;
                   size = e.size;
-                  mtime = e.mtime;
+                  times = e.times;
                   content_id =
                     (match e.state with
                       | Uploaded m -> Some m.h1
@@ -874,7 +896,7 @@ module Make (C : Engine_ctx.S) = struct
                 {
                   Staged.name = Names.leaf_of path;
                   size = m.size;
-                  mtime = Unix.gettimeofday ();
+                  times = { mtime = Fs.now (); created = m.created };
                   chunk_size = m.chunk_size;
                   content =
                     Slots
@@ -888,7 +910,7 @@ module Make (C : Engine_ctx.S) = struct
                 {
                   Staged.name = Names.leaf_of path;
                   size = 0;
-                  mtime = Unix.gettimeofday ();
+                  times = new_times ();
                   chunk_size = R.chunk_size ();
                   content = Slots [||];
                   state = Owed;
@@ -1064,7 +1086,7 @@ module Make (C : Engine_ctx.S) = struct
                         (Bigstring.sub data ~off:pc.buf_off ~len:pc.len)
                   | _ -> assert false)
               pieces);
-        let e = { e with mtime = Unix.gettimeofday (); state = Owed } in
+        let e = { e with times = edited e.times; state = Owed } in
         write_edit ~replaced:!replaced path before e;
         bump path;
         mark_dirty path)
@@ -1112,7 +1134,7 @@ module Make (C : Engine_ctx.S) = struct
             e with
             size;
             content = Slots slots;
-            mtime = Unix.gettimeofday ();
+            times = edited e.times;
             state = Owed;
           }
         in
@@ -1143,7 +1165,7 @@ module Make (C : Engine_ctx.S) = struct
           {
             Staged.name = Names.leaf_of path;
             size = 0;
-            mtime = Unix.gettimeofday ();
+            times = new_times ();
             chunk_size = R.chunk_size ();
             content = Slots [||];
             state = Owed;
@@ -1240,7 +1262,7 @@ module Make (C : Engine_ctx.S) = struct
   (* 04 §4.3 [write_whole]: the handed-over file is adopted by rename, never
      copied when on the same filesystem. An edit of a version this client no
      longer holds is staged aside as a new file (conflict-resolution §4.9). *)
-  let write_whole path ~src ?base ~exclusive () =
+  let write_whole ?created path ~src ?base ~exclusive () =
     check_writable ();
     if exclusive && exists path then Fail.raise_ Fail.Exists "%s exists" path;
     let stale =
@@ -1275,16 +1297,29 @@ module Make (C : Engine_ctx.S) = struct
         Fs.fsync_dir (Filename.dirname dst);
         let st = Fs.sys (fun () -> Unix.LargeFile.stat dst) in
         let size = Int64.to_int st.st_size and chunk_size = R.chunk_size () in
+        let times =
+          let t = Fs.times dst in
+          carried path
+            { t with created = Option.value created ~default:t.created }
+        in
         let h1 = digest_of_body ~size ~cs:chunk_size id in
         if h1 <> None && h1 = current then (
           release_body id;
-          settle path)
+          match (before, Mirror.file mirror path) with
+            | None, `File m when Manifest.times m <> times ->
+                let m = Manifest.with_times m times in
+                bump path;
+                Mirror.write_file ~own:true mirror path m;
+                settle path;
+                post_put path;
+                feed_put path m.size
+            | _ -> settle path)
         else (
           let e =
             {
               Staged.name = Names.leaf_of path;
               size;
-              mtime = st.st_mtime;
+              times;
               chunk_size;
               content = Whole { body = id; h1 };
               state = Owed;
@@ -1613,6 +1648,7 @@ module Make (C : Engine_ctx.S) = struct
   let install path (m : Manifest.t) =
     let m = Manifest.rename m (Names.leaf_of path) in
     with_key path (fun () ->
+        let m = Manifest.with_times m (carried path (Manifest.times m)) in
         begin_change path;
         ignore (discard_edit path);
         bump path;
@@ -1633,8 +1669,8 @@ module Make (C : Engine_ctx.S) = struct
         if exclusive && exists path then
           Fail.raise_ Fail.Exists "%s exists" path;
         install path
-          (Manifest.symlink ~name:(Names.leaf_of path)
-             ~mtime:(Unix.gettimeofday ()) target))
+          (Manifest.symlink ~name:(Names.leaf_of path) ~times:(new_times ())
+             target))
 
   let evict path =
     match Mirror.manifest mirror path with
@@ -1736,7 +1772,7 @@ module Make (C : Engine_ctx.S) = struct
                 go 0;
                 Fs.fsync fd));
         let st = stat path in
-        try Unix.utimes dst st.mtime st.mtime with _ -> ())
+        try Fs.set_times dst st.times with _ -> ())
 
   let fetch_range path dst ~off ~len =
     let h = open_read path in

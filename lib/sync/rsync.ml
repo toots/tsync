@@ -260,7 +260,7 @@ module Make (C : Engine_ctx.S) = struct
                           skipped := (rel, "symlinks are skipped") :: !skipped
                       | { st_kind = S_LNK; _ }, `Keep ->
                           Bulk.install_link run tp ~target:(Unix.readlink path)
-                            ~mtime:(Unix.lstat path).st_mtime;
+                            ~times:(Fs.times path);
                           succeed rel 0
                       | { st_kind = S_LNK; _ }, `Follow -> (
                           match Unix.stat path with
@@ -301,7 +301,7 @@ module Make (C : Engine_ctx.S) = struct
                                 ~len:(Bigstring.length b) ~off:(i * m.chunk_size)
                             done;
                             Fs.fsync fd);
-                        Unix.utimes tmp m.mtime m.mtime;
+                        Fs.set_times tmp (Manifest.times m);
                         Fs.unix_rename tmp path);
                     succeed rel m.size
                 | Patch_local (m, indices) ->
@@ -316,7 +316,7 @@ module Make (C : Engine_ctx.S) = struct
                           indices;
                         Unix.ftruncate fd m.size;
                         Fs.fsync fd);
-                    Unix.utimes path m.mtime m.mtime;
+                    Fs.set_times path (Manifest.times m);
                     succeed rel !sent
                 | _ -> ()))
         (with_decision (function

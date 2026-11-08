@@ -210,7 +210,7 @@ module Make (C : Context.S) = struct
   (* Chunks only: every chunk the manifest names is on the store when this
      returns. *)
   let upload_chunks ?(cancel = Atomic.make false) ?(progress = fun _ -> ())
-      ?(sent = fun _ -> ()) ~name ~size ~chunk_size ~mtime source =
+      ?(sent = fun _ -> ()) ~name ~size ~chunk_size ~times source =
     let count = Chunking.manifest_count ~size ~cs:chunk_size in
     (* The chunks go up in parallel, possibly on several domains, and a caller
        counting into a ref would lose updates. *)
@@ -238,7 +238,7 @@ module Make (C : Context.S) = struct
                 ck)
     in
     let keys = Rt.map_bounded ~width:2 one (List.init count Fun.id) in
-    Manifest.make ~name ~size ~mtime ~chunk_size keys
+    Manifest.make ~name ~size ~times ~chunk_size keys
 
   let slot parent leaf = Key.child d parent leaf
 
