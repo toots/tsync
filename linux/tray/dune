@@ -6,7 +6,6 @@
  (libraries
   tsync_core
   tsync_config
-  tsync_catalog
   tsync_ipc
   tsync_owner
   tsync_menu

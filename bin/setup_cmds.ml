@@ -95,37 +95,63 @@ let terminal_io : Config_wizard.io =
   in
   { ask; say = print_endline }
 
+(* setup-link §6.3: a new config starts from a setup link when one is given. *)
 let edit_config ~advanced () =
+  let path = Paths.config_file () in
+  let link =
+    if Fs.read_file_opt path <> None then ""
+    else
+      String.trim
+        (terminal_io.ask
+           {
+             label = "Setup link (blank to set up by hand)";
+             default = None;
+             secret = false;
+           })
+  in
+  if link <> "" then Setup_link_cmds.join link false
+  else
+    run (fun () ->
+        let current =
+          match Fs.read_file_opt path with
+            | None -> None
+            | Some text -> (
+                match Yojson.Safe.from_string text with
+                  | j -> Some j
+                  | exception Yojson.Json_error e ->
+                      fail "%s is not valid JSON (%s); fix it by hand first"
+                        path e)
+        in
+        match Config_wizard.edit ~advanced terminal_io current with
+          | None ->
+              say "nothing written";
+              0
+          | Some j -> (
+              match Config_wizard.write j with
+                | Error e -> fail "not written: %s" e
+                | Ok _ ->
+                    say "written to %s; restart the tsync service to apply it"
+                      path;
+                    0))
+
+let summarise_config () =
   run (fun () ->
-      let path = Paths.config_file () in
-      let current =
-        match Fs.read_file_opt path with
-          | None -> None
-          | Some text -> (
-              match Yojson.Safe.from_string text with
-                | j -> Some j
-                | exception Yojson.Json_error e ->
-                    fail "%s is not valid JSON (%s); fix it by hand first" path
-                      e)
-      in
-      match Config_wizard.edit ~advanced terminal_io current with
-        | None ->
-            say "nothing written";
-            0
-        | Some j -> (
-            match Config_wizard.prepare j with
-              | Error e -> fail "not written: %s" e
-              | Ok j ->
-                  Fs.mkdir_p (Filename.dirname path);
-                  Fs.durable_replace ~perm:0o600 path
-                    (Yojson.Safe.pretty_to_string j ^ "\n");
-                  say "written to %s; restart the tsync service to apply it"
-                    path;
-                  0))
+      print_endline (Config_summary.render (config ()));
+      0)
 
 let config_cmd =
-  let edit =
-    Arg.(value & flag & info ["edit"] ~doc:"Edit the config through prompts.")
+  let mode =
+    Arg.(
+      value
+      & vflag `Show
+          [
+            (`Edit, info ["edit"] ~doc:"Edit the config through prompts.");
+            ( `Summary,
+              info ["summary"]
+                ~doc:
+                  "Print each domain's folder, storage and features in plain \
+                   words." );
+          ])
   in
   let advanced =
     Arg.(
@@ -135,11 +161,20 @@ let config_cmd =
             "With $(b,--edit), also ask about the advanced settings; the \
              answer - removes one.")
   in
-  cmd "config" ~doc:"Print the config, secrets masked, or edit it."
-    Term.(
-      const (fun edit advanced ->
-          if edit then edit_config ~advanced () else show_config ())
-      $ edit $ advanced)
+  Cmd.group
+    ~default:
+      Term.(
+        const (fun mode advanced ->
+            match mode with
+              | `Edit -> edit_config ~advanced ()
+              | `Summary -> summarise_config ()
+              | `Show -> show_config ())
+        $ mode $ advanced)
+    (Cmd.info "config"
+       ~doc:
+         "Print the config, secrets masked, edit it, or share or join a setup \
+          link.")
+    [Setup_link_cmds.share_cmd; Setup_link_cmds.join_cmd]
 
 let default_domain name clear =
   run (fun () ->

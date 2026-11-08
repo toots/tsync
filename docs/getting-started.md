@@ -8,7 +8,7 @@ A **domain** is one synced folder: a name, the stores that hold its data (**back
 tsync config --edit
 ```
 
-On a machine with no config, the prompts go in this order. Press Enter to accept the value in brackets.
+On a machine with no config, the first prompt asks for a **setup link**: if someone gave you one ([from a setup link](server.md#from-a-setup-link)), paste it and you are done. Otherwise press Enter, and the prompts go in this order. Press Enter to accept the value in brackets.
 
 **This machine**
 

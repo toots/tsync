@@ -3,7 +3,7 @@
 
 The app connects to one domain on one tsync server.
 
-**Setup.** Enter the server's URL and the secret, then tap **Check server**: the app lists the domains that secret opens. Pick one, set how much storage the cache may use (2 GB by default), and tap **Connect**. The URL must be `https://`.
+**Setup.** With a [setup link](server.md#from-a-setup-link), tap **Scan setup code** and scan the QR code its page shows, or paste the link in the URL field and tap **Check server**: the server, the secret and the domain are filled in, and a link naming several domains lets you pick one. Otherwise enter the server's URL and the secret, then tap **Check server**: the app lists the domains that secret opens. Pick one, set how much storage the cache may use (2 GB by default), and tap **Connect**. The URL must be `https://`.
 
 **Files.** Browse the domain, also offline: a folder you have seen stays listed, with a banner saying when it was last refreshed. Each file shows whether it is online-only, available offline, or waiting to upload. Long-press an item to open it, share a link, keep it offline, remove its download, rename, move or delete it.
 

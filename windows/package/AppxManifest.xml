@@ -8,9 +8,10 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop3="http://schemas.microsoft.com/appx/manifest/desktop/windows10/3"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap10 desktop6 rescap">
+  IgnorableNamespaces="uap uap10 desktop3 desktop6 rescap">
   <Identity
     Name="org.feverdreamtv.tsync"
     Publisher="@PUBLISHER@"
@@ -47,6 +48,19 @@
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
+      <!-- Windows 10 refuses a sync root (E_BOUNDS) to a package declaring no
+           cloudFiles extension; tsync has no shell handlers, so the ids name none. -->
+      <Extensions>
+        <desktop3:Extension Category="windows.cloudFiles">
+          <desktop3:CloudFiles>
+            <desktop3:CustomStateHandler Clsid="20000000-0000-0000-0000-000000000001" />
+            <desktop3:ThumbnailProviderHandler Clsid="20000000-0000-0000-0000-000000000001" />
+            <desktop3:ExtendedPropertyHandler Clsid="20000000-0000-0000-0000-000000000001" />
+            <desktop3:BannersHandler Clsid="20000000-0000-0000-0000-000000000001" />
+            <desktop3:CloudFilesContextMenus />
+          </desktop3:CloudFiles>
+        </desktop3:Extension>
+      </Extensions>
     </Application>
   </Applications>
 </Package>

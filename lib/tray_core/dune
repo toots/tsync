@@ -1,11 +1,13 @@
 ; What every tray shares (linux-tray.md, cloud-files.md §15): polling the
-; owners into the menu model, the stats and codes submenus, and the actions.
+; owners into the menu model, the stats and codes submenus, and the actions. It
+; links the catalog because reading the config needs every driver registered.
 
 (library
  (name tsync_tray_core)
  (libraries
   tsync_core
   tsync_config
+  tsync_catalog
   tsync_ipc
   tsync_owner
   tsync_menu

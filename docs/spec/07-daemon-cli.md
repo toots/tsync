@@ -647,7 +647,9 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
 | `share [PATH] [--expires DUR] [--token HEX] \| --preview TOKEN\|URL \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout as soon as the share exists, expiry on stderr; the preview image is then made by the owner in the background, or by this process before it exits when it ran the request itself; `--preview` makes it again and waits; `--revoke` exits 1 when no share of the domain held the token |
 | `vault <verb>`, `<extension> <verb>` | owner, serving only | [extensions §6](extensions/README.md#6-commands-and-actions), [vault §8](extensions/vault.md#8-commands), and each extension's spec |
-| `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
+| `config [--edit \| --summary]` | none | print the parsed config with secrets masked, run the wizard (§5.9), or with `--summary` print per domain its name, folder, each backend's URL (else its name) worded by role, its extensions and whether it is read-only, with no secret |
+| `config share DOMAIN... [--url URL] [--expires DUR] \| --revoke LINK` | owner; `--revoke` none | create or revoke a setup link ([setup-link §5](algorithms/setup-link.md#5-creating-and-revoking)) |
+| `config join LINK` | none | add the domains of a setup link ([setup-link §6](algorithms/setup-link.md#6-joining)) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
 | `build-info` | none | compiled frontends and drivers, the extensions, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
 | `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
@@ -786,7 +788,8 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 
 - Edits the raw JSON so that nothing it does not ask about is lost. An existing file that is not
   valid JSON is refused (exit 1).
-- New file: prompts for globals (client name, default the hostname; `maxUploads`; `maxDownloads`;
+- New file: asks first for a setup link, blank to set up by hand
+  ([setup-link §6.3](algorithms/setup-link.md#63-where-a-link-is-opened)); then prompts for globals (client name, default the hostname; `maxUploads`; `maxDownloads`;
   whether the uplink governor is enabled; TLS implementation when more than one is available), then
   a domain. The advanced mode adds `maxChunkBuffers` (default `maxUploads`), the governor's other
   settings and the per-link ceilings of the links some backend uses.

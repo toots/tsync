@@ -41,8 +41,12 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | Command | Does |
 |---|---|
 | `tsync config` | Print the domains as read, secrets masked |
+| `tsync config --summary` | Each domain's folder, where it is stored and what it brings beside the files, in plain words |
 | `tsync config --edit` | Create or change the config through prompts |
 | `tsync config --edit --advanced` | The same, also asking about the [advanced settings](tuning.md#advanced-settings); answer `-` to remove one |
+| `tsync config share DOMAIN... [--url URL] [--expires DUR]` | Print a [setup link](server.md#from-a-setup-link) for these domains; `--url` is the server's public address, on the server |
+| `tsync config share --revoke LINK` | Stop a setup link |
+| `tsync config join LINK` | Add the domains of a setup link to this machine |
 | `tsync default-domain [NAME] [--clear]` | See above |
 | `tsync build-info` | What this binary includes, and where it keeps things |
 

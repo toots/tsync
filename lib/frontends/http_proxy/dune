@@ -14,6 +14,7 @@
   tsync_ipc
   tsync_owner
   tsync_status
+  tsync_setup_link
   unix
   base64
   yojson))
@@ -47,3 +48,18 @@
     (echo "let html = {tsync_page|")
     (cat %{page})
     (echo "|tsync_page}\n")))))
+
+(rule
+ (targets setup_assets.ml)
+ (deps
+  (:page setup_page.html)
+  (:qrcode %{project_root}/vendor/qrcode-generator/qrcode.js))
+ (action
+  (with-stdout-to
+   setup_assets.ml
+   (progn
+    (echo "let html = {tsync_asset|")
+    (cat %{page})
+    (echo "|tsync_asset}\nlet qrcode = {tsync_asset|")
+    (cat %{qrcode})
+    (echo "|tsync_asset}\n")))))

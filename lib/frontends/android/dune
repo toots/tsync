@@ -11,6 +11,7 @@
   tsync_ipc
   tsync_status
   tsync_http
+  tsync_setup_link
   unix
   threads.posix
   yojson))

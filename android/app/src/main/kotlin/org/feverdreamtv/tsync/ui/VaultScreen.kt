@@ -450,11 +450,11 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
     }
 }
 
-private fun playServices(context: Context) =
+internal fun playServices(context: Context) =
     GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
 
 /** Google's code scanner: no camera permission, QR only. */
-private fun scan(context: Context, onText: (String) -> Unit, onFailure: (String) -> Unit) {
+internal fun scan(context: Context, onText: (String) -> Unit, onFailure: (String) -> Unit) {
     val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
     GmsBarcodeScanning.getClient(context, options).startScan()
         .addOnSuccessListener { barcode -> barcode.rawValue?.let(onText) }

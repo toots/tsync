@@ -319,3 +319,35 @@
  (enabled_if %{lib-available:tsync_preview_av})
  (action
   (diff preview_av_test.expected preview_av_test.output)))
+
+(executable
+ (name setup_link_test)
+ (modules setup_link_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_config
+  tsync_http
+  tsync_http_proxy_client
+  tsync_http_proxy
+  tsync_setup_link
+  tsync_android
+  yojson
+  unix))
+
+; The listener serves local stores, and Windows holds none (cloud-files §2).
+
+(rule
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   setup_link_test.output
+   (run ./setup_link_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (diff setup_link_test.expected setup_link_test.output)))

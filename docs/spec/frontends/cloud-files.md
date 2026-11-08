@@ -617,8 +617,18 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
   **identity package**: a sparse package whose external location is the programs folder, declaring
   `tsyncd.exe` as its application, signed with the same certificate. Only `tsyncd.exe` runs with
   package identity; nothing is virtualised, so the CLI and the owners share one data directory.
-- It creates the scheduled task (§14.2), sets the tray's autostart value, then starts the task and
-  the tray.
+- The identity package declares a `windows.cloudFiles` extension whose handlers name a CLSID
+  nothing implements: Windows 10 refuses to register a sync root for a package without one
+  (`E_BOUNDS`), and tsync provides no shell handlers.
+- Until the certificate chains to a root Windows trusts, the installer carries it and, before
+  registering the identity package, adds it to the machine's `TrustedPeople` store when it is not
+  there, through one elevated step the user consents to. Refused, nothing is registered.
+- When registering fails, the installer says why, skips the setup-link page and exits non-zero; the
+  programs stay, and running it again retries. Otherwise its last page shows `tsync config
+  --summary`.
+- It creates the scheduled task (§14.2), sets the tray's autostart value, and starts the task and
+  the tray; then it offers an optional setup-link page
+  ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)).
 - With no config, or no domain configured, the supervisor exits 0
   ([07 §3.1](../07-daemon-cli.md#31-tsync-start-the-supervisor)); a configuration takes effect when
   the service is next started.

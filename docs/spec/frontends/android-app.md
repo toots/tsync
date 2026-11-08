@@ -438,7 +438,8 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
 
 ### 10.7 Setup and Settings
 
-- **Setup**, when no config exists, in this order: server URL and secret (the secret masked, with a
+- **Setup**, when no config exists, in this order: *Scan setup code*, or a setup link pasted in
+  the URL field, which fills what follows ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)); server URL and secret (the secret masked, with a
   control to reveal it, and paste accepted); **Check server** (§6.2), whose answer fills a choice of
   domains, or one domain directly; cache limit, pre-filled; **Connect** (§6.1). Each validation
   failure is shown on its field, which takes focus and is scrolled into view. A server that cannot be

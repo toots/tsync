@@ -570,7 +570,11 @@ let read_within t (r : Server.request) read_body limit =
 (* §A4.6: a link is handed out only once the member holds what it shares. *)
 let on_member t route k body =
   match route.share with
-    | `Member (m : Composite.member) when is_manifest_name (Key.to_string k) ->
+    | `Member (m : Composite.member)
+      when is_manifest_name (Key.to_string k)
+           && Result.is_error
+                (Tsync_setup_link.Setup_link.stored_of_string
+                   (Bigstring.to_string body)) ->
         let share =
           match Share_server.manifest_share (Bigstring.to_string body) with
             | Some share -> share
@@ -1065,6 +1069,9 @@ let self_url (l : Proxy_options.listener) =
     (if l.tls = None then "http" else "https")
     host l.port
 
+let listener_tls t =
+  match t.listener with Some l -> l.tls <> None | None -> false
+
 (* §A9.1: with several share-serving routes, the one whose domain the token's
    manifest names answers, else the first, so its refusal is the answer. *)
 let serve_share t (r : Server.request) params rest =
@@ -1107,9 +1114,7 @@ let serve_share t (r : Server.request) params rest =
   match
     Share_server.handle
       ?self:(Option.map self_url t.listener)
-      share
-      ~tls:(match t.listener with Some l -> l.tls <> None | None -> false)
-      ~max_zip_members r ~token ~sub params
+      share ~tls:(listener_tls t) ~max_zip_members r ~token ~sub params
     |> count_bytes [t.total] ~written:0
   with
     | { body = Stream s; _ } as response ->
@@ -1133,6 +1138,34 @@ let serve_share t (r : Server.request) params rest =
         Rt.Semaphore.release t.share_slots;
         raise e
 
+(* setup-link §7: the first route whose share store holds a setup link naming
+   its domain, whatever its [shares]. *)
+let serve_setup t (r : Server.request) params rest =
+  if r.meth <> "GET" && r.meth <> "HEAD" then
+    answer (text 405 "method not allowed");
+  count t "page";
+  let held route k =
+    Option.bind ((share_store route).get_opt k) (fun body ->
+        match
+          Tsync_setup_link.Setup_link.stored_of_string
+            (Bigstring.to_string body)
+        with
+          | Ok s when Domain_name.equal s.domain route.domain -> Some s
+          | _ -> None)
+  in
+  let token, what =
+    match String.split_on_char '/' rest with
+      | [token] when List.assoc_opt "json" params = Some "1" -> (token, `Json)
+      | [token] -> (token, `Page)
+      | [token; "preview"] -> (token, `Preview)
+      | _ -> ("", `Page)
+  in
+  Setup_page.answer
+    ~origin:(Share_server.origin ~tls:(listener_tls t) r)
+    ~token what
+    (Option.bind (Key.share token) (fun k ->
+         List.find_map (fun route -> held route k) t.routes))
+
 (* The wire's processing order (backends/http-proxy §6.1). *)
 let handle t (r : Server.request) read_body =
   Atomic.incr t.in_flight;
@@ -1142,6 +1175,10 @@ let handle t (r : Server.request) read_body =
       serve_share t r
         (Option.value ~default:[] (W.parse_query r.query))
         (String.sub r.path 3 (String.length r.path - 3))
+    else if String.starts_with ~prefix:"/join/" r.path then
+      serve_setup t r
+        (Option.value ~default:[] (W.parse_query r.query))
+        (String.sub r.path 6 (String.length r.path - 6))
     else (
       let params =
         match W.parse_query r.query with Some p -> p | None -> bad_request t
