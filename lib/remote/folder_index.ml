@@ -1,35 +1,61 @@
-type entry = { key : string; etag : string; body : string }
+open Tsync_core
+
+type entry = { key : string; etag : string; body : Bigstring.t }
 
 let magic = "tsyncidx1"
 let max_bytes = 64 * 1024 * 1024
 let max_children = 10_000
 
 let encode entries =
-  let b = Buffer.create 4096 in
-  Buffer.add_string b magic;
-  let field s =
-    Buffer.add_int32_be b (Int32.of_int (String.length s));
-    Buffer.add_string b s
+  let size =
+    List.fold_left
+      (fun n e ->
+        n + 12 + String.length e.key + String.length e.etag
+        + Bigstring.length e.body)
+      (String.length magic) entries
   in
+  let b = Bigstring.create size in
+  let pos = ref 0 in
+  let put_string s =
+    Bigstring.blit_from_bytes (Bytes.unsafe_of_string s) 0 b !pos
+      (String.length s);
+    pos := !pos + String.length s
+  in
+  let put_length n =
+    let be = Bytes.create 4 in
+    Bytes.set_int32_be be 0 (Int32.of_int n);
+    put_string (Bytes.unsafe_to_string be)
+  in
+  let put_field_string s =
+    put_length (String.length s);
+    put_string s
+  in
+  put_string magic;
   List.iter
     (fun e ->
-      field e.key;
-      field e.etag;
-      field e.body)
+      put_field_string e.key;
+      put_field_string e.etag;
+      put_length (Bigstring.length e.body);
+      Bigstring.blit ~src:e.body ~src_off:0 ~dst:b ~dst_off:!pos
+        ~len:(Bigstring.length e.body);
+      pos := !pos + Bigstring.length e.body)
     entries;
-  Buffer.contents b
+  b
 
-let decode s =
-  let n = String.length s in
+let decode b =
+  let n = Bigstring.length b in
   let m = String.length magic in
-  if n < m || String.sub s 0 m <> magic then None
+  if n < m || Bigstring.to_string ~len:m b <> magic then None
   else (
     let field pos =
       if pos + 4 > n then None
       else (
-        let len = Int32.to_int (String.get_int32_be s pos) in
-        if len < 0 || pos + 4 + len > n then None
-        else Some (String.sub s (pos + 4) len, pos + 4 + len))
+        let len =
+          Int32.to_int
+            (String.get_int32_be (Bigstring.to_string ~off:pos ~len:4 b) 0)
+        in
+        if len < 0 || len > n - pos - 4 then None
+        else Some (Bigstring.sub b ~off:(pos + 4) ~len, pos + 4 + len))
     in
     let rec go pos acc =
       if pos = n then Some (List.rev acc)
@@ -42,7 +68,13 @@ let decode s =
                 | Some (etag, pos) -> (
                     match field pos with
                       | None -> None
-                      | Some (body, pos) -> go pos ({ key; etag; body } :: acc))
-              ))
+                      | Some (body, pos) ->
+                          go pos
+                            ({
+                               key = Bigstring.to_string key;
+                               etag = Bigstring.to_string etag;
+                               body;
+                             }
+                            :: acc))))
     in
     go m [])
