@@ -21,6 +21,8 @@ data class Intent(
     val base: String? = null,
     val modified: Long? = null,
     val state: IntentState = IntentState.OPEN,
+    /** Null in a record written before domains were named: the config's first domain. */
+    val domain: String? = null,
 ) {
     fun encode(): String {
         val where = JSONObject().put("name", target.name)
@@ -28,7 +30,9 @@ data class Intent(
             is Target.Child -> where.put("parentRef", target.parentRef)
             is Target.Existing -> where.put("ref", target.ref)
         }
-        val record = JSONObject().put("target", where).put("exclusive", exclusive).put("state", state.wire)
+        val record = JSONObject().put("target", where)
+        domain?.let { record.put("domain", it) }
+        record.put("exclusive", exclusive).put("state", state.wire)
         base?.let { record.put("base", it) }
         modified?.let { record.put("modified", it) }
         return record.toString()
@@ -52,6 +56,7 @@ data class Intent(
                     base = text(record, "base"),
                     modified = if (record.has("modified") && !record.isNull("modified")) record.getLong("modified") else null,
                     state = it,
+                    domain = text(record, "domain"),
                 )
             }
         } catch (e: JSONException) {

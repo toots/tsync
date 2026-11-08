@@ -44,45 +44,83 @@ sealed interface Boot {
     data object Ready : Boot
 }
 
-/** What the core told the host (android.md §4.2). */
+/** What the core told the host (android.md §4.2), naming the domain it is about. */
 sealed interface Notice {
-    data class Changed(val refs: Set<String>) : Notice
-    data object Recovered : Notice
+    val domain: String
+
+    data class Changed(override val domain: String, val refs: Set<String>) : Notice
+    data class Recovered(override val domain: String) : Notice
 }
 
-/** The process's one owner and everything that hangs off it (app §2). */
-class Tsync private constructor(val context: Context) {
-    val home: File = context.filesDir
-    val config = ConfigStore(home)
-    val core: Core = NativeCore { domain }
+/** One configured domain and everything that hangs off its owner (app §2). Boots on first use. */
+class Served internal constructor(val name: String, private val tsync: Tsync) {
+    val core: Core = NativeCore(name)
     val client = Client(core)
     val vault = Vault(client)
     val passwords = Passwords(client)
+    val offline = MutableStateFlow(false)
+    val latch = OfflineLatch { offline.value = it }
+
+    @Volatile
+    var boot: Boot? = null
+        internal set
+
+    /** Idempotent; concurrent callers wait for the first. Never on the UI thread. */
+    fun boot(): Boot = tsync.boot(this)
+
+    /**
+     * Runs a request, booting the domain first and feeding its offline latch (app §5). Never on
+     * the UI thread. @throws CoreException with the boot failure
+     */
+    fun <T> ask(request: Client.() -> T): T {
+        when (val boot = boot()) {
+            Boot.Ready -> {}
+            Boot.NoConfig -> throw CoreException(Code.NOT_FOUND, "$name is not configured")
+            is Boot.Failed -> throw CoreException(Code.INTERNAL, boot.reason)
+        }
+        return try {
+            client.request()
+        } catch (e: CoreException) {
+            latch.failed(e)
+            throw e
+        }
+    }
+
+    fun documentId(ref: String): String = Tsync.documentId(name, ref)
+}
+
+/** The process's owners, one per domain booted, and what they share (app §2). */
+class Tsync private constructor(val context: Context) {
+    val home: File = context.filesDir
+    val config = ConfigStore(home)
+    private val served = ConcurrentHashMap<String, Served>()
 
     /** Bumped by every vault change the app makes, so each vault screen asks again (pitfall B-8.18). */
     val vaultChanges = MutableStateFlow(0)
-    val ingest = Ingest(client, IntentStore(home))
+    val ingest = Ingest(IntentStore(home), { config.names().firstOrNull() }) { domain(it).ask { this } }
     val keepAlive = KeepAlive(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val offline = MutableStateFlow(false)
-    val latch = OfflineLatch { offline.value = it }
     val notices = MutableSharedFlow<Notice>(extraBufferCapacity = 64)
     val outcomes = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val notificationsWanted = MutableStateFlow(false)
 
-    @Volatile
-    var boot: Boot? = null
-        private set
-
-    /** The domain this process serves, which a config saved since does not change. */
-    @Volatile
-    var domain: String = config.read()?.domain.orEmpty()
-        private set
+    /** The domains booted so far, for screens that follow them. */
+    val bootedNames = MutableStateFlow<Set<String>>(emptySet())
+    private val vaultPrefs = context.getSharedPreferences("vault", Context.MODE_PRIVATE)
 
     private var prepared = false
+    private var watching = false
     private val observed = ConcurrentHashMap<String, Int>()
     private val refresher = Executors.newSingleThreadScheduledExecutor { Thread(it, "tsync-observed").apply { isDaemon = true } }
     private var refresh: ScheduledFuture<*>? = null
+
+    /** The one object of [name], configured or not. */
+    fun domain(name: String): Served = served.computeIfAbsent(name) { Served(it, this) }
+
+    /** The configured domains, in config order. */
+    fun domains(): List<Served> = config.names().map(::domain)
+
+    fun booted(): List<Served> = domains().filter { it.boot == Boot.Ready }
 
     /**
      * Once per process, before the core is used: local recovery, the trust bundle (app §4), the
@@ -99,39 +137,86 @@ class Tsync private constructor(val context: Context) {
         Native.nativeInit(bytes(home.path), bytes(bundle.path), bytes(ingest.intents.stagingDirectory.path))
         Thread(::readNotices, "tsync-notices").apply { isDaemon = true }.start()
         prepared = true
+        ingest.pending().filter { it.intent == null }.forEach { Notifications.unreadableSave(this, it.staging) }
     }
 
-    /** Idempotent; concurrent callers wait for the first. Never on the UI thread. */
-    @Synchronized
-    fun boot(): Boot {
-        if (boot == Boot.Ready) return Boot.Ready
-        if (!config.exists()) return Boot.NoConfig.also { boot = it }
+    internal fun boot(domain: Served): Boot = synchronized(domain) {
+        domain.boot?.takeIf { it == Boot.Ready }?.let { return it }
+        // Not cached: a domain the config names later boots then.
+        if (domain.name !in config.names()) return Boot.NoConfig
         val result = try {
             prepare()
-            val name = config.read()?.domain.orEmpty()
-            core.boot(name)?.let { Boot.Failed(it) } ?: Boot.Ready.also { domain = name }
+            domain.core.boot(domain.name)?.let { Boot.Failed(it) } ?: Boot.Ready
         } catch (e: Throwable) {
             Boot.Failed(e.message ?: e.toString())
         }
-        boot = result
+        domain.boot = result
         if (result == Boot.Ready) {
-            resumeSaves()
+            bootedNames.value += domain.name
+            resumeSaves(domain.name)
             watchScreen()
         }
-        return result
+        result
+    }
+
+    /** Fetches and opens a setup link (setup-link §6.3), which needs no domain booted. */
+    fun setupLink(link: String): String {
+        prepare()
+        return NativeCore("").setupLink(link)
+    }
+
+    /** The core's verdict on a config on disk that names no domain it can read. */
+    fun configRefusal(): String? = try {
+        prepare()
+        config.names().firstOrNull()?.let { domain(it).core.checkConfig(it) }
+    } catch (e: Throwable) {
+        e.message ?: e.toString()
+    }
+
+    /** app §2: the domains that had a vault when last asked. */
+    fun vaultDomains(): Set<String> = vaultPrefs.getStringSet("domains", null).orEmpty()
+
+    /**
+     * The domains whose vaults a reader asks, in config order, each booted: those of
+     * [vaultDomains], and any other already booted, which may have one.
+     */
+    fun vaults(): List<Served> {
+        val known = vaultDomains()
+        return domains().filter { (it.name in known || it.boot == Boot.Ready) && it.boot() == Boot.Ready }
+    }
+
+    /** The vault domains using [extension], in config order (extensions README §6.1). */
+    fun using(extension: String): List<Served> = vaults().filter { domain ->
+        try {
+            extension in domain.client.stats().extensions
+        } catch (e: CoreException) {
+            false
+        }
+    }
+
+    /** Records whether [domain]'s `vault_status` answered, so later readers boot it (app §2). */
+    fun noteVault(domain: String, has: Boolean) {
+        val known = vaultDomains()
+        if ((domain in known) == has) return
+        vaultPrefs.edit().putStringSet("domains", if (has) known + domain else known - domain).apply()
     }
 
     /** vault §6.2: reported while the process lives; a process that is gone holds no K to lock. */
+    @Synchronized
     private fun watchScreen() {
+        if (watching) return
+        watching = true
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 scope.launch {
-                    try {
-                        vault.screenLocked()
-                        vaultChanges.value += 1
-                    } catch (e: CoreException) {
-                        // No vault, or none to lock: nothing to report.
+                    for (domain in booted()) {
+                        try {
+                            domain.vault.screenLocked()
+                        } catch (e: CoreException) {
+                            // No vault, or none to lock: nothing to report.
+                        }
                     }
+                    vaultChanges.value += 1
                 }
             }
         }
@@ -143,21 +228,12 @@ class Tsync private constructor(val context: Context) {
         }
     }
 
-    /** The core's verdict on the config on disk, for a boot that failed. */
-    fun configRefusal(): String? = try {
-        prepare()
-        core.checkConfig(config.read()?.domain.orEmpty())
-    } catch (e: Throwable) {
-        null
-    }
-
-    /** app §8.2: after boot, commit what earlier processes left ready. */
-    private fun resumeSaves() {
+    /** app §8.2: after a domain boots, commit what earlier processes left ready for it. */
+    private fun resumeSaves(domain: String) {
         keepAlive.retain(Work.SAVE)
         scope.launch {
             try {
-                ingest.resumeReady { save, result -> Notifications.saveOutcome(this@Tsync, save.staging, save.intent?.target?.name, result) }
-                ingest.pending().filter { it.intent == null }.forEach { Notifications.unreadableSave(this@Tsync, it.staging) }
+                ingest.resumeReady(domain) { save, result -> Notifications.saveOutcome(this@Tsync, save.staging, save.intent?.target?.name, result) }
             } finally {
                 keepAlive.release(Work.SAVE)
             }
@@ -173,9 +249,13 @@ class Tsync private constructor(val context: Context) {
         if (!warming.compareAndSet(false, true)) return
         scope.launch {
             try {
-                if (boot() == Boot.Ready) passwords.list(pull = Pull.BACKGROUND)
-            } catch (e: CoreException) {
-                // Nothing to warm, or nothing reachable: the next form asks again.
+                for (domain in vaults()) {
+                    try {
+                        domain.passwords.list(pull = Pull.BACKGROUND)
+                    } catch (e: CoreException) {
+                        // Nothing to warm, or nothing reachable: the next form asks again.
+                    }
+                }
             } finally {
                 warming.set(false)
             }
@@ -185,14 +265,6 @@ class Tsync private constructor(val context: Context) {
     /** One warm-up at a time. */
     private val warming = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** Runs a request, feeding the offline latch (app §5). */
-    fun <T> ask(request: Client.() -> T): T = try {
-        client.request()
-    } catch (e: CoreException) {
-        latch.failed(e)
-        throw e
-    }
-
     private fun readNotices() {
         while (true) {
             val notice = try {
@@ -200,28 +272,29 @@ class Tsync private constructor(val context: Context) {
             } catch (e: JSONException) {
                 continue
             }
+            val domain = notice.optString("domain")
             when (notice.optString("event")) {
                 "changed" -> {
                     val refs = notice.optJSONArray("refs") ?: continue
-                    changed((0 until refs.length()).map { refs.getString(it) }.toSet())
+                    changed(domain, (0 until refs.length()).map { refs.getString(it) }.toSet())
                 }
                 "recovered" -> {
-                    latch.recovered()
+                    domain(domain).latch.recovered()
                     vaultChanges.value++
-                    notices.tryEmit(Notice.Recovered)
-                    observed.keys.forEach(::notifyChildren)
+                    notices.tryEmit(Notice.Recovered(domain))
+                    observed.keys.filter { split(it)?.first == domain }.forEach(::notifyChildren)
                 }
             }
         }
     }
 
-    private fun changed(refs: Set<String>) {
-        refs.forEach(::notifyChildren)
-        notices.tryEmit(Notice.Changed(refs))
+    private fun changed(domain: String, refs: Set<String>) {
+        refs.forEach { notifyChildren(documentId(domain, it)) }
+        notices.tryEmit(Notice.Changed(domain, refs))
     }
 
-    fun notifyChildren(ref: String) {
-        context.contentResolver.notifyChange(DocumentsContract.buildChildDocumentsUri(AUTHORITY, ref), null)
+    fun notifyChildren(documentId: String) {
+        context.contentResolver.notifyChange(DocumentsContract.buildChildDocumentsUri(AUTHORITY, documentId), null)
     }
 
     fun notifyRoots() {
@@ -230,8 +303,8 @@ class Tsync private constructor(val context: Context) {
 
     /** app §7.1: listed again every `observed_refresh` for as long as something shows the folder. */
     @Synchronized
-    fun observe(ref: String) {
-        observed.merge(ref, 1, Int::plus)
+    fun observe(documentId: String) {
+        observed.merge(documentId, 1, Int::plus)
         if (refresh == null) {
             val period = Parameters.OBSERVED_REFRESH_MS
             refresh = refresher.scheduleWithFixedDelay(::refreshObserved, period, period, TimeUnit.MILLISECONDS)
@@ -239,8 +312,8 @@ class Tsync private constructor(val context: Context) {
     }
 
     @Synchronized
-    fun unobserve(ref: String) {
-        observed.computeIfPresent(ref) { _, count -> if (count > 1) count - 1 else null }
+    fun unobserve(documentId: String) {
+        observed.computeIfPresent(documentId) { _, count -> if (count > 1) count - 1 else null }
         if (observed.isEmpty()) {
             refresh?.cancel(false)
             refresh = null
@@ -248,14 +321,17 @@ class Tsync private constructor(val context: Context) {
     }
 
     private fun refreshObserved() {
-        for (ref in observed.keys) {
+        for (id in observed.keys) {
+            val (name, ref) = split(id) ?: continue
+            val domain = domain(name)
+            if (domain.boot != Boot.Ready) continue
             try {
                 // The owner pulls a folder that is no longer fresh and sends `changed` when it differs.
-                latch.listed(ask { listDir(ref, limit = 1) })
+                domain.latch.listed(domain.ask { listDir(ref, limit = 1) })
             } catch (e: CoreException) {
-                if (e.code == Code.NOT_FOUND) changed(setOf(ref))
+                if (e.code == Code.NOT_FOUND) changed(name, setOf(ref))
             } catch (e: Throwable) {
-                Log.w(TAG, "observed refresh of $ref failed", e)
+                Log.w(TAG, "observed refresh of $id failed", e)
             }
         }
     }
@@ -279,6 +355,14 @@ class Tsync private constructor(val context: Context) {
 
         @Volatile
         private var instance: Tsync? = null
+
+        /** app §7: `<domain>/<reference>`; a domain name holds no `/`. */
+        fun documentId(domain: String, ref: String): String = "$domain/$ref"
+
+        fun split(documentId: String): Pair<String, String>? {
+            val slash = documentId.indexOf('/')
+            return if (slash <= 0) null else documentId.substring(0, slash) to documentId.substring(slash + 1)
+        }
 
         fun get(context: Context): Tsync = instance ?: synchronized(this) {
             instance ?: Tsync(context.applicationContext).also { instance = it }

@@ -63,6 +63,11 @@ class BackupPrefs(context: Context) {
     var lastOutcome: String?
         get() = prefs.getString("lastOutcome", null)
         set(value) = prefs.edit().putString("lastOutcome", value).apply()
+
+    /** app §11.6 "Back up to"; null is the config's first domain. */
+    var domain: String?
+        get() = prefs.getString("domain", null)
+        set(value) = prefs.edit().putString("domain", value).apply()
 }
 
 /** One camera-backup pass (app §11.8) and what it is made of. */
@@ -73,6 +78,12 @@ class Backup(private val context: Context) {
     val prefs = BackupPrefs(context)
 
     fun hold(): Hold? = Processing.gate(prefs.settings, device())
+
+    /** The domain new items go to; null when the config names none, or no longer names the one picked. */
+    fun target(): String? {
+        val names = tsync.config.names()
+        return (prefs.domain ?: names.firstOrNull())?.takeIf { it in names }
+    }
 
     private fun device(): Device {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -91,10 +102,11 @@ class Backup(private val context: Context) {
     /** app §11.3, for every volume. A baseline pass records what exists as never to be uploaded. */
     fun discover(baseline: Boolean = false) {
         val now = System.currentTimeMillis()
+        val domain = target()
         for (volume in media.volumes()) {
             val start = DiscoveryStart.of(db.mark(volume), media.version(volume), media.generation(volume), now)
             val full = start.full || baseline
-            val planner = DiscoveryPlanner(volume, db.records(), start.copy(full = full), ZoneId.systemDefault(), now, baseline)
+            val planner = DiscoveryPlanner(volume, db.records(), start.copy(full = full), ZoneId.systemDefault(), now, baseline, domain)
             media.rows(volume, start.mark.takeIf { !full }).forEach(planner::see)
             db.apply(volume, planner.changes(), planner.mark())
         }
@@ -115,8 +127,12 @@ class Backup(private val context: Context) {
                 prefs.lastOutcome = holdReason(context, it)
                 return true
             }
+            if (target() == null) {
+                prefs.lastOutcome = context.getString(R.string.backup_pick_domain)
+                return false
+            }
             return try {
-                check(tsync.boot() == Boot.Ready) { (tsync.boot as? Boot.Failed)?.reason ?: context.getString(R.string.provider_not_set_up) }
+                tsync.prepare()
                 tsync.ingest.intents.sweep()
                 discover()
                 val outcome = process(userInitiated, stopped)
@@ -140,10 +156,12 @@ class Backup(private val context: Context) {
 
     private fun process(userInitiated: Boolean, stopped: () -> Boolean): PassOutcome {
         val started = System.currentTimeMillis()
-        val folders = Folders(tsync.client, db)
+        val first = tsync.config.names().firstOrNull()
+        val folders = HashMap<String, Folders>()
         var uploaded = 0
         var failed = 0
         var more = false
+        var refusal: String? = null
         for (record in Processing.due(db.records(), started)) {
             val now = System.currentTimeMillis()
             val row = media.row(record.volume, record.mediaId)
@@ -151,7 +169,16 @@ class Backup(private val context: Context) {
                 if (row == null) db.delete(record.mediaId) else more = true
                 continue
             }
-            val staged = tsync.ask { status() }.pendingBytes
+            // app §11.6: each record goes to its own domain, booted by the pass. One that cannot
+            // boot leaves its records as they are, as a pass that fails does.
+            val domain = tsync.domain(record.domain ?: first ?: break)
+            val boot = domain.boot()
+            if (boot != Boot.Ready) {
+                refusal = (boot as? Boot.Failed)?.reason ?: context.getString(R.string.provider_not_set_up)
+                more = true
+                continue
+            }
+            val staged = domain.ask { status() }.pendingBytes
             val free = tsync.ingest.intents.stagingDirectory.usableSpace
             val gated = !userInitiated && hold() != null
             if (stopped() || gated || !Processing.withinBudget(staged, now - started, free, row.size)) {
@@ -159,24 +186,26 @@ class Backup(private val context: Context) {
                 break
             }
             try {
-                db.put(upload(folders, record, row))
+                val into = folders.getOrPut(domain.name) { Folders(domain.client, db.folders(domain.name)) }
+                db.put(upload(domain.name, into, record, row))
                 uploaded++
             } catch (e: Exception) {
                 db.put(Processing.failed(record, e.message ?: e.toString(), System.currentTimeMillis()))
                 failed++
             }
         }
+        if (uploaded == 0 && failed == 0) refusal?.let { throw IllegalStateException(it) }
         return PassOutcome(uploaded, failed, more)
     }
 
-    private fun upload(folders: Folders, record: Record, row: MediaRow): Record {
+    private fun upload(domain: String, folders: Folders, record: Record, row: MediaRow): Record {
         val directory = Naming.parentPath(record.target)
         val firstUpload = record.etag == null
         val folder = folders.folderFor(directory)
         val ingest = tsync.ingest
         // The intent stays open: the media store keeps the photo, so a failed or interrupted
         // commit drops the staged copy and the record retries.
-        val name = ingest.stage(Target.Child(folder, Naming.leaf(record.target)), firstUpload, Processing.base(record), row.captureMillis)
+        val name = ingest.stage(domain, Target.Child(folder, Naming.leaf(record.target)), firstUpload, Processing.base(record), row.captureMillis)
         try {
             val copied = media.open(record.volume, row).use { input -> ingest.staging(name).outputStream().use(input::copyTo) }
             if (copied != row.size) throw java.io.IOException("copied $copied bytes of ${row.size}")
@@ -193,13 +222,14 @@ class Backup(private val context: Context) {
             if (e.code == Code.NOT_FOUND) folders.forget(directory)
             throw e
         }
-        return Processing.uploaded(record, row, "$directory/${item.name}", item.contentId ?: item.etag, System.currentTimeMillis())
+        return Processing.uploaded(record, row, "$directory/${item.name}", item.contentId ?: item.etag, System.currentTimeMillis()).copy(domain = domain)
     }
 
     /** `off | <n> failed — <last error> | not started yet | <n> waiting to upload | up to date`, and what qualifies it. */
     fun statusLine(): String {
         val settings = prefs.settings
         if (!settings.enabled) return context.getString(R.string.backup_off)
+        if (target() == null) return context.getString(R.string.backup_pick_domain)
         val records = db.records()
         val failed = records.filter { it.state == State.FAILED }
         val waiting = records.count { it.state == State.PENDING }

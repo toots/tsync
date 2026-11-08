@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.LoginRow
 import org.feverdreamtv.tsync.ui.TsyncTheme
@@ -55,14 +56,15 @@ class LinkActivity : ComponentActivity() {
         setContent { TsyncTheme { Picker(tsync, label, onPick = { link(tsync, site, it) }, onCancel = { done(null) }) } }
     }
 
-    private fun link(tsync: Tsync, site: String, login: LoginRow) {
+    private fun link(tsync: Tsync, site: String, picked: Pair<Served, LoginRow>) {
+        val (domain, login) = picked
         tsync.scope.launch {
             val dataset = try {
-                if (tsync.boot() != Boot.Ready) null
+                if (domain.boot() != Boot.Ready) null
                 else {
-                    if (site !in login.urls) tsync.passwords.setSites(login.id, login.urls + site)
+                    if (site !in login.urls) domain.passwords.setSites(login.id, login.urls + site)
                     tsync.vaultChanges.value++
-                    val filled = tsync.passwords.fill(site, login.id)
+                    val filled = domain.passwords.fill(site, login.id)
                     val builder = Dataset.Builder()
                     var any = false
                     fun put(key: String, text: String?) {
@@ -98,14 +100,20 @@ class LinkActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Picker(tsync: Tsync, app: String, onPick: (LoginRow) -> Unit, onCancel: () -> Unit) {
+private fun Picker(tsync: Tsync, app: String, onPick: (Pair<Served, LoginRow>) -> Unit, onCancel: () -> Unit) {
     var filter by remember { mutableStateOf("") }
-    var logins by remember { mutableStateOf<List<LoginRow>>(emptyList()) }
+    var logins by remember { mutableStateOf<List<Pair<Served, LoginRow>>>(emptyList()) }
+    var named by remember { mutableStateOf(false) }
     var chosen by remember { mutableStateOf<LoginRow?>(null) }
+    var chosenIn by remember { mutableStateOf<Served?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(filter) {
         scope.launch {
-            logins = withContext(Dispatchers.IO) { runCatching { tsync.passwords.list(filter = filter).logins }.getOrDefault(emptyList()) }
+            logins = withContext(Dispatchers.IO) {
+                val domains = tsync.using("passwords")
+                named = domains.size > 1
+                domains.flatMap { domain -> runCatching { domain.passwords.list(filter = filter).logins }.getOrDefault(emptyList()).map { domain to it } }
+            }
         }
     }
     Column(Modifier.fillMaxSize().padding(top = 32.dp)) {
@@ -115,11 +123,11 @@ private fun Picker(tsync: Tsync, app: String, onPick: (LoginRow) -> Unit, onCanc
             singleLine = true, modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
         LazyColumn(Modifier.fillMaxSize()) {
-            items(logins, key = { it.id }) { login ->
+            items(logins, key = { (domain, login) -> domain.documentId(login.id) }) { (domain, login) ->
                 ListItem(
                     headlineContent = { Text(login.title) },
-                    supportingContent = { Text(login.username) },
-                    modifier = Modifier.clickable { chosen = login },
+                    supportingContent = { Text(if (named) "${login.username} · ${domain.name}" else login.username) },
+                    modifier = Modifier.clickable { chosen = login; chosenIn = domain },
                 )
             }
         }
@@ -128,7 +136,7 @@ private fun Picker(tsync: Tsync, app: String, onPick: (LoginRow) -> Unit, onCanc
         AlertDialog(
             onDismissRequest = { chosen = null },
             text = { Text(stringResource(R.string.autofill_link_confirm, login.title, app)) },
-            confirmButton = { TextButton(onClick = { onPick(login) }) { Text(stringResource(R.string.autofill_link_use)) } },
+            confirmButton = { TextButton(onClick = { chosenIn?.let { onPick(it to login) } }) { Text(stringResource(R.string.autofill_link_use)) } },
             dismissButton = { TextButton(onClick = { chosen = null; onCancel() }) { Text(stringResource(R.string.cancel)) } },
         )
     }

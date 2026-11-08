@@ -12,7 +12,6 @@
     <string name="close">Close</string>
     <string name="back">Back</string>
     <string name="hide">Hide</string>
-    <string name="show">Show</string>
     <string name="save">Save</string>
     <string name="create">Create</string>
     <string name="name">Name</string>
@@ -107,25 +106,23 @@
     <string name="camera_backup">Camera backup</string>
     <string name="details">Details</string>
     <string name="back_up_now">Back up now</string>
-    <string name="setup_title">Connect to a server</string>
-    <string name="server_url">Server URL</string>
-    <string name="server_secret">Secret</string>
-    <string name="check_server">Check server</string>
+    <string name="setup_title">Join a domain</string>
+    <string name="setup_link">Setup link</string>
+    <string name="setup_open_link">Open link</string>
+    <string name="setup_join">Join</string>
+    <string name="setup_link_nothing">This link offers no domain to join here.</string>
     <string name="setup_scan">Scan setup code</string>
     <string name="setup_link_from">Setup link from %1$s</string>
     <string name="setup_link_skipped">Not on this phone: %1$s</string>
-    <string name="domain_name">Domain</string>
-    <string name="cache_limit">Cache limit</string>
-    <string name="connect">Connect</string>
-    <string name="server_secret_refused">Secret refused (or this device\'s clock is off)</string>
-    <string name="server_too_old">This server is too old to list its domains. Type the domain name.</string>
-    <string name="server_unchecked">The server could not be checked (%1$s). You can still type the domain name.</string>
-    <string name="error_url_malformed">Enter the server\'s address, starting with https://</string>
-    <string name="error_url_cleartext">The address must start with https://</string>
-    <string name="error_secret_short">The secret must be at least 32 characters</string>
-    <string name="error_domain_invalid">This is not a valid domain name</string>
-    <string name="settings_server">Server</string>
     <string name="settings_storage">Storage</string>
+    <string name="settings_domains">Domains</string>
+    <string name="add_domain">Add a domain</string>
+    <string name="remove">Remove</string>
+    <string name="remove_domain_title">Remove %1$s?</string>
+    <string name="remove_domain_text">The phone stops serving this domain. Nothing is deleted from it, and joining it again from a setup link serves it as before.</string>
+    <string name="domain_not_booted">Not started yet</string>
+    <string name="choose_domain">Choose a domain</string>
+    <string name="move_between_domains">An item cannot be moved to another domain</string>
     <string name="settings_about">About</string>
     <string name="storage_limit">Cache limit: %1$s</string>
     <string name="storage_cache">Cached files: %1$s</string>
@@ -134,7 +131,7 @@
     <string name="free_up_space">Free up space</string>
     <string name="free_up_text">Every downloaded file is removed from this phone, including files made available offline. Files waiting to upload are kept.</string>
     <string name="restart_title">Restart tsync?</string>
-    <string name="restart_text">The new server settings take effect when tsync restarts. Until then it keeps using the previous ones.</string>
+    <string name="restart_text">The domain stops being served when tsync restarts. Until then it is served as before.</string>
     <string name="restart_now">Restart now</string>
     <string name="about_version">Version %1$s</string>
     <string name="about_commit">Built from commit %1$s</string>
@@ -148,6 +145,8 @@
     <string name="backup_not_enabled">Camera backup was not turned on: %1$s</string>
     <string name="backup_running">Backing up camera photos</string>
     <string name="backup_off">off</string>
+    <string name="backup_to">Back up to</string>
+    <string name="backup_pick_domain">Pick the domain to back up to</string>
     <string name="backup_not_started">not started yet</string>
     <string name="backup_up_to_date">up to date</string>
     <string name="backup_status_failed">%1$d failed — %2$s</string>
@@ -193,10 +192,6 @@
     <plurals name="retried_changes">
         <item quantity="one">%1$d change retried</item>
         <item quantity="other">%1$d changes retried</item>
-    </plurals>
-    <plurals name="server_domains">
-        <item quantity="one">The server offers %1$d domain</item>
-        <item quantity="other">The server offers %1$d domains</item>
     </plurals>
     <plurals name="backup_waiting">
         <item quantity="one">%1$d waiting to upload</item>
@@ -286,6 +281,7 @@
     <string name="passwords_password_copied">Password of %1$s copied</string>
     <string name="passwords_remove_confirm">Remove %1$s from the vault?</string>
     <string name="autofill_locked">tsync is locked</string>
+    <string name="autofill_locked_in">tsync is locked (%1$s)</string>
     <string name="autofill_locked_detail">Open tsync to unlock</string>
     <string name="channel_passwords">Passwords</string>
     <string name="save_login_done">Saved a login for %1$s</string>

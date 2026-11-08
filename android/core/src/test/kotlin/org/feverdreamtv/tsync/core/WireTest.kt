@@ -72,11 +72,11 @@ class WireTest {
         val config = JSONObject().put("name", "wire").put("domains", listOf(domain)).toString()
         core = ProcessCore(binary, home, config)
         client = Client(core)
-        ingest = Ingest(client, IntentStore(home))
+        ingest = Ingest(IntentStore(home), { "Wire Suite" }) { client }
     }
 
     private fun save(parent: String, name: String, body: String, modified: Long? = null): Committed {
-        val staging = ingest.stage(Target.Child(parent, name), exclusive = true, modified = modified)
+        val staging = ingest.stage("Wire Suite", Target.Child(parent, name), exclusive = true, modified = modified)
         ingest.staging(staging).writeText(body)
         ingest.markReady(staging)
         return ingest.commit(staging).also { assertFalse(ingest.staging(staging).exists(), "the staging file is adopted") }
@@ -127,7 +127,7 @@ class WireTest {
         val fetched = client.ensureCached(first.item.ref, dest.path)
         assertEquals("one", dest.readText())
         assertEquals(first.item.contentId, fetched.contentId)
-        val edit = ingest.stage(Target.Existing(first.item.ref, "a.txt"), exclusive = false, base = fetched.contentId)
+        val edit = ingest.stage("Wire Suite", Target.Existing(first.item.ref, "a.txt"), exclusive = false, base = fetched.contentId)
         ingest.staging(edit).writeText("edited")
         ingest.markReady(edit)
         val edited = ingest.commit(edit).item

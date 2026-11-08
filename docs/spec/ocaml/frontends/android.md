@@ -61,8 +61,9 @@ Companion to the language-neutral specs [../../frontends/android.md](../../front
 |---|---|
 | `tests/android/lazy_test` | the bridge in-process over a store double that pends or is down, with a peer client: freshness, peers' changes, owed work under a pull, refusals, patience, `unreachable`, recovery, view expiry and holds, notices |
 | `tests/android/bridge_test` | 8 foreign threads × 64 reads through `tsync_bridge.h`, entries before boot, a spawned command refused by the host that owns the domain |
+| `tests/android/domains_test` | two domains booted in one process: a domain not booted is refused, a failed boot leaves the other serving, files, notices and handles stay in their own domain |
 | `tests/android/cli_test` | every verb, one spawned process per call, replies in full; registered verbs = driven verbs |
-| `android/` `:core:test` | wire shapes against the binary, naming, intents, ingest, config, check server, the backup planner |
-| `android/` `:app:testDebugUnitTest` | the record database: schema 3, the upgrade from 2 |
+| `android/` `:core:test` | wire shapes against the binary, naming, intents, ingest (each save to its domain), config (adding and removing domains), the backup planner |
+| `android/` `:app:testDebugUnitTest` | the record database: schema 4, the upgrade from 2, the folder cache per domain |
 
 Not checked by any suite: the breaker-open path of a listing, a process kill at each durable step, anything on a device.

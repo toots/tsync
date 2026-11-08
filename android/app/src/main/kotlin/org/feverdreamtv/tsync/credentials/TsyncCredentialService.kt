@@ -28,8 +28,8 @@ import androidx.credentials.provider.PasswordCredentialEntry
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import kotlinx.coroutines.launch
-import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.autofill.Browsers
 import org.feverdreamtv.tsync.core.Code
@@ -50,9 +50,6 @@ class TsyncCredentialService : CredentialProviderService() {
         val job = tsync.scope.launch {
             try {
                 callback.onResult(entries(tsync, request))
-            } catch (e: CoreException) {
-                Log.w(Tsync.TAG, "credentials: the owner refused: ${e.code.wire}: ${e.message}")
-                if (e.code == Code.LOCKED) callback.onResult(locked()) else callback.onResult(BeginGetCredentialResponse())
             } catch (e: Throwable) {
                 Log.w(Tsync.TAG, "credentials: no answer", e)
                 callback.onError(GetCredentialUnknownException(e.message))
@@ -79,8 +76,31 @@ class TsyncCredentialService : CredentialProviderService() {
             Log.w(Tsync.TAG, "credentials: ${app?.packageName} is not a listed browser")
             return BeginGetCredentialResponse()
         }
-        if (tsync.boot() != Boot.Ready) return BeginGetCredentialResponse()
         val mark = org.feverdreamtv.tsync.autofill.TsyncIcon.of(this)
+        val entries = mutableListOf<CredentialEntry>()
+        val locked = mutableListOf<String>()
+        val domains = tsync.using("passwords")
+        // §1: with several domains, every entry names its own.
+        fun named(text: String, domain: Served) = if (domains.size > 1) "$text · ${domain.name}" else text
+        for (domain in domains) {
+            try {
+                entries += entries(domain, request, origin, mark, ::named)
+            } catch (e: CoreException) {
+                Log.w(Tsync.TAG, "credentials: ${domain.name} refused: ${e.code.wire}: ${e.message}")
+                if (e.code == Code.LOCKED) locked += domain.name
+            }
+        }
+        return BeginGetCredentialResponse.Builder().setCredentialEntries(entries)
+            .setAuthenticationActions(locked.map { locked(it, domains.size > 1) }).build()
+    }
+
+    private fun entries(
+        domain: Served,
+        request: BeginGetCredentialRequest,
+        origin: String?,
+        mark: android.graphics.drawable.Icon?,
+        named: (String, Served) -> String,
+    ): List<CredentialEntry> {
         val entries = mutableListOf<CredentialEntry>()
         for (option in request.beginGetCredentialOptions) {
             when (option) {
@@ -90,36 +110,38 @@ class TsyncCredentialService : CredentialProviderService() {
                     if (rpId.isEmpty()) continue
                     val allow = Webauthn.ids(json.optJSONArray("allowCredentials"))
                     val asked = origin ?: "https://$rpId"
-                    val matched = tsync.passwords.passkeyMatch(asked, rpId, allow, pull = Pull.BACKGROUND)
-                    Log.i(Tsync.TAG, "credentials: $rpId, origin ${if (origin == null) "after the pick" else origin}, ${allow.size} allowed, ${matched.size} matched")
+                    val matched = domain.passwords.passkeyMatch(asked, rpId, allow, pull = Pull.BACKGROUND)
+                    Log.i(Tsync.TAG, "credentials: ${domain.name}: $rpId, origin ${if (origin == null) "after the pick" else origin}, ${allow.size} allowed, ${matched.size} matched")
                     for (passkey in matched) {
-                        val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_ID, passkey.id), passkey.id)
+                        val pick = pending(picked(domain).putExtra(PasskeyActivity.EXTRA_ID, passkey.id), domain.documentId(passkey.id))
                         entries += PublicKeyCredentialEntry.Builder(this, passkey.userName, pick, option)
-                            .setDisplayName(passkey.userDisplayName.ifEmpty { null })
+                            .setDisplayName(named(passkey.userDisplayName.ifEmpty { passkey.userName }, domain))
                             .apply { mark?.let { setIcon(it) } }.build()
                     }
                 }
                 is BeginGetPasswordOption -> {
                     // A login is offered for a known origin only: its password is what the pick hands over.
                     if (origin == null) continue
-                    for (login in tsync.passwords.list(site = origin, pull = Pull.BACKGROUND).logins) {
-                        val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_LOGIN, login.id), login.id)
+                    for (login in domain.passwords.list(site = origin, pull = Pull.BACKGROUND).logins) {
+                        val pick = pending(picked(domain).putExtra(PasskeyActivity.EXTRA_LOGIN, login.id), domain.documentId(login.id))
                         entries += PasswordCredentialEntry.Builder(this, login.username, pick, option)
-                            .setDisplayName(login.title)
+                            .setDisplayName(named(login.title, domain))
                             .apply { mark?.let { setIcon(it) } }.build()
                     }
                 }
             }
         }
-        return BeginGetCredentialResponse.Builder().setCredentialEntries(entries).build()
+        return entries
     }
 
+    private fun picked(domain: Served) = Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_DOMAIN, domain.name)
+
     /** §1: the vault is unlocked in the app, never here. */
-    private fun locked(): BeginGetCredentialResponse {
+    private fun locked(domain: String, named: Boolean): AuthenticationAction {
         val open = Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_SHOW_VAULT, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val action = AuthenticationAction(getString(R.string.autofill_locked), PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE))
-        return BeginGetCredentialResponse.Builder().setAuthenticationActions(listOf(action)).build()
+        val title = if (named) getString(R.string.autofill_locked_in, domain) else getString(R.string.autofill_locked)
+        return AuthenticationAction(title, PendingIntent.getActivity(this, domain.hashCode(), open, PendingIntent.FLAG_IMMUTABLE))
     }
 
     override fun onBeginCreateCredentialRequest(
@@ -127,15 +149,22 @@ class TsyncCredentialService : CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>,
     ) {
-        // §6.2: one entry; the creation itself waits for the pick.
+        // §6.2: one entry per domain; the creation itself waits for the pick.
         val app = request.callingAppInfo
         val browser = origin(app) != null || (app != null && Browsers.isBrowser(this, app.packageName))
         if (request !is BeginCreatePublicKeyCredentialRequest || !browser) {
             return callback.onError(CreateCredentialUnknownException(getString(R.string.passkey_not_offered)))
         }
         val tsync = Tsync.get(this)
-        val pick = pending(Intent(this, PasskeyActivity::class.java).putExtra(PasskeyActivity.EXTRA_CREATE, true), "create")
-        callback.onResult(BeginCreateCredentialResponse.Builder().addCreateEntry(CreateEntry.Builder(tsync.domain.ifEmpty { "tsync" }, pick).build()).build())
+        val job = tsync.scope.launch {
+            val response = BeginCreateCredentialResponse.Builder()
+            for (domain in tsync.using("passwords")) {
+                val pick = pending(picked(domain).putExtra(PasskeyActivity.EXTRA_CREATE, true), domain.documentId("create"))
+                response.addCreateEntry(CreateEntry.Builder(domain.name, pick).build())
+            }
+            callback.onResult(response.build())
+        }
+        cancellationSignal.setOnCancelListener { job.cancel() }
     }
 
     override fun onClearCredentialStateRequest(

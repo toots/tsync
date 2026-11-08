@@ -68,7 +68,7 @@ object Notifications {
         val label = name ?: context.getString(R.string.shared_file)
         result.onSuccess { committed ->
             if (committed.rerouted) {
-                problem(tsync, staging, context.getString(R.string.save_rerouted_title, committed.item.name), context.getString(R.string.save_rerouted_text, tsync.domain))
+                problem(tsync, staging, context.getString(R.string.save_rerouted_title, committed.item.name), context.getString(R.string.save_rerouted_text, committed.domain))
             }
         }.onFailure { error ->
             problem(tsync, staging, context.getString(R.string.save_failed_title, label), error.message ?: error.toString())

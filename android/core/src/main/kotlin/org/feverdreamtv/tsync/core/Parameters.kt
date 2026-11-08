@@ -7,7 +7,6 @@ object Parameters {
     const val MAX_TREE_DEPTH = 4096
     const val MAX_NAME_ATTEMPTS = 1000
     const val STAGING_ORPHAN_AGE_MS = 24 * 3_600_000L
-    const val CHECK_SERVER_TIMEOUT_MS = 10_000
     const val SETTLE_TIME_MS = 10_000L
     const val DATE_ADDED_LOOKBACK_S = 24 * 3_600L
     const val FULL_DISCOVERY_INTERVAL_MS = 7 * 24 * 3_600_000L
@@ -17,7 +16,6 @@ object Parameters {
     const val TRIGGER_DELAY_S = 10L
     const val TRIGGER_MAX_DELAY_S = 300L
     const val PERIODIC_INTERVAL_H = 6L
-    const val MIN_SECRET_LENGTH = 32
     const val DEFAULT_MAX_CACHE = "2G"
     const val ROOT = "root"
 

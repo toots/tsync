@@ -19,13 +19,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +63,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -86,6 +90,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Codes
@@ -136,22 +141,20 @@ fun VaultMark(appearance: org.feverdreamtv.tsync.core.Appearance, modifier: Modi
     }
 }
 
+/** One vault domain as the Vault screen last asked it (android-app §10.8). */
+class VaultView(val domain: Served, val status: VaultStatus?, val failure: String?, val extensions: List<String>, val settled: Boolean)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     SecureWindow()
-    var status by remember { mutableStateOf<VaultStatus?>(null) }
-    // android-app §5.1: whether the status that asked the server has answered.
-    var settled by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    // android-app §2, §10.8: every vault domain, in config order, each answered on its own.
+    var views by remember { mutableStateOf<List<VaultView>?>(null) }
     var generation by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
-    var confirm by remember { mutableStateOf<Boolean?>(null) }
+    var confirm by remember { mutableStateOf<Pair<Served, Boolean>?>(null) }
     var adding by remember { mutableStateOf(false) }
-    // android-app §10.8: one tab per extension the domain uses.
-    var extensions by remember { mutableStateOf<List<String>>(emptyList()) }
     var tab by rememberSaveable { mutableStateOf("totp") }
-    val scope = rememberCoroutineScope()
     val changes by tsync.vaultChanges.collectAsState()
     val lifecycle = LocalLifecycleOwner.current
     fun reload() = generation++
@@ -159,98 +162,157 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             // android-app §5.1: the last view at once, then the server's answer over it.
             for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
-                attempt { tsync.vault.status(pull) }
-                    .onSuccess { status = it; failure = null; if (pull == Pull.DEFAULT) settled = true }
-                    .onFailure { if (status == null) failure = it.message }
+                val previous = views.orEmpty()
+                views = withContext(Dispatchers.IO) { tsync.vaults().mapNotNull { ask(tsync, it, pull, previous.firstOrNull { v -> v.domain === it }) } }
             }
             // passwords/android §1.1: after an unlock, once the status is shown.
-            if (status?.state == "unlocked") tsync.warmPasswords()
-            attempt { tsync.ask { stats() }.extensions }.onSuccess { extensions = it }
+            if (views.orEmpty().any { it.status?.state == "unlocked" }) tsync.warmPasswords()
         }
     }
-    val unlocked = status?.state == "unlocked"
+    val shown = views.orEmpty()
+    val tabs = listOf("totp", "passwords").filter { t -> shown.any { t in it.extensions } }
+    val current = if (tab in tabs || tabs.isEmpty()) tab else tabs.first()
+    val inTab = shown.filter { current in it.extensions || it.status == null || tabs.isEmpty() }
+    // A new record goes to the first domain, in config order, using the extension.
+    val addTo = shown.firstOrNull { "totp" in it.extensions }
     Scaffold(
         modifier = Modifier.padding(outer),
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
-                navigationIcon = { status?.appearance?.let { VaultMark(it, Modifier.padding(start = 16.dp)) } },
+                navigationIcon = { shown.singleOrNull()?.status?.appearance?.let { VaultMark(it, Modifier.padding(start = 16.dp)) } },
                 title = { Text(stringResource(R.string.destination_vault), Modifier.semantics { heading() }) },
                 actions = {
-                    if (status != null && status?.state != "absent") {
+                    val menus = shown.filter { it.status != null && it.status.state != "absent" }
+                    if (menus.isNotEmpty()) {
                         IconButton(onClick = { menu = true }) {
                             Icon(painterResource(R.drawable.ic_more), contentDescription = stringResource(R.string.more))
                         }
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        status?.let { DropdownMenuItem(text = { Text(describe(LocalContext.current, it)) }, onClick = {}, enabled = false) }
-                        HorizontalDivider()
-                        if (unlocked) DropdownMenuItem(text = { Text(stringResource(R.string.vault_lock)) }, onClick = { menu = false; confirm = false })
-                        if (status?.enrolled == true) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.vault_forget)) }, onClick = { menu = false; confirm = true })
+                        menus.forEachIndexed { index, view ->
+                            val status = view.status!!
+                            if (index > 0) HorizontalDivider()
+                            val state = describe(LocalContext.current, status)
+                            DropdownMenuItem(text = { Text(if (shown.size > 1) "${view.domain.name}: $state" else state) }, onClick = {}, enabled = false)
+                            if (status.state == "unlocked") DropdownMenuItem(text = { Text(stringResource(R.string.vault_lock)) }, onClick = { menu = false; confirm = view.domain to false })
+                            if (status.enrolled) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.vault_forget)) }, onClick = { menu = false; confirm = view.domain to true })
+                            }
                         }
                     }
                 },
             )
         },
         floatingActionButton = {
-            if (unlocked && shownTab(extensions, tab) == "totp") FloatingActionButton(onClick = { adding = true }) {
+            if (current == "totp" && addTo?.status?.state == "unlocked") FloatingActionButton(onClick = { adding = true }) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = stringResource(R.string.code_add))
             }
         },
     ) { padding ->
-        val current = status
         when {
-            failure != null -> Failure(failure!!, padding, onRetry = ::reload)
-            current == null -> Loading(padding)
-            current.state == "absent" -> Message(stringResource(R.string.vault_absent), padding)
-            current.state == "corrupt" -> Message(stringResource(R.string.vault_corrupt), padding)
-            current.state == "locked" -> Column(Modifier.padding(padding)) {
-                if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
-                if (current.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
-                Column(Modifier.padding(16.dp)) { UnlockForm(tsync, current.enrolled, onUnlocked = ::reload) }
-            }
+            views == null -> Loading(padding)
+            shown.isEmpty() -> Message(stringResource(R.string.vault_not_used), padding)
             else -> Column(Modifier.padding(padding)) {
-                current.newMachines.forEach { Banner(stringResource(R.string.vault_machine_joined, it)) }
-                if (current.newMachines.isNotEmpty()) TextButton(onClick = {
-                    scope.launch { attempt { tsync.vault.acknowledgeMachines() }; reload() }
-                }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.vault_machines_seen)) }
-                val tabs = listOf("totp", "passwords").filter { it in extensions }
-                if (tabs.size > 1) TabRow(selectedTabIndex = tabs.indexOf(shownTab(extensions, tab)).coerceAtLeast(0)) {
+                if (tabs.size > 1) TabRow(selectedTabIndex = tabs.indexOf(current).coerceAtLeast(0)) {
                     tabs.forEach { name ->
-                        Tab(selected = shownTab(extensions, tab) == name, onClick = { tab = name }, text = {
+                        Tab(selected = current == name, onClick = { tab = name }, text = {
                             Text(stringResource(if (name == "totp") R.string.vault_tab_codes else R.string.vault_tab_passwords))
                         })
                     }
                 }
-                if (shownTab(extensions, tab) == "passwords") PasswordsTab(tsync, PaddingValues(), onLocked = ::reload)
-                else CodesList(tsync, PaddingValues(), onLocked = ::reload)
+                if (current == "passwords") PasswordsTab(tsync, inTab, PaddingValues(), onChanged = ::reload)
+                else CodesList(tsync, inTab, PaddingValues(), onChanged = ::reload)
             }
         }
     }
-    confirm?.let { forget ->
+    confirm?.let { (domain, forget) ->
         AlertDialog(
             onDismissRequest = { confirm = null },
             text = { Text(stringResource(if (forget) R.string.vault_forget_confirm else R.string.vault_lock_confirm)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirm = null
-                    scope.launch {
-                        attempt { tsync.vault.lock(forget) }.reason()?.let { tsync.report(it, failed = true) }
-                        reload()
+                    tsync.scope.launch {
+                        attempt { domain.vault.lock(forget) }.reason()?.let { tsync.report(it, failed = true) }
+                        tsync.vaultChanges.value++
                     }
                 }) { Text(stringResource(if (forget) R.string.vault_forget else R.string.vault_lock)) }
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
-    if (adding) AddCodeSheet(tsync, onDismiss = { adding = false; tsync.vaultChanges.value++ })
+    if (adding && addTo != null) AddCodeSheet(tsync, addTo.domain, onDismiss = { adding = false; tsync.vaultChanges.value++ })
 }
 
-/** The tab asked for when the domain uses its extension, else the one it uses. */
-private fun shownTab(extensions: List<String>, asked: String): String =
-    if (asked in extensions || "totp" !in extensions && "passwords" !in extensions) asked
-    else if ("totp" in extensions) "totp" else "passwords"
+/** One domain's status and extensions; null when it uses no extension, which takes it out of the set (app §2). */
+private fun ask(tsync: Tsync, domain: Served, pull: Pull, previous: VaultView?): VaultView? {
+    val status = try {
+        domain.vault.status(pull)
+    } catch (e: CoreException) {
+        // A last view stays shown over a refusal; without one the refusal is.
+        return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, emptyList(), false)
+    }
+    tsync.noteVault(domain.name, status != null)
+    status ?: return null
+    val extensions = try {
+        domain.client.stats().extensions
+    } catch (e: CoreException) {
+        previous?.extensions.orEmpty()
+    }
+    return VaultView(domain, status, null, extensions, previous?.settled == true || pull == Pull.DEFAULT)
+}
+
+/**
+ * extensions README §6.1 in a vault list: with [several] domains, a header naming the domain with
+ * its mark, then, until the vault is unlocked, its state in place of its rows.
+ * @return whether the domain's rows follow
+ */
+internal fun LazyListScope.vaultSection(tsync: Tsync, view: VaultView, several: Boolean, onChanged: () -> Unit): Boolean {
+    val name = view.domain.name
+    if (several) item(key = "$name/header") { DomainHeader(view) }
+    val unlocked = view.status?.state == "unlocked"
+    if (!unlocked) item(key = "$name/state") { VaultState(tsync, view, onChanged) }
+    val machines = view.status?.newMachines.orEmpty()
+    if (unlocked && machines.isNotEmpty()) item(key = "$name/machines") { MachinesJoined(view, machines, onChanged) }
+    return unlocked
+}
+
+@Composable
+private fun DomainHeader(view: VaultView) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        view.status?.appearance?.let { VaultMark(it, Modifier.padding(end = 8.dp)) }
+        Text(view.domain.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+    }
+}
+
+@Composable
+private fun VaultState(tsync: Tsync, view: VaultView, onChanged: () -> Unit) {
+    val status = view.status
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        when {
+            status == null -> Text(view.failure.orEmpty(), color = MaterialTheme.colorScheme.error)
+            status.state == "absent" -> Text(stringResource(R.string.vault_absent))
+            status.state == "corrupt" -> Text(stringResource(R.string.vault_corrupt))
+            else -> {
+                if (status.outdated && view.settled) Banner(stringResource(R.string.codes_offline_as_of, age(status.pulledAt)))
+                if (status.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
+                UnlockForm(view.domain, status.enrolled, onUnlocked = onChanged)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MachinesJoined(view: VaultView, machines: List<String>, onChanged: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    Column {
+        machines.forEach { Banner(stringResource(R.string.vault_machine_joined, it)) }
+        TextButton(onClick = {
+            scope.launch { attempt { view.domain.vault.acknowledgeMachines() }; onChanged() }
+        }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.vault_machines_seen)) }
+    }
+}
 
 private fun describe(context: Context, status: VaultStatus): String {
     val state = context.getString(if (status.state == "unlocked") R.string.vault_state_unlocked else R.string.vault_state_locked)
@@ -273,7 +335,7 @@ private fun Message(text: String, padding: PaddingValues) {
 
 /** A passphrase and, on a phone not yet enrolled, the secret key: masked, paste accepted, no autofill. */
 @Composable
-fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
+fun UnlockForm(domain: Served, enrolled: Boolean, onUnlocked: () -> Unit) {
     var passphrase by remember { mutableStateOf("") }
     var secretKey by remember { mutableStateOf("") }
     var refusal by remember { mutableStateOf<String?>(null) }
@@ -292,7 +354,7 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
             onClick = {
                 busy = true
                 scope.launch {
-                    val result = attempt { tsync.vault.unlock(passphrase, secretKey.takeUnless { enrolled }) }
+                    val result = attempt { domain.vault.unlock(passphrase, secretKey.takeUnless { enrolled }) }
                     busy = false
                     refusal = result.reason()
                     if (result.isSuccess) onUnlocked()
@@ -304,32 +366,40 @@ fun UnlockForm(tsync: Tsync, enrolled: Boolean, onUnlocked: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit) {
+private fun CodesList(tsync: Tsync, views: List<VaultView>, padding: PaddingValues, onChanged: () -> Unit) {
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
-    var codes by remember { mutableStateOf<Codes?>(null) }
-    // android-app §5.1: whether a read that waited for the server has answered, before which an
-    // outdated list is the last view shown at once, not yet a sign of being offline.
-    var settled by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    var codes by remember { mutableStateOf<Map<String, Codes>>(emptyMap()) }
+    // android-app §5.1: the domains whose read waited for the server, before which an outdated
+    // list is the last view shown at once, not yet a sign of being offline.
+    var settled by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var failures by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var elapsed by remember { mutableIntStateOf(0) }
-    var acting by remember { mutableStateOf<OneTimeCode?>(null) }
+    var acting by remember { mutableStateOf<Pair<Served, OneTimeCode>?>(null) }
     val changes by tsync.vaultChanges.collectAsState()
     val lifecycle = LocalLifecycleOwner.current
+    val open = views.filter { it.status?.state == "unlocked" }.map { it.domain }
     // The owner computes every code; the app only counts the seconds down and asks again at zero,
     // at each return to the foreground, and after each change it makes (pitfall B-8.18).
-    LaunchedEffect(filter, changes) {
+    LaunchedEffect(filter, changes, open) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            if (codes == null) attempt { tsync.vault.codes(filter, Pull.BACKGROUND) }.onSuccess { codes = it }
+            for (domain in open) {
+                if (domain.name !in codes) attempt { domain.vault.codes(filter, Pull.BACKGROUND) }.onSuccess { codes = codes + (domain.name to it) }
+            }
             while (true) {
-                val result = attempt { tsync.vault.codes(filter) }
-                result.onSuccess { codes = it; settled = true; failure = null; elapsed = 0 }.onFailure { failure = it.message }
-                if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
-                    onLocked()
-                    return@repeatOnLifecycle
+                var failed = false
+                for (domain in open) {
+                    val result = attempt { domain.vault.codes(filter) }
+                    result.onSuccess { codes = codes + (domain.name to it); settled = settled + domain.name; failures = failures - domain.name }
+                        .onFailure { failures = failures + (domain.name to it.message.orEmpty()); failed = true }
+                    if ((result.exceptionOrNull() as? CoreException)?.code == Code.LOCKED) {
+                        onChanged()
+                        return@repeatOnLifecycle
+                    }
                 }
+                elapsed = 0
                 // A failed read keeps counting the codes it has down, which may then show as expired.
-                val wait = if (result.isFailure) 5 else codes?.records?.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
+                val wait = if (failed) 5 else codes.values.flatMap { it.records }.minOfOrNull { it.secondsLeft }?.coerceAtLeast(1) ?: 30
                 repeat(wait) { delay(1000); elapsed++ }
             }
         }
@@ -340,42 +410,50 @@ private fun CodesList(tsync: Tsync, padding: PaddingValues, onLocked: () -> Unit
             label = { Text(stringResource(R.string.code_search)) },
             singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        failure?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        val current = codes ?: return@Column if (failure == null) Loading() else Unit
-        if (current.outdated && settled) Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt)))
         LazyColumn(Modifier.fillMaxSize()) {
-            if (current.records.isEmpty()) item { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
-            items(current.records, key = { it.id }) { record ->
-                val left = (record.secondsLeft - elapsed).coerceAtLeast(0)
-                ListItem(
-                    headlineContent = { Text(record.issuer.ifEmpty { record.account }) },
-                    supportingContent = {
-                        Column {
-                            if (record.issuer.isNotEmpty()) Text(record.account)
-                            Text(grouped(record.code), style = MaterialTheme.typography.headlineMedium)
-                        }
-                    },
-                    trailingContent = {
-                        Text(
-                            stringResource(R.string.code_seconds_left, left),
-                            color = if (left <= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    modifier = Modifier.combinedClickable(
-                        onClick = { copy(context, tsync, record) },
-                        onLongClick = { acting = record },
-                    ),
-                )
-            }
-            if (current.corrupt > 0) item {
-                Text(
-                    context.resources.getQuantityString(R.plurals.codes_corrupt, current.corrupt, current.corrupt),
-                    Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error,
-                )
+            for (view in views) {
+                if (!vaultSection(tsync, view, views.size > 1, onChanged)) continue
+                val name = view.domain.name
+                failures[name]?.let { item(key = "$name/failure") { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) } }
+                val current = codes[name]
+                if (current == null) {
+                    if (name !in failures) item(key = "$name/loading") { CircularProgressIndicator(Modifier.padding(16.dp)) }
+                    continue
+                }
+                if (current.outdated && name in settled) item(key = "$name/outdated") { Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt))) }
+                if (current.records.isEmpty()) item(key = "$name/empty") { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
+                items(current.records, key = { "$name/${it.id}" }) { record ->
+                    val left = (record.secondsLeft - elapsed).coerceAtLeast(0)
+                    ListItem(
+                        headlineContent = { Text(record.issuer.ifEmpty { record.account }) },
+                        supportingContent = {
+                            Column {
+                                if (record.issuer.isNotEmpty()) Text(record.account)
+                                Text(grouped(record.code), style = MaterialTheme.typography.headlineMedium)
+                            }
+                        },
+                        trailingContent = {
+                            Text(
+                                stringResource(R.string.code_seconds_left, left),
+                                color = if (left <= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        modifier = Modifier.combinedClickable(
+                            onClick = { copy(context, tsync, record) },
+                            onLongClick = { acting = view.domain to record },
+                        ),
+                    )
+                }
+                if (current.corrupt > 0) item(key = "$name/corrupt") {
+                    Text(
+                        context.resources.getQuantityString(R.plurals.codes_corrupt, current.corrupt, current.corrupt),
+                        Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
     }
-    acting?.let { CodeActions(tsync, it, onDone = { acting = null; tsync.vaultChanges.value++ }) }
+    acting?.let { (domain, record) -> CodeActions(tsync, domain, record, onDone = { acting = null; tsync.vaultChanges.value++ }) }
 }
 
 private fun grouped(code: String) = code.chunked(3).joinToString(" ")
@@ -390,7 +468,7 @@ private fun copy(context: Context, tsync: Tsync, record: OneTimeCode) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
+private fun CodeActions(tsync: Tsync, domain: Served, record: OneTimeCode, onDone: () -> Unit) {
     var renaming by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
     var removeSent by remember { mutableStateOf(false) }
@@ -416,7 +494,7 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
                     TextButton(enabled = !busy, onClick = {
                         busy = true
                         scope.launch {
-                            val result = attempt { tsync.vault.rename(record.id, issuer.trim(), account.trim()) }
+                            val result = attempt { domain.vault.rename(record.id, issuer.trim(), account.trim()) }
                             busy = false
                             refusal = result.reason()
                             if (result.isSuccess) onDone()
@@ -433,7 +511,7 @@ private fun CodeActions(tsync: Tsync, record: OneTimeCode, onDone: () -> Unit) {
                 TextButton(enabled = !removeSent, onClick = {
                     removeSent = true
                     scope.launch {
-                        attempt { tsync.vault.remove(record.id) }.reason()?.let { tsync.report(it, failed = true) }
+                        attempt { domain.vault.remove(record.id) }.reason()?.let { tsync.report(it, failed = true) }
                         onDone()
                     }
                 }) { Text(stringResource(R.string.code_remove)) }
@@ -465,7 +543,7 @@ internal fun scan(context: Context, onText: (String) -> Unit, onFailure: (String
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
+private fun AddCodeSheet(tsync: Tsync, domain: Served, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var entering by remember { mutableStateOf(false) }
@@ -486,7 +564,7 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
             val text = withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
             } ?: return@launch
-            attempt { tsync.vault.import(text) }
+            attempt { domain.vault.import(text) }
                 .onSuccess { imported ->
                     outcome = buildString {
                         append(context.getString(R.string.code_imported, imported.added, imported.already, imported.refused.size))
@@ -503,7 +581,7 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
             confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
         )
         entering -> EnterCode(onDismiss, busy) { secret, issuer, account ->
-            adding { tsync.vault.add(secret, issuer, account) }
+            adding { domain.vault.add(secret, issuer, account) }
         }
         else -> ModalBottomSheet(onDismissRequest = onDismiss) {
             Column(Modifier.navigationBarsPadding()) {
@@ -512,7 +590,7 @@ private fun AddCodeSheet(tsync: Tsync, onDismiss: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.code_scan)) },
                     supportingContent = if (scanner) null else ({ Text(stringResource(R.string.code_scan_unavailable)) }),
                     modifier = Modifier.combinedClickable(enabled = scanner, onClick = {
-                        scan(context, { text -> adding { tsync.vault.add(text) } }, { outcome = it })
+                        scan(context, { text -> adding { domain.vault.add(text) } }, { outcome = it })
                     }),
                 )
                 ListItem(headlineContent = { Text(stringResource(R.string.code_enter)) }, modifier = Modifier.combinedClickable(onClick = { entering = true }))
@@ -562,8 +640,10 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
     var generation by remember { mutableIntStateOf(0) }
     var refusal by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // A new record goes to the first domain, in config order, using totp.
+    var domain by remember { mutableStateOf<Served?>(null) }
     LaunchedEffect(generation) {
-        val result = attempt { tsync.vault.status() }
+        val result = attempt { tsync.using("totp").firstOrNull()?.also { domain = it }?.vault?.status() }
         status = result.getOrNull()
         unreachable = result.reason()
         checked = true
@@ -587,7 +667,7 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
                     current == null -> Text(stringResource(R.string.vault_not_used))
                     current.state == "absent" -> Text(stringResource(R.string.vault_absent))
                     current.state == "corrupt" -> Text(stringResource(R.string.vault_corrupt))
-                    current.state == "locked" -> UnlockForm(tsync, current.enrolled, onUnlocked = {
+                    current.state == "locked" -> UnlockForm(domain!!, current.enrolled, onUnlocked = {
                         generation++
                         tsync.vaultChanges.value++
                     })
@@ -600,7 +680,7 @@ fun CodeLinkSheet(tsync: Tsync, link: String, onDone: () -> Unit) {
             if (current?.state == "unlocked") TextButton(enabled = !busy, onClick = {
                 busy = true
                 scope.launch {
-                    val result = attempt { tsync.vault.add(link) }
+                    val result = attempt { domain!!.vault.add(link) }
                     busy = false
                     refusal = result.reason()
                     if (result.isSuccess) {

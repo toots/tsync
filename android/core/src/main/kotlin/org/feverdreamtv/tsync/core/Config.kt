@@ -4,118 +4,98 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
-import java.net.URI
-import java.net.URISyntaxException
 
-/** What the app configures: one domain backed by one http-proxy server (app §6.1). */
+/** One domain the app configures, backed by one http-proxy server (app §6.1). */
 data class ServerConfig(
     val url: String,
     val secret: String,
     val domain: String,
     val maxCache: String = Parameters.DEFAULT_MAX_CACHE,
 ) {
-    fun encode(clientName: String): String {
+    fun json(): JSONObject {
         val backend = JSONObject().put("type", "http-proxy").put("name", "server").put("role", "main")
             .put("url", url.trim().trimEnd('/')).put("secret", secret)
-        val domain = JSONObject().put("name", domain).put("versioning", true)
+        return JSONObject().put("name", domain).put("versioning", true)
             .put("maxCache", maxCache.trim()).put("frontends", JSONArray().put("android"))
             .put("backends", JSONArray().put(backend))
-        return JSONObject().put("name", clientName).put("domains", JSONArray().put(domain)).toString()
     }
 
     companion object {
-        /** Reads what a config names, leniently: it prefills a form, it validates nothing. */
-        fun decode(text: String): Pair<String?, ServerConfig>? = try {
+        fun encode(clientName: String, domains: List<ServerConfig>): String =
+            JSONObject().put("name", clientName).put("domains", JSONArray(domains.map { it.json() })).toString()
+
+        /** Reads what a config names, leniently: it lists domains, it validates nothing. */
+        fun decode(text: String): Pair<String?, List<ServerConfig>>? = try {
             val config = JSONObject(text)
-            val domain = config.getJSONArray("domains").getJSONObject(0)
+            val domains = config.getJSONArray("domains")
+            text(config, "name") to (0 until domains.length()).map { domain(domains.getJSONObject(it)) }
+        } catch (e: JSONException) {
+            null
+        }
+
+        private fun domain(domain: JSONObject): ServerConfig {
             val backends = domain.optJSONArray("backends") ?: JSONArray()
             val backend = (0 until backends.length()).map { backends.getJSONObject(it) }
                 .firstOrNull { it.optString("type", "") == "http-proxy" } ?: JSONObject()
             val maxCache = if (domain.has("maxCache")) domain.get("maxCache").toString() else ""
-            text(config, "name") to ServerConfig(
+            return ServerConfig(
                 url = backend.optString("url", ""),
                 secret = backend.optString("secret", ""),
                 domain = domain.optString("name", ""),
                 maxCache = maxCache,
             )
-        } catch (e: JSONException) {
-            null
         }
     }
 }
 
-enum class FormField { URL, SECRET, DOMAIN }
-
-enum class FormError(val field: FormField) {
-    URL_MALFORMED(FormField.URL),
-    URL_CLEARTEXT(FormField.URL),
-    SECRET_TOO_SHORT(FormField.SECRET),
-    DOMAIN_INVALID(FormField.DOMAIN),
-}
-
-object ConfigForm {
-    private val reservedDomains = setOf("shares", "corrupted", "verify-jobs", "gc-jobs")
-
-    /** app §6.1 rules 1–3: the first failure wins. Rule 4 is the core's. */
-    fun validate(config: ServerConfig): FormError? =
-        urlError(config.url)
-            ?: FormError.SECRET_TOO_SHORT.takeIf { config.secret.length < Parameters.MIN_SECRET_LENGTH }
-            ?: FormError.DOMAIN_INVALID.takeIf { !isDomainName(config.domain) }
-
-    fun urlError(url: String): FormError? {
-        val uri = try {
-            URI(url.trim())
-        } catch (e: URISyntaxException) {
-            return FormError.URL_MALFORMED
-        }
-        val host = uri.host ?: return FormError.URL_MALFORMED
-        if (uri.userInfo != null || uri.rawQuery != null || uri.rawFragment != null) return FormError.URL_MALFORMED
-        return when (uri.scheme?.lowercase()) {
-            "https" -> null
-            "http" -> if (isLoopback(host)) null else FormError.URL_CLEARTEXT
-            else -> FormError.URL_MALFORMED
-        }
-    }
-
-    fun isLoopback(host: String): Boolean {
-        val bare = host.removePrefix("[").removeSuffix("]").lowercase()
-        if (bare == "localhost" || bare == "::1") return true
-        val octets = bare.split('.').map { it.toIntOrNull() }
-        return octets.size == 4 && octets.all { it != null && it in 0..255 } && octets[0] == 127
-    }
-
-    /** The grammar of 01-core §2.2, on the name's bytes. */
-    fun isDomainName(name: String): Boolean {
-        val bytes = name.toByteArray(Charsets.UTF_8)
-        if (bytes.isEmpty() || bytes.size > 255) return false
-        if (bytes.any { it.toInt() in 0x00..0x1F || it.toInt() == 0x7F || it.toInt() == '/'.code }) return false
-        return name != "." && name != ".." && !name.startsWith(".tsync-") && name !in reservedDomains
-    }
-}
-
-/** The config file (app §6.1): only a text the core accepted is ever written to it. */
+/**
+ * The config file (app §6.1): only a text the core accepted is ever written to it. [check] is the
+ * core's `check_config` of a domain and a candidate text, null when accepted.
+ */
 class ConfigStore(home: File) {
     private val directory = File(home, ".config/tsync")
     val file = File(directory, "config.json")
 
     fun exists(): Boolean = file.exists()
 
-    fun read(): ServerConfig? = decoded()?.second
+    /** The configured domains, in the order the app lists them; empty when there is none. */
+    fun read(): List<ServerConfig> = decoded()?.second.orEmpty()
 
-    private fun decoded(): Pair<String?, ServerConfig>? =
+    fun names(): List<String> = read().map { it.domain }
+
+    private fun decoded(): Pair<String?, List<ServerConfig>>? =
         if (exists()) ServerConfig.decode(file.readText()) else null
 
     /**
-     * @param check the core's `check_config` of a domain and a candidate text: null when accepted
-     * @return null when the candidate became the config, else the core's sentence
+     * Appends [added], leaving out a domain the config already names. With [replace] the current
+     * domains are dropped, as Setup does over a config that does not load (app §10.2).
+     * @return null when the candidate became the config, else the refused domain and the core's sentence
      */
     @Synchronized
-    fun save(config: ServerConfig, deviceName: String, check: (String, String) -> String?): String? {
-        val clientName = decoded()?.first?.takeIf { it.isNotEmpty() } ?: deviceName.ifBlank { "android" }
-        val candidate = config.encode(clientName)
-        check(config.domain, candidate)?.let { return it }
+    fun add(added: List<ServerConfig>, deviceName: String, replace: Boolean = false, check: (String, String) -> String?): String? {
+        val current = decoded()
+        val kept = if (replace) emptyList() else current?.second.orEmpty()
+        val fresh = added.filter { new -> kept.none { it.domain == new.domain } }
+        val clientName = current?.first?.takeIf { it.isNotEmpty() } ?: deviceName.ifBlank { "android" }
+        val candidate = ServerConfig.encode(clientName, kept + fresh)
+        for (domain in fresh) check(domain.domain, candidate)?.let { return "${domain.domain}: $it" }
+        write(candidate)
+        return null
+    }
+
+    /** Deletes [name]'s entry and nothing else. @return the core's sentence when it refuses what is left */
+    @Synchronized
+    fun remove(name: String, check: (String, String) -> String?): String? {
+        val (clientName, domains) = decoded() ?: return null
+        val kept = domains.filter { it.domain != name }
+        val candidate = ServerConfig.encode(clientName ?: "android", kept)
+        kept.firstOrNull()?.let { first -> check(first.domain, candidate)?.let { return it } }
+        write(candidate)
+        return null
+    }
+
+    private fun write(candidate: String) {
         Durable.privateDirectory(directory)
         Durable.write(file, candidate.toByteArray())
-        return null
     }
 }

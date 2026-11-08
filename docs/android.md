@@ -1,17 +1,19 @@
 # Use it from an Android phone
 
 
-The app connects to one domain on one tsync server.
+The app serves any number of domains, each through its own tsync server. A domain starts the first time you use it.
 
-**Setup.** With a [setup link](server.md#from-a-setup-link), tap **Scan setup code** and scan the QR code its page shows, or paste the link in the URL field and tap **Check server**: the server, the secret and the domain are filled in, and a link naming several domains lets you pick one. Otherwise enter the server's URL and the secret, then tap **Check server**: the app lists the domains that secret opens. Pick one, set how much storage the cache may use (2 GB by default), and tap **Connect**. The URL must be `https://`.
+**Setup.** Domains are added from a [setup link](server.md#from-a-setup-link) only: tap **Scan setup code** and scan the QR code its page shows, or paste the link and tap **Open link**. Tick the domains to join (a single one is ticked already; those the phone already has are not offered) and tap **Join**. Each domain's cache may use 2 GB. A link to a server that is not `https://` joins nothing.
 
-**Files.** Browse the domain, also offline: a folder you have seen stays listed, with a banner saying when it was last refreshed. Each file shows whether it is online-only, available offline, or waiting to upload. Long-press an item to open it, share a link, keep it offline, remove its download, rename, move or delete it.
+**Domains.** *Settings → Domains* lists each domain with its server. *Add a domain* opens a setup link the same way; *Remove* takes a domain off the phone after you confirm, and nothing in it is deleted. Removing a domain that is running offers to restart tsync; until then it keeps being served.
 
-**Other apps.** tsync appears in Android's file picker, so any app can open and save documents in the domain. It is also a share target: *Save to tsync* in another app's share sheet, then pick a folder.
+**Files.** With several domains, Files opens on the list of them; tap one to browse it. A domain that cannot start says why on its row. Browse a domain, also offline: a folder you have seen stays listed, with a banner saying when it was last refreshed. Each file shows whether it is online-only, available offline, or waiting to upload. Long-press an item to open it, share a link, keep it offline, remove its download, rename, move or delete it.
 
-**Camera backup.** In Settings, turn on *Back up camera photos and videos*, and choose between everything already on the phone and new captures only. It uploads over wifi only and not on a low battery, unless you switch those off. *Back up now* runs it at once.
+**Other apps.** tsync appears in Android's file picker, one entry per domain, so any app can open and save documents in them. It is also a share target: *Save to tsync* in another app's share sheet, then pick a domain and a folder. An item cannot be moved from one domain to another.
 
-**Vault.** <a id="vault"></a>When the server's domain uses the [vault](vault.md), a *Vault* screen appears. The phone follows the domain: create the vault, change its passphrase or delete it on a computer.
+**Camera backup.** In Settings, turn on *Back up camera photos and videos*, and choose between everything already on the phone and new captures only. With several domains, *Back up to* picks the one new photos go to; those already backed up stay where they are. It uploads over wifi only and not on a low battery, unless you switch those off. *Back up now* runs it at once.
+
+**Vault.** <a id="vault"></a>When a domain uses the [vault](vault.md), a *Vault* screen appears. The phone follows each domain: create the vault, change its passphrase or delete it on a computer. With several vaults, each tab lists them all, grouped under each domain's name and mark, and each is unlocked and locked on its own; a new code goes to the first domain that uses codes.
 
 - *Unlock* with the passphrase, and the first time on this phone the secret key too; the phone then stays unlocked until you lock it from the screen's menu (⋮), which can also forget the secret key.
 - *Codes* lists your two-factor codes with the seconds each has left. Tap one to copy it; the copy is marked sensitive, so the keyboard and clipboard previews hide it. Long-press to rename or remove. The search field narrows the list.
@@ -26,14 +28,15 @@ The app connects to one domain on one tsync server.
 - **Turn it on** in *Settings → Passwords, passkeys & accounts*: choose tsync as the *Preferred service*, and turn tsync on (and Google off, if you like) under *Additional providers*. The *Passwords* tab offers *Turn on tsync for autofill* until you have.
 - **Chrome** fills from its own password manager unless told otherwise: in Chrome, *Settings → Autofill services → Autofill using another service*, then restart Chrome. Vanadium and Firefox use tsync directly.
 - **Filling.** Tap a username or password field: tsync's suggestions name each login by title and username, and the password is fetched only when you pick one. A code field offers the code of the site's login that links one.
+- **Several domains.** Suggestions come from every vault, each naming its domain. A new login is saved to the first domain that uses passwords; creating a passkey offers one entry per domain, so you pick the vault there.
 - **Saving.** Signing in with a login tsync does not have offers *Save to tsync?*. A changed password asks, in a notification, whether to update the one tsync has.
 - **A strong password.** Signing up, or changing a password, a new-password field also offers *Use a strong password*: picking it fills a generated password, and the field confirming it, and saves the login in tsync at once. Submitting the form then adds the username to that login.
 - **Passkeys** (Android 14 and later) work in the browsers Google lists for passkeys, Chrome, Firefox, Brave, Edge, Samsung Internet and Vanadium among them: create one with tsync, and sign in with it, after the fingerprint or screen lock when the site asks. Apps' own passkeys are not supported yet.
 - **Which site.** A page's address is believed only from a browser on that list, checked by its signature. Any other app is offered the logins saved for that app, and those of the websites that declare the app as theirs (their Digital Asset Links, checked against the app's signature); a website's login appears from the next form on, once tsync has checked it. For any other login, *Other logins…* lets you pick one and use it for that app from then on.
 - **The Passwords tab** lists your logins, notes and passkeys. Tap one to copy its username, password, code, notes or any of its custom fields; every copy is marked sensitive.
-- **A locked vault** shows *tsync is locked*; tapping it opens the Vault screen, where you unlock. Autofill never asks for your passphrase.
+- **A locked vault** shows *tsync is locked*, naming the domain when there are several; tapping it opens the Vault screen, where you unlock. Autofill never asks for your passphrase.
 - Suggestions come from what the phone already holds, so they appear quickly and offline; logins added elsewhere a moment ago show at the next tap.
 
-**Activity.** What is uploading and downloading, what failed with a *Retry*, a pause switch, and the status text for diagnosis.
+**Activity.** For each running domain: what is uploading and downloading, a pause switch, and the status text for diagnosis; then what failed, with a *Retry*. A domain not started yet is listed as such.
 
-**Settings → Storage → Free up space** removes every download from the phone, files kept offline included.
+**Settings → Storage → Free up space**, per running domain, removes every download of that domain from the phone, files kept offline included.

@@ -35,6 +35,9 @@ class IntentFormatTest {
         assertEquals(setOf("target", "exclusive", "state", "base", "modified"), encoded.keySet())
         assertEquals(setOf("ref", "name"), encoded.getJSONObject("target").keySet())
         assertEquals(existing, Intent.decode(existing.encode()))
+        val named = Intent(Target.Child("root", "a"), true, domain = "Family Photos")
+        assertEquals("Family Photos", JSONObject(named.encode()).getString("domain"))
+        assertEquals(named, Intent.decode(named.encode()))
     }
 
     @Test
@@ -107,10 +110,12 @@ class IntentStoreTest {
 class IngestTest {
     private val home = Files.createTempDirectory("home").toFile()
     private val fake = FakeCore()
-    private val ingest = Ingest(Client(fake), IntentStore(home))
+    private val other = FakeCore()
+    private val clients = mapOf("docs" to Client(fake), "photos" to Client(other))
+    private val ingest = Ingest(IntentStore(home), { "docs" }, clients::getValue)
 
-    private fun stage(target: Target, exclusive: Boolean = true, body: String = "body", ready: Boolean = true, base: String? = null, modified: Long? = null): String {
-        val name = ingest.stage(target, exclusive, base, modified)
+    private fun stage(target: Target, exclusive: Boolean = true, body: String = "body", ready: Boolean = true, base: String? = null, modified: Long? = null, domain: String = "docs"): String {
+        val name = ingest.stage(domain, target, exclusive, base, modified)
         ingest.staging(name).writeText(body)
         if (ready) ingest.markReady(name)
         return name
@@ -119,7 +124,7 @@ class IngestTest {
     private fun restarted(): Ingest {
         val store = IntentStore(home)
         store.recover()
-        return Ingest(Client(fake), store)
+        return Ingest(store, { "docs" }, clients::getValue)
     }
 
     @Test
@@ -202,7 +207,7 @@ class IngestTest {
     @Test
     fun aProcessKilledAtEveryStepLosesNoReportedSaveAndPublishesNoPartialBody() {
         // Killed after the intent, before the body is complete: nothing was reported.
-        val interrupted = ingest.stage(Target.Child("root", "partial.bin"), true)
+        val interrupted = ingest.stage("docs", Target.Child("root", "partial.bin"), true)
         ingest.staging(interrupted).writeText("half")
         // Killed after ready, before commit: success was reported.
         val reported = stage(Target.Child("root", "whole.bin"), body = "whole")
@@ -213,7 +218,7 @@ class IngestTest {
 
         val next = restarted()
         val outcomes = mutableListOf<Pair<String, Boolean>>()
-        next.resumeReady { save, result -> outcomes += save.staging to result.isSuccess }
+        next.resumeReady("docs") { save, result -> outcomes += save.staging to result.isSuccess }
         assertFalse(next.intents.exists(interrupted) || next.staging(interrupted).exists())
         assertNull(fake.child("root", "partial.bin"))
         assertEquals("whole", String(fake.child("root", "whole.bin")!!.content))
@@ -227,7 +232,7 @@ class IngestTest {
     fun resumeLeavesTheSavesOfRunningFlowsAlone() {
         val running = stage(Target.Child("root", "a"))
         var resumed = 0
-        ingest.resumeReady { _, _ -> resumed++ }
+        ingest.resumeReady("docs") { _, _ -> resumed++ }
         assertEquals(0, resumed)
         assertNull(ingest.retry(running))
         ingest.commit(running)
@@ -235,11 +240,27 @@ class IngestTest {
     }
 
     @Test
+    fun eachSaveGoesToItsOwnDomainAndAnUnnamedOneToTheFirst() {
+        stage(Target.Child("root", "mine.jpg"), domain = "photos")
+        File(home, "staging/6-old").writeText("old")
+        File(home, "intents/6-old.json").writeText("""{"target":{"parentRef":"root","name":"old.txt"},"exclusive":true,"state":"ready"}""")
+        val next = restarted()
+        val resumed = mutableListOf<String>()
+        next.resumeReady("docs") { save, result -> resumed += save.staging; assertTrue(result.isSuccess) }
+        assertEquals(listOf("6-old"), resumed)
+        assertEquals(listOf("old.txt"), fake.names("root"))
+        assertEquals(emptyList(), other.names("root"))
+        next.resumeReady("photos") { save, result -> resumed += save.staging; assertTrue(result.isSuccess) }
+        assertEquals(listOf("mine.jpg"), other.names("root"))
+        assertEquals(listOf("old.txt"), fake.names("root"))
+    }
+
+    @Test
     fun anUnreadableRecordIsReportedAndKept() {
         File(home, "staging/5-odd").writeText("body")
         File(home, "intents/5-odd.json").writeText("""{"state":"later"}""")
         val next = restarted()
-        next.resumeReady { _, _ -> error("must not commit") }
+        next.resumeReady("docs") { _, _ -> error("must not commit") }
         assertEquals(listOf(PendingSave("5-odd", null)), next.pending())
         assertTrue(File(home, "staging/5-odd").exists())
     }

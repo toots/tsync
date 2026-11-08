@@ -8,7 +8,7 @@ import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.feverdreamtv.tsync.backup.MediaSource
-import org.feverdreamtv.tsync.core.Parameters
+import org.feverdreamtv.tsync.provider.TsyncDocumentsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -25,13 +25,13 @@ class DeviceTest {
     private val context = instrumentation.targetContext
 
     @Test
-    fun thereIsAlwaysOneRootEvenWhenTheCoreCannotBoot() {
+    fun withNoConfigThereIsOneRootSayingSo() {
         val roots = context.contentResolver.query(DocumentsContract.buildRootsUri(Tsync.AUTHORITY), null, null, null, null)
         assertNotNull(roots)
         roots!!.use {
             assertEquals(1, it.count)
             it.moveToFirst()
-            assertEquals(Parameters.ROOT, it.getString(it.getColumnIndexOrThrow(DocumentsContract.Root.COLUMN_DOCUMENT_ID)))
+            assertEquals(TsyncDocumentsProvider.UNCONFIGURED, it.getString(it.getColumnIndexOrThrow(DocumentsContract.Root.COLUMN_DOCUMENT_ID)))
             assertEquals("tsync", it.getString(it.getColumnIndexOrThrow(DocumentsContract.Root.COLUMN_TITLE)))
             val flags = it.getInt(it.getColumnIndexOrThrow(DocumentsContract.Root.COLUMN_FLAGS))
             assertTrue(flags and DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD != 0)
@@ -40,7 +40,7 @@ class DeviceTest {
 
     @Test
     fun theRootDocumentIsSynthesised() {
-        val root = DocumentsContract.buildDocumentUri(Tsync.AUTHORITY, Parameters.ROOT)
+        val root = DocumentsContract.buildDocumentUri(Tsync.AUTHORITY, TsyncDocumentsProvider.UNCONFIGURED)
         context.contentResolver.query(root, null, null, null, null)!!.use {
             assertTrue(it.moveToFirst())
             assertEquals(DocumentsContract.Document.MIME_TYPE_DIR, it.getString(it.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)))

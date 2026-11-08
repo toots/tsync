@@ -188,8 +188,10 @@ is refused.
 - **Roots.** One root per domain the config names, each even when its domain cannot boot (a
   vanished root leaves no way to diagnose): root id = the domain name, document id
   `<domain>/root`, title `tsync`, summary = the domain name, supporting is-child, and create unless
-  the domain is read-only. With no config, one root with an empty id, which says tsync is not set
-  up.
+  the domain is read-only. A domain is not booted to draw its root: until it is, its root offers
+  create and the owner refuses a write to a read-only domain. With no config, one root with an
+  empty id and the document id `unconfigured` (no `/`, so no domain's), whose listing says tsync
+  is not set up.
 - **Document.** A domain's root is synthesised (a fresh install has no mirror). Otherwise `stat`.
   - Folder: the directory MIME type; supports create, delete, rename and move.
   - File: MIME type from the name's extension (default octet-stream); supports write, delete,
@@ -468,7 +470,7 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
   - *Domains*: one entry per domain, in config order, naming it and its server, with **Remove**
     (after a confirmation naming the domain) and the restart prompt of §6.1; then **Add a
     domain**, which opens Setup. Nothing of a domain is edited here.
-  - *Storage*, per domain: the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
+  - *Storage*, per domain, asked of the booted domains only (one not booted says so): the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
     when empty), with the server named when they are its list; the cache limit; how much the cache (from `stats`) and the staged bodies (from
     `status`) hold now;
     "Free up space" (`evict` on the root, after a confirmation saying that files made available

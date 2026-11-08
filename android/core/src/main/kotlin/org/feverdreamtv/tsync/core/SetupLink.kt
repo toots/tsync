@@ -13,9 +13,6 @@ sealed interface SetupAnswer {
 }
 
 object SetupLink {
-    /** Whether pasted text is a setup link rather than a server URL; the core decides whether it is a valid one. */
-    fun looksLike(text: String): Boolean = text.contains("/join/") && text.contains('#')
-
     fun parse(json: String): SetupAnswer = try {
         val answer = JSONObject(json)
         if (answer.has("error")) SetupAnswer.Refused(answer.getString("error"))

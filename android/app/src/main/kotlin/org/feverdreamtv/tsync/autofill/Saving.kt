@@ -29,9 +29,10 @@ object Saving {
     private const val EXTRA_USERNAME = "username"
     private const val EXTRA_PASSWORD = "password"
     private const val EXTRA_UPDATE = "update"
+    private const val EXTRA_DOMAIN = "domain"
 
     /** passwords §5.1: the suggestion awaiting its submit, in memory only, its password kept as a SHA-256. */
-    private class Pending(val site: String, val id: String, val digest: ByteArray)
+    private class Pending(val domain: String, val site: String, val id: String, val digest: ByteArray)
 
     @Volatile
     private var pending: Pending? = null
@@ -39,33 +40,39 @@ object Saving {
     private fun digest(password: String): ByteArray =
         java.security.MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
 
-    fun suggested(site: String, id: String, password: String) {
-        pending = Pending(site, id, digest(password))
+    fun suggested(domain: String, site: String, id: String, password: String) {
+        pending = Pending(domain, site, id, digest(password))
     }
 
-    fun save(tsync: Tsync, site: String, username: String, password: String, update: String?) {
+    /**
+     * §5: a new login goes to the first domain using passwords; [update] names a login of
+     * [domain], the one that holds it.
+     */
+    fun save(tsync: Tsync, site: String, username: String, password: String, update: String?, domain: String? = null) {
         val context = tsync.context
         val identity = "save:$site:$username"
         try {
-            if (tsync.boot() != Boot.Ready) throw CoreException(Code.UNREACHABLE, context.getString(R.string.save_login_not_ready))
             // §5.1: the submit of a suggested password names the login the pick saved.
             val suggestion = pending
             if (update == null && suggestion != null && suggestion.site == site &&
                 java.security.MessageDigest.isEqual(suggestion.digest, digest(password))
             ) {
                 pending = null
-                tsync.passwords.saveSuggested(site, username, suggestion.id)
+                tsync.domain(suggestion.domain).ask { this }
+                tsync.domain(suggestion.domain).passwords.saveSuggested(site, username, suggestion.id)
                 tsync.vaultChanges.value++
                 Notifications.outcome(tsync, identity, context.getString(R.string.save_login_done, site), username)
                 return
             }
-            when (val saved = tsync.passwords.save(site, username, password, update)) {
+            val target = if (domain != null) tsync.domain(domain).takeIf { it.boot() == Boot.Ready } else tsync.using("passwords").firstOrNull()
+            target ?: throw CoreException(Code.UNREACHABLE, context.getString(R.string.save_login_not_ready))
+            when (val saved = target.passwords.save(site, username, password, update)) {
                 is Saved.Done -> {
                     tsync.vaultChanges.value++
                     Notifications.outcome(tsync, identity, context.getString(R.string.save_login_done, site), username)
                 }
                 Saved.Unchanged -> {}
-                is Saved.Update -> offerUpdate(context, identity, site, username, password, saved.id)
+                is Saved.Update -> offerUpdate(context, identity, target.name, site, username, password, saved.id)
             }
         } catch (e: CoreException) {
             val reason = if (e.code == Code.LOCKED) context.getString(R.string.save_login_locked) else e.message.orEmpty()
@@ -73,12 +80,12 @@ object Saving {
         }
     }
 
-    private fun offerUpdate(context: Context, identity: String, site: String, username: String, password: String, id: String) {
+    private fun offerUpdate(context: Context, identity: String, domain: String, site: String, username: String, password: String, id: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.channel_passwords), NotificationManager.IMPORTANCE_DEFAULT))
         val update = Intent(context, UpdateReceiver::class.java).setAction(ACTION_UPDATE)
             .putExtra(EXTRA_SITE, site).putExtra(EXTRA_USERNAME, username).putExtra(EXTRA_PASSWORD, password).putExtra(EXTRA_UPDATE, id)
-            .putExtra("identity", identity)
+            .putExtra(EXTRA_DOMAIN, domain).putExtra("identity", identity)
         val tap = PendingIntent.getBroadcast(context, identity.hashCode(), update, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.save_login_update_title, site))
@@ -100,7 +107,7 @@ object Saving {
             val pending = goAsync()
             tsync.scope.launch {
                 try {
-                    save(tsync, site, intent.getStringExtra(EXTRA_USERNAME).orEmpty(), password, update = id)
+                    save(tsync, site, intent.getStringExtra(EXTRA_USERNAME).orEmpty(), password, update = id, domain = intent.getStringExtra(EXTRA_DOMAIN))
                 } catch (e: Throwable) {
                     Log.w(Tsync.TAG, "update of a login failed", e)
                 } finally {
