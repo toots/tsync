@@ -26,6 +26,10 @@ function Until($what, [scriptblock] $test, [int] $seconds = 60) {
     Step "published: $((Published) -join ', ')"
   }
   Step 'status:'; & $tsync status 2>&1 | Out-String | Write-Host
+  if ($log -and (Test-Path $log)) {
+    Step 'why folders stay pending:'
+    Select-String -Path $log -Pattern 'cloud_files: applying' | Select-Object -Last 10 | ForEach-Object Line
+  }
   throw "FAILED within $seconds s: $what"
 }
 
@@ -174,6 +178,18 @@ try {
     (PublishedText 'made\inner.txt') -eq 'inside'
   } 90
 
+  Step 'copying an old file into the sync root'
+  $old = Join-Path $Work 'old.txt'
+  Set-Content -NoNewline -Path $old -Value 'from 2001'
+  $written = [DateTime]::new(2001, 2, 3, 4, 5, 6, [DateTimeKind]::Utc)
+  (Get-Item $old).LastWriteTimeUtc = $written
+  # Copy-Item keeps the last write time, as Explorer does.
+  Copy-Item $old (Join-Path $root 'old.txt')
+  Until 'a copied file reaches the domain' { (PublishedText 'old.txt') -eq 'from 2001' } 90
+  $exported = (Get-Item (Join-Path (Exported) 'old.txt')).LastWriteTimeUtc
+  Check "a copied file keeps its last write time in the domain (got $($exported.ToString('o')))" `
+    ([Math]::Abs(($exported - $written).TotalSeconds) -lt 1)
+
   Step 'saving through a temporary file'
   $temporary = Join-Path $root 'new.txt.saving'
   Set-Content -NoNewline -Path $temporary -Value 'saved whole'
@@ -193,6 +209,20 @@ try {
   Until 'a domain change appears in the sync root' {
     (Test-Path (Join-Path $root 'peer.txt')) -and
       ((Get-Content -Raw (Join-Path $root 'peer.txt')) -eq 'from elsewhere')
+  } 90
+
+  Step 'updating a placeholder from the domain'
+  $remote = Join-Path $root 'remote.txt'
+  $source = Join-Path $Work 'remote'
+  New-Item -ItemType Directory -Force $source | Out-Null
+  Set-Content -NoNewline -Path (Join-Path $source 'remote.txt') -Value 'first'
+  & $tsync import $source --domain docs
+  Until 'a file imported elsewhere appears in the sync root' { Test-Path $remote } 90
+  Set-Content -NoNewline -Path (Join-Path $source 'remote.txt') -Value 'second, and longer'
+  & $tsync import $source --domain docs --force-rehash
+  Check 'a forced import beside the running owner exits 0' ($LASTEXITCODE -eq 0)
+  Until 'a domain edit reaches the placeholder' {
+    ((Get-Item $remote).Length -eq 18) -and ((Get-Content -Raw $remote) -eq 'second, and longer')
   } 90
 
   Step 'pinning'

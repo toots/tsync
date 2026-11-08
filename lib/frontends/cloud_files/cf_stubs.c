@@ -713,8 +713,8 @@ CAMLprim value tsync_cf_create_bytecode(value *argv, int argn) {
 }
 
 /* New metadata and identity for an in-sync placeholder, dehydrated when
-   [_dehydrate]; [false] when the item changed since [_usn], which leaves it as
-   it was (§10.2). */
+   [_dehydrate]; 1 when the item changed since [_usn] and 2 when it is held
+   for writing, either of which leaves it as it was (§10.2). */
 CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, value _size,
                                        value _mtime, value _identity, value _read_only,
                                        value _dehydrate) {
@@ -735,20 +735,25 @@ CAMLprim value tsync_cf_refresh_native(value _path, value _usn, value _is_dir, v
   caml_release_runtime_system();
   HANDLE h = open_item(path, FILE_READ_ATTRIBUTES | WRITE_DAC | SYNCHRONIZE,
                        FILE_SHARE_READ | FILE_SHARE_DELETE);
-  HRESULT hr = h == INVALID_HANDLE_VALUE
-                   ? HRESULT_FROM_WIN32(GetLastError())
-                   : cf_update(h, &metadata, identity, (DWORD)length, NULL, 0, flags, &usn, NULL);
+  /* The platform refuses an update given the USN it holds, so the handle,
+     which denies writers, makes the check instead (cloud-files §9.3). */
+  BOOL changed = h != INVALID_HANDLE_VALUE && usn_of(h) != usn;
+  HRESULT hr = h == INVALID_HANDLE_VALUE ? HRESULT_FROM_WIN32(GetLastError())
+               : changed ? S_OK
+                         : cf_update(h, &metadata, identity, (DWORD)length, NULL, 0, flags, NULL,
+                                     NULL);
   if (h != INVALID_HANDLE_VALUE)
     CloseHandle(h);
   caml_acquire_runtime_system();
   free(path);
   free(identity);
-  if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) ||
-      hr == HRESULT_FROM_WIN32(ERROR_CLOUD_FILE_NOT_IN_SYNC))
-    CAMLreturn(Val_false);
+  if (changed)
+    CAMLreturn(Val_int(1));
+  if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION))
+    CAMLreturn(Val_int(2));
   if (FAILED(hr))
     fail_hresult("updating a placeholder", hr);
-  CAMLreturn(Val_true);
+  CAMLreturn(Val_int(0));
 }
 
 CAMLprim value tsync_cf_refresh_bytecode(value *argv, int argn) {

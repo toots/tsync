@@ -77,23 +77,27 @@ let () =
           | Some _ -> "admitted"
           | None -> "refused");
       (* The bucket is spent: the chunk below is mid-body, its next slice
-         waiting, when the log entry is asked. *)
-      let entry_asked = ref infinity and entry_in = ref infinity in
+         waiting, when the log entry is asked. A slice the chunk runs while
+         another waiter is in line went ahead of the entry, the only other. *)
       let late_slices = ref 0 in
       let chunk =
         Rt.async (fun () ->
             send l ~chunk:true mib ~on_slice:(fun _ ->
-                let now = Rt.now () in
-                if now > !entry_asked && now < !entry_in then incr late_slices))
+                if Uplink.waiting l > 0 then incr late_slices))
       in
       Rt.sleep 0.2;
-      entry_asked := Rt.now ();
-      send l ~chunk:false (256 * 1024) ~on_slice:(fun _ ->
-          entry_in := Rt.now ());
+      let entry_asked = Rt.now () in
+      send l ~chunk:false (256 * 1024);
+      let entry_waited = Rt.now () -. entry_asked in
       Rt.Promise.await chunk;
-      (* One slice granted just before the entry may run just after it. *)
-      p "a log entry asked mid-chunk passes before its next slice: %b"
-        (!late_slices <= 1 && !entry_in < infinity);
+      (* One slice granted just before the entry may run just after it, and
+         the entry waits for a quarter second of refill, which load only
+         lengthens. *)
+      p "a log entry asked mid-chunk passes before its next slice: %s"
+        (if !late_slices <= 1 && entry_waited > 0.1 then "true"
+         else
+           Printf.sprintf "%d chunk slices passed it, it waited %.3f s"
+             !late_slices entry_waited);
       (* Taking turns, the other writer is all but done when the first ends; a
          task resuming late shifts that by a slice or two, not by half. *)
       let slices = [| Atomic.make 0; Atomic.make 0 |] in

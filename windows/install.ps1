@@ -33,6 +33,13 @@ if (-not (Trusted)) {
   if (-not (Trusted)) { throw "tsync's certificate ($thumbprint) is still not in the machine's TrustedPeople store, so Windows refuses its package." }
 }
 
+# tsync stop returns before its processes exit, and Windows refuses to update the
+# package while a tsyncd.exe runs with its identity.
+$daemon = Join-Path $ProgramDir 'tsyncd.exe'
+$running = @(Get-Process tsyncd -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $daemon })
+$running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+$running | Where-Object { -not $_.HasExited } | Stop-Process -Force
+
 Add-AppxPackage -Path (Join-Path $ProgramDir 'tsync-identity.msix') `
   -ExternalLocation $ProgramDir -ForceUpdateFromAnyVersion
 

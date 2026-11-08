@@ -252,7 +252,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length, item` (served length, short only at end of file; the row of the version served) | B |
 | `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
 | `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
-| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
+| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `aside?`, `await?` | `size, mtime, item`; the staging file is adopted by rename, its last write time becoming the item's mtime, so a frontend copying a file into staging keeps the file's ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm03)) | M, B (adopting digests the whole file; with `await` it also waits for the upload and the commit) |
 | `mkdir` | `parentRef`, `name`, `exclusive?`, `aside?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
 | `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`), `dstBase?` or `aside?` | `item` at the destination; a folder keeps its id, a file its file id | M |

@@ -52,9 +52,12 @@ let untake t path why =
   Atomic.incr t.untaken;
   Log.info "cloud_files: %s is not taken: %s" path why
 
+(* The owner takes a written file's time from the staging copy, so the copy
+   keeps the original's. *)
 let copy_to_staging t path =
   Fs.mkdir_p t.staging;
   let dst = Fs.temp_in t.staging in
+  let mtime = (Unix.LargeFile.stat path).st_mtime in
   In_channel.with_open_bin path (fun ic ->
       Out_channel.with_open_bin dst (fun oc ->
           let buffer = Bytes.create 65536 in
@@ -66,6 +69,7 @@ let copy_to_staging t path =
                   pump ()
           in
           pump ()));
+  Unix.utimes dst mtime mtime;
   dst
 
 (* The item's place once the domain answered: renamed to the conflicted copy's

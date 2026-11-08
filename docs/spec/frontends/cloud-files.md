@@ -404,7 +404,8 @@ take(item):
       folder that already existed
   file (placeholder or not):
     wait until it is settled: unchanged for TAKE_SETTLE and openable without sharing write
-    u = its update sequence number; copy it into the take staging directory
+    u = its update sequence number; copy it into the take staging directory, keeping its last
+      write time, which the domain records as the item's mtime
     not a placeholder → write(parentRef, name, staging, aside: true)
     placeholder       → write(ref, staging, base: its contentId)
     landed = the reply's aside when present, else its item  # the item the file's bytes now are
@@ -623,6 +624,10 @@ provider: purge, a domain removed from the config, a moved `syncRoot`.
 - Until the certificate chains to a root Windows trusts, the installer carries it and, before
   registering the identity package, adds it to the machine's `TrustedPeople` store when it is not
   there, through one elevated step the user consents to. Refused, nothing is registered.
+- Installing over an earlier install stops the service and the tray before replacing the
+  programs. Before registering the identity package again it waits up to 30 s for every
+  `tsyncd.exe` of the programs folder to exit, then ends any left: Windows refuses to update a
+  package one of its applications holds.
 - When registering fails, the installer says why, skips the setup-link page and exits non-zero; the
   programs stay, and running it again retries. Otherwise its last page shows `tsync config
   --summary`.

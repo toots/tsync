@@ -203,6 +203,11 @@ regular file, and for a symlink `count = 0`, `link_len > 0`, `size` = the target
 a partial rewrite needs no reread of unchanged bytes. The recorded name is the leaf of the key the body
 is written to; a body copied to a new location keeps its old name until re-put.
 
+**mtime.** `mtime` is the content's last write time where the content was written, whichever backend
+holds the manifest. Anything that carries an existing file into a domain (an import, an rsync, a
+frontend handing over a whole file, a take) MUST record that file's last write time, never the time
+it was uploaded; only an edit made through a frontend records the time of the edit.
+
 Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000.5`, chunk size 8 MiB;
 `h = dual("d447b1ea40e6988b-b7aeb52a10fdaf2d-11;") = d94b4e9626fdc9c1-f3f6d793ca1ea424`; 114 bytes:
 

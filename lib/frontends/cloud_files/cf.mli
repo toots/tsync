@@ -154,6 +154,12 @@ val set_identity :
 val create : string -> placeholder -> unit
 
 (** Gives an in-sync placeholder the metadata and identity of [placeholder],
-    dehydrating it when [dehydrate]; [false] when it changed since [usn] or is
-    held for writing, which leaves it as it was. *)
-val refresh : string -> usn:int64 -> placeholder -> dehydrate:bool -> bool
+    dehydrating it when [dehydrate]; [`Changed] when it changed since [usn] and
+    [`Held_open] when it is held for writing, either of which leaves it as it
+    was. *)
+val refresh :
+  string ->
+  usn:int64 ->
+  placeholder ->
+  dehydrate:bool ->
+  [ `Updated | `Changed | `Held_open ]
