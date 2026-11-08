@@ -21,7 +21,7 @@
 (executable
  (name lock_holder)
  (modules lock_holder)
- (libraries tsync_core tsync_store))
+ (libraries unix tsync_core tsync_store))
 
 (rule
  (deps lock_holder.exe)
