@@ -624,7 +624,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 
 | command | class | semantics |
 |---|---|---|
-| `start [--mount P] [--tls native\|openssl]` | none | §3.1 |
+| `start [--mount P] [--tls system\|openssl\|native]` | none | §3.1 |
 | `stop` | none | §5.4 |
 | `status [--json] [--totals [--exact] [--reload]] [-w S]` | none | §5.5 |
 | `logs [-f] [-n N]` | none | executes the platform log reader (default N = 200); explains what is missing if it cannot |

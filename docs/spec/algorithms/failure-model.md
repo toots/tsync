@@ -159,6 +159,7 @@ files, staged data, the cache, durable records.
 | 429; 503 carrying a throttling indication (a throttling error code such as `SlowDown`, or a `Retry-After` header) | TRANSIENT/load, with `retry_after` when given |
 | any other 5xx | TRANSIENT/link |
 | connection, DNS or TLS failure; a failed redial; a stall; a body shorter than its framing announced | TRANSIENT/link |
+| a server certificate that does not verify ([security-model §9.1](security-model.md#91-tls-implementations)) | REFUSED/other |
 | `EMFILE`, `ENFILE`, `ENOBUFS`, `ENOMEM` while opening a socket | TRANSIENT/local |
 | a per-key error other than "absent" inside a 2xx bulk answer (for example a bulk delete) | TRANSIENT/load for that key when the code is service-internal (internal error, slow down, service unavailable), REFUSED/other otherwise. It MUST be raised, never dropped, and is never evidence against the link: the request itself was answered |
 | 401, 403; a credential that cannot be minted because the grant is invalid or revoked | REFUSED/denied |
