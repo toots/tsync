@@ -36,13 +36,12 @@ internal class ProcessCore(private val binary: String, private val home: File, p
 
     override fun request(json: String): String = run("request", json)
     override fun status(): String = run("status")
-    override fun checkConfig(domain: String, candidate: String?): String? = null
-    override fun boot(domain: String): String? = null
+    override fun checkConfig(candidate: String?): String? = null
+    override fun boot(): String? = null
     override fun open(ref: String): Long = error("not driven by the wire suite")
     override fun size(handle: Long): Long = error("not driven by the wire suite")
     override fun read(handle: Long, offset: Long, length: Int, dest: ByteArray): Int = error("not driven by the wire suite")
     override fun close(handle: Long): Int = error("not driven by the wire suite")
-    override fun setupLink(link: String): String = error("not driven by the wire suite")
 }
 
 /**

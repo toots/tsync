@@ -29,11 +29,9 @@ class FakeCore(private val domain: String = "Family Photos") : Core {
     fun child(parent: String, name: String): Node? = nodes.values.firstOrNull { it.parent == parent && it.name == name && it.ref != "root" }
     fun names(parent: String): List<String> = nodes.values.filter { it.parent == parent && it.ref != "root" }.map { it.name }.sorted()
 
-    override fun checkConfig(domain: String, candidate: String?): String? = null
-    override fun boot(domain: String): String? = null
+    override fun checkConfig(candidate: String?): String? = null
+    override fun boot(): String? = null
     override fun status(): String = "status"
-    var setupAnswer = """{"error":"This is not a tsync setup link"}"""
-    override fun setupLink(link: String): String = setupAnswer
     override fun open(ref: String): Long = -2
     override fun size(handle: Long): Long = -9
     override fun read(handle: Long, offset: Long, length: Int, dest: ByteArray): Int = -9

@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ConfigFormatTest {
     private val secret = "0123456789abcdef0123456789abcdef"
@@ -93,6 +94,17 @@ class ConfigStoreTest {
         assertNull(store.remove("photos", accept))
         assertEquals(emptyList(), store.read())
         assertEquals("Pixel", JSONObject(store.file.readText()).getString("name"))
+    }
+
+    @Test
+    fun onlyAFileThatDoesNotDecodeIsUnreadable() {
+        assertFalse(store.unreadable())
+        store.add(listOf(docs), "Pixel", check = accept)
+        store.remove("docs", accept)
+        assertFalse(store.unreadable())
+        store.file.writeText("{")
+        assertTrue(store.unreadable())
+        assertEquals(emptyList(), store.read())
     }
 
     @Test

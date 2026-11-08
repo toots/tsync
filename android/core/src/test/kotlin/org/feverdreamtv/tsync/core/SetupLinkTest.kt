@@ -30,7 +30,7 @@ class SetupLinkTest {
 
     @Test
     fun theCoreSentenceIsShownAsIs() {
-        val answer = SetupLink.parse(FakeCore().setupLink("anything"))
+        val answer = SetupLink.parse("""{"error":"This is not a tsync setup link"}""")
         assertIs<SetupAnswer.Refused>(answer)
         assertEquals("This is not a tsync setup link", answer.reason)
         assertIs<SetupAnswer.Refused>(SetupLink.parse("not json"))

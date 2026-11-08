@@ -1,20 +1,17 @@
 package org.feverdreamtv.tsync.core
 
-/** The bridge of android.md §5, in platform strings. Every call blocks its calling thread. */
+/** The bridge of android.md §5 on one domain, in platform strings. Every call blocks its calling thread. */
 interface Core {
     /**
-     * Checks the config, or [candidate] (a config's text) in its place.
+     * Checks the domain in the config, or in [candidate] (a config's text) in its place.
      * @return null when accepted, else the core's sentence.
      */
-    fun checkConfig(domain: String, candidate: String? = null): String?
+    fun checkConfig(candidate: String? = null): String?
 
     /** @return null when ready, else the core's sentence. */
-    fun boot(domain: String): String?
+    fun boot(): String?
 
     fun request(json: String): String
-
-    /** Fetches and opens a setup link (setup-link §6.3), before any config exists; read by [SetupLink.parse]. */
-    fun setupLink(link: String): String
 
     fun status(): String
 

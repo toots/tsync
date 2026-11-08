@@ -146,7 +146,7 @@ class Tsync private constructor(val context: Context) {
         if (domain.name !in config.names()) return Boot.NoConfig
         val result = try {
             prepare()
-            domain.core.boot(domain.name)?.let { Boot.Failed(it) } ?: Boot.Ready
+            domain.core.boot()?.let { Boot.Failed(it) } ?: Boot.Ready
         } catch (e: Throwable) {
             Boot.Failed(e.message ?: e.toString())
         }
@@ -162,13 +162,13 @@ class Tsync private constructor(val context: Context) {
     /** Fetches and opens a setup link (setup-link §6.3), which needs no domain booted. */
     fun setupLink(link: String): String {
         prepare()
-        return NativeCore("").setupLink(link)
+        return Native.nativeSetupLink(link.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
     }
 
-    /** The core's verdict on a config on disk that names no domain it can read. */
+    /** The core's verdict on a config on disk that names no domain it can read: its load fails before any domain is looked up. */
     fun configRefusal(): String? = try {
         prepare()
-        config.names().firstOrNull()?.let { domain(it).core.checkConfig(it) }
+        NativeCore("").checkConfig()
     } catch (e: Throwable) {
         e.message ?: e.toString()
     }

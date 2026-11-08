@@ -158,7 +158,7 @@ private fun JoinForm(tsync: Tsync, replace: Boolean, onJoined: () -> Unit) {
                 failure = withContext(Dispatchers.IO) {
                     try {
                         tsync.prepare()
-                        tsync.config.add(joining, Build.MODEL.orEmpty(), replace) { domain, candidate -> tsync.domain(domain).core.checkConfig(domain, candidate) }
+                        tsync.config.add(joining, Build.MODEL.orEmpty(), replace) { domain, candidate -> tsync.domain(domain).core.checkConfig(candidate) }
                     } catch (e: Throwable) {
                         e.message ?: e.toString()
                     }
@@ -272,7 +272,7 @@ fun SettingsScreen(tsync: Tsync, domains: List<String>, outer: PaddingValues, on
                         val refusal = withContext(Dispatchers.IO) {
                             try {
                                 tsync.prepare()
-                                tsync.config.remove(name) { domain, candidate -> tsync.domain(domain).core.checkConfig(domain, candidate) }
+                                tsync.config.remove(name) { domain, candidate -> tsync.domain(domain).core.checkConfig(candidate) }
                             } catch (e: Throwable) {
                                 e.message ?: e.toString()
                             }

@@ -45,13 +45,12 @@ class PasswordsTest {
             return replies.getValue(request.getString("action"))
         }
         override fun status() = "{}"
-        override fun checkConfig(domain: String, candidate: String?): String? = null
-        override fun boot(domain: String): String? = null
+        override fun checkConfig(candidate: String?): String? = null
+        override fun boot(): String? = null
         override fun open(ref: String): Long = error("unused")
         override fun size(handle: Long): Long = error("unused")
         override fun read(handle: Long, offset: Long, length: Int, dest: ByteArray): Int = error("unused")
         override fun close(handle: Long): Int = error("unused")
-        override fun setupLink(link: String): String = error("unused")
     }
 
     @Test

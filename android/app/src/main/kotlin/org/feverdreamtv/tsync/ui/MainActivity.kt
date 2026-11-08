@@ -159,7 +159,7 @@ fun TsyncTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-/** The configured domains; [unreadable] when a config exists that names none the app can read. */
+/** The configured domains; [unreadable] when a config file exists that does not decode. */
 private data class Started(val domains: List<String>, val unreadable: Boolean, val refusal: String?)
 
 @Composable
@@ -172,7 +172,7 @@ private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink
     LaunchedEffect(attempt) {
         started = withContext(Dispatchers.IO) {
             val domains = tsync.config.names()
-            val unreadable = domains.isEmpty() && tsync.config.exists()
+            val unreadable = tsync.config.unreadable()
             Started(domains, unreadable, if (unreadable) tsync.configRefusal() else null)
         }
     }

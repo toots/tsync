@@ -63,6 +63,9 @@ class ConfigStore(home: File) {
 
     fun names(): List<String> = read().map { it.domain }
 
+    /** A config file that does not decode: Setup replaces it (app §10.2). */
+    fun unreadable(): Boolean = exists() && decoded() == null
+
     private fun decoded(): Pair<String?, List<ServerConfig>>? =
         if (exists()) ServerConfig.decode(file.readText()) else null
 
