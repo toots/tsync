@@ -180,9 +180,9 @@ let execute t dir usns (action : Apply_plan.action) =
         let refused why =
           Take.schedule t.take (path name);
           Some
-            (Printf.sprintf "%s's %s was not updated: %s (usn %Ld)" name
+            (Printf.sprintf "%s's %s was not updated: %s" name
                (if dehydrate then "content" else "metadata")
-               why usn)
+               why)
         in
         match Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate with
           | `Updated ->
