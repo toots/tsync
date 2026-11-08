@@ -41,7 +41,7 @@ enum class Copy(val label: Int) {
 }
 
 /** One save into a folder, from the share target or from "Upload files" (app §10.6). */
-class Save(private val tsync: Tsync, val sources: List<Source>, private val parentRef: String) {
+class Save(private val tsync: Tsync, private val domain: String, val sources: List<Source>, private val parentRef: String) {
     val progress = MutableStateFlow(sources.map { Copy.WAITING })
 
     /**
@@ -67,7 +67,7 @@ class Save(private val tsync: Tsync, val sources: List<Source>, private val pare
         mark(index, Copy.COPYING)
         val ingest = tsync.ingest
         val staging = try {
-            ingest.stage(Target.Child(parentRef, Naming.sanitizeLeaf(source.name)), exclusive = true)
+            ingest.stage(domain, Target.Child(parentRef, Naming.sanitizeLeaf(source.name)), exclusive = true)
         } catch (e: Exception) {
             // The intent could not be made durable: this file fails, the others go on.
             mark(index, Copy.FAILED)

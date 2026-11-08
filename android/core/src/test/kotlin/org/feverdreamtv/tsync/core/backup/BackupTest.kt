@@ -227,6 +227,17 @@ class ProcessingTest {
     }
 
     @Test
+    fun aRemovedDomainsRecordsAreLeftOutAndOneNamingNoneIsTheFirsts() {
+        val old = record.copy(mediaId = 1)
+        val docs = record.copy(mediaId = 2, domain = "docs")
+        val photos = record.copy(mediaId = 3, domain = "photos")
+        assertEquals(listOf(old, docs, photos), Processing.served(listOf(old, docs, photos), listOf("docs", "photos")))
+        assertEquals(listOf(old, photos), Processing.served(listOf(old, docs, photos), listOf("photos")))
+        assertEquals(emptyList(), Processing.served(listOf(old, docs), emptyList()))
+        assertTrue(Processing.settled(Processing.served(listOf(docs), listOf("photos"))))
+    }
+
+    @Test
     fun dueRecordsComeInCaptureOrder() {
         val later = record.copy(mediaId = 1, target = "Camera Uploads/2026/2026-08-17 09.00.00.jpg")
         val earlier = record.copy(mediaId = 9, target = NOON_TARGET)

@@ -71,13 +71,13 @@ class RecordDbTest {
     @Test
     fun aNewDatabaseHasTheSpecifiedSchema() {
         val fresh = open().readableDatabase
-        assertEquals(3, fresh.version)
+        assertEquals(4, fresh.version)
         assertEquals(
             listOf(
                 "CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL)",
                 "CREATE TABLE media ( media_id INTEGER PRIMARY KEY, volume TEXT NOT NULL, relative_path TEXT NOT NULL, " +
                     "size_bytes INTEGER NOT NULL, modified_seconds INTEGER NOT NULL, state TEXT NOT NULL, " +
-                    "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, updated_at INTEGER NOT NULL, etag TEXT, next_attempt_at INTEGER)",
+                    "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, updated_at INTEGER NOT NULL, etag TEXT, next_attempt_at INTEGER, domain TEXT)",
                 "CREATE UNIQUE INDEX media_path ON media(relative_path)",
                 "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
             ),
@@ -92,23 +92,24 @@ class RecordDbTest {
         val before = SQLiteDatabase.openDatabase(context.getDatabasePath(RecordDb.NAME).path, null, SQLiteDatabase.OPEN_READONLY).use { dump(it, columns) }
         assertEquals(3, before.size)
         val upgraded = open()
-        assertEquals(3, upgraded.readableDatabase.version)
+        assertEquals(4, upgraded.readableDatabase.version)
         assertEquals(before, dump(upgraded.readableDatabase, columns))
         val records = upgraded.records()
         assertEquals(listOf(State.DONE, State.FAILED, State.FAILED), records.map { it.state })
-        assertTrue(records.all { it.etag == null && it.nextAttemptAt == null })
+        assertTrue(records.all { it.etag == null && it.nextAttemptAt == null && it.domain == null })
         // A record without its optional parts: due now, and a re-upload carries no base.
         assertEquals(listOf(2L, 3L), Processing.due(records, 0).map { it.mediaId })
         assertNull(Processing.base(records[0]))
         assertEquals("QUARANTINED", DatabaseUtils.stringForQuery(upgraded.readableDatabase, "SELECT state FROM media WHERE media_id = 3", null))
         assertEquals(Mark(41, 1755347464, version = null, fullDiscoveryAt = null), upgraded.mark("external_primary"))
-        assertEquals("d:9f3a", upgraded.get("Camera Uploads/2026"))
+        // Its keys name no domain, so the old cache is dropped and the folders resolved again.
+        assertNull(upgraded.folders("docs").get("Camera Uploads/2026"))
     }
 
     @Test
     fun changesAndTheMarkMoveInOneTransaction() {
         val store = open()
-        val record = Record(7, "external_primary", "Camera Uploads/2026/a.jpg", 10, 100, State.PENDING, updatedAt = 1)
+        val record = Record(7, "external_primary", "Camera Uploads/2026/a.jpg", 10, 100, State.PENDING, updatedAt = 1, domain = "photos")
         store.apply("external_primary", listOf(RecordChange.Put(record), RecordChange.Rekey(7, 9)), Mark(5, 6, "v1", 7))
         assertEquals(listOf(record.copy(mediaId = 9)), store.records())
         assertEquals(Mark(5, 6, "v1", 7), store.mark("external_primary"))
@@ -131,13 +132,17 @@ class RecordDbTest {
     }
 
     @Test
-    fun theFolderCacheIsDisposable() {
-        val store = open()
-        store.put("Camera Uploads", "d:1")
-        store.put("Camera Uploads", "d:2")
-        assertEquals("d:2", store.get("Camera Uploads"))
-        store.remove("Camera Uploads")
-        assertNull(store.get("Camera Uploads"))
+    fun theFolderCacheIsDisposableAndKeyedByDomain() {
+        val docs = open().folders("docs")
+        val photos = db!!.folders("photos")
+        docs.put("Camera Uploads", "d:1")
+        docs.put("Camera Uploads", "d:2")
+        photos.put("Camera Uploads", "d:3")
+        assertEquals("d:2", docs.get("Camera Uploads"))
+        assertEquals("d:3", photos.get("Camera Uploads"))
+        docs.remove("Camera Uploads")
+        assertNull(docs.get("Camera Uploads"))
+        assertEquals("d:3", photos.get("Camera Uploads"))
     }
 
     @Test
@@ -147,7 +152,9 @@ class RecordDbTest {
         assertNull(prefs.lastOutcome)
         prefs.settings = BackupSettings(enabled = true, unmeteredOnly = false, whenBatteryOk = false)
         prefs.lastOutcome = "3 uploaded"
+        assertNull(prefs.domain)
+        prefs.domain = "photos"
         val stored = context.getSharedPreferences("camera-backup", Context.MODE_PRIVATE).all
-        assertEquals(mapOf("enabled" to true, "unmeteredOnly" to false, "whenBatteryOk" to false, "lastOutcome" to "3 uploaded"), stored)
+        assertEquals(mapOf("enabled" to true, "unmeteredOnly" to false, "whenBatteryOk" to false, "lastOutcome" to "3 uploaded", "domain" to "photos"), stored)
     }
 }

@@ -73,12 +73,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.Parameters
 import org.feverdreamtv.tsync.core.Pull
-import org.feverdreamtv.tsync.core.ServerConfig
 
 class MainActivity : ComponentActivity() {
     private var shared by mutableStateOf<List<Uri>?>(null)
@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
         val streams = streams(intent)
         val refusal = when {
             streams.isEmpty() -> R.string.share_only_files
-            !Tsync.get(this).config.exists() -> R.string.share_not_set_up
+            Tsync.get(this).config.names().isEmpty() -> R.string.share_not_set_up
             else -> null
         }
         if (refusal == null) {
@@ -159,7 +159,8 @@ fun TsyncTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-private data class Started(val boot: Boot, val refusal: String?, val config: ServerConfig?)
+/** The configured domains; [refusal] says why a config file that exists does not decode. */
+private data class Started(val domains: List<String>, val refusal: String?)
 
 @Composable
 private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink: String?, onCodeLinkDone: () -> Unit, onShareDone: () -> Unit) {
@@ -167,27 +168,23 @@ private fun App(shared: List<Uri>?, requested: Pair<Destination, Int>?, codeLink
     val tsync = remember { Tsync.get(context) }
     var started by remember { mutableStateOf<Started?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
+    // Nothing boots here: each domain boots at its first use (app §2).
     LaunchedEffect(attempt) {
         started = withContext(Dispatchers.IO) {
-            val boot = tsync.boot()
-            // A config the core refuses leads back to Setup with its reason; nothing is deleted.
-            val refusal = if (boot is Boot.Failed) tsync.configRefusal() else null
-            Started(boot, refusal, tsync.config.read())
+            val domains = tsync.config.names()
+            val refusal = if (tsync.config.unreadable()) tsync.configRefusal() ?: context.getString(R.string.config_unreadable) else null
+            Started(domains, refusal)
         }
     }
     NotificationPermission(tsync)
     val state = started
     when {
         state == null -> Screen(stringResource(R.string.app_name)) { Loading(it) }
-        state.boot == Boot.NoConfig -> SetupScreen(null, null, onConnected = { started = null; attempt++ })
-        state.boot is Boot.Failed && state.refusal != null ->
-            SetupScreen(state.config, state.refusal, onConnected = { started = null; attempt++ })
-        state.boot is Boot.Failed -> Screen(stringResource(R.string.app_name)) {
-            Failure(state.boot.reason, it, onRetry = { started = null; attempt++ })
-        }
-        shared != null -> SaveTarget(tsync, shared, onShareDone)
+        // A config that does not load leads to Setup with the core's reason; joining replaces it.
+        state.domains.isEmpty() -> SetupScreen(tsync, state.refusal, onJoined = { started = null; attempt++ })
+        shared != null -> SaveTarget(tsync, state.domains, shared, onShareDone)
         else -> {
-            Main(tsync, requested)
+            Main(tsync, state.domains, requested, onConfigChanged = { attempt++ })
             codeLink?.let { CodeLinkSheet(tsync, it, onCodeLinkDone) }
         }
     }
@@ -214,22 +211,26 @@ enum class Destination(val label: Int, val icon: Int) {
     SETTINGS(R.string.destination_settings, R.drawable.ic_settings),
 }
 
-data class Crumb(val ref: String, val name: String)
+/** One folder of a trail, within one domain (app §10.3). */
+data class Crumb(val domain: String, val ref: String, val name: String)
 
 private val trailSaver = listSaver<SnapshotStateList<Crumb>, String>(
-    save = { trail -> trail.flatMap { listOf(it.ref, it.name) } },
-    restore = { saved -> saved.chunked(2).map { Crumb(it[0], it[1]) }.toMutableStateList() },
+    save = { trail -> trail.flatMap { listOf(it.domain, it.ref, it.name) } },
+    restore = { saved -> saved.chunked(3).map { Crumb(it[0], it[1], it[2]) }.toMutableStateList() },
 )
 
+/** At the root of the one domain, or empty, showing the list of domains, when there are several. */
 @Composable
-fun rememberTrail(rootName: String): SnapshotStateList<Crumb> =
-    rememberSaveable(saver = trailSaver) { listOf(Crumb(Parameters.ROOT, rootName)).toMutableStateList() }
+fun rememberTrail(domains: List<String>): SnapshotStateList<Crumb> =
+    rememberSaveable(saver = trailSaver) {
+        domains.singleOrNull()?.let { listOf(Crumb(it, Parameters.ROOT, it)) }.orEmpty().toMutableStateList()
+    }
 
 @Composable
-private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
+private fun Main(tsync: Tsync, domains: List<String>, requested: Pair<Destination, Int>?, onConfigChanged: () -> Unit) {
     var destination by rememberSaveable { mutableStateOf(Destination.FILES) }
-    val trail = rememberTrail(tsync.domain)
-    var moving by remember { mutableStateOf<Item?>(null) }
+    val trail = rememberTrail(domains)
+    var moving by remember { mutableStateOf<Pair<Served, Item>?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current
 
@@ -237,26 +238,26 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
         // Outcomes are shown here only while the screen is; otherwise they become notifications.
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { tsync.outcomes.collect { snackbar.showSnackbar(it) } }
     }
-    // android-app §5.1, §10.2: shown at once from what the phone last knew, then from the
-    // vault's last view, then from the server, each answer settling it.
-    val context = LocalContext.current
-    val known = remember { context.getSharedPreferences("vault", android.content.Context.MODE_PRIVATE) }
-    var vaultShown by rememberSaveable { mutableStateOf(known.getBoolean("shown", false)) }
-    LaunchedEffect(Unit) {
+    // android-app §2, §5.1, §10.2: shown at once from the vault domains the phone last knew,
+    // then from each vault's last view, then from the server, each answer settling it. A
+    // domain booted since may have a vault too.
+    var vaultShown by rememberSaveable { mutableStateOf(tsync.vaultDomains().any { it in domains }) }
+    val booted by tsync.bootedNames.collectAsState()
+    LaunchedEffect(booted, domains) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
-                val shown = withContext(Dispatchers.IO) {
-                    try {
-                        tsync.vault.status(pull) != null
-                    } catch (e: CoreException) {
-                        android.util.Log.w(Tsync.TAG, "vault status: ${e.code.wire}: ${e.message}")
-                        null
+                vaultShown = withContext(Dispatchers.IO) {
+                    for (domain in tsync.vaults()) {
+                        try {
+                            tsync.noteVault(domain.name, domain.vault.status(pull) != null)
+                        } catch (e: CoreException) {
+                            android.util.Log.w(Tsync.TAG, "vault status of ${domain.name}: ${e.code.wire}: ${e.message}")
+                        }
                     }
-                } ?: continue
-                vaultShown = shown
-                known.edit().putBoolean("shown", shown).apply()
+                    tsync.vaultDomains().any { it in domains }
+                }
             }
-            // After the status: the warm-up holds the vault's folders while it fetches.
+            // After the status: the warm-up holds the vaults' folders while it fetches.
             if (vaultShown) tsync.warmPasswords()
         }
     }
@@ -281,11 +282,11 @@ private fun Main(tsync: Tsync, requested: Pair<Destination, Int>?) {
     ) { bars ->
         val item = moving
         when {
-            destination == Destination.FILES && item != null -> MoveTarget(tsync, item, bars, onDone = { moving = null })
-            destination == Destination.FILES -> FilesScreen(tsync, FilesMode.Browse, trail, bars, onMove = { moving = it })
+            destination == Destination.FILES && item != null -> MoveTarget(tsync, item.first, item.second, bars, onDone = { moving = null })
+            destination == Destination.FILES -> FilesScreen(tsync, FilesMode.Browse, trail, domains, bars, onMove = { domain, it -> moving = domain to it })
             destination == Destination.VAULT -> VaultScreen(tsync, bars)
             destination == Destination.ACTIVITY -> ActivityScreen(tsync, bars)
-            else -> SettingsScreen(tsync, bars)
+            else -> SettingsScreen(tsync, domains, bars, onConfigChanged)
         }
     }
 }

@@ -10,12 +10,14 @@
 void tsync_bridge_started(void);
 
 /* name: check_config, boot, request, status or next_notice. NULL before the
-   runtime started. */
+   runtime started. check_config and request take the domain, a NUL, then the
+   candidate or the request. */
 char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
                         size_t *length);
 
 void tsync_bridge_init(const char *trust_store, const char *transfer_root);
-long tsync_bridge_open(const char *ref, size_t length);
+long tsync_bridge_open(const char *domain, size_t domain_length,
+                       const char *ref, size_t ref_length);
 long tsync_bridge_size(long handle);
 long tsync_bridge_read(long handle, long offset, long length, char *dest);
 long tsync_bridge_close(long handle);

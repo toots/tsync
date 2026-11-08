@@ -38,7 +38,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Notifications
+import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.backup.Backup
 import org.feverdreamtv.tsync.backup.BackupSchedule
@@ -49,37 +51,52 @@ import org.feverdreamtv.tsync.core.PendingSave
 import org.feverdreamtv.tsync.core.Stats
 import org.feverdreamtv.tsync.core.Status
 
-private data class Snapshot(
+/** One domain as last asked; [status] and the rest are null for a domain not booted, which is asked nothing. */
+private class DomainSnapshot(
+    val domain: Served,
+    val booted: Boolean,
     val status: Status?,
     val stats: Stats?,
     val failure: String?,
-    val saves: List<PendingSave>,
-    val backup: String,
-    val backupEnabled: Boolean,
+    val offline: Boolean,
     val details: String,
 )
 
+private data class Snapshot(
+    val domains: List<DomainSnapshot>,
+    val saves: List<PendingSave>,
+    val backup: String,
+    val backupEnabled: Boolean,
+)
+
 private fun snapshot(tsync: Tsync): Snapshot {
-    val status = runCatching { tsync.ask { status() } }
     val backup = Backup(tsync.context)
     return Snapshot(
-        status = status.getOrNull(),
-        stats = runCatching { tsync.client.stats() }.getOrNull(),
-        failure = status.exceptionOrNull()?.message,
+        domains = tsync.domains().map { domain ->
+            if (domain.boot != Boot.Ready) return@map DomainSnapshot(domain, false, null, null, null, false, "")
+            val status = runCatching { domain.ask { status() } }
+            DomainSnapshot(
+                domain = domain,
+                booted = true,
+                status = status.getOrNull(),
+                stats = runCatching { domain.ask { stats() } }.getOrNull(),
+                failure = status.exceptionOrNull()?.message,
+                offline = domain.offline.value,
+                details = runCatching { domain.core.status() }.getOrElse { it.message.orEmpty() },
+            )
+        },
         saves = tsync.ingest.pending(),
         backup = backup.statusLine(),
         backupEnabled = backup.prefs.settings.enabled,
-        details = runCatching { tsync.core.status() }.getOrElse { it.message.orEmpty() },
     )
 }
 
-/** What the app is doing and what went wrong (app §10.5), polled only while visible. */
+/** What the app is doing and what went wrong (app §10.5), per booted domain, polled only while visible. */
 @Composable
 fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
     val context = LocalContext.current
     var visible by remember { mutableStateOf(false) }
     var shown by remember { mutableStateOf<Snapshot?>(null) }
-    val offline by tsync.offline.collectAsState()
     LifecycleResumeEffect(Unit) {
         visible = true
         onPauseOrDispose { visible = false }
@@ -107,48 +124,67 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
             Loading(padding)
             return@Screen
         }
-        val status = state.status
+        val several = state.domains.size > 1
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            val line = when {
-                status == null -> state.failure ?: stringResource(R.string.state_unknown)
-                offline -> stringResource(R.string.state_offline)
-                status.paused -> stringResource(R.string.state_paused)
-                status.readOnly -> stringResource(R.string.state_read_only)
-                else -> stringResource(R.string.state_connected)
-            }
-            Text(line, style = MaterialTheme.typography.titleLarge)
-            if (status != null) {
-                OutlinedButton(onClick = { run { tsync.ask { pause(!status.paused) }; context.getString(if (status.paused) R.string.resumed else R.string.paused) } }) {
-                    Text(stringResource(if (status.paused) R.string.resume else R.string.pause))
+            for (entry in state.domains) {
+                val domain = entry.domain
+                if (several) Text(domain.name, Modifier.padding(top = 16.dp).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+                if (!entry.booted) {
+                    Text(stringResource(R.string.domain_not_booted))
+                    continue
                 }
+                val status = entry.status
+                val line = when {
+                    status == null -> entry.failure ?: stringResource(R.string.state_unknown)
+                    entry.offline -> stringResource(R.string.state_offline)
+                    status.paused -> stringResource(R.string.state_paused)
+                    status.readOnly -> stringResource(R.string.state_read_only)
+                    else -> stringResource(R.string.state_connected)
+                }
+                Text(line, style = MaterialTheme.typography.titleLarge)
+                if (status != null) {
+                    OutlinedButton(onClick = { run { domain.ask { pause(!status.paused) }; context.getString(if (status.paused) R.string.resumed else R.string.paused) } }) {
+                        Text(stringResource(if (status.paused) R.string.resume else R.string.pause))
+                    }
 
-                Section(R.string.uploads)
-                status.uploading.forEach { Text(it.name) }
-                val waiting = (status.pendingUploads - status.uploading.size).coerceAtLeast(0)
-                Text(pluralStringResource(R.plurals.uploads_waiting, waiting, waiting, Formatter.formatFileSize(context, status.pendingBytes)))
+                    Section(R.string.uploads)
+                    status.uploading.forEach { Text(it.name) }
+                    val waiting = (status.pendingUploads - status.uploading.size).coerceAtLeast(0)
+                    Text(pluralStringResource(R.plurals.uploads_waiting, waiting, waiting, Formatter.formatFileSize(context, status.pendingBytes)))
 
-                Section(R.string.downloads)
-                if (status.downloading.isEmpty()) Text(stringResource(R.string.no_downloads))
-                status.downloading.forEach { download ->
-                    Text(download.name)
-                    LinearProgressIndicator(
-                        progress = { if (download.size > 0) download.bytes.toFloat() / download.size else 0f },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Section(R.string.downloads)
+                    if (status.downloading.isEmpty()) Text(stringResource(R.string.no_downloads))
+                    status.downloading.forEach { download ->
+                        Text(download.name)
+                        LinearProgressIndicator(
+                            progress = { if (download.size > 0) download.bytes.toFloat() / download.size else 0f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            stringResource(
+                                R.string.download_progress,
+                                Formatter.formatFileSize(context, download.bytes),
+                                Formatter.formatFileSize(context, download.size),
+                                Formatter.formatFileSize(context, download.rate.toLong()),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                val parked = entry.stats?.parked ?: 0
+                if (parked > 0) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        stringResource(
-                            R.string.download_progress,
-                            Formatter.formatFileSize(context, download.bytes),
-                            Formatter.formatFileSize(context, download.size),
-                            Formatter.formatFileSize(context, download.rate.toLong()),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
+                        pluralStringResource(R.plurals.parked_changes, parked, parked) + entry.stats?.lastError?.let { ": $it" }.orEmpty(),
+                        Modifier.weight(1f),
                     )
+                    TextButton(onClick = { run { domain.ask { retry() }.let { context.resources.getQuantityString(R.plurals.retried_changes, it, it) } } }) {
+                        Text(stringResource(R.string.retry_now))
+                    }
                 }
             }
 
             Section(R.string.problems)
-            val parked = state.stats?.parked ?: 0
+            val parked = state.domains.sumOf { it.stats?.parked ?: 0 }
             if (state.saves.isEmpty() && parked == 0) Text(stringResource(R.string.no_problems))
             for (save in state.saves) Row(verticalAlignment = Alignment.CenterVertically) {
                 val intent = save.intent
@@ -170,15 +206,6 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
                     }
                 }) { Text(stringResource(R.string.retry)) }
             }
-            if (parked > 0) Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    pluralStringResource(R.plurals.parked_changes, parked, parked) + state.stats?.lastError?.let { ": $it" }.orEmpty(),
-                    Modifier.weight(1f),
-                )
-                TextButton(onClick = { run { tsync.ask { retry() }.let { context.resources.getQuantityString(R.plurals.retried_changes, it, it) } } }) {
-                    Text(stringResource(R.string.retry_now))
-                }
-            }
 
             Section(R.string.camera_backup)
             Text(state.backup)
@@ -187,7 +214,10 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
             }
 
             Section(R.string.details)
-            SelectionContainer { Text(state.details, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            for (entry in state.domains.filter { it.booted }) {
+                if (several) Text(entry.domain.name, style = MaterialTheme.typography.titleSmall)
+                SelectionContainer { Text(entry.details, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            }
         }
     }
 }

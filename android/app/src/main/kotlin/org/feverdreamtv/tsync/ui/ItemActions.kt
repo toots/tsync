@@ -46,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.Availability
 import org.feverdreamtv.tsync.core.Client
@@ -70,9 +71,9 @@ suspend fun fieldError(request: () -> Unit): String? = withContext(Dispatchers.I
 }
 
 /** A view intent on the document, through the system chooser (app §10.4). */
-fun openFile(tsync: Tsync, context: Context, item: Item) {
+fun openFile(tsync: Tsync, context: Context, domain: Served, item: Item) {
     val view = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(DocumentsContract.buildDocumentUri(Tsync.AUTHORITY, item.ref), TsyncDocumentsProvider.mimeType(item.name))
+        .setDataAndType(DocumentsContract.buildDocumentUri(Tsync.AUTHORITY, domain.documentId(item.ref)), TsyncDocumentsProvider.mimeType(item.name))
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     if (context.packageManager.queryIntentActivities(view, 0).isEmpty()) {
         tsync.report(context.getString(R.string.no_app_opens, item.name), failed = true)
@@ -85,11 +86,11 @@ fun openFile(tsync: Tsync, context: Context, item: Item) {
  * Runs an action that may outlive the screen: it shows as running, then says how it ended, on
  * screen or as a notification (app §10.4).
  */
-private fun act(tsync: Tsync, running: MutableState<String?>, label: String, action: Client.() -> String) {
+private fun act(tsync: Tsync, domain: Served, running: MutableState<String?>, label: String, action: Client.() -> String) {
     running.value = label
     tsync.scope.launch {
         val (text, failed) = try {
-            tsync.ask(action) to false
+            domain.ask(action) to false
         } catch (e: CoreException) {
             (e.message ?: e.code.wire) to true
         }
@@ -105,7 +106,7 @@ private fun counted(context: Context, item: Item, counts: Counts, plural: Int, s
 }
 
 @Composable
-fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableState<String?>, onDismiss: () -> Unit, onMove: (Item) -> Unit) {
+fun ItemActions(tsync: Tsync, domain: Served, item: Item, readOnly: Boolean, running: MutableState<String?>, onDismiss: () -> Unit, onMove: (Item) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var prompt by remember { mutableStateOf<Prompt?>(null) }
@@ -117,7 +118,7 @@ fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableSta
         ListItem(headlineContent = { Text(stringResource(label)) }, modifier = Modifier.clickable(onClick = onClick))
     }
 
-    fun restore() = act(tsync, running, context.getString(R.string.making_available, item.name)) {
+    fun restore() = act(tsync, domain, running, context.getString(R.string.making_available, item.name)) {
         counted(context, item, restore(item.ref), R.plurals.files_available_offline, R.string.available_offline)
     }
 
@@ -128,11 +129,11 @@ fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableSta
                 Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
-            if (!item.isDir) action(R.string.action_open) { onDismiss(); openFile(tsync, context, item) }
+            if (!item.isDir) action(R.string.action_open) { onDismiss(); openFile(tsync, context, domain, item) }
             action(R.string.action_share_link) {
                 scope.launch {
                     try {
-                        link = withContext(Dispatchers.IO) { tsync.ask { share(item.ref) } }
+                        link = withContext(Dispatchers.IO) { domain.ask { share(item.ref) } }
                     } catch (e: CoreException) {
                         tsync.report(e.message ?: e.code.wire, failed = true)
                         onDismiss()
@@ -143,7 +144,7 @@ fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableSta
             if (pinned && !item.isDir) action(R.string.action_keep_longer) { onDismiss(); restore() }
             if (item.isDir || item.availability != Availability.ONLINE_ONLY) action(R.string.action_remove_download) {
                 onDismiss()
-                act(tsync, running, context.getString(R.string.removing_download, item.name)) {
+                act(tsync, domain, running, context.getString(R.string.removing_download, item.name)) {
                     counted(context, item, evict(item.ref), R.plurals.downloads_removed, R.string.download_removed)
                 }
             }
@@ -163,7 +164,7 @@ fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableSta
             confirm = stringResource(R.string.action_rename),
             onDismiss = onDismiss,
             onSubmit = { name ->
-                fieldError { tsync.ask { rename(item.ref, item.parentRef, Naming.sanitizeLeaf(name)) } }
+                fieldError { domain.ask { rename(item.ref, item.parentRef, Naming.sanitizeLeaf(name)) } }
                     .also { if (it == null) tsync.report(context.getString(R.string.renamed, name)) }
             },
         )
@@ -175,7 +176,7 @@ fun ItemActions(tsync: Tsync, item: Item, readOnly: Boolean, running: MutableSta
             confirmButton = {
                 TextButton(onClick = {
                     onDismiss()
-                    act(tsync, running, context.getString(R.string.deleting, item.name)) {
+                    act(tsync, domain, running, context.getString(R.string.deleting, item.name)) {
                         try {
                             delete(item)
                         } catch (e: CoreException) {

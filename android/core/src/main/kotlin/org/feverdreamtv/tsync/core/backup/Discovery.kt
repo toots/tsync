@@ -23,6 +23,7 @@ data class DiscoveryStart(val mark: Mark, val rebuilt: Boolean, val full: Boolea
  * step 3). Deterministic: the same records and rows give the same changes.
  *
  * @param baseline a "from now on" pass: every new row is recorded as existing before backup
+ * @param domain the domain a new record goes to; one already made keeps its own
  * @param rebuilt the media store was rebuilt: ids may now name other items, so a record is
  *   matched to a row by target and size before its id is believed
  */
@@ -33,6 +34,7 @@ class DiscoveryPlanner(
     private val zone: ZoneId,
     private val now: Long,
     private val baseline: Boolean = false,
+    private val domain: String? = null,
 ) {
     private val byId = records.associateByTo(sortedMapOf()) { it.mediaId }
     private val taken = records.mapTo(hashSetOf()) { it.target }
@@ -107,6 +109,7 @@ class DiscoveryPlanner(
         modifiedSeconds = row.modifiedSeconds,
         state = if (baseline || predatesBackup(row)) State.BASELINE else State.PENDING,
         updatedAt = now,
+        domain = domain,
     )
 
     /** app §11.2: a row behind the mark without a record, which only another writer leaves. */

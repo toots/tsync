@@ -23,12 +23,15 @@ never on the main thread.
   which opens that setting (`ACTION_REQUEST_SET_AUTOFILL_SERVICE`).
 - Neither holds a secret beyond the request it answers, nor writes one to disk, nor logs a
   password, code, passphrase, seed or key.
-- The phone serves one domain (android-app §2); there is no domain merge.
+- **Several domains** are merged as [README §6.1](../README.md#61-several-domains) says: a request
+  boots the vault domains (android-app §2) and asks each one using `passwords`. With more than one
+  domain answering, every entry names its domain in its subtitle. A domain that does not answer in
+  time is left out of that answer.
 - **tsync's icon** heads every autofill suggestion's row and is the icon of every Credential
-  Manager entry, saying where the suggestion comes from. The phone serving one vault, its mark
-  ([vault §8.1](../vault.md#81-appearance)) is drawn on the Vault screen only.
-- **Neither unlocks** ([README §5](../README.md#5-host-adapters)). A request on a locked vault is
-  answered with one entry, "tsync is locked", whose tap opens the app's Vault screen
+  Manager entry, saying where the suggestion comes from. The vaults' marks
+  ([vault §8.1](../vault.md#81-appearance)) are drawn in the app only.
+- **Neither unlocks** ([README §5](../README.md#5-host-adapters)). A locked vault adds one entry
+  to the answer, "tsync is locked", naming its domain when more than one uses `passwords`, whose tap opens the app's Vault screen
   ([android-app §10.8](../../frontends/android-app.md#108-vault)), where the user unlocks; nothing is
   filled or signed. The user then asks again.
 
@@ -36,8 +39,8 @@ never on the main thread.
 
 A request reads what the phone holds (§3): the records' bodies the cache keeps for
 `RECORD_KEEP` ([README §4.1](../README.md#41-where-they-live)). So that they are there when a
-form asks, the app lists the passwords once (`passwords_list`, `pull: background`) after an
-unlock and each time it comes to the foreground, after the vault's status is asked, one at a
+form asks, the app lists each vault domain's passwords once (`passwords_list`, `pull: background`)
+after an unlock and each time it comes to the foreground, after the vault's status is asked, one at a
 time. That listing answers at once; the bodies it lacks are fetched after it, outside the vault's
 locks ([README §4.1](../README.md#41-where-they-live)), so neither a form nor a screen deciding
 whether to show the vault waits behind them. A request while they arrive answers without the
@@ -96,8 +99,10 @@ platform vouches for:
 - **Save** (`save`, `confirm`). A fill response with a password field carries save info for the
   username and password, so the platform offers "Save to tsync?" when the user submits the form.
   `onSaveRequest` sends `passwords_save` (passwords §8) with the request's site, and the username and
-  password typed, a new-password field's over the current one's (passwords §5.1). The platform's
-  prompt is the approval.
+  password typed, a new-password field's over the current one's (passwords §5.1), to the first
+  domain, in config order, using `passwords` (the platform's prompt offers no choice), or to the
+  domain that holds the login when the update below names one. The platform's prompt is the
+  approval.
 - A reply naming a record to update (passwords §8: same site and username, another password)
   shows a notification "Update the password for `<site>`?", private on the lock screen, with
   **Update**, which sends `passwords_save` again with `update`. Nothing is updated without that
@@ -138,7 +143,8 @@ the owner does not do: a passkey request from an app off the list is answered wi
 ### 6.2 Creation
 
 - `onBeginCreateCredentialRequest` of a `BeginCreatePublicKeyCredentialRequest` from a browser of
-  the list answers one entry, named by the domain. The system's sheet names the site and the user
+  the list answers one entry per domain using `passwords`, named by the domain, so the system's
+  sheet is where the user picks the vault. The system's sheet names the site and the user
   name; picking tsync's entry is the approval. The activity it starts verifies the user when asked
   (§7), sends `passwords_passkey_create` and returns the registration response's JSON. An exclusion the owner refuses `exists` returns WebAuthn's
   `InvalidStateError`. A create response has no authentication action, so a locked vault is
@@ -163,7 +169,7 @@ sends `verified: true` only when it succeeded; a cancelled prompt cancels the re
 ## 8. In the app
 
 The Vault screen ([android-app §10.8](../../frontends/android-app.md#108-vault)) gets a
-**Passwords** tab when the domain uses `passwords`:
+**Passwords** tab when a vault domain uses `passwords`, its domains merged as that section says:
 
 - **List** (`passwords_list`, with a search field as `filter`): logins by title and username,
   and passkeys by RP ID and user name; no password shown.
@@ -199,6 +205,10 @@ With tsync selected as the autofill service and the vault unlocked, on a signed 
   prompt when asked; signing in with it succeeds.
 - With the vault locked, every request shows "tsync is locked" and fills nothing; its tap opens
   the Vault screen.
+- With two domains using `passwords`, one locked: the login page offers the other's logins, each
+  naming its domain, and one "tsync is locked" entry naming the locked one; a new login is saved
+  to the first domain; registering a passkey offers one entry per domain and creates it in the one
+  picked.
 - With the app's process killed and the vault unlocked, the login page offers the login at the
   first tap, within the platform's deadline; the time from the request to the answer is
   measured on the phone and recorded here.

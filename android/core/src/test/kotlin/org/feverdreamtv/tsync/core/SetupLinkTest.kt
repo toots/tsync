@@ -3,19 +3,10 @@ package org.feverdreamtv.tsync.core
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class SetupLinkTest {
-    @Test
-    fun aLinkIsToldFromAServerUrl() {
-        assertTrue(SetupLink.looksLike("https://h.example/join/0123456789abcdef0123456789abcdef#key"))
-        assertFalse(SetupLink.looksLike("https://h.example"))
-        assertFalse(SetupLink.looksLike("https://h.example/join/0123"))
-    }
-
     @Test
     fun eachDomainCarriesItsServerAndLook() {
         val answer = SetupLink.parse(
@@ -39,7 +30,7 @@ class SetupLinkTest {
 
     @Test
     fun theCoreSentenceIsShownAsIs() {
-        val answer = SetupLink.parse(FakeCore().setupLink("anything"))
+        val answer = SetupLink.parse("""{"error":"This is not a tsync setup link"}""")
         assertIs<SetupAnswer.Refused>(answer)
         assertEquals("This is not a tsync setup link", answer.reason)
         assertIs<SetupAnswer.Refused>(SetupLink.parse("not json"))

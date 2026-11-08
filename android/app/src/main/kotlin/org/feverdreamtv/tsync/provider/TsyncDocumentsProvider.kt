@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.Notifications
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.Availability
 import org.feverdreamtv.tsync.core.Code
@@ -37,7 +38,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** The domain as documents (app §7). A document id is the item's reference. */
+/** The domains as documents (app §7). A document id is `<domain>/<reference>`. */
 class TsyncDocumentsProvider : DocumentsProvider() {
     private val tsync by lazy { Tsync.get(context!!) }
 
@@ -57,58 +58,79 @@ class TsyncDocumentsProvider : DocumentsProvider() {
 
     private fun string(id: Int, vararg arguments: Any): String = context!!.getString(id, *arguments)
 
+    /** The domain and reference a document id names. */
+    private fun locate(documentId: String): Pair<Served, String> {
+        val (name, ref) = Tsync.split(documentId) ?: throw FileNotFoundException(string(R.string.provider_not_set_up))
+        return tsync.domain(name) to ref
+    }
+
     /** @throws IllegalStateException with the boot failure, which the platform shows to the caller */
-    private fun booted() {
-        when (val boot = tsync.boot()) {
+    private fun booted(domain: Served) {
+        when (val boot = domain.boot()) {
             Boot.Ready -> return
-            Boot.NoConfig -> throw IllegalStateException(string(R.string.provider_not_set_up))
+            Boot.NoConfig -> throw FileNotFoundException(string(R.string.provider_not_set_up))
             is Boot.Failed -> throw IllegalStateException(boot.reason)
         }
     }
 
-    private fun <T> asking(request: org.feverdreamtv.tsync.core.Client.() -> T): T = try {
-        tsync.ask(request)
+    private fun <T> Served.asking(request: org.feverdreamtv.tsync.core.Client.() -> T): T = try {
+        ask(request)
     } catch (e: CoreException) {
         throw if (e.code == Code.NOT_FOUND) FileNotFoundException(e.message) else IllegalStateException(e.message)
     }
 
-    private fun readOnlyDomain(): Boolean = try {
-        tsync.boot() == Boot.Ready && tsync.client.stat(Parameters.ROOT).readOnly
+    /** Known only once booted: a domain is not booted to draw its root. */
+    private fun readOnly(domain: Served): Boolean = try {
+        domain.boot == Boot.Ready && domain.client.stat(Parameters.ROOT).readOnly
     } catch (e: CoreException) {
         false
     }
 
-    // A vanished root leaves no way to diagnose, so there is always one, booted or not.
+    // A vanished root leaves no way to diagnose, so each domain has one, booted or not.
     override fun queryRoots(projection: Array<out String>?): Cursor {
         val cursor = MatrixCursor(projection ?: ROOT_COLUMNS)
-        val domain = tsync.config.read()?.domain ?: tsync.domain
-        val create = if (tsync.boot() == Boot.Ready && !readOnlyDomain()) Root.FLAG_SUPPORTS_CREATE else 0
-        cursor.newRow()
-            .add(Root.COLUMN_ROOT_ID, domain.ifEmpty { string(R.string.app_name) })
-            .add(Root.COLUMN_DOCUMENT_ID, Parameters.ROOT)
-            .add(Root.COLUMN_TITLE, string(R.string.app_name))
-            .add(Root.COLUMN_SUMMARY, domain)
-            .add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
-            .add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD or create)
+        val domains = tsync.domains()
+        if (domains.isEmpty()) {
+            cursor.newRow().add(Root.COLUMN_ROOT_ID, "").add(Root.COLUMN_DOCUMENT_ID, UNCONFIGURED)
+                .add(Root.COLUMN_TITLE, string(R.string.app_name)).add(Root.COLUMN_SUMMARY, string(R.string.provider_not_set_up))
+                .add(Root.COLUMN_ICON, R.mipmap.ic_launcher).add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD)
+        }
+        for (domain in domains) {
+            val create = if (readOnly(domain)) 0 else Root.FLAG_SUPPORTS_CREATE
+            cursor.newRow()
+                .add(Root.COLUMN_ROOT_ID, domain.name)
+                .add(Root.COLUMN_DOCUMENT_ID, domain.documentId(Parameters.ROOT))
+                .add(Root.COLUMN_TITLE, string(R.string.app_name))
+                .add(Root.COLUMN_SUMMARY, domain.name)
+                .add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
+                .add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD or create)
+        }
         return cursor
     }
 
     override fun queryDocument(documentId: String, projection: Array<out String>?): Cursor {
         val cursor = MatrixCursor(projection ?: DOCUMENT_COLUMNS)
-        if (documentId == Parameters.ROOT) {
+        if (documentId == UNCONFIGURED) {
+            // The root of no config: its listing says tsync is not set up.
+            cursor.newRow().add(Document.COLUMN_DOCUMENT_ID, UNCONFIGURED).add(Document.COLUMN_DISPLAY_NAME, string(R.string.app_name))
+                .add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR).add(Document.COLUMN_FLAGS, 0)
+            return cursor
+        }
+        val (domain, ref) = locate(documentId)
+        if (ref == Parameters.ROOT) {
             // Synthesised: a fresh install has no mirror to stat.
-            val flags = if (readOnlyDomain()) 0 else Document.FLAG_DIR_SUPPORTS_CREATE
-            cursor.newRow().add(Document.COLUMN_DOCUMENT_ID, Parameters.ROOT)
-                .add(Document.COLUMN_DISPLAY_NAME, tsync.domain.ifEmpty { string(R.string.app_name) })
+            val flags = if (readOnly(domain)) 0 else Document.FLAG_DIR_SUPPORTS_CREATE
+            cursor.newRow().add(Document.COLUMN_DOCUMENT_ID, documentId)
+                .add(Document.COLUMN_DISPLAY_NAME, domain.name)
                 .add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR).add(Document.COLUMN_FLAGS, flags)
             return cursor
         }
-        booted()
-        row(cursor, asking { stat(documentId) })
+        booted(domain)
+        row(cursor, domain, domain.asking { stat(ref) })
         return cursor
     }
 
-    private fun row(cursor: MatrixCursor, item: Item) {
+    private fun row(cursor: MatrixCursor, domain: Served, item: Item) {
         val writable = !item.readOnly
         val common = Document.FLAG_SUPPORTS_DELETE or Document.FLAG_SUPPORTS_RENAME or Document.FLAG_SUPPORTS_MOVE
         val flags = when {
@@ -116,7 +138,8 @@ class TsyncDocumentsProvider : DocumentsProvider() {
             item.isDir -> common or Document.FLAG_DIR_SUPPORTS_CREATE
             else -> common or Document.FLAG_SUPPORTS_WRITE
         }
-        val row = cursor.newRow().add(Document.COLUMN_DOCUMENT_ID, item.ref)
+        val id = domain.documentId(item.ref)
+        val row = cursor.newRow().add(Document.COLUMN_DOCUMENT_ID, id)
             .add(Document.COLUMN_DISPLAY_NAME, item.name)
             .add(Document.COLUMN_MIME_TYPE, mimeType(item))
             .add(Document.COLUMN_FLAGS, flags)
@@ -124,20 +147,22 @@ class TsyncDocumentsProvider : DocumentsProvider() {
             row.add(Document.COLUMN_SIZE, item.size)
             if (item.mtime != 0.0) row.add(Document.COLUMN_LAST_MODIFIED, item.mtimeMillis)
         }
-        parents[item.ref] = item.parentRef
+        parents[id] = domain.documentId(item.parentRef)
     }
 
     override fun queryChildDocuments(parentDocumentId: String, projection: Array<out String>?, sortOrder: String?): Cursor {
         val cursor = ObservedCursor(projection ?: DOCUMENT_COLUMNS, parentDocumentId)
         cursor.setNotificationUri(context!!.contentResolver, DocumentsContract.buildChildDocumentsUri(Tsync.AUTHORITY, parentDocumentId))
-        val boot = tsync.boot()
+        val (domain, ref) = Tsync.split(parentDocumentId)?.let { (name, ref) -> tsync.domain(name) to ref }
+            ?: return cursor.saying(DocumentsContract.EXTRA_ERROR, string(R.string.provider_not_set_up))
+        val boot = domain.boot()
         if (boot != Boot.Ready) {
             return cursor.saying(DocumentsContract.EXTRA_ERROR, (boot as? Boot.Failed)?.reason ?: string(R.string.provider_not_set_up))
         }
         try {
-            val listing = tsync.ask { listAll(parentDocumentId) }
-            tsync.latch.listed(listing)
-            listing.items.forEach { row(cursor, it) }
+            val listing = domain.ask { listAll(ref) }
+            domain.latch.listed(listing)
+            listing.items.forEach { row(cursor, domain, it) }
             if (listing.outdated) cursor.saying(DocumentsContract.EXTRA_INFO, string(R.string.offline_as_of, age(listing.pulledAt)))
         } catch (e: CoreException) {
             when (e.code) {
@@ -177,22 +202,28 @@ class TsyncDocumentsProvider : DocumentsProvider() {
         }
     }
 
-    override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean =
-        tsync.boot() == Boot.Ready && Tree.isChild(tsync.client, parentDocumentId, documentId)
+    override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean {
+        val (parent, parentRef) = Tsync.split(parentDocumentId) ?: return false
+        val (name, ref) = Tsync.split(documentId) ?: return false
+        val domain = tsync.domain(name)
+        return parent == name && domain.boot() == Boot.Ready && Tree.isChild(domain.client, parentRef, ref)
+    }
 
     override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String {
-        booted()
+        val (domain, parentRef) = locate(parentDocumentId)
+        booted(domain)
         val names = Naming.candidates(Naming.sanitizeLeaf(displayName))
         val folder = mimeType == Document.MIME_TYPE_DIR
-        return asking {
-            Ingest.firstFree(names) { if (folder) mkdir(parentDocumentId, it, exclusive = true) else create(parentDocumentId, it) }
-        }.ref
+        return domain.documentId(domain.asking {
+            Ingest.firstFree(names) { if (folder) mkdir(parentRef, it, exclusive = true) else create(parentRef, it) }
+        }.ref)
     }
 
     override fun deleteDocument(documentId: String) {
-        booted()
+        val (domain, ref) = locate(documentId)
+        booted(domain)
         try {
-            tsync.ask { delete(stat(documentId)) }
+            domain.ask { delete(stat(ref)) }
         } catch (e: CoreException) {
             // Absent already: a delete of it succeeded (failure-model §7.2).
             if (e.code != Code.NOT_FOUND) throw IllegalStateException(e.message)
@@ -201,50 +232,56 @@ class TsyncDocumentsProvider : DocumentsProvider() {
     }
 
     override fun renameDocument(documentId: String, displayName: String): String? {
-        booted()
-        val renamed = asking { rename(documentId, stat(documentId).parentRef, Naming.sanitizeLeaf(displayName)) }
+        val (domain, ref) = locate(documentId)
+        booted(domain)
+        val renamed = domain.asking { rename(ref, stat(ref).parentRef, Naming.sanitizeLeaf(displayName)) }
         // The platform takes null for "the id did not change", which is every rename here.
-        return renamed.ref.takeIf { it != documentId }
+        return domain.documentId(renamed.ref).takeIf { it != documentId }
     }
 
     override fun moveDocument(sourceDocumentId: String, sourceParentDocumentId: String, targetParentDocumentId: String): String {
-        booted()
-        return asking {
-            val source = stat(sourceDocumentId)
-            if (source.isDir && Tree.isWithin(this, source.ref, targetParentDocumentId)) {
+        val (domain, ref) = locate(sourceDocumentId)
+        val (target, targetRef) = locate(targetParentDocumentId)
+        if (target !== domain) throw IllegalStateException(string(R.string.move_between_domains))
+        booted(domain)
+        return domain.documentId(domain.asking {
+            val source = stat(ref)
+            if (source.isDir && Tree.isWithin(this, source.ref, targetRef)) {
                 throw CoreException(Code.INVALID, string(R.string.move_into_itself, source.name))
             }
-            rename(source.ref, targetParentDocumentId, source.name)
-        }.ref
+            rename(source.ref, targetRef, source.name)
+        }.ref)
     }
 
     override fun getDocumentType(documentId: String): String {
-        if (documentId == Parameters.ROOT) return Document.MIME_TYPE_DIR
-        booted()
-        return mimeType(asking { stat(documentId) })
+        val (domain, ref) = locate(documentId)
+        if (ref == Parameters.ROOT) return Document.MIME_TYPE_DIR
+        booted(domain)
+        return mimeType(domain.asking { stat(ref) })
     }
 
     override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
-        booted()
-        return if ('w' in mode) openForWriting(documentId, mode) else openForReading(documentId)
+        val (domain, ref) = locate(documentId)
+        booted(domain)
+        return if ('w' in mode) openForWriting(domain, ref, mode) else openForReading(domain, ref)
     }
 
-    private fun openForReading(ref: String): ParcelFileDescriptor {
+    private fun openForReading(domain: Served, ref: String): ParcelFileDescriptor {
         // app §5.1: offline, bytes the phone does not hold are refused at once. stat never pulls.
-        if (tsync.offline.value && asking { stat(ref) }.availability == Availability.ONLINE_ONLY) {
+        if (domain.offline.value && domain.asking { stat(ref) }.availability == Availability.ONLINE_ONLY) {
             throw FileNotFoundException(string(R.string.not_available_offline))
         }
-        val handle = tsync.core.open(ref)
+        val handle = domain.core.open(ref)
         if (handle <= 0) throw FileNotFoundException(string(R.string.cannot_open, OsConstants.errnoName(-handle.toInt()) ?: handle.toString()))
         tsync.keepAlive.retain(Work.OPEN_FILE)
         val callback = object : ProxyFileDescriptorCallback() {
-            override fun onGetSize(): Long = positive("size", tsync.core.size(handle))
+            override fun onGetSize(): Long = positive("size", domain.core.size(handle))
 
             override fun onRead(offset: Long, size: Int, data: ByteArray): Int =
-                positive("read", tsync.core.read(handle, offset, size, data).toLong()).toInt()
+                positive("read", domain.core.read(handle, offset, size, data).toLong()).toInt()
 
             override fun onRelease() {
-                tsync.core.close(handle)
+                domain.core.close(handle)
                 tsync.keepAlive.release(Work.OPEN_FILE)
             }
         }
@@ -263,21 +300,21 @@ class TsyncDocumentsProvider : DocumentsProvider() {
         return answer
     }
 
-    private fun openForWriting(ref: String, mode: String): ParcelFileDescriptor {
-        val document = asking { stat(ref) }
+    private fun openForWriting(domain: Served, ref: String, mode: String): ParcelFileDescriptor {
+        val document = domain.asking { stat(ref) }
         if (document.readOnly) throw FileNotFoundException(string(R.string.read_only_domain))
         tsync.keepAlive.retain(Work.SAVE)
         val ingest = tsync.ingest
         // The intent is durable before the staging file exists or is handed to anyone (app §8.2).
         var staged: String? = null
         try {
-            val name = ingest.stage(Target.Existing(ref, document.name), exclusive = false)
+            val name = ingest.stage(domain.name, Target.Existing(ref, document.name), exclusive = false)
             staged = name
             val staging = ingest.staging(name)
             val keepsBody = ('r' in mode || 'a' in mode) && 't' !in mode
             val base = if (keepsBody) {
                 // Starting empty would publish a truncated file on close, so a failed fetch refuses the open.
-                tsync.ask { ensureCached(ref, staging.path) }.contentId
+                domain.ask { ensureCached(ref, staging.path) }.contentId
             } else {
                 staging.createNewFile()
                 document.contentId
@@ -319,6 +356,9 @@ class TsyncDocumentsProvider : DocumentsProvider() {
 
     companion object {
         private const val READER_THREADS = 4
+
+        /** The document of the one root shown with no config; holding no `/`, it names no domain's item. */
+        const val UNCONFIGURED = "unconfigured"
 
         private val ROOT_COLUMNS = arrayOf(
             Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE, Root.COLUMN_SUMMARY, Root.COLUMN_ICON, Root.COLUMN_FLAGS,

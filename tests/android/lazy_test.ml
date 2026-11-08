@@ -147,7 +147,7 @@ let text j k = match field j k with Some (`String s) -> s | _ -> "?"
 
 let request fields =
   Yojson.Safe.from_string
-    (Android_host.request (Yojson.Safe.to_string (`Assoc fields)))
+    (Android_host.request "docs" (Yojson.Safe.to_string (`Assoc fields)))
 
 let action name fields = request (("action", `String name) :: fields)
 let s k v = (k, `String v)
@@ -223,7 +223,7 @@ let show_notices label =
     (String.concat ", " (List.sort_uniq compare (List.concat_map render got)))
 
 let read_all ref_ =
-  let handle = Android_host.open_ ref_ in
+  let handle = Android_host.open_ "docs" ref_ in
   if handle < 0 then Printf.sprintf "errno %d" (-handle)
   else (
     let buffer = Bigstring.create 64 in
@@ -292,8 +292,8 @@ let () =
 
   p "== before boot";
   p "  %-34s %s" "request"
-    (Android_host.request {|{"action":"stat","ref":"root"}|});
-  p "  %-34s %d" "open" (Android_host.open_ "root");
+    (Android_host.request "docs" {|{"action":"stat","ref":"root"}|});
+  p "  %-34s %d" "open" (Android_host.open_ "docs" "root");
   p "  %-34s %S" "check_config" (Android_host.check_config "");
   p "  %-34s %S" "check_config of another domain"
     (Android_host.check_config "nope");
@@ -327,7 +327,7 @@ let () =
          }
        "");
   p "  %-34s %S" "boot again" (Android_host.boot "");
-  p "  %-34s %s" "not JSON" (Android_host.request "{nope");
+  p "  %-34s %s" "not JSON" (Android_host.request "docs" "{nope");
 
   p "== freshness";
   let l = list "root, mirror empty" "root" in
@@ -350,7 +350,7 @@ let () =
 
   p "== a peer's changes";
   p "  %-34s %s" "open a.txt" (read_all a);
-  let kept = Android_host.open_ a in
+  let kept = Android_host.open_ "docs" a in
   peer_writes "a.txt" "replaced by the peer";
   peer_writes "b.txt" "new";
   p "  %-34s %s" "open a.txt after the peer replaced it" (read_all a);
@@ -750,7 +750,7 @@ let () =
   p "  %-34s %d not opening" "list once it is fetched" (fetched ());
   p "== status";
   p "  %-34s %b" "names the frontend"
-    (let st = Android_host.status () in
+    (let st = Android_host.status "docs" in
      let rec has i =
        i + 16 <= String.length st
        && (String.sub st i 16 = "Frontend android" || has (i + 1))

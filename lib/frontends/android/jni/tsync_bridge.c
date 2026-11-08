@@ -109,14 +109,18 @@ static long number(value _result) {
   return Is_exception_result(_result) ? -EIO : Long_val(_result);
 }
 
-long tsync_bridge_open(const char *ref, size_t length) {
+long tsync_bridge_open(const char *domain, size_t domain_length,
+                       const char *ref, size_t ref_length) {
   if (!atomic_load(&started))
     return -EIO;
   enter_ocaml();
   CAMLparam0();
-  CAMLlocal1(_ref);
-  _ref = caml_alloc_initialized_string(length, ref);
-  long handle = number(caml_callback_exn(*entry("open"), _ref));
+  CAMLlocal1(_arg);
+  _arg = caml_alloc_string(domain_length + 1 + ref_length);
+  memcpy((char *)Bytes_val(_arg), domain, domain_length);
+  Bytes_val(_arg)[domain_length] = 0;
+  memcpy((char *)Bytes_val(_arg) + domain_length + 1, ref, ref_length);
+  long handle = number(caml_callback_exn(*entry("open"), _arg));
   CAMLdrop;
   leave_ocaml();
   return handle;

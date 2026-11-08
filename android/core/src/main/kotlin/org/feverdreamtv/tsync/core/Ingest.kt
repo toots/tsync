@@ -3,26 +3,31 @@ package org.feverdreamtv.tsync.core
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-/** A staged body the core adopted. `rerouted` says its target was gone and it went to the root. */
-data class Committed(val item: Item, val rerouted: Boolean)
+/** A staged body [domain] adopted. `rerouted` says its target was gone and it went to the root. */
+data class Committed(val item: Item, val rerouted: Boolean, val domain: String)
 
 /** A save that did not reach the domain and is still on the phone. */
 data class PendingSave(val staging: String, val intent: Intent?)
 
-/** The only way bytes enter the domain from the app (app §8). */
-class Ingest(private val client: Client, val intents: IntentStore) {
+/**
+ * The only way bytes enter a domain from the app (app §8). [firstDomain] names the domain of an
+ * intent that names none; [client] is a domain's, booted.
+ */
+class Ingest(val intents: IntentStore, private val firstDomain: () -> String?, private val client: (String) -> Client) {
     // Staging names a flow of this process is working on: resume and retry leave them alone.
     private val claimed = ConcurrentHashMap.newKeySet<String>()
 
     /** Writes the open intent for a new staging name, before the file is handed to anyone. */
-    fun stage(target: Target, exclusive: Boolean, base: String? = null, modified: Long? = null): String {
+    fun stage(domain: String, target: Target, exclusive: Boolean, base: String? = null, modified: Long? = null): String {
         val name = intents.newName()
         claimed += name
-        intents.put(name, Intent(target, exclusive, base, modified))
+        intents.put(name, Intent(target, exclusive, base, modified, domain = domain))
         return name
     }
 
     fun staging(name: String): File = intents.staging(name)
+
+    fun domainOf(intent: Intent): String? = intent.domain ?: firstDomain()
 
     fun update(name: String, change: (Intent) -> Intent): Intent {
         val intent = change(read(name))
@@ -63,23 +68,26 @@ class Ingest(private val client: Client, val intents: IntentStore) {
         }
     }
 
-    private fun write(intent: Intent, staging: String, candidates: (String) -> Sequence<String>, reroute: Boolean): Committed =
-        try {
-            Committed(writeTo(intent.target, intent, staging, candidates), rerouted = false)
+    private fun write(intent: Intent, staging: String, candidates: (String) -> Sequence<String>, reroute: Boolean): Committed {
+        val domain = domainOf(intent) ?: throw CoreException(Code.INTERNAL, "no domain is configured")
+        val client = client(domain)
+        return try {
+            Committed(client.writeTo(intent.target, intent, staging, candidates), rerouted = false, domain)
         } catch (e: CoreException) {
             if (e.code != Code.NOT_FOUND || !reroute) throw e
             val fallback = Target.Child(Parameters.ROOT, Naming.sanitizeLeaf(intent.target.name))
-            Committed(writeTo(fallback, intent.copy(exclusive = true), staging, candidates), rerouted = true)
+            Committed(client.writeTo(fallback, intent.copy(exclusive = true), staging, candidates), rerouted = true, domain)
         }
+    }
 
-    private fun writeTo(target: Target, intent: Intent, staging: String, candidates: (String) -> Sequence<String>): Item =
+    private fun Client.writeTo(target: Target, intent: Intent, staging: String, candidates: (String) -> Sequence<String>): Item =
         when (target) {
-            is Target.Existing -> client.writeRef(target.ref, staging, intent.base)
+            is Target.Existing -> writeRef(target.ref, staging, intent.base)
             is Target.Child ->
-                if (!intent.exclusive) client.writeChild(target.parentRef, target.name, staging, intent.base, false)
+                if (!intent.exclusive) writeChild(target.parentRef, target.name, staging, intent.base, false)
                 else firstFree(candidates(target.name)) { name ->
                     try {
-                        client.writeChild(target.parentRef, name, staging, intent.base, true)
+                        writeChild(target.parentRef, name, staging, intent.base, true)
                     } catch (e: CoreException) {
                         adoptedBefore(e, intent, File(staging)) ?: throw e
                     }
@@ -100,10 +108,10 @@ class Ingest(private val client: Client, val intents: IntentStore) {
         return occupant
     }
 
-    /** Commits what earlier processes left ready (app §8.2), reporting each outcome. */
-    fun resumeReady(report: (PendingSave, Result<Committed>) -> Unit) {
+    /** Commits what earlier processes left ready for [domain] (app §8.2), reporting each outcome. */
+    fun resumeReady(domain: String, report: (PendingSave, Result<Committed>) -> Unit) {
         for (save in pending()) {
-            if (save.intent == null || !claimed.add(save.staging)) continue
+            if (save.intent == null || domainOf(save.intent) != domain || !claimed.add(save.staging)) continue
             report(save, runCatching { commit(save.staging) })
         }
     }

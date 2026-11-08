@@ -26,10 +26,11 @@ class FillActivity : Activity() {
         val tsync = Tsync.get(this)
         if (intent.getBooleanExtra(EXTRA_SUGGEST, false)) return suggest(tsync, site)
         val id = intent.getStringExtra(EXTRA_ID) ?: return done(null)
+        val domain = tsync.domain(intent.getStringExtra(EXTRA_DOMAIN) ?: return done(null))
         tsync.scope.launch {
             val dataset = try {
-                if (tsync.boot() != Boot.Ready) null
-                else dataset(tsync.passwords.fill(site, id, pull = Pull.BACKGROUND, certs = Browsers.certificatesOf(this@FillActivity, site)))
+                if (domain.boot() != Boot.Ready) null
+                else dataset(domain.passwords.fill(site, id, pull = Pull.BACKGROUND, certs = Browsers.certificatesOf(this@FillActivity, site)))
             } catch (e: Exception) {
                 null
             }
@@ -37,15 +38,16 @@ class FillActivity : Activity() {
         }
     }
 
-    /** passwords §5.1: the login is saved now; the submit only sets its username. */
+    /** passwords §5.1: the login is saved now, to the first domain using passwords; the submit only sets its username. */
     @Suppress("DEPRECATION")
     private fun suggest(tsync: Tsync, site: String) {
         tsync.scope.launch {
             val dataset = try {
-                if (tsync.boot() != Boot.Ready) null
+                val domain = tsync.using("passwords").firstOrNull()
+                if (domain == null) null
                 else {
-                    val suggestion = tsync.passwords.suggest(site, intent.getStringExtra(EXTRA_TYPED_USERNAME).orEmpty())
-                    Saving.suggested(site, suggestion.id, suggestion.password)
+                    val suggestion = domain.passwords.suggest(site, intent.getStringExtra(EXTRA_TYPED_USERNAME).orEmpty())
+                    Saving.suggested(domain.name, site, suggestion.id, suggestion.password)
                     tsync.vaultChanges.value++
                     val builder = Dataset.Builder()
                     ids(EXTRA_PASSWORD).forEach { builder.setValue(it, AutofillValue.forText(suggestion.password)) }
@@ -87,6 +89,7 @@ class FillActivity : Activity() {
     companion object {
         const val EXTRA_SITE = "org.feverdreamtv.tsync.autofill.SITE"
         const val EXTRA_ID = "org.feverdreamtv.tsync.autofill.ID"
+        const val EXTRA_DOMAIN = "org.feverdreamtv.tsync.autofill.DOMAIN"
         const val EXTRA_USERNAME = "org.feverdreamtv.tsync.autofill.USERNAME"
         const val EXTRA_PASSWORD = "org.feverdreamtv.tsync.autofill.PASSWORD"
         const val EXTRA_CODE = "org.feverdreamtv.tsync.autofill.CODE"

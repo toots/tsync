@@ -12,7 +12,7 @@
 #include "tsync_bridge.h"
 
 CAMLprim value tsync_test_open_before_start(value _unit) {
-  return Val_long(tsync_bridge_open("root", 4));
+  return Val_long(tsync_bridge_open("docs", 4, "root", 4));
 }
 
 struct reader {
@@ -28,7 +28,7 @@ static unsigned char expected(long offset) { return (offset * 7 + 3) & 0xff; }
 static void *read_loop(void *arg) {
   struct reader *reader = arg;
   char buffer[4096];
-  long handle = tsync_bridge_open(reader->ref, strlen(reader->ref));
+  long handle = tsync_bridge_open("docs", 4, reader->ref, strlen(reader->ref));
   if (handle <= 0 || tsync_bridge_size(handle) != reader->size) {
     atomic_fetch_add(reader->failures, 1);
     return NULL;

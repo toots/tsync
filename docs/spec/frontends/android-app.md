@@ -38,13 +38,19 @@ The app has to do four things with one process the platform may kill at any mome
 - Every component runs in the app's default process and calls the core through the bridge
   ([android.md §5](android.md#5-the-bridge)). None may be declared in a separate process: a second
   process could not reach the owner, which serves no socket.
-- The app serves exactly one domain: the one its config names.
-- **Boot** is triggered by the first use from any entry point, never on the UI thread, and is the
-  bridge's `boot` ([android.md §3.1](android.md#31-boot)). After it reports ready the app resumes
-  ready ingest intents (§8.2).
-- **Notices** ([android.md §4.2](android.md#42-notices)): on `changed`, tell the platform that each
-  named folder's children changed (§7) and refresh the browser when it shows one of them (§10.3); on
-  `recovered`, clear the offline state and refresh.
+- The app serves every domain its config names.
+- **Boot** is per domain, triggered by the first use of that domain from any entry point, never on
+  the UI thread, and is the bridge's `boot` ([android.md §3.1](android.md#31-boot)). After a domain
+  reports ready the app resumes its ready ingest intents (§8.2).
+- **Vault domains.** The app keeps, in its preferences, the set of domains that had a vault when it
+  last asked (`vault_status` not refused for using no extension). Anything that reads the vaults
+  (the Vault screen, autofill, passkeys) boots every domain of that set first; a domain outside it
+  has no vault the phone knows of, and joins the set once it boots and answers one. The screen lock
+  ([vault §6.2](../extensions/vault.md#62-auto-lock)) is reported to every booted domain; one
+  not booted holds no K.
+- **Notices** ([android.md §4.2](android.md#42-notices)) name their domain: on `changed`, tell the
+  platform that each named folder's children changed (§7) and refresh the browser when it shows one
+  of them (§10.3); on `recovered`, clear that domain's offline state and refresh.
 
 ## 3. Local state
 
@@ -101,8 +107,9 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   are one step in the owner, so two concurrent saves never overwrite each other.
 - **Offline.** A listing reply's `outdated` and `pulledAt`
   ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)) are shown, never hidden
-  (§7, §10.3). An `unreachable` answer or an `outdated` listing puts the app in the offline state. Only
-  the `recovered` notice, or a listing that is not `outdated`, clears it: `stat`, `status` and
+  (§7, §10.3). The offline state is per domain. An `unreachable` answer or an `outdated` listing
+  puts its domain in the offline state. Only that domain's `recovered` notice, or a listing of it that
+  is not `outdated`, clears it: `stat`, `status` and
   mutations succeed without the store and say nothing about it.
 
 ### 5.1 Working offline
@@ -143,35 +150,30 @@ follows this rule rather than failing as a whole when the store is silent; the c
                     "url": "https://tsync.example.org", "secret": "…" } ] } ] }
 ```
 
-- The app configures one domain backed by one http-proxy server: URL, secret, domain, cache limit
-  (default `2G`). The config has no `extensions`: the phone uses the extensions the server states
+- The app configures any number of domains, each backed by one http-proxy server of its own: the
+  URL, secret and name a setup link offered it with (§10.7), and the cache limit `2G`. Domains are
+  added only by joining a setup link, and removed from Settings; their order in the config is the
+  order the app lists them in. The config has no `extensions`: the phone uses the extensions the server states
   for the domain ([05 §2.1](../05-ops-config.md#21-schema-and-validation), rule 5) and decides
   nothing about them.
-- **Validation**, first failure wins and is attached to its field:
-  1. the URL MUST use `https://` unless its host is a loopback address
-     ([android.md §4.1](android.md#41-what-the-host-provides));
-  2. the secret meets the strength rule of
-     [security-model.md §10.1](../algorithms/security-model.md#101-generation-and-strength);
-  3. the domain name follows the grammar of [01-core.md](../01-core.md);
-  4. the core accepts the candidate (`check_config`); its message is shown verbatim.
+- **Validation** is the core's: each domain joined is added to a candidate that `check_config`
+  must accept, which refuses a cleartext URL to a non-loopback host
+  ([android.md §4.1](android.md#41-what-the-host-provides)); its message is shown verbatim, naming
+  the domain. A domain the config already names is not offered.
 - **A config the core refused is never the app's config.** The candidate's text is checked
   (`check_config` with the candidate) and written to the config file only when accepted; a refused
   candidate is never written anywhere.
 - The config is written atomically with owner-only permissions.
-- Saving a changed config while the core is booted offers "Restart now", which finishes every
-  activity and exits the process, or "Later", which keeps serving the old config until the process
-  dies. The platform is told the provider's roots changed either way.
+- An added domain is served at once. Removing a domain that is booted offers "Restart now", which
+  finishes every activity and exits the process, or "Later", which keeps serving that domain as it
+  booted until the process dies. The platform is told the provider's roots changed
+  either way.
+- Joining a domain that is still served since its removal offers the same restart: until then it
+  is served with the settings it booted with.
+- Removing a domain deletes its entry from the config, nothing else: its local state, staged bodies
+  and intents stay until a config names it again.
 
-### 6.2 Check server
-
-The one request the app makes itself, before any config exists: `GET <url>/domains` through the
-platform's network stack, signed as the http-proxy wire specifies
-([backends/http-proxy.md](../backends/http-proxy.md)), with `check_server_timeout`. 200 → offer the
-listed domains; 401 → "secret refused (or this device's clock is off)"; 404 → "this server is too
-old to list its domains", and the domain name is typed instead. The app declares cleartext traffic
-disallowed to the platform, which covers this request.
-
-### 6.3 Backup and device transfer
+### 6.2 Backup and device transfer
 
 The rule is [security-model.md §10.2](../algorithms/security-model.md#102-at-rest). The app disables
 platform backup and device transfer entirely: the config, the client identity, the domain's local
@@ -179,19 +181,26 @@ state, the staging directory, ingest intents and camera-backup records all descr
 
 ## 7. Documents provider
 
-A document id is the item's reference. File references are `i:` references
+A document id is `<domain>/<reference>`, the item's domain and its reference; a domain name holds no
+`/` ([01-core.md](../01-core.md)). File references are `i:` references
 ([08 §2.2](../08-frontends.md#22-item-references)), so a document id survives a rename and a move.
+Every operation below runs in the document's domain, booting it first, and a move between domains
+is refused.
 
-- **Roots.** Always one root, even when the core cannot boot (a vanished root leaves no way to
-  diagnose): root id = the domain name, document id `root`, title `tsync`, summary = the domain
-  name, supporting is-child, and create unless the domain is read-only.
-- **Document.** `root` is synthesised (a fresh install has no mirror). Otherwise `stat`.
+- **Roots.** One root per domain the config names, each even when its domain cannot boot (a
+  vanished root leaves no way to diagnose): root id = the domain name, document id
+  `<domain>/root`, title `tsync`, summary = the domain name, supporting is-child, and create unless
+  the domain is read-only. A domain is not booted to draw its root: until it is, its root offers
+  create and the owner refuses a write to a read-only domain. With no config, one root with an
+  empty id and the document id `unconfigured` (no `/`, so no domain's), whose listing says tsync
+  is not set up.
+- **Document.** A domain's root is synthesised (a fresh install has no mirror). Otherwise `stat`.
   - Folder: the directory MIME type; supports create, delete, rename and move.
   - File: MIME type from the name's extension (default octet-stream); supports write, delete,
     rename and move; size; last-modified = `mtime`, absent when 0.
   - A row carrying `readOnly` supports none of create, write, delete, rename or move.
 - **Children.** Walk every page of `list_dir` into one result, registered on the folder's
-  notification address so a `changed` notice refreshes it. While the result is open the folder is
+  notification address (that of its document id) so a `changed` notice of its domain refreshes it. While the result is open the folder is
   **observed** (§7.1).
   - `outdated`: the rows, with the info message "Offline: showing this folder as of <time>".
   - `unreachable` (the folder was never listed, or its last view is too old to show): no rows,
@@ -272,10 +281,12 @@ picked for upload) is acknowledged before the owner can commit it. Each staging 
 durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
 
 ```json
-{"target":{"parentRef":"d:9f3a","name":"report.pdf"}, "exclusive":true,
+{"domain":"Family Photos", "target":{"parentRef":"d:9f3a","name":"report.pdf"}, "exclusive":true,
  "base":"1294bbe85c2f380b", "modified":1755347464000, "state":"ready"}
 ```
 
+- `domain`: the domain the file goes to. Readers take a record without one as naming the config's
+  first domain.
 - `target`: `{"parentRef","name"}` for a file to be made, or `{"ref","name"}` for an existing
   file, `name` being its name when the intent was written (only the fallback below uses it).
 - `exclusive`: whether the commit must not replace an existing item. `base` (optional): the
@@ -287,11 +298,11 @@ durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
 
 - The intent is written before the staging file is handed to anyone. It becomes `ready`, with the
   staging file fsynced, before the platform or the user is told the operation succeeded.
-- After boot the app commits every `ready` intent, then deletes it. An `open` intent found at
+- After a domain boots the app commits every `ready` intent of that domain, then deletes it. An `open` intent found at
   process start is an interrupted write and is discarded with its staging file. A `ready` intent
   whose staging file is gone was adopted just before the process died: its record is deleted.
 - A target that no longer exists at commit time (`not_found`: the parent, or the file a reference
-  named) commits to the domain root under the target's `name`, exclusive, and notifies the user
+  named) commits to its domain's root under the target's `name`, exclusive, and notifies the user
   where the file went.
 - The staging sweep deletes only staging files that no intent names and whose name-embedded creation
   time is older than `staging_orphan_age`.
@@ -299,7 +310,7 @@ durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
 ### 8.3 Folders by path
 
 `folderFor(path)` resolves each directory segment with `mkdir` (which answers an existing folder,
-after the destination pull) and takes the reference from the reply's item. A cache of path → folder
+after the destination pull) and takes the reference from the reply's item. A cache of (domain, path) → folder
 reference MAY avoid repeated requests; a cached reference that answers `not_found` is dropped and
 the path resolved again.
 
@@ -349,19 +360,25 @@ implementation's.
 
 ### 10.2 Structure
 
-Until a config exists the app shows only Setup (§10.7). A config the core refuses at boot (one
-written by an earlier version, for instance with a cleartext URL) also shows Setup, with its fields
-filled from that config and the core's message; nothing is deleted. After that, three top-level destinations
+Until a config exists the app shows only Setup (§10.7). A config that does not load at all (one
+written by an earlier version, for instance) also shows Setup, with the core's message; joining a
+link there replaces it. A domain the core refuses at boot shows the core's message on its row in
+Files and in Settings, which offers its **Remove**; nothing is deleted otherwise. After that, three top-level destinations
 reachable from every screen: **Files** (the start destination), **Activity** and **Settings**, and
-**Vault** (§10.8) while the domain uses an extension: shown when `vault_status` is not refused for
-using none, asked at boot and again each time the app comes to the foreground.
+**Vault** (§10.8) while a domain uses an extension: shown when the set of vault domains (§2) is not
+empty, settled by `vault_status` of each of them at launch and again each time the app comes to the
+foreground.
 Process death and configuration changes restore the destination and, in Files, the folder trail.
 
 ### 10.3 Files
 
-- **Trail.** A stack of `(reference, name)` from the root. The title is the current folder's name
-  (the domain name at the root); the path is shown and each ancestor is reachable from it. Back pops
-  the trail and leaves the app at the root.
+- **Domains.** With one domain, Files opens at its root. With several, Files opens on the list of
+  domains, in config order, each row a folder whose tap boots the domain and descends into its
+  root; a domain that fails to boot shows the core's sentence on its row.
+- **Trail.** A stack of `(reference, name)` from the root, within one domain. The title is the
+  current folder's name (the domain name at the root); the path is shown and each ancestor is
+  reachable from it, as is the list of domains when there are several. Back pops the trail and
+  leaves the app at the list of domains, or at the root when there is one domain.
 - **Listing.** `list_dir` pages, the next page loaded as the list nears its end, in the handler's
   order. Shown while the first page loads: a progress indication, not an empty list.
 - **Row.** An icon for the kind (folder, or the file's type family from its MIME type), the name, a
@@ -376,7 +393,7 @@ Process death and configuration changes restore the destination and, in Files, t
 - **Offline.** When the listing is `outdated`, a banner above the list says "Offline: showing this
   folder as of <time>" and stays until a fresh listing arrives. A folder that answers `unreachable`
   shows "Cannot reach the server" with Retry instead of a list.
-- **Read-only.** On a read-only domain the screen says so once, and nothing that writes is offered.
+- **Read-only.** On a read-only domain the screen says so once per domain, and nothing that writes is offered.
 - **Add.** One prominent control offering "New folder" (a name prompt; `mkdir`, exclusive; `exists`
   is shown on the name field) and "Upload files" (the system file picker, multiple; then §10.6 into
   the current folder).
@@ -395,7 +412,7 @@ Offered in a sheet titled with the item's name; each ends with a short confirmat
 | Keep offline longer | pinned files | `restore` again, which extends the pin. |
 | Remove download | all not `online-only` | `evict`, with counts for a folder. A file waiting to upload keeps its bytes. |
 | Rename | all, when writable | A name prompt pre-filled with the current name; `rename` in place with `noreplace: true`; `exists` is shown on the field. |
-| Move | all, when writable | Files in pick mode (§10.6) to choose the destination folder, the item itself and its subtree not offered; then `rename` into it under the same name with `noreplace: true`. `exists` is shown with the owner's sentence. |
+| Move | all, when writable | Files in pick mode (§10.6) to choose the destination folder, the item itself, its subtree and every other domain not offered; then `rename` into it under the same name with `noreplace: true`. `exists` is shown with the owner's sentence. |
 | Delete | all, when writable | A confirmation naming the item, and for a folder saying that everything in it is deleted; then `delete` or `rmdir`. |
 | Details | all | Name, kind, size, modified, where its bytes are, pinned until, whether it is uploaded. |
 
@@ -407,6 +424,9 @@ left running: its outcome is then a notification.
 What the app is doing and what went wrong, read from the `status` and `stats` actions every `status_poll` while
 the screen is visible, and not at all otherwise.
 
+Every line below is per booted domain, under a header naming it when more than one domain is booted;
+a domain not booted is listed as such and asked nothing.
+
 - **State line**: connected, offline (the offline state of §5), paused, or read-only.
 - **Uploads**: the files uploading now, how many more are waiting and how many bytes are owed.
 - **Downloads**: each transfer running now with its progress and rate.
@@ -414,7 +434,7 @@ the screen is visible, and not at all otherwise.
   the owner's parked records, with "Retry now" (`retry`).
 - **Pause / Resume** (`pause`).
 - **Camera backup**: the status line of §11.8 and "Back up now".
-- **Details**: the `status()` text verbatim, selectable, for diagnosis.
+- **Details**: each booted domain's `status(domain)` text verbatim, selectable, for diagnosis.
 
 ### 10.6 Saving into the domain
 
@@ -424,7 +444,9 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
 - **Share target.** No streams → "Only files can be saved to tsync"; no config → "Set up tsync
   before saving to it"; in both cases the activity finishes. Otherwise Files opens in **pick mode**:
   taps only navigate folders, item actions are off, "New folder" stays, the title reads "Save N
-  files to <path>", and the screen offers "Save here" and "Cancel".
+  files to <path>" (the path starting at the domain name), and the screen offers "Save here" and
+  "Cancel". With several domains pick mode starts on the list of domains, which offers no "Save
+  here".
 - **Names.** One file: an editable name pre-filled with the stream's display name (else the last
   address segment, else "shared file"). Several: each keeps its own name. Every name is sanitised
   (§11.5).
@@ -438,33 +460,45 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
 
 ### 10.7 Setup and Settings
 
-- **Setup**, when no config exists, in this order: *Scan setup code*, or a setup link pasted in
-  the URL field, which fills what follows ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)); server URL and secret (the secret masked, with a
-  control to reveal it, and paste accepted); **Check server** (§6.2), whose answer fills a choice of
-  domains, or one domain directly; cache limit, pre-filled; **Connect** (§6.1). Each validation
-  failure is shown on its field, which takes focus and is scrolled into view. A server that cannot be
-  checked does not block setup: the domain name can be typed.
+- **Setup**, when no config exists and from *Add a domain* in Settings: *Scan setup code*, or a
+  setup link pasted in its one field
+  ([setup-link §6.3](../algorithms/setup-link.md#63-where-a-link-is-opened)). There is no manual
+  entry of a server, secret or domain. The opened link lists its joinable domains, each with its
+  name and mark from `about`, those already configured left out, and the domains it skipped with
+  their reasons; one domain is picked already, several may be picked. **Join** adds every domain
+  picked (§6.1), each over the server it was offered with. A link that cannot be opened, or offers
+  nothing joinable, says why and joins nothing.
 - **Settings**:
-  - *Server*: the same fields, with the restart prompt of §6.1 on a change.
-  - *Storage*: the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
+  - *Domains*: one entry per domain, in config order, naming it and its server, with **Remove**
+    (after a confirmation naming the domain) and the restart prompt of §6.1; then **Add a
+    domain**, which opens Setup. Nothing of a domain is edited here.
+  - *Storage*, per domain, asked of the booted domains only (one not booted says so): the extensions the domain uses here, from `stats` (`settings.extensions`, `none`
     when empty), with the server named when they are its list; the cache limit; how much the cache (from `stats`) and the staged bodies (from
     `status`) hold now;
     "Free up space" (`evict` on the root, after a confirmation saying that files made available
     offline are removed from the phone too).
-  - *Camera backup*: the controls of §11.6.
+  - *Camera backup*: the controls of §11.6, and the domain it backs up to (§11.6).
   - *About*: the app version and the commit it was built from.
 
 ### 10.8 Vault
 
-The vault's extensions on this phone: one tab per extension the domain uses, **Codes** for
-`totp` ([totp](../extensions/totp.md)), more as further extensions arrive. The phone follows the
-domain: it never creates, deletes or re-keys the vault, which a computer does
+The vaults' extensions on this phone: one tab per extension a vault domain (§2) uses, **Codes** for
+`totp` ([totp](../extensions/totp.md)), more as further extensions arrive. The phone follows each
+domain: it never creates, deletes or re-keys a vault, which a computer does
 ([vault §3](../extensions/vault.md#3-initialising), §7).
 
-- **The vault's mark** heads the screen: its appearance from `vault_status`
+- **Several domains** are shown as one, as
+  [extensions README §6.1](../extensions/README.md#61-several-domains) says: a tab lists every
+  domain using its extension, each answer merged and nothing deduplicated. With more than one
+  domain in a tab, its rows are grouped by domain under a header naming the domain with its
+  vault's mark; a domain's state (*no vault*, *locked*, *unreachable*, *offline*) is shown under its
+  header in place of or above its rows, and the other domains list as usual. A new record (*Add*,
+  a link opened from elsewhere) goes to the first domain, in config order, using the extension.
+- **The vault's mark** heads the screen when one domain is shown, and each domain's header
+  otherwise: its appearance from `vault_status`
   ([vault §8.1](../extensions/vault.md#81-appearance)), the vault's icon or the tsync glyph in
   its colour.
-- **Menu** (⋮): the vault's state from `vault_status` (locked or unlocked, whether this phone is
+- **Menu** (⋮), one section per domain when there are several: the vault's state from `vault_status` (locked or unlocked, whether this phone is
   enrolled, where K is kept); **Lock** (`vault_lock`, after a confirmation saying codes need the
   passphrase again afterwards); **Forget the secret key on this phone** (`vault_lock` with
   `forget`, after a confirmation saying the next unlock needs it again).
@@ -529,7 +563,7 @@ One record per media item, keyed by its media id, with a unique target path:
 | Field | Meaning |
 |---|---|
 | volume, media id | the item's identity in the media store |
-| target | the domain path it is (or will be) uploaded to; frozen at first sight |
+| target | the domain and the path in it the item is (or will be) uploaded to; frozen at first sight. Readers take a record without a domain as naming the config's first domain |
 | size, modified | the item's values when last seen, and when uploaded for `DONE` |
 | etag | the content identity the upload produced; writers MUST record it with `DONE`. Readers SHOULD accept a record without it (meaning unknown: a re-upload then carries no `base`) |
 | state | `PENDING` (seen, not yet uploaded), `DONE` (adopted by the core), `FAILED` (last attempt failed), `BASELINE` (existed when backup was enabled "from now on"; never uploaded). Writers MUST NOT produce another value; readers SHOULD accept one, meaning `FAILED` |
@@ -655,13 +689,16 @@ the store away, photos are staged up to the budget and committed when it returns
 - **Access level**: full when both image and video read access are granted (or, on older platforms,
   external-storage read); selected-only when only a user selection is readable; denied otherwise.
   Media-location access is requested too. Selected-only is reported as a limit, not a stall.
-- **Controls**: "Back up camera photos and videos"; "Only over wifi" (default on); "Not when the
-  battery is low" (default on); "Back up now".
+- **Controls**: "Back up camera photos and videos"; "Back up to" (one domain of the config, the
+  first by default; a change applies to items seen from then on, records already made keep their
+  target); "Only over wifi" (default on); "Not when the battery is low" (default on); "Back up now".
+  A pass boots the target domain of each record it uploads; backup whose domain the config no
+  longer names asks for another and uploads nothing until one is picked.
 - **Enabling** asks "Everything" (backfill) or "From now on", then requests access. Backup is enabled
   only once read access is granted. For "From now on", off the UI thread, a discovery pass first
   records every existing row as `BASELINE`; if that pass cannot complete, backup is not enabled and
   the user is told why. Turning backup off cancels all work.
-- **Budgets**, per pass: the staged bytes the core still owes for this domain stay under
+- **Budgets**, per pass: the staged bytes the core still owes for the domain an item goes to stay under
   `staged_bytes_budget`, since staged bodies are not covered by the cache limit and fill the phone's
   storage while the store is away; running time at most `pass_time_budget` (the platform stops jobs
   after about ten minutes); free space in the staging directory at least twice the item's size.
@@ -725,7 +762,6 @@ What the app's build MUST guarantee; where it runs and what it gates is [10](../
 | `max_tree_depth` | 4096 | |
 | `max_name_attempts` | 1000 | |
 | `staging_orphan_age` | 24 h | |
-| `check_server_timeout` | 10 s | |
 | `settle_time` | 10 s | |
 | `date_added_lookback` | 24 h | |
 | `full_discovery_interval` | 7 days | |
@@ -776,9 +812,22 @@ checked.
 - A commit adopts the staging file (it is gone afterwards) and keeps its mtime.
 - Every surfaced failure carries its code; a failed listing is never taken as an empty folder.
 - A config the core refuses is never left as the app's config.
-- Started on the state `main`'s app left (its config, staging files, settings and version-2 record
-  database), the app converts nothing, uploads no photo again and loses no setting; a config it can
-  no longer accept leads to Setup with the reason.
+- Started on the state an app serving one domain left, the app serves its config as is, commits
+  its ready intents to that domain, and keeps its camera-backup records, `BASELINE` included, as
+  that domain's: no photo is uploaded again.
+
+**Several domains**
+- With two domains configured, the provider shows two roots; a document id of one is never served
+  from the other, and a move between them is refused.
+- Opening one domain boots it alone; the other is booted by its own first use, or by a vault read
+  when it is in the set of vault domains.
+- A domain whose boot fails (another process holds it, a refused backend) shows its sentence on its
+  row and its root, and the other domain serves as usual.
+- A `changed` notice of one domain refreshes only that domain's folders; one domain offline leaves
+  the other's banner off.
+- With both domains using `totp`, one locked: the Codes tab lists the other's codes under its
+  header, and the locked domain's header offers its unlock.
+- Adding a domain serves it without a restart; removing a booted one offers the restart.
 
 **Provider**
 - `isChildDocument` is true for every descendant of a tree root and false for anything else.
@@ -799,7 +848,7 @@ checked.
 
 **Secrets and transport**
 - The app's data is excluded from backup and device transfer.
-- A cleartext URL to a non-loopback host is refused by the form.
+- A setup link naming a cleartext URL to a non-loopback host joins nothing, and says why.
 - A trust-store change on the device is picked up at the next process start.
 
 **User interface**
@@ -822,6 +871,9 @@ checked.
 
 ## 15. Rationale (do not undo)
 
+- **Domains boot on first use, not at launch.** Each booted domain runs its own owner and
+  maintenance schedule for the life of the process; an entry point that needs one domain pays for
+  that one.
 - **Edit opens that cannot fetch the current body are refused.** Starting empty published
   truncations.
 - **Commit off the descriptor thread.** A commit waits for the upload; the callback thread serves

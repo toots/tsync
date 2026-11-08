@@ -9,7 +9,7 @@ enum class State {
     }
 }
 
-/** One media item's durable record (app §11.2). */
+/** One media item's durable record (app §11.2). A null [domain] is the config's first domain. */
 data class Record(
     val mediaId: Long,
     val volume: String,
@@ -22,6 +22,7 @@ data class Record(
     val updatedAt: Long,
     val etag: String? = null,
     val nextAttemptAt: Long? = null,
+    val domain: String? = null,
 )
 
 /** A row of the media store, as discovery and processing read it. */

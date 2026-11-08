@@ -22,7 +22,7 @@ let reads = 64
 
 let request fields =
   Yojson.Safe.from_string
-    (Android_host.request (Yojson.Safe.to_string (`Assoc fields)))
+    (Android_host.request "docs" (Yojson.Safe.to_string (`Assoc fields)))
 
 let field j k = match j with `Assoc l -> List.assoc_opt k l | _ -> None
 
@@ -54,7 +54,8 @@ let () =
        root);
   p "open before the runtime is announced  %d" (open_before_start ());
   Tsync_android_bridge.Android_bridge.started ();
-  p "open before boot                      %d" (Android_host.open_ "root");
+  p "open before boot                      %d"
+    (Android_host.open_ "docs" "root");
   p "boot                                  %S" (Android_host.boot "");
   let staging = Filename.concat (Sys.getenv "HOME") "staged" in
   Fs.write_file_for_test staging
@@ -75,7 +76,7 @@ let () =
       | _ -> failwith (Yojson.Safe.to_string written)
   in
   p "open of an absent reference           %d"
-    (Android_host.open_ "i:00000000000000000000000000000000");
+    (Android_host.open_ "docs" "i:00000000000000000000000000000000");
   p "%d foreign threads × %d reads           %d failures" threads reads
     (stress ref_ ~threads ~reads ~size);
   let code, said = spawned tsync ["android"; "stat"; "root"] in

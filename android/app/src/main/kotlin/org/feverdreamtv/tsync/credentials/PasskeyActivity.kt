@@ -43,6 +43,9 @@ import org.json.JSONObject
 class PasskeyActivity : FragmentActivity() {
     private val tsync by lazy { Tsync.get(this) }
 
+    /** The domain whose entry was picked (§6.2). */
+    private val domain by lazy { tsync.domain(intent.getStringExtra(EXTRA_DOMAIN).orEmpty()) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         when {
@@ -62,7 +65,7 @@ class PasskeyActivity : FragmentActivity() {
     private fun login(id: String) {
         val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent) ?: return finish()
         val origin = origin(request.callingAppInfo) ?: return getFailed(getString(R.string.passkey_not_offered))
-        work({ tsync.passwords.fill(origin, id) }) { filled ->
+        work({ domain.passwords.fill(origin, id) }) { filled ->
             val result = Intent()
             PendingIntentHandler.setGetCredentialResponse(result, GetCredentialResponse(PasswordCredential(filled.username, filled.password)))
             done(result)
@@ -77,7 +80,7 @@ class PasskeyActivity : FragmentActivity() {
         val json = JSONObject(option.requestJson)
         val rpId = json.optString("rpId").ifEmpty { Webauthn.host(origin) }
         verify(Webauthn.verificationAsked(json.optString("userVerification", "")), getString(R.string.passkey_sign_in, rpId)) { verified ->
-            work({ tsync.passwords.passkeyAssert(origin, rpId, id, Webauthn.base64Url(hash), verified) }) { signed ->
+            work({ domain.passwords.passkeyAssert(origin, rpId, id, Webauthn.base64Url(hash), verified) }) { signed ->
                 val clientData = Webauthn.clientData("webauthn.get", json.optString("challenge"), origin)
                 val result = Intent()
                 PendingIntentHandler.setGetCredentialResponse(
@@ -104,7 +107,7 @@ class PasskeyActivity : FragmentActivity() {
         val asked = Webauthn.verificationAsked(json.optJSONObject("authenticatorSelection")?.optString("userVerification", ""))
         verify(asked, getString(R.string.passkey_save, rpId)) { verified ->
             work({
-                tsync.passwords.passkeyCreate(
+                domain.passwords.passkeyCreate(
                     origin, rpId, user.optString("id"), user.optString("name"), user.optString("displayName"),
                     algorithms, Webauthn.ids(json.optJSONArray("excludeCredentials")), Webauthn.base64Url(hash), verified,
                 )
@@ -151,7 +154,7 @@ class PasskeyActivity : FragmentActivity() {
     private fun <T> work(call: () -> T, onRefused: ((CoreException) -> Unit)? = null, then: (T) -> Unit) {
         tsync.scope.launch {
             val outcome = runCatching {
-                if (tsync.boot() != Boot.Ready) throw CoreException(Code.UNREACHABLE, getString(R.string.save_login_not_ready))
+                if (domain.boot() != Boot.Ready) throw CoreException(Code.UNREACHABLE, getString(R.string.save_login_not_ready))
                 call()
             }
             withContext(Dispatchers.Main) {
@@ -198,5 +201,6 @@ class PasskeyActivity : FragmentActivity() {
         const val EXTRA_ID = "org.feverdreamtv.tsync.credentials.ID"
         const val EXTRA_LOGIN = "org.feverdreamtv.tsync.credentials.LOGIN"
         const val EXTRA_CREATE = "org.feverdreamtv.tsync.credentials.CREATE"
+        const val EXTRA_DOMAIN = "org.feverdreamtv.tsync.credentials.DOMAIN"
     }
 }

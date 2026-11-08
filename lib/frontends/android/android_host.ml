@@ -116,7 +116,11 @@ let check_trust_store { trust_store; _ } =
   if not holds_one then
     Fail.raise_ Fail.Local "the trust store %s holds no certificate" trust_store
 
-type opened = { version : Tsync_sync.Local_ops.handle; size : int }
+type opened = {
+  owner : Owner.embedded;
+  version : Tsync_sync.Local_ops.handle;
+  size : int;
+}
 
 let handles : (int, opened) Hashtbl.t = Hashtbl.create 16
 let handles_m = Mutex.create ()
@@ -142,8 +146,10 @@ let frontend () : R.frontend option =
       pending_folders = None;
     }
 
-let booted : Owner.embedded option Atomic.t = Atomic.make None
+(* Replaced whole under [boot_m], so foreign threads read it without a lock. *)
+let booted : (string * Owner.embedded) list Atomic.t = Atomic.make []
 let boot_m = Mutex.create ()
+let booted_owner name = List.assoc_opt name (Atomic.get booted)
 
 let boot_once ?pull_params name =
   let config, dom = load name in
@@ -160,16 +166,20 @@ let boot_once ?pull_params name =
           [h.transfer_root]
       | None -> [Paths.home ()]
   in
-  let owner =
-    Owner.embed ?pull_params ~role:"app" ~what:"the tsync app" ~roots
-      ~publish:Notices.push ~frontend config dom
-  in
-  Owner.maintain owner;
-  Atomic.set booted (Some owner)
+  let key = Domain_name.to_string dom.name in
+  if booted_owner key = None then (
+    let owner =
+      Owner.embed ?pull_params ~role:"app" ~what:"the tsync app" ~roots
+        ~publish:Notices.push ~frontend config dom
+    in
+    Owner.maintain owner;
+    Atomic.set booted ((key, owner) :: Atomic.get booted))
 
+(* ponytail: one lock for every domain's boot, since a boot reads no store;
+   per-domain locks if one domain's recovery ever holds the others back. *)
 let boot ?pull_params name =
   Mutex.protect boot_m (fun () ->
-      if Atomic.get booted <> None then ""
+      if booted_owner name <> None then ""
       else (
         match Rt.run_sync (fun () -> boot_once ?pull_params name) with
           | () -> ""
@@ -217,7 +227,7 @@ let open_in (owner : Owner.embedded) ref_ =
         in
         Mutex.protect handles_m (fun () ->
             incr last_handle;
-            Hashtbl.replace handles !last_handle { version; size };
+            Hashtbl.replace handles !last_handle { owner; version; size };
             !last_handle)
 
 let find handle =
@@ -225,11 +235,11 @@ let find handle =
 
 let size handle = match find handle with Some o -> o.size | None -> -ebadf
 
-let read_in (owner : Owner.embedded) handle ~off buffer =
-  let (module E : Tsync_sync.Engine.S) = owner.engine in
+let read_in handle ~off buffer =
   match find handle with
     | None -> -ebadf
     | Some o -> (
+        let (module E : Tsync_sync.Engine.S) = o.owner.engine in
         match E.read o.version ~off ~len:(Bigstring.length buffer) with
           | bytes ->
               let n = Bigstring.length bytes in
@@ -244,33 +254,32 @@ let close handle =
         Hashtbl.remove handles handle;
         o)
   in
-  (match (opened, Atomic.get booted) with
-    | Some o, Some owner -> (
-        let (module E : Tsync_sync.Engine.S) = owner.engine in
-        try E.release o.version with _ -> ())
-    | _ -> ());
+  Option.iter
+    (fun o ->
+      let (module E : Tsync_sync.Engine.S) = o.owner.engine in
+      try E.release o.version with _ -> ())
+    opened;
   0
 
 (* Every entry is total: a call before boot is a failure like any other. *)
-let not_booted = Fail.make Fail.Unprepared "the core is not booted"
-
-let on_owner ~failed f =
-  match Atomic.get booted with
-    | None -> failed (Fail.E not_booted)
+let on_owner name ~failed f =
+  match booted_owner name with
+    | None ->
+        failed (Fail.E (Fail.make Fail.Unprepared (name ^ " is not booted")))
     | Some owner -> ( try Rt.run_sync (fun () -> f owner) with e -> failed e)
 
-let request text =
-  on_owner
+let request name text =
+  on_owner name
     ~failed:(fun e -> Yojson.Safe.to_string (Ipc.failure (Fail.classify e)))
     (fun owner -> request_in owner text)
 
-let status () = on_owner ~failed:sentence status_in
-let open_ ref_ = on_owner ~failed:(fun _ -> -eio) (fun o -> open_in o ref_)
+let status name = on_owner name ~failed:sentence status_in
+
+let open_ name ref_ =
+  on_owner name ~failed:(fun _ -> -eio) (fun o -> open_in o ref_)
 
 let read handle ~off buffer =
-  on_owner
-    ~failed:(fun e -> -errno_of e)
-    (fun owner -> read_in owner handle ~off buffer)
+  try Rt.run_sync (fun () -> read_in handle ~off buffer) with e -> -errno_of e
 
 module L = Tsync_setup_link.Setup_link
 

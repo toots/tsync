@@ -11,8 +11,8 @@ import org.feverdreamtv.tsync.core.backup.Record
 import org.feverdreamtv.tsync.core.backup.RecordChange
 import org.feverdreamtv.tsync.core.backup.State
 
-/** Camera-backup records, discovery marks and the folder cache (app §11.2), schema version 3. */
-class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION), FolderCache {
+/** Camera-backup records, discovery marks and the folder cache (app §11.2), schema version 4. */
+class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE media (
@@ -26,21 +26,25 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION
                  last_error TEXT,
                  updated_at INTEGER NOT NULL,
                  etag TEXT,
-                 next_attempt_at INTEGER)"""
+                 next_attempt_at INTEGER,
+                 domain TEXT)"""
         )
         db.execSQL("CREATE UNIQUE INDEX media_path ON media(relative_path)")
         db.execSQL("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         db.execSQL("CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL)")
     }
 
-    // Version 2 lacks the two last columns; adding them rewrites no row, and a row without them
-    // reads as the spec says a record without its optional parts reads.
+    // Older versions lack the last columns; adding them rewrites no row, and a row without them
+    // reads as the spec says a record without its optional parts reads. The folder cache's keys
+    // gained their domain, so its old rows are dropped.
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         val columns = db.rawQuery("PRAGMA table_info(media)", null).use { cursor ->
             generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
         }
         if ("etag" !in columns) db.execSQL("ALTER TABLE media ADD COLUMN etag TEXT")
         if ("next_attempt_at" !in columns) db.execSQL("ALTER TABLE media ADD COLUMN next_attempt_at INTEGER")
+        if ("domain" !in columns) db.execSQL("ALTER TABLE media ADD COLUMN domain TEXT")
+        if (oldVersion < 4) db.execSQL("DELETE FROM dirs")
     }
 
     fun records(): List<Record> = readableDatabase.rawQuery("SELECT * FROM media ORDER BY media_id", null).use { cursor ->
@@ -62,6 +66,7 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION
             updatedAt = cursor.getLong(index("updated_at")),
             etag = cursor.getString(index("etag")),
             nextAttemptAt = optionalLong("next_attempt_at"),
+            domain = cursor.getString(index("domain")),
         )
     }
 
@@ -110,6 +115,7 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION
         put("updated_at", record.updatedAt)
         put("etag", record.etag)
         put("next_attempt_at", record.nextAttemptAt)
+        put("domain", record.domain)
     }
 
     private fun meta(key: String): String? =
@@ -132,17 +138,20 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION
         for ((key, value) in entries) db.execSQL("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", arrayOf(key, value))
     }
 
-    override fun get(path: String): String? =
-        readableDatabase.rawQuery("SELECT ref FROM dirs WHERE path = ?", arrayOf(path)).use { if (it.moveToFirst()) it.getString(0) else null }
+    /** app §8.3: the folder cache of [domain], keyed `<domain>/<path>`; a domain name holds no `/`. */
+    fun folders(domain: String): FolderCache = object : FolderCache {
+        override fun get(path: String): String? =
+            readableDatabase.rawQuery("SELECT ref FROM dirs WHERE path = ?", arrayOf("$domain/$path")).use { if (it.moveToFirst()) it.getString(0) else null }
 
-    override fun put(path: String, ref: String) =
-        writableDatabase.execSQL("INSERT OR REPLACE INTO dirs (path, ref) VALUES (?, ?)", arrayOf(path, ref))
+        override fun put(path: String, ref: String) =
+            writableDatabase.execSQL("INSERT OR REPLACE INTO dirs (path, ref) VALUES (?, ?)", arrayOf("$domain/$path", ref))
 
-    override fun remove(path: String) = writableDatabase.execSQL("DELETE FROM dirs WHERE path = ?", arrayOf(path))
+        override fun remove(path: String) = writableDatabase.execSQL("DELETE FROM dirs WHERE path = ?", arrayOf("$domain/$path"))
+    }
 
     companion object {
         const val NAME = "camera-backup.db"
-        const val VERSION = 3
+        const val VERSION = 4
 
         @Volatile
         private var instance: RecordDb? = null

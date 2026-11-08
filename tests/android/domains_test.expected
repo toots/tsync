@@ -1,0 +1,19 @@
+== one domain booted
+  boot docs                      ""
+  request on photos              internal: photos is not booted
+  open on photos                 -5
+  status of photos               photos is not booted
+== a boot that fails
+  boot laptop                    "laptop is owned by another process"
+  docs still answers             ok
+== both booted
+  boot photos                    ""
+  boot docs again                ""
+  docs has a.txt                 ok
+  docs has b.txt                 not_found: b.txt: not found
+  photos has b.txt               ok
+  a notice names photos          true
+== handles
+  docs' file opened in photos    -2
+  read                           from docs
+  read after close               -9

@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -21,12 +22,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,14 +68,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.feverdreamtv.tsync.Boot
 import org.feverdreamtv.tsync.Notice
 import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Served
 import org.feverdreamtv.tsync.Tsync
 import org.feverdreamtv.tsync.core.Availability
 import org.feverdreamtv.tsync.core.Code
 import org.feverdreamtv.tsync.core.CoreException
 import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.Naming
+import org.feverdreamtv.tsync.core.Parameters
 import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.provider.TsyncDocumentsProvider
 
@@ -83,7 +90,7 @@ sealed interface FilesMode {
 }
 
 /** One folder's listing and how it stands: loading, loaded, failed, outdated (app §10.3). */
-class FolderModel(private val tsync: Tsync, val ref: String, private val scope: CoroutineScope) {
+class FolderModel(private val domain: Served, val ref: String, private val scope: CoroutineScope) {
     var items by mutableStateOf<List<Item>>(emptyList())
         private set
     var next by mutableStateOf<String?>(null)
@@ -111,8 +118,8 @@ class FolderModel(private val tsync: Tsync, val ref: String, private val scope: 
         refreshing = byUser
         scope.launch {
             try {
-                val listing = withContext(Dispatchers.IO) { tsync.ask { listDir(ref, limit = maxOf(PAGE, items.size), pull = pull) } }
-                tsync.latch.listed(listing)
+                val listing = withContext(Dispatchers.IO) { domain.ask { listDir(ref, limit = maxOf(PAGE, items.size), pull = pull) } }
+                domain.latch.listed(listing)
                 items = listing.items
                 next = listing.next
                 outdated = listing.outdated
@@ -139,7 +146,7 @@ class FolderModel(private val tsync: Tsync, val ref: String, private val scope: 
         scope.launch {
             try {
                 // A page asked with `after` continues the first page's view; its flags are the first page's.
-                val page = withContext(Dispatchers.IO) { tsync.ask { listDir(ref, after = after, limit = PAGE) } }
+                val page = withContext(Dispatchers.IO) { domain.ask { listDir(ref, after = after, limit = PAGE) } }
                 items = items + page.items
                 next = page.next
             } catch (e: CoreException) {
@@ -155,19 +162,76 @@ class FolderModel(private val tsync: Tsync, val ref: String, private val scope: 
     }
 }
 
+/**
+ * The domains' folders (app §10.3). With several [domains] an empty [trail] shows the list of
+ * domains; with one, the trail never leaves its root.
+ */
 @Composable
 fun FilesScreen(
     tsync: Tsync,
     mode: FilesMode,
     trail: SnapshotStateList<Crumb>,
+    domains: List<String>,
     outer: PaddingValues = PaddingValues(),
-    onMove: (Item) -> Unit = {},
+    onMove: (Served, Item) -> Unit = { _, _ -> },
     bottomBar: @Composable (Crumb) -> Unit = {},
+) {
+    val floor = if (domains.size > 1) 0 else 1
+    val current = trail.lastOrNull()
+    if (current == null) DomainList(tsync, mode, domains, outer, onOpen = { trail.add(Crumb(it, Parameters.ROOT, it)) })
+    else FolderScreen(tsync, tsync.domain(current.domain), mode, trail, floor, outer, onMove, bottomBar)
+}
+
+/** app §10.3: each row boots its domain and descends into its root; a failed boot shows on the row. */
+@Composable
+private fun DomainList(tsync: Tsync, mode: FilesMode, domains: List<String>, outer: PaddingValues, onOpen: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val failures = remember { mutableStateMapOf<String, String>() }
+    var opening by remember { mutableStateOf<String?>(null) }
+    val cancel = (mode as? FilesMode.Pick)?.onCancel
+    BackHandler(enabled = cancel != null) { cancel?.invoke() }
+    Screen(stringResource(if (mode is FilesMode.Pick) R.string.choose_domain else R.string.destination_files), outer, onBack = cancel) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            items(domains, key = { it }) { name ->
+                ListItem(
+                    leadingContent = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
+                    headlineContent = { Text(name) },
+                    supportingContent = failures[name]?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
+                    trailingContent = if (opening == name) ({ CircularProgressIndicator(Modifier.size(24.dp)) }) else null,
+                    modifier = Modifier.clickable(enabled = opening == null) {
+                        opening = name
+                        scope.launch {
+                            val boot = withContext(Dispatchers.IO) { tsync.domain(name).boot() }
+                            opening = null
+                            when (boot) {
+                                Boot.Ready -> failures.remove(name).also { onOpen(name) }
+                                is Boot.Failed -> failures[name] = boot.reason
+                                Boot.NoConfig -> failures[name] = context.getString(R.string.provider_not_set_up)
+                            }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderScreen(
+    tsync: Tsync,
+    domain: Served,
+    mode: FilesMode,
+    trail: SnapshotStateList<Crumb>,
+    floor: Int,
+    outer: PaddingValues,
+    onMove: (Served, Item) -> Unit,
+    bottomBar: @Composable (Crumb) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val current = trail.last()
-    val model = remember(current.ref) { FolderModel(tsync, current.ref, scope) }
+    val model = remember(current.domain, current.ref) { FolderModel(domain, current.ref, scope) }
     val path = trail.joinToString("/") { it.name }
     var readOnly by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Item?>(null) }
@@ -175,32 +239,33 @@ fun FilesScreen(
     var saving by remember { mutableStateOf<Save?>(null) }
     val running = remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        readOnly = withContext(Dispatchers.IO) { runCatching { tsync.client.status().readOnly }.getOrDefault(false) }
+    LaunchedEffect(domain.name) {
+        readOnly = withContext(Dispatchers.IO) { runCatching { domain.ask { status() }.readOnly }.getOrDefault(false) }
     }
     // Shown in the foreground, the folder is observed and listed again (app §7.1).
-    LifecycleResumeEffect(current.ref) {
+    val document = domain.documentId(current.ref)
+    LifecycleResumeEffect(document) {
         model.load()
-        tsync.observe(current.ref)
-        onPauseOrDispose { tsync.unobserve(current.ref) }
+        tsync.observe(document)
+        onPauseOrDispose { tsync.unobserve(document) }
     }
-    LaunchedEffect(current.ref) {
+    LaunchedEffect(document) {
         tsync.notices.collect { notice ->
-            if (notice is Notice.Recovered || (notice is Notice.Changed && current.ref in notice.refs)) model.load()
+            if (notice.domain == domain.name && (notice is Notice.Recovered || (notice is Notice.Changed && current.ref in notice.refs))) model.load()
         }
     }
     // The folder is gone: drop it from the view (failure-model §7.2).
     LaunchedEffect(model.failure) {
         if (model.failure?.code == Code.NOT_FOUND && trail.size > 1) trail.removeAt(trail.lastIndex)
     }
-    BackHandler(enabled = trail.size > 1 || mode is FilesMode.Pick) {
-        if (trail.size > 1) trail.removeAt(trail.lastIndex) else (mode as FilesMode.Pick).onCancel()
+    BackHandler(enabled = trail.size > floor || mode is FilesMode.Pick) {
+        if (trail.size > floor) trail.removeAt(trail.lastIndex) else (mode as FilesMode.Pick).onCancel()
     }
 
     val upload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
-            val save = Save(tsync, withContext(Dispatchers.IO) { Save.sources(context, uris) }, current.ref)
+            val save = Save(tsync, domain.name, withContext(Dispatchers.IO) { Save.sources(context, uris) }, current.ref)
             saving = save
             val failed = save.stage()
             saving = null
@@ -211,26 +276,26 @@ fun FilesScreen(
     Screen(
         title = if (mode is FilesMode.Pick) mode.title(path) else current.name,
         outer = outer,
-        onBack = if (trail.size > 1) ({ trail.removeAt(trail.lastIndex) }) else null,
+        onBack = if (trail.size > floor) ({ trail.removeAt(trail.lastIndex) }) else null,
         bottomBar = { bottomBar(current) },
         floatingActionButton = {
             if (!readOnly) AddButton(uploads = mode is FilesMode.Browse, onNewFolder = { newFolder = true }, onUpload = { upload.launch(arrayOf("*/*")) })
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TrailBar(trail)
+            TrailBar(trail, domains = floor == 0)
             if (readOnly) Banner(stringResource(R.string.read_only_domain))
             if (model.loaded && model.outdated) Banner(stringResource(R.string.offline_as_of, age(model.outdatedSince)))
             if (model.loaded) model.failure?.let { Banner(it.message ?: it.code.wire) }
             running.value?.let { RunningBar(it, onHide = { running.value = null }) }
             PullToRefreshBox(isRefreshing = model.refreshing, onRefresh = { model.load(Pull.NOW, byUser = true) }, modifier = Modifier.fillMaxSize()) {
-                Listing(model, mode, onOpenFolder = { trail.add(Crumb(it.ref, it.name)) }, onOpenFile = { openFile(tsync, context, it) }, onActions = { selected = it })
+                Listing(model, mode, onOpenFolder = { trail.add(Crumb(domain.name, it.ref, it.name)) }, onOpenFile = { openFile(tsync, context, domain, it) }, onActions = { selected = it })
             }
         }
     }
 
     selected?.let { item ->
-        ItemActions(tsync, item, readOnly || item.readOnly, running, onDismiss = { selected = null }, onMove = onMove)
+        ItemActions(tsync, domain, item, readOnly || item.readOnly, running, onDismiss = { selected = null }, onMove = { onMove(domain, it) })
     }
     if (newFolder) NamePrompt(
         title = stringResource(R.string.new_folder),
@@ -238,7 +303,7 @@ fun FilesScreen(
         confirm = stringResource(R.string.create),
         onDismiss = { newFolder = false; model.load() },
         onSubmit = { name ->
-            fieldError { tsync.ask { mkdir(current.ref, Naming.sanitizeLeaf(name), exclusive = true) } }
+            fieldError { domain.ask { mkdir(current.ref, Naming.sanitizeLeaf(name), exclusive = true) } }
         },
     )
     saving?.let { SaveProgress(it) }
@@ -257,11 +322,16 @@ fun savedMessage(context: android.content.Context, count: Int, failed: List<Stri
     return if (failed.isEmpty()) done else done + " " + context.getString(R.string.could_not_copy, failed.joinToString(", "))
 }
 
+/** Each ancestor is reachable, and with [domains] the list of domains before the root. */
 @Composable
-private fun TrailBar(trail: SnapshotStateList<Crumb>) {
+private fun TrailBar(trail: SnapshotStateList<Crumb>, domains: Boolean) {
     val scroll = rememberScrollState()
     LaunchedEffect(trail.size) { scroll.scrollTo(scroll.maxValue) }
     Row(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (domains) {
+            TextButton(onClick = { trail.clear() }) { Text(stringResource(R.string.app_name), maxLines = 1) }
+            Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         trail.forEachIndexed { index, crumb ->
             if (index > 0) Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { while (trail.size > index + 1) trail.removeAt(trail.lastIndex) }, enabled = index < trail.lastIndex) {
@@ -385,10 +455,10 @@ private fun ItemRow(item: Item, enabled: Boolean, onClick: () -> Unit, onActions
 
 /** The share target: Files in pick mode, then the save (app §10.6). */
 @Composable
-fun SaveTarget(tsync: Tsync, uris: List<Uri>, onDone: () -> Unit) {
+fun SaveTarget(tsync: Tsync, domains: List<String>, uris: List<Uri>, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val trail = rememberTrail(tsync.domain)
+    val trail = rememberTrail(domains)
     var sources by remember { mutableStateOf<List<Source>?>(null) }
     var name by rememberSaveable { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf<Save?>(null) }
@@ -402,11 +472,12 @@ fun SaveTarget(tsync: Tsync, uris: List<Uri>, onDone: () -> Unit) {
         tsync = tsync,
         mode = FilesMode.Pick(title = { pluralStringResource(R.plurals.save_files_to, count, count, it) }, onCancel = onDone),
         trail = trail,
+        domains = domains,
         bottomBar = { folder ->
             PickBar(confirm = stringResource(R.string.save_here), enabled = sources != null && saving == null, onCancel = onDone, onConfirm = {
                 val chosen = sources.orEmpty().map { if (count == 1) it.copy(name = name.orEmpty()) else it }
                 scope.launch {
-                    val save = Save(tsync, chosen, folder.ref)
+                    val save = Save(tsync, folder.domain, chosen, folder.ref)
                     saving = save
                     val failed = save.stage()
                     Toast.makeText(context, savedMessage(context, count, failed), Toast.LENGTH_LONG).show()
@@ -426,22 +497,23 @@ fun SaveTarget(tsync: Tsync, uris: List<Uri>, onDone: () -> Unit) {
     saving?.let { SaveProgress(it) }
 }
 
-/** Files in pick mode choosing where an item moves (app §10.4). */
+/** Files in pick mode choosing where an item moves, within its domain (app §10.4). */
 @Composable
-fun MoveTarget(tsync: Tsync, item: Item, outer: PaddingValues, onDone: () -> Unit) {
+fun MoveTarget(tsync: Tsync, domain: Served, item: Item, outer: PaddingValues, onDone: () -> Unit) {
     val context = LocalContext.current
-    val trail = rememberTrail(tsync.domain)
+    val trail = rememberTrail(listOf(domain.name))
     FilesScreen(
         tsync = tsync,
         mode = FilesMode.Pick(title = { stringResource(R.string.move_to, item.name, it) }, hidden = item.ref, onCancel = onDone),
         trail = trail,
+        domains = listOf(domain.name),
         outer = outer,
         bottomBar = { folder ->
             PickBar(confirm = stringResource(R.string.move_here), enabled = true, onCancel = onDone, onConfirm = {
                 val path = trail.joinToString("/") { it.name }
                 tsync.scope.launch {
                     try {
-                        tsync.ask { rename(item.ref, folder.ref, item.name) }
+                        domain.ask { rename(item.ref, folder.ref, item.name) }
                         tsync.report(context.getString(R.string.moved_to, item.name, path))
                     } catch (e: CoreException) {
                         tsync.report(e.message ?: e.code.wire, failed = true)
