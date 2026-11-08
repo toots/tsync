@@ -183,7 +183,11 @@ let () =
     [row ~times:(at 200) "i:1" "a.txt"]
     [child ?identity:(id "i:1" "c1") "a.txt"];
   show "only its creation time changed"
-    [row ~times:{ (at 100) with created = 50_000_000_000 } "i:1" "a.txt"]
+    [
+      row
+        ~times:{ (at 100) with created = 500_000_000_000_000_000 }
+        "i:1" "a.txt";
+    ]
     [child ?identity:(id "i:1" "c1") "a.txt"];
   show "a row with no time is not compared on it"
     [row ~times:(at 0) "i:1" "a.txt"]

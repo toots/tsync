@@ -32,6 +32,7 @@ list_dir root                      {"ok":true,"items":[]}
   op                               {"op":"mkdir","ref":"d:<id1>","parentRef":"root","name":"a"}
   op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
   op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
+  op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
   op                               {"op":"put","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
   op                               {"op":"rename","is_dir":false,"srcRef":"i:<file-1>","srcParentRef":"d:<id1>","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
   op                               {"op":"delete","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
