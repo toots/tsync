@@ -75,10 +75,13 @@ entries: the conflicted copy the other client published.
 | fresh name | `aside(name)` in the same folder (§5) |
 | temporary place | a temporary name of the local tree ([01](../01-core.md) §2.9); never published |
 
-- **Equality of file values.** Two manifests are equal when their **content identity** is: the
-  pair of whole-file digests `h1`, `h2` ([02](../02-remote-model.md) §2.1). Size is implied; the
-  modification time is carried with the content and is not compared. Changing a file's time alone
-  is not a change.
+- **Equality of file values.** Two manifests are **alike** when their **content identity** is:
+  the pair of whole-file digests `h1`, `h2` ([02](../02-remote-model.md) §2.1). They are **equal**
+  when they are alike and their `mtime` is the same. A change of `mtime` alone is a change, and is
+  published.
+- **Join.** The join of two alike manifests is the content with the later `mtime`.
+- A guard is a content identity ([03](../03-journal-sync.md) §2.3), so the main compares guards as
+  alike.
 - A staged edit whose manifest is not built yet has no identity and differs from every value. Two
   clients writing the same bytes can therefore end with a conflicted copy holding those bytes,
   when the arrival comes before the upload. An implementation MAY compute the identity of a staged
@@ -121,10 +124,12 @@ For each file key $k$ where $N(k) \neq L(k)$, and for each fresh key the merge m
 
 | Merge outcome at $k$ | Local action |
 |---|---|
-| the main's value, nothing local to keep (first row; fifth row with $L(k) = ∅$) | install the manifest as the mirror entry, or remove the mirror entry when the value is ∅ |
+| the main's value, nothing local to keep (first row; eighth row with $L(k) = ∅$) | install the manifest as the mirror entry, or remove the mirror entry when the value is ∅ |
 | the same change (third row) | install the main's manifest; a staged edit with that identity is released |
-| the main's value, the local one kept aside (fifth row; R2 on a file) | move the local file to `aside(k)` as a local rename does (staged edit, base entry, file id and open handles follow it), then install the main's manifest at $k$ |
-| the local value kept (second and fourth rows) | nothing changes locally |
+| the same content (fourth row) | install the join; a staged edit with that identity is released |
+| the main's value over a local change of time (fifth row) | install the main's manifest |
+| the main's value, the local one kept aside (eighth row; R2 on a file) | move the local file to `aside(k)` as a local rename does (staged edit, base entry, file id and open handles follow it), then install the main's manifest at $k$ |
+| the local value kept (second, sixth and seventh rows) | nothing changes locally |
 
 - **Staged facts are re-checked under the key lock** ([04](../04-checkout-cache.md) §3.2). The
   owner takes the key lock of every file key the merge changes before it writes the arrival

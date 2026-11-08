@@ -46,13 +46,16 @@ let record_name : Algebra.key -> string = function
 
 let before_path t key = Filename.concat (before_dir t) (record_name key)
 
-let settled_fields = function
-  | Drop -> [("drop", `Bool true)]
-  (* 03 §2.8: no value of [before] reads as an identity, so this one reads
-     back as unknown. *)
-  | Before_file (Some Unknown) -> [("before", `String "unknown")]
-  | Before_file v -> [("before", Log_entry.guard_to_json v)]
-  | Before_folder p -> [("before", Log_entry.place_to_json p)]
+let settled_fields (key : Algebra.key) settled =
+  match (key, settled) with
+    | _, Drop -> [("drop", `Bool true)]
+    (* 03 §2.8: no value of [before] reads as a manifest, so this one reads
+       back as unknown. *)
+    | _, Before_file (Some Unknown) -> [("before", `String "unknown")]
+    | `File p, Before_file v ->
+        [("before", Log_entry.manifest_to_json ~leaf:p.name v)]
+    | _, Before_folder p -> [("before", Log_entry.place_to_json p)]
+    | `Folder _, Before_file _ -> Fail.invalid "a file before-value at a folder"
 
 (* An unknown before-value differs from every value: only an arrival by state,
    which reads the main's value at its key, replaces it. *)
@@ -60,7 +63,7 @@ let unknown = function Before_file (Some Unknown) -> true | _ -> false
 
 let encode_before key value =
   Yojson.Safe.to_string
-    (`Assoc (Log_entry.key_fields key @ settled_fields value))
+    (`Assoc (Log_entry.key_fields key @ settled_fields key value))
 
 let settled_of_json json : (Algebra.key * settled) option =
   let* key = ok (Log_entry.key_of_json json) in
@@ -73,7 +76,7 @@ let settled_of_json json : (Algebra.key * settled) option =
         Some
           ( key,
             Before_file
-              (match Log_entry.guard_of_json v with
+              (match Log_entry.manifest_of_json v with
                 | Ok v -> v
                 | Error _ -> Some Unknown) )
     | _, Some v, `Folder _ ->
@@ -297,7 +300,7 @@ let encode_arrival a =
              `List
                (List.map
                   (fun (key, value) ->
-                    `Assoc (Log_entry.key_fields key @ settled_fields value))
+                    `Assoc (Log_entry.key_fields key @ settled_fields key value))
                   a.before) );
          ]))
 

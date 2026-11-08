@@ -192,14 +192,14 @@ LOCAL(op), under the locks 04 §3.2 names (the metadata lock for a namespace cha
   for its next sync is made durable by a namespace operation on its key, and before the upload
   records its edit as Uploaded: an Uploaded edit with no before-value reads as committed (§4.8).
   A staged edit found at owner start with no
-  before-value takes the content identity of its base entry as its before-value, or ∅ when it has
+  before-value takes its base entry's manifest as its before-value, or ∅ when it has
   none ([04](../04-checkout-cache.md) §4.10): the key was clean when the edit began.
 - **A local intent** precedes a namespace operation whose local steps are not one atomic step on
   local storage; owner start completes it ([04](../04-checkout-cache.md) §4.5). It serves local
   recovery only and is never published.
-- **Equality.** Two file values are equal when their content identities are equal
-  ([conflict-resolution.md](conflict-resolution.md) §2). A staged edit whose identity is not yet
-  computed differs from every value.
+- **Equality.** Two file values are equal when their content identities and their times are
+  ([conflict-resolution.md](conflict-resolution.md) §2), so a change of time alone keeps its
+  before-value. A staged edit whose identity is not yet computed differs from every value.
 
 ### 4.2 Upload
 

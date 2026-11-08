@@ -240,3 +240,25 @@
  (alias runtest)
  (action
   (diff cycle_test.expected cycle_test.output)))
+
+(executable
+ (name import_time_test)
+ (modules import_time_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  import_time_test.output
+  (run ./import_time_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff import_time_test.expected import_time_test.output)))

@@ -10,7 +10,15 @@ type value = Known of Manifest.t | Identity of string | Unknown
 val identity_of : Manifest.t -> string
 
 val identity : value -> string option
+
+(** Same content identity (conflict-resolution §2). *)
+val alike : value -> value -> bool
+
+(** Alike, with the same time where both are {!Known}. *)
 val equal : value -> value -> bool
+
+(** Of two alike values, the one with the later time. *)
+val join : value -> value -> value
 
 type command = value Algebra.command
 

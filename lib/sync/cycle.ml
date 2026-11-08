@@ -589,33 +589,14 @@ module Make (C : Engine_ctx.S) = struct
         | Some id -> List.filter (concerns id) (pending ())
     in
     let decide () =
-      Algebra.merge ~equal:same ~aside ~l:l_base ~before:(before ()) ~theirs ()
-    in
-    (* conflict-resolution §4.1, the same change on both sides: the key is
-       left as it is by the merge, and the main's manifest is the one every
-       client ends with (change-algebra §7.3). *)
-    let same_change (merged : Log_entry.value Algebra.merged) =
-      List.filter_map
-        (function
-          | `File (p, _, Some (Log_entry.Known m))
-            when not
-                   (List.exists
-                      (fun c -> Algebra.key_of c = `File p)
-                      merged.local) -> (
-              match Algebra.file merged.start p with
-                | Some (Known mine)
-                  when Log_entry.identity_of mine = Log_entry.identity_of m
-                       && mine <> m ->
-                    Some (Sync_state.File (p, Some m))
-                | _ -> None)
-          | _ -> None)
-        theirs
+      Algebra.merge ~equal:same ~alike:Log_entry.alike ~join:Log_entry.join
+        ~aside ~l:l_base ~before:(before ()) ~theirs ()
     in
     let arrival_of merged =
       {
         Sync_state.head;
         view;
-        steps = steps_of merged @ same_change merged;
+        steps = steps_of merged;
         before = settled_of ~theirs merged;
       }
     in
@@ -888,7 +869,7 @@ module Make (C : Engine_ctx.S) = struct
         with_keys paths (fun () ->
             List.iter
               (function
-                | `File (p, _, after) when same_file (l_base.file p) after ->
+                | `File (p, _, after) when alike_file (l_base.file p) after ->
                     Option.iter promote_held (path_of p)
                 | _ -> ())
               batch;
@@ -972,7 +953,7 @@ module Make (C : Engine_ctx.S) = struct
               | Some path ->
                   with_key path (fun () ->
                       (* A value the key no longer holds is no longer pushed. *)
-                      if same_file (l_base.file p) (Some (Known m)) then (
+                      if alike_file (l_base.file p) (Some (Known m)) then (
                         let sent i =
                           let ck = Manifest.key m i in
                           (not (lacks ck))

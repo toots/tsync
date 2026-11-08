@@ -362,7 +362,7 @@ let reidentify t i j =
 
 type rule = [ `R1 | `R2 | `R3 ]
 
-let merge ?priority ~equal ~aside ~l ~before ~theirs () =
+let merge ?priority ~equal ~alike ~join ~aside ~l ~before ~theirs () =
   let l = of_base l in
   let r =
     apply l
@@ -374,6 +374,7 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
   in
   let m = apply r theirs in
   let same a b = Option.equal equal a b in
+  let similar a b = Option.equal alike a b in
   let keys = Keys.of_list (List.map key_of before @ List.map key_of theirs) in
   let fresh ~start n ~is_dir (p : place) =
     let taken name =
@@ -385,8 +386,16 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
     | `File p ->
         let rv = file r p and lv = file l p and mv = file m p in
         if same lv rv || same lv mv then (set_file n p mv, copies)
-        else if same mv rv || mv = None then (n, copies)
-        else (set_file n p mv, if lv = None then copies else (p, lv) :: copies)
+        else if same mv rv then (n, copies)
+        else (
+          match (lv, mv) with
+            | Some l, Some m when alike l m ->
+                (set_file n p (Some (join l m)), copies)
+            | _ when similar lv rv -> (set_file n p mv, copies)
+            | _ when similar mv rv || mv = None -> (n, copies)
+            | _ ->
+                ( set_file n p mv,
+                  if lv = None then copies else (p, lv) :: copies ))
     | `Folder i ->
         let rv = folder r i and lv = folder l i and mv = folder m i in
         if lv = rv || rv <> mv then (set_folder n i mv, copies) else (n, copies)
@@ -406,7 +415,7 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
       (List.rev copies)
   in
   let from_m n : key -> bool = function
-    | `File p -> same (file n p) (file m p)
+    | `File p -> similar (file n p) (file m p)
     | `Folder i -> folder n i = folder m i
   in
   let restore ~start n d =
@@ -453,7 +462,12 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
                 let keys = Keys.add (`File q) (Keys.add k acc.keys) in
                 match file tree q with
                   | None -> { acc with tree = set_file tree q v; keys }
-                  | Some _ as w when same w v -> { acc with tree; keys }
+                  | Some w when similar (Some w) v ->
+                      {
+                        acc with
+                        tree = set_file tree q (Option.map (join w) v);
+                        keys;
+                      }
                   | Some _ ->
                       let q' = fresh ~start tree ~is_dir:false q in
                       {

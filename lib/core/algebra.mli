@@ -105,16 +105,19 @@ type 'f merged = {
 
 type rule = [ `R1 | `R2 | `R3 ]
 
-(** [merge ~equal ~aside ~l ~before ~theirs ()] (Definition 7). [before] is one
-    command per before-value, from [R] to [L]; [theirs] is one command per key
-    fetched, whose value after is [M]'s. [aside ~taken ~is_dir name] is a name
-    for which [taken] is false: one free in [N] and in [L], so a file moves
-    aside before anything else is enacted. [priority] is the order in which the
-    repair rules are tried. Raises [Failure] if the repair does not end, which
-    Theorem 8 excludes. *)
+(** [merge ~equal ~alike ~join ~aside ~l ~before ~theirs ()] (Definition 7):
+    [alike] compares contents alone and [join] combines two alike values.
+    [before] is one command per before-value, from [R] to [L]; [theirs] is one
+    command per key fetched, whose value after is [M]'s.
+    [aside ~taken ~is_dir name] is a name for which [taken] is false: one free
+    in [N] and in [L], so a file moves aside before anything else is enacted.
+    [priority] is the order in which the repair rules are tried. Raises
+    [Failure] if the repair does not end, which Theorem 8 excludes. *)
 val merge :
   ?priority:rule list ->
   equal:('f -> 'f -> bool) ->
+  alike:('f -> 'f -> bool) ->
+  join:('f -> 'f -> 'f) ->
   aside:(taken:(string -> bool) -> is_dir:bool -> string -> string) ->
   l:'f base ->
   before:'f command list ->

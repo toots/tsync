@@ -385,6 +385,7 @@ module Make (C : Engine_ctx.S) = struct
      differ from every value: read twice, it is the same by identity. *)
   let same v w = v == w || Log_entry.equal v w
   let same_file = Option.equal same
+  let alike_file = Option.equal Log_entry.alike
 
   (* publication §4.1: a before-value that [L] returned to is dropped. *)
   let settle path =

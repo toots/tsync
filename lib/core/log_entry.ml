@@ -7,8 +7,19 @@ let identity = function
   | Identity i -> Some i
   | Unknown -> None
 
-let equal a b =
+let alike a b =
   match (identity a, identity b) with Some a, Some b -> a = b | _ -> false
+
+(* An identity carries no time, so it is equal to every alike manifest. *)
+let equal a b =
+  alike a b
+  && match (a, b) with Known a, Known b -> a.mtime = b.mtime | _ -> true
+
+let join a b =
+  match (a, b) with
+    | Known a, Known b -> if b.mtime > a.mtime then Known b else Known a
+    | Known _, _ -> a
+    | _ -> b
 
 type command = value Algebra.command
 

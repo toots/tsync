@@ -48,7 +48,7 @@ no position: true
 position file: "0000000001234567"
   d-3f9a0c1b2d4e-40b: {"folder":"3f9a0c1b2d4e-40b","before":[".tsync-root","Photos"]}
   f-.tsync-root-05ccfe…: {"file":[".tsync-root","top.txt"],"before":null}
-  f-3f9a0c1b2d4e-40a-1…: {"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":"23159de6084fe0eb-fef0cbc1c405b4a8"}
+  f-3f9a0c1b2d4e-40a-1…: {"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":"dHN5bmNtMDMFAAAAAAAAAAAAAAAAAPA/CAAAAAEAAAAHAAAAAAAAADIzMTU5ZGU2MDg0ZmUwZWJmZWYwY2JjMWM0MDViNGE4b25lLmpwZzM3MGYwZjFjMTZiMGFhNTMtM2UwOTM4NDhjNDlkOWJhNw=="}
   f-3f9a0c1b2d4e-40a-7…: {"file":["3f9a0c1b2d4e-40a","new.jpg"],"before":null}
 a second record of one key changes nothing: true
 pending: 4

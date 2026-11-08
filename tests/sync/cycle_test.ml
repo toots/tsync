@@ -785,7 +785,8 @@ let () =
           settle a;
           write a "f" "abcd";
           uploaded a;
-          p "  A, once the upload ended: %s\n" (status a));
+          p "  A, once the upload ended: %s\n" (status a);
+          p "  A, synced: %s\n" (sync a));
       scenario "a write that waits for its base while another file arrives"
         (fun root ->
           let link = link () in
@@ -866,9 +867,12 @@ let () =
           write b "f" "abcd";
           uploaded b;
           settle a;
+          let later = mtime b in
           let synced = sync b in
           p "  B: %s; %s\n" synced (tree b);
-          p "  B has the file as the main holds it: %b\n" (mtime a = mtime b);
+          p "  B keeps the later time: %b\n" (mtime b = later);
+          ignore (sync a);
+          p "  A takes it: %b\n" (mtime a = later);
           p "  entries: %d\n" (entries root));
       scenario "a read-only client leaves an entry to those that write"
         (fun root ->
