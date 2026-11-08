@@ -678,13 +678,13 @@ CAMLprim value tsync_terminal_columns(value fd) {
 
 CAMLprim value tsync_drop_mapped_pages(value v) { return Val_unit; }
 
-/* Seconds on a clock that counts time spent asleep (publication A7). */
 /* 02 §2.6 times: nanoseconds since the Unix epoch from 100 ns ticks since 1601. */
 #define TICKS_TO_UNIX_EPOCH 116444736000000000LL
 
 static int64_t ns_of_filetime(FILETIME t) {
   int64_t ticks = ((int64_t)t.dwHighDateTime << 32) | t.dwLowDateTime;
-  return (ticks - TICKS_TO_UNIX_EPOCH) * 100;
+  /* A time before 1970 (an unset 0 among them) reads as 0, which tsync takes for none. */
+  return ticks < TICKS_TO_UNIX_EPOCH ? 0 : (ticks - TICKS_TO_UNIX_EPOCH) * 100;
 }
 
 static FILETIME filetime_of_ns(int64_t ns) {
@@ -741,7 +741,8 @@ CAMLprim value tsync_set_times(value path, value mtime, value created) {
   caml_release_runtime_system();
   HANDLE h = CreateFileW(p, FILE_WRITE_ATTRIBUTES,
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                         OPEN_EXISTING,
+                         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
   DWORD err = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
   BOOL ok = FALSE;
   if (h != INVALID_HANDLE_VALUE) {
@@ -755,6 +756,7 @@ CAMLprim value tsync_set_times(value path, value mtime, value created) {
   CAMLreturn(Val_unit);
 }
 
+/* Seconds on a clock that counts time spent asleep (publication A7). */
 CAMLprim value tsync_boottime(value unit) {
   return caml_copy_double((double)GetTickCount64() / 1000.0);
 }
@@ -994,7 +996,7 @@ static void set_mtime(value path, int64_t mtime) {
   struct timespec both[2] = {timespec_of_ns(mtime), timespec_of_ns(mtime)};
   char *p = caml_stat_strdup(String_val(path));
   caml_release_runtime_system();
-  int r = utimensat(AT_FDCWD, p, both, 0);
+  int r = utimensat(AT_FDCWD, p, both, AT_SYMLINK_NOFOLLOW);
   caml_acquire_runtime_system();
   caml_stat_free(p);
   if (r < 0) uerror("set_times", path);
@@ -1219,23 +1221,29 @@ CAMLprim value tsync_ftimes(value fd) {
 
 CAMLprim value tsync_times(value path) {
   CAMLparam1(path);
+  CAMLlocal1(res);
+  char *p = caml_stat_strdup(String_val(path));
   struct stat st;
   caml_release_runtime_system();
-  int r = lstat(String_val(path), &st);
+  int r = lstat(p, &st);
   caml_acquire_runtime_system();
-  CAMLreturn(stat_times(r, &st, path));
+  caml_stat_free(p);
+  res = stat_times(r, &st, path);
+  CAMLreturn(res);
 }
 #else
+static int64_t ns_of_statx(struct statx_timestamp t) {
+  return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
+}
+
 static value statx_times(int dirfd, const char *path, int flags, value arg) {
   struct statx stx;
   caml_release_runtime_system();
   int r = statx(dirfd, path, flags, STATX_MTIME | STATX_BTIME, &stx);
   caml_acquire_runtime_system();
   if (r < 0) uerror("times", arg);
-  int64_t mtime = (int64_t)stx.stx_mtime.tv_sec * 1000000000LL + stx.stx_mtime.tv_nsec;
-  int64_t created = (stx.stx_mask & STATX_BTIME)
-                        ? (int64_t)stx.stx_btime.tv_sec * 1000000000LL + stx.stx_btime.tv_nsec
-                        : mtime;
+  int64_t mtime = ns_of_statx(stx.stx_mtime);
+  int64_t created = (stx.stx_mask & STATX_BTIME) ? ns_of_statx(stx.stx_btime) : mtime;
   return alloc_times(mtime, created);
 }
 
@@ -1431,7 +1439,7 @@ CAMLprim value tsync_set_times(value path, value mtime, value created) {
   struct timespec made = timespec_of_ns(Long_val(created));
   char *p = caml_stat_strdup(String_val(path));
   caml_release_runtime_system();
-  int r = setattrlist(p, &attrs, &made, sizeof(made), 0);
+  int r = setattrlist(p, &attrs, &made, sizeof(made), FSOPT_NOFOLLOW);
   caml_acquire_runtime_system();
   caml_stat_free(p);
   if (r < 0) uerror("set_times", path);
