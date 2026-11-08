@@ -37,7 +37,9 @@ let metadata_differs (c : child) (row : row) =
   && (c.size <> row.size
      || row.times.mtime > 0
         && (apart c.times.mtime row.times.mtime
-           || apart c.times.created row.times.created)
+           || apart c.times.created
+                (Tsync_core.Fs.creation ~mtime:row.times.mtime row.times.created)
+           )
      || c.read_only <> row.read_only)
 
 let content_differs (id : Identity.t) (row : row) =

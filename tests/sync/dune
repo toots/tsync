@@ -262,3 +262,25 @@
  (alias runtest)
  (action
   (diff import_time_test.expected import_time_test.output)))
+
+(executable
+ (name write_times_test)
+ (modules write_times_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  write_times_test.output
+  (run ./write_times_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff write_times_test.expected write_times_test.output)))

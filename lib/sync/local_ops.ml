@@ -896,7 +896,7 @@ module Make (C : Engine_ctx.S) = struct
                 {
                   Staged.name = Names.leaf_of path;
                   size = m.size;
-                  times = { mtime = Fs.now (); created = m.created };
+                  times = edited (Manifest.times m);
                   chunk_size = m.chunk_size;
                   content =
                     Slots
@@ -1300,7 +1300,12 @@ module Make (C : Engine_ctx.S) = struct
         let times =
           let t = Fs.times dst in
           carried path
-            { t with created = Option.value created ~default:t.created }
+            {
+              t with
+              created =
+                Option.fold created ~none:t.created
+                  ~some:(Fs.creation ~mtime:t.mtime);
+            }
         in
         let h1 = digest_of_body ~size ~cs:chunk_size id in
         if h1 <> None && h1 = current then (
@@ -1313,6 +1318,18 @@ module Make (C : Engine_ctx.S) = struct
                 settle path;
                 post_put path;
                 feed_put path m.size
+            | Some e, _ when e.times <> times ->
+                let state : Staged.state =
+                  match e.state with
+                    | Uploaded m -> Uploaded (Manifest.with_times m times)
+                    | Owed -> Owed
+                in
+                let e = { e with times; state } in
+                Staged.write staged path e;
+                bump path;
+                settle path;
+                post_put path;
+                feed_put path e.size
             | _ -> settle path)
         else (
           let e =

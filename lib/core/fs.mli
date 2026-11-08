@@ -29,12 +29,19 @@ val now : unit -> int
 (** Seconds, for the interfaces that take a float. *)
 val seconds : int -> float
 
+(** [created], or [mtime] where [created] is before 1980-01-02: FAT's unset
+    1980-01-01 in any zone, or a platform's zero. Every creation time from
+    outside goes through it, so one read from disk and one a frontend passes
+    agree. *)
+val creation : mtime:int -> int -> int
+
 (** Of the link itself, not its target. *)
 val times : string -> times
 
 val ftimes : Unix.file_descr -> times
 
-(** [created] is set where the platform can: Windows and macOS. *)
+(** Of the link itself, like {!times}. [created] is set where the platform can:
+    Windows and macOS. *)
 val set_times : string -> times -> unit
 
 val exists : string -> bool
