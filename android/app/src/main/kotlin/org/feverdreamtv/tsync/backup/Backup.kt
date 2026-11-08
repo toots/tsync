@@ -79,11 +79,8 @@ class Backup(private val context: Context) {
 
     fun hold(): Hold? = Processing.gate(prefs.settings, device())
 
-    /** The domain new items go to; null when the config names none, or no longer names the one picked. */
-    fun target(): String? {
-        val names = tsync.config.names()
-        return (prefs.domain ?: names.firstOrNull())?.takeIf { it in names }
-    }
+    /** The domain new items go to among [names]; null when they are empty, or no longer hold the one picked. */
+    fun target(names: List<String> = tsync.config.names()): String? = (prefs.domain ?: names.firstOrNull())?.takeIf { it in names }
 
     private fun device(): Device {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)

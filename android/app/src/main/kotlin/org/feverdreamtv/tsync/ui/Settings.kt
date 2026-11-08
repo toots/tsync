@@ -379,8 +379,8 @@ private fun BackupControls(tsync: Tsync, domains: List<String>) {
     SwitchRow(R.string.backup_enable, settings.enabled, enabled = !busy) { on ->
         if (on) choosing = true else store(settings.copy(enabled = false))
     }
-    var target by remember { mutableStateOf(backup.prefs.domain ?: domains.firstOrNull()) }
-    if (domains.size > 1 || target !in domains) {
+    var target by remember { mutableStateOf(backup.target(domains)) }
+    if (domains.size > 1 || target == null) {
         Text(stringResource(R.string.backup_to), Modifier.padding(top = 8.dp))
         Row(Modifier.horizontalScroll(rememberScrollState())) {
             domains.forEach { name ->

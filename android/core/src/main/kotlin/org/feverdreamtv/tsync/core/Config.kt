@@ -12,7 +12,7 @@ data class ServerConfig(
     val domain: String,
     val maxCache: String = Parameters.DEFAULT_MAX_CACHE,
 ) {
-    fun json(): JSONObject {
+    private fun json(): JSONObject {
         val backend = JSONObject().put("type", "http-proxy").put("name", "server").put("role", "main")
             .put("url", url.trim().trimEnd('/')).put("secret", secret)
         return JSONObject().put("name", domain).put("versioning", true)
