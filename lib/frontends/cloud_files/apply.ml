@@ -17,6 +17,7 @@ type t = {
   mutable state : Apply_state.t;
   mutable stored : Apply_state.t;
   mutable woken : float option;
+  blocked : (string, string) Hashtbl.t;
 }
 
 let load state_file =
@@ -37,6 +38,7 @@ let create ~engine:_ ~handler ~root ~take ~unshown ~state_file () =
     state = load state_file;
     stored = load state_file;
     woken = None;
+    blocked = Hashtbl.create 16;
   }
 
 let pending t = Mutex.protect t.m (fun () -> List.length t.state.pending)
@@ -146,44 +148,46 @@ let rec remove path =
     Sys.rmdir path)
   else Sys.remove path
 
-(* Carries one action out; [false] leaves the folder pending. *)
+(* Carries one action out; a reason leaves the folder pending. *)
 let execute t dir usns (action : Apply_plan.action) =
   let path n = Filename.concat dir n in
   match action with
     | Take name ->
         Take.schedule t.take (path name);
-        false
+        Some (name ^ " is owed to the domain")
     | Rename { from; to_ } ->
         Sys.rename (path from) (path to_);
-        true
+        None
     | Move { name; into; as_ } ->
         (* The plan sees no other folder: a name taken there stays, and the
            item goes only when it matches the domain. *)
         if Sys.file_exists (Filename.concat into as_) then (
           if all_in_sync (path name) then remove (path name);
-          false)
+          Some
+            (Printf.sprintf "%s moves onto %s, which is taken" name
+               (Filename.concat into as_)))
         else (
           Sys.rename (path name) (Filename.concat into as_);
-          true)
+          None)
     | Create { name; row } ->
         Cf.create dir (placeholder name row);
         (* §11: under a pinned folder it is made whole, which the take decides. *)
         Take.schedule t.take (path name);
-        true
+        None
     | Refresh { name; row } | Update { name; row } ->
         let dehydrate = match action with Refresh _ -> true | _ -> false in
         let usn = Option.value ~default:(-1L) (Hashtbl.find_opt usns name) in
         if Cf.refresh (path name) ~usn (placeholder name row) ~dehydrate then (
           if dehydrate then Take.schedule t.take (path name);
-          true)
+          None)
         else (
           Take.schedule t.take (path name);
-          false)
+          Some (name ^ " changed or is held open, so it was not updated"))
     | Delete name ->
         if all_in_sync (path name) then (
           remove (path name);
-          true)
-        else false
+          None)
+        else Some (name ^ " is gone from the domain but not all in sync here")
 
 let children dir =
   let usns = Hashtbl.create 16 in
@@ -212,6 +216,16 @@ let children dir =
   in
   (children, usns)
 
+(* A folder stays pending while retried, so its reasons are logged only when
+   they change. *)
+let report_blocked t dir reasons =
+  match reasons with
+    | [] -> Hashtbl.remove t.blocked dir
+    | first :: _ ->
+        if Hashtbl.find_opt t.blocked dir <> Some first then (
+          Hashtbl.replace t.blocked dir first;
+          Log.info "cloud_files: applying %s: %s" dir first)
+
 (* §10.2: [true] once the folder matches the domain, or when the sync root
    does not hold it, which leaves nothing to apply. *)
 let apply_folder t ref_ =
@@ -229,15 +243,16 @@ let apply_folder t ref_ =
         let actions =
           Apply_plan.plan ~fold:Cf.upcase ~rows ~children ~locate:(locate t)
         in
-        List.fold_left
-          (fun finished action ->
-            match execute t dir usns action with
-              | ok -> finished && ok
-              | exception e ->
-                  Log.info "cloud_files: applying %s: %s" dir
-                    (Printexc.to_string e);
-                  false)
-          true actions
+        let reasons =
+          List.filter_map
+            (fun action ->
+              match execute t dir usns action with
+                | reason -> reason
+                | exception e -> Some (Printexc.to_string e))
+            actions
+        in
+        report_blocked t dir reasons;
+        reasons = []
 
 (* §10.3, stale: every folder the sync root holds and has populated. *)
 let populated_folders t =
