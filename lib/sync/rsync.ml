@@ -255,7 +255,7 @@ module Make (C : Engine_ctx.S) = struct
                     succeed rel 0
                 | _ -> (
                     let path = local_path src.path rel in
-                    match (Unix.lstat path, symlinks ()) with
+                    match (Unix.lstat path, Bulk.local_symlinks ()) with
                       | { st_kind = S_LNK; _ }, `Skip ->
                           skipped := (rel, "symlinks are skipped") :: !skipped
                       | { st_kind = S_LNK; _ }, `Keep ->
@@ -282,7 +282,7 @@ module Make (C : Engine_ctx.S) = struct
               match d with
                 | Rsync_plan.Assemble ({ link = Some target; _ } : Manifest.t)
                   ->
-                    (try Unix.unlink path
+                    (try Fs.unix_unlink path
                      with Unix.Unix_error (ENOENT, _, _) -> ());
                     Unix.symlink target path;
                     succeed rel 0
@@ -302,7 +302,7 @@ module Make (C : Engine_ctx.S) = struct
                             done;
                             Fs.fsync fd);
                         Unix.utimes tmp m.mtime m.mtime;
-                        Unix.rename tmp path);
+                        Fs.unix_rename tmp path);
                     succeed rel m.size
                 | Patch_local (m, indices) ->
                     let sent = ref 0 in
@@ -346,7 +346,8 @@ module Make (C : Engine_ctx.S) = struct
             List.iter
               (fun (rel, _) ->
                 ignore
-                  (attempt rel (fun () -> Unix.unlink (local_path src.path rel))))
+                  (attempt rel (fun () ->
+                       Fs.unix_unlink (local_path src.path rel))))
               drops
         | Domain ->
             List.iter

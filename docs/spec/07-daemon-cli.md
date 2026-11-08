@@ -46,10 +46,10 @@ process**, and everything else asks it. It also decides how processes start, sto
 | Role | Instances | Owns | Does |
 |---|---|---|---|
 | **Domain owner** | exactly one process per domain per machine at a time | the domain's local state ([local-cache.md](data-model/local-cache.md)) and its ownership lock | converges the domain (recovery, the cycle, maintenance), runs its upload queue, resumes its deferred work, serves its request interface, hosts the domain's presenting frontend |
-| **Supervisor** | at most one per machine (`tsync start` on Linux) | no domain state; the uplink governor, the supervisor socket, the job registry | starts, restarts and stops owners and the store server; collects status |
+| **Supervisor** | at most one per machine (`tsync start` on Linux, `tsyncd start` on Windows) | no domain state; the uplink governor, the supervisor socket, the job registry | starts, restarts and stops owners and the store server; collects status |
 | **Store server** | at most one per machine (the `http-proxy` frontend) | no domain local state | serves domains' stores to other machines; submits the deferred work it causes to owners' logs |
 | **One-shot command** | any number | nothing, unless it takes ownership (§2.5) | acts on stores directly, or asks the owner, or becomes the owner for its duration |
-| **Client tool** | any number (tray, Dolphin plugin, File Provider extension, Android UI) | nothing | asks the owner over its request interface |
+| **Client tool** | any number (trays, Dolphin plugin, File Provider extension, Android UI) | nothing | asks the owner over its request interface |
 
 A process MAY own several domains. It then holds one ownership lock per domain and keeps each
 domain's state and serialisation separate.
@@ -113,8 +113,8 @@ that changes a domain runs in the owner (§2.5), bulk publishers included
 
 On a host with a supervisor, it assigns each configured domain to exactly one owner process:
 
-1. A domain presented by a frontend whose descriptor declares **per-domain topology** (`fuse`) is
-   owned by its own process, which also hosts the mount.
+1. A domain presented by a frontend whose descriptor declares **per-domain topology** (`fuse`,
+   `cloud_files`) is owned by its own process, which also hosts the mount or the sync root.
 2. A domain presented by a frontend whose descriptor declares **shared topology**
    (`file_provider`) is owned by that frontend's single process, which owns every such domain.
 3. A domain with no presenting frontend (only `http-proxy`, or none) is owned by a **headless
@@ -128,6 +128,7 @@ talks to one process), holds the governor, and starts the store server as its ch
 | Host | Owner of each domain | Supervisor | Converges | Uplink governor |
 |---|---|---|---|---|
 | Linux service | one process per domain: the FUSE mount process, or a headless owner | `tsync start` | yes, the owner | the supervisor |
+| Windows service | one process per domain: the sync root's owner ([cloud-files.md §3](frontends/cloud-files.md#3-processes-and-ownership)), or a headless owner | `tsyncd start`, started by the scheduled task | yes, the owner | the supervisor |
 | macOS service | the service process started by the launch agent: it owns every domain (the `file_provider` ones and any other) and is restarted by the launch agent on any unclean exit | none: the service process starts the store server itself | yes, the owner | the service process |
 | Android | the app process, for each domain it opens | none | recovery, maintenance, deferred resume; no background cycle (pulled tree, [android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)) | the holder of the machine-wide governor lock |
 | One-shot command | itself, only when it takes ownership (§2.5) | — | recovery and deferred resume at acquisition; no background cycle | leased, else the governor lock's holder |
@@ -221,23 +222,23 @@ Rules:
 
 ### 2.7 Runtime paths
 
-| Item | Linux | macOS |
-|---|---|---|
-| config | `$XDG_CONFIG_HOME/tsync/config.json` (default `~/.config/…`) | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` |
-| data dir | `$XDG_DATA_HOME/tsync` (default `~/.local/share/tsync`) | `<group container>/tsync` |
-| cache root | `$XDG_CACHE_HOME/tsync` (default `~/.cache/tsync`) | `<data dir>/cache` |
-| owner socket | `<data dir>/tsync-<domain>.sock` (one per owner) | `<data dir>/tsync.sock`, the service process's one socket for every domain (routes by `domain`) |
-| store-server socket | `<data dir>/tsync-http-proxy.sock` | same |
-| supervisor socket | `<data dir>/tsync-sync.sock` | same |
-| ownership lock | `<data dir>/owners/<domain>.lock` | same |
-| governor lock | [uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol) | same |
-| pause flag | `<data dir>/paused/<domain>` (present = paused) | same |
-| resync generation | `<data dir>/resync-<domain>` ([08 §2.5](08-frontends.md)) | same |
-| feed watermark | `<data dir>/feed-watermark-<domain>`: the feed key, a space, the epoch ms it last moved ([08 §3.6](08-frontends.md#36-change-feed-changes_since)) | same |
-| dropped-shard record | `<data dir>/feed-dropped-<domain>` (present = a shard was dropped) | same |
-| default domain | `<data dir>/default-domain` (one line, the name) | same |
-| restart | the service manager's own command, on the unit the installer set up: `systemctl --user restart tsync` (source install) or `systemctl restart tsync@<user>` (packages) | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon` |
-| log reader | `journalctl -t tsync -n N [-f]` | `tail -n N [-f] ~/Library/Logs/tsync-daemon.log` |
+| Item | Linux | macOS | Windows |
+|---|---|---|---|
+| config | `$XDG_CONFIG_HOME/tsync/config.json` (default `~/.config/…`) | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` | `%LOCALAPPDATA%\tsync\config.json` |
+| data dir | `$XDG_DATA_HOME/tsync` (default `~/.local/share/tsync`) | `<group container>/tsync` | `%LOCALAPPDATA%\tsync\data` |
+| cache root | `$XDG_CACHE_HOME/tsync` (default `~/.cache/tsync`) | `<data dir>/cache` | `%LOCALAPPDATA%\tsync\cache` |
+| owner socket | `<data dir>/tsync-<domain>.sock` (one per owner) | `<data dir>/tsync.sock`, the service process's one socket for every domain (routes by `domain`) | as Linux |
+| store-server socket | `<data dir>/tsync-http-proxy.sock` | same | none: Windows serves no store ([cloud-files.md §2](frontends/cloud-files.md#2-what-a-windows-host-holds)) |
+| supervisor socket | `<data dir>/tsync-sync.sock` | same | as Linux |
+| ownership lock | `<data dir>/owners/<domain>.lock` | same | same |
+| governor lock | [uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol) | same | same |
+| pause flag | `<data dir>/paused/<domain>` (present = paused) | same | same |
+| resync generation | `<data dir>/resync-<domain>` ([08 §2.5](08-frontends.md)) | same | same |
+| feed watermark | `<data dir>/feed-watermark-<domain>`: the feed key, a space, the epoch ms it last moved ([08 §3.6](08-frontends.md#36-change-feed-changes_since)) | same | same |
+| dropped-shard record | `<data dir>/feed-dropped-<domain>` (present = a shard was dropped) | same | same |
+| default domain | `<data dir>/default-domain` (one line, the name) | same | same |
+| restart | the service manager's own command, on the unit the installer set up: `systemctl --user restart tsync` (source install) or `systemctl restart tsync@<user>` (packages) | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon` | `tsync stop`, then `schtasks /Run /TN \tsync\service` ([cloud-files.md §14.2](frontends/cloud-files.md#142-service)) |
+| log reader | `journalctl -t tsync -n N [-f]` | `tail -n N [-f] ~/Library/Logs/tsync-daemon.log` | `Get-Content -Tail N [-Wait] $env:LOCALAPPDATA\tsync\logs\tsync.log` (PowerShell) |
 
 tsync has **no restart command**. Which unit runs the service is the installer's choice (a user
 unit, a system template instance, a launch agent), and a command that guesses it restarts the wrong
@@ -259,6 +260,9 @@ domain and the limit.
   `RestartPreventExitStatus=78`, `TimeoutStopSec` greater than `STOP_WAIT` (§3.4),
   `LimitNOFILE=65536`. The system unit MUST NOT use `ProtectHome=`, `PrivateTmp=` or
   `PrivateMounts=`: a private mount namespace hides the FUSE mount from everyone else.
+- Windows scheduled task `\tsync\service`, run at the user's logon: `tsyncd.exe start`, restarted
+  on failure ([cloud-files.md §14.2](frontends/cloud-files.md#142-service)), which cannot exclude
+  status 78.
 - macOS launch agent `org.feverdreamtv.tsync.daemon`: `RunAtLoad`, `KeepAlive {SuccessfulExit=false}`
   (the service process, which owns every domain, is restarted on any unclean exit), output to
   `~/Library/Logs/tsync-daemon.log`.
@@ -355,10 +359,13 @@ owns:
 - No restart happens once a stop is requested.
 - On macOS the launch agent restarts the service process on any unclean exit; the service process
   restarts its store-server child as above.
+- On Windows the scheduled task restarts the supervisor on failure; its owners end with it
+  ([cloud-files.md §5.2](frontends/cloud-files.md#52-processes)) and it starts them afresh.
 
 ### 3.4 Stop
 
-Triggers: `tsync stop` (IPC `stop`), SIGTERM or SIGINT, the service manager's stop.
+Triggers: `tsync stop` (IPC `stop`), SIGTERM or SIGINT, the service manager's stop. Windows has
+no signals; what stands for each is [cloud-files.md §5.2](frontends/cloud-files.md#52-processes).
 
 **Stop signal.** Each process has one process-wide stop flag with hooks
 ([01](01-core.md) shutdown). Requesting it is idempotent. Backoffs, retry ladders, queue workers and
@@ -629,12 +636,12 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `set-aside [--remove NAME... \| --remove-all]` | owner | lists the domain's set-aside objects (staged manifests, sync-state records and queue records that could not be decoded) with their size and time, or removes the named ones after the user inspected them ([durable-queue.md §3.3](algorithms/durable-queue.md#33-ordering-rules), [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery)); owner action `set_aside` |
 | `versions [PATH]` | read | versions of a file, newest first (`time  human  size`), or every deleted file of the domain |
 | `versions --revert PATH [--version TS]` | owner | `revert` (latest when no version) |
-| `expire DATE [--apply]` | owner | [05 §4.8](05-ops-config.md); cutoff `YYYY-MM-DD` at local midnight; prints the versions, log entries and shares removed, or, without `--apply`, those it would remove; a takeover record removed with the log is not counted |
-| `gc [...]` | owner | [05 §4.9](05-ops-config.md) |
+| `expire DATE [--apply]` | owner, not on Windows | [05 §4.8](05-ops-config.md); cutoff `YYYY-MM-DD` at local midnight; prints the versions, log entries and shares removed, or, without `--apply`, those it would remove; a takeover record removed with the log is not counted |
+| `gc [...]` | owner, not on Windows | [05 §4.9](05-ops-config.md) |
 | `sync [--full] [-j N]` | owner | one cycle now, or with `--full` an arrival by state ([05 §4.7](05-ops-config.md)), in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N log entries merged, C changes; K entries committed, P changes pending`, the first part reading `state read: F files, D folders` for an arrival by state; exit 1 if the cycle failed |
-| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
-| `void-entry NUMBER` | owner | [05 §4.12](05-ops-config.md); prints what a voided entry loses |
-| `mirror [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs a main and at least one copy |
+| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner; `--repair` not on Windows | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
+| `void-entry NUMBER` | owner, not on Windows | [05 §4.12](05-ops-config.md); prints what a voided entry loses |
+| `mirror [--skip-chunks\|--path P]` | owner, not on Windows | [05 §4.6](05-ops-config.md); needs a main and at least one copy |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; a lone argument that names a file or folder in the domain is refused with exit 2 (`<arg> is a path in <domain>; give a destination directory after it`) rather than read as `DIR`; exit 1 on failures or on pending local changes (listed on stderr) |
 | `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
@@ -790,7 +797,9 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 - **Backends** are a list edited the same way (a number edits, `[a]dd`, `[r]emove N`, `[d]one`). An
   empty list goes straight to the prompts of its first backend, since a domain needs one. Per
   backend: type (default `local`); field prompts from the driver's option spec; role default
-  `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
+  `replica` for a cloud store once a `main` exists, else `main`; on Windows
+  ([cloud-files.md §2](frontends/cloud-files.md#2-what-a-windows-host-holds)) `local` is not offered and the type has no
+  default; optional filling of s3/gcs fields
   from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs). The advanced mode adds the
   backend's `link`. A frontend's *advanced* options are asked about in the advanced mode only, with
   its other options.

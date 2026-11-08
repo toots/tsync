@@ -1,6 +1,6 @@
 (library
  (name tsync_tray_lib)
- (modules bus layout mark tray)
+ (modules bus layout tray)
  (enabled_if
   (= %{system} linux))
  (libraries
@@ -10,6 +10,7 @@
   tsync_ipc
   tsync_owner
   tsync_menu
+  tsync_tray_core
   tsync_dbus
   unix
   threads.posix

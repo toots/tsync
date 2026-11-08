@@ -159,9 +159,11 @@ let first () =
       (* Before any unlock: a watcher keeps the tick it started with. *)
       Atomic.set Tsync_owner.Vault.minute 2.;
       with_owner (fun () ->
-          Fs.write_file_for_test secret_key_file (init "idle");
           ignore (init "aged");
           ignore (init "free");
+          (* Last: the idle limit runs from its creation, and an init takes
+             a while under load. *)
+          Fs.write_file_for_test secret_key_file (init "idle");
           p "== the keystore under a policy";
           status "idle" "idle";
           status "free" "free";

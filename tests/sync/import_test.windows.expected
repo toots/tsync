@@ -1,0 +1,32 @@
+== A imports a tree, B arrives
+imported 3 (36 bytes), skipped 0, links skipped 1, failed 0
+-- after B's pass
+  A: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top"
+  B: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top"
+
+== a rerun finds everything there
+imported 0 (0 bytes), skipped 3, links skipped 1, failed 0
+entries B merges: 0
+
+== a changed file stays skipped unless forced
+imported 0 (0 bytes), skipped 1, links skipped 0, failed 0
+imported 1 (12 bytes), skipped 0, links skipped 0, failed 0
+-- after B's pass
+  B: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top, changed"
+
+== cancelled partway: only what was installed is committed
+imported 1 (3 bytes), skipped 0, links skipped 0, failed 0, cancelled
+  not committed yet: 2
+-- after B's pass
+  B: empty/  more/  more/one.txt = "one"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top, changed"
+imported 2 (8 bytes), skipped 1, links skipped 0, failed 0
+-- after the rerun
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top, changed"
+
+== a file rewritten in place while it is read
+imported 0 (0 bytes), skipped 0, links skipped 0, failed 1
+  swap.txt: swap.txt changed while it was read [transient/local]
+-- after B's pass
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top.txt = "top, changed"
+
+owed: A 0 uploads, 0 pending; B 0 pending

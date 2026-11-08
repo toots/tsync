@@ -34,7 +34,7 @@ On a machine with no config, the prompts go in this order. Press Enter to accept
 
 | Prompt | What to answer |
 |---|---|
-| `type` | `local`, `s3`, `gcs` or `http-proxy`. See [backend types](config.md#backend-types). |
+| `type` | `local`, `s3`, `gcs` or `http-proxy`. See [backend types](config.md#backend-types). Windows does not offer `local`: a Windows PC reaches its storage through a bucket or a tsync server. |
 | `backend name` | A label of your choice, for instance `disk`. Commands use it in `--source`. |
 | `role` | `main` for the first one. The others are in [keep more than one copy](copies.md). |
 | `link` | Remote stores only. Enter. See [uplink](tuning.md#uplink). |
@@ -49,7 +49,8 @@ The list is then shown. Enter moves on; `a` adds another backend.
 |---|---|---|
 | `mount it as a folder on this machine (fuse)` | Linux | yes |
 | `show it in Finder on this machine (file_provider)` | macOS | yes |
-| `serve it to other machines over HTTPS (http-proxy)` | both | no |
+| `show it in Explorer on this machine (cloud_files)` | Windows | yes |
+| `serve it to other machines over HTTPS (http-proxy)` | Linux, macOS | no |
 
 So on a new domain, Enter twice gives you a folder. Saying yes to the server asks for its port, secret and certificate ([run tsync as a server](server.md)). Each frontend's remaining options sit behind one more question, `other options`, which defaults to no.
 
@@ -108,8 +109,9 @@ tsync has no restart command of its own: the service belongs to your system's se
 | Linux package | `sudo systemctl enable --now tsync@$USER` | `sudo systemctl restart tsync@$USER` |
 | Linux from source | done by `make install` | `systemctl --user restart tsync` |
 | macOS | done by the installer | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon` |
+| Windows | `schtasks /Run /TN \tsync\service` | `tsync stop`, then `schtasks /Run /TN \tsync\service` |
 
-The Linux package's unit is a template that takes the user to run as. Once enabled it starts at boot, with nobody logged in.
+The Linux package's unit is a template that takes the user to run as. Once enabled it starts at boot, with nobody logged in. On Windows the service is a scheduled task that starts at sign-in; setup starts it once, but with no config yet it stops at once, so start it after writing the config.
 
 Then look:
 
@@ -117,7 +119,7 @@ Then look:
 tsync status
 ```
 
-Your folder is at `~/tsync/<domain>/` on Linux. On macOS it is in Finder's sidebar under **Locations**, and on disk under `~/Library/CloudStorage/`.
+Your folder is at `~/tsync/<domain>/` on Linux. On macOS it is in Finder's sidebar under **Locations**, and on disk under `~/Library/CloudStorage/`. On Windows it is `%USERPROFILE%\tsync\<domain>`.
 
 `tsync stop` stops the service and unmounts. A stop takes seconds whatever is still uploading: unfinished work is recorded on disk and continues at the next start. `tsync start` runs tsync in the foreground, which is what the service does.
 
@@ -213,7 +215,7 @@ tsync logs -f         # follow the service log
 
 The report is quiet when things are fine. A line in capitals is something to look at; [the status report](commands.md#the-status-report) explains each.
 
-The tray icon on Linux and the menu bar item on macOS show the same thing at a glance: which files are moving, how much is left, and a *Hold changes* switch.
+The tray icon on Linux and Windows and the menu bar item on macOS show the same thing at a glance: which files are moving, how much is left, and a *Hold changes* switch.
 
 ### Pause
 

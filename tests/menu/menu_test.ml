@@ -41,7 +41,7 @@ let menu ?(quit = "Quit tsync tray") domains =
   M.render ~quit (List.map (fun (name, reply) -> (name, status reply)) domains)
 
 let show (m : M.t) =
-  Printf.printf "icon    %s\ntooltip %s\n" m.icon m.tooltip;
+  Printf.printf "icon    %s\ntooltip %s\n" (M.icon_name m.icon) m.tooltip;
   List.iter entry m.entries
 
 let stats replies =
@@ -82,7 +82,9 @@ let () =
   case "formatters: duration";
   List.iter
     (fun s ->
-      Printf.printf "%g -> %s\n" s
+      (* %.17g writes these inputs without an exponent, whose width is the C
+         runtime's own. *)
+      Printf.printf "%.17g -> %s\n" s
         (Option.value ~default:"undefined" (M.duration s)))
     [0.; 45.; 60.; 90.; 3600.; 8000.; 86400.; 90000.; 180000.; -1.; nan; 1e13];
   case "formatters: time left";

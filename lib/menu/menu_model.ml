@@ -22,7 +22,15 @@ type item = {
 }
 
 type entry = Separator | Item of item
-type t = { icon : string; tooltip : string; entries : entry list }
+type state = [ `Idle | `Sync | `Paused | `Error ]
+
+let icon_name = function
+  | `Idle -> "tsync-idle-symbolic"
+  | `Sync -> "tsync-sync-symbolic"
+  | `Paused -> "tsync-paused-symbolic"
+  | `Error -> "tsync-error-symbolic"
+
+type t = { icon : state; tooltip : string; entries : entry list }
 
 let file_rows = 5
 let label_max = 64
@@ -275,10 +283,10 @@ let render ?quit ?(codes = []) domains =
   in
   let tooltip = "tsync — " ^ summary in
   let icon =
-    if all_unreachable || any_failing then "tsync-error-symbolic"
-    else if all_paused then "tsync-paused-symbolic"
-    else if List.exists moving reachable then "tsync-sync-symbolic"
-    else "tsync-idle-symbolic"
+    if all_unreachable || any_failing then `Error
+    else if all_paused then `Paused
+    else if List.exists moving reachable then `Sync
+    else `Idle
   in
   let owed =
     positive (sum_known ( + ) 0 (List.map (fun s -> s.pending_bytes) reachable))
@@ -695,7 +703,7 @@ type wire = { icon : string; tooltip : string; entries : json list }
 let to_json (t : t) =
   wire_to_yojson
     {
-      icon = t.icon;
+      icon = icon_name t.icon;
       tooltip = t.tooltip;
       entries = List.map entry_to_json t.entries;
     }

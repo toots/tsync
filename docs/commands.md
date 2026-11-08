@@ -111,6 +111,14 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync fileprovider reset` | Remove the domain from Finder and add it back |
 | `tsync fileprovider purge` | Uninstall |
 
+**Windows only**
+
+| Command | Does |
+|---|---|
+| `tsync cloudfiles reimport` | Compare the folder with the domain again, changing what differs |
+| `tsync cloudfiles reset` | Empty the folder and let it fill again from the domain; refused while it holds a change the domain does not |
+| `tsync cloudfiles purge` | Release every folder from Windows and remove the service task and local state, keeping the config and the folders; the uninstaller runs it |
+
 **Exit status.** 0 on success. 1 when something failed or, for `data-integrity`, was found wrong; the reason is one sentence on stderr. 2 when the invocation itself is refused: arguments that contradict each other, paths naming two domains, a command that cannot apply to this domain. 124 for a mistake on the command line.
 
 `pause-uploads` and `resume-uploads` are older names for `pause` and `resume`.
@@ -162,12 +170,13 @@ A healthy report is short. These lines appear only when there is something to sa
 
 ## Logs
 
-tsync keeps no log files of its own. It logs to the system, and `tsync logs` reads it back.
+On Linux and macOS tsync logs to the system, and on Windows to a file. `tsync logs` reads it back either way.
 
 | Platform | Reads | Notes |
 |---|---|---|
 | Linux | The systemd journal: `journalctl -t tsync` | Needs systemd-journald. Without it, the log is wherever your init system sends the service's stderr. |
 | macOS | `~/Library/Logs/tsync-daemon.log` | Nothing rotates this file. |
+| Windows | `%LOCALAPPDATA%\tsync\logs\tsync.log` | Nothing rotates this file. The tray logs to `tray.log` beside it. |
 
 On macOS the File Provider extension is started by the system and logs separately:
 

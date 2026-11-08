@@ -84,7 +84,7 @@ let local_listing dir =
     let path = if rel = "" then dir else Filename.concat dir rel in
     if Sys.is_directory path then
       List.concat_map
-        (fun n -> walk (if rel = "" then n else Filename.concat rel n))
+        (fun n -> walk (if rel = "" then n else rel ^ "/" ^ n))
         (List.sort compare (Array.to_list (Sys.readdir path)))
     else [rel]
   in

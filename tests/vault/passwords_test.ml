@@ -367,6 +367,8 @@ let asset_links () =
   grants "not JSON" "<html>"
 
 let () =
+  (* The CSV holds CRLF, which Windows' text mode would write as CR CR LF. *)
+  set_binary_mode_out stdout true;
   asset_links ();
   sites ();
   matching ();

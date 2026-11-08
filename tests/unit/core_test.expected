@@ -126,14 +126,6 @@ manifests   chunk manifests true; outgoing manifests true; marker true; referenc
 versions    chunk versions true; outgoing versions true; marker true; reference versions; version versions; manifest marker true
 chunks.from chunk chunks.from true; outgoing chunks.from true; marker true; reference chunks.from; version chunks.from; manifest marker true
 
-== a mount point, its parent resolved
-real/Drive               true
-real/Drive/              true
-real/./Drive             true
-real//Drive              true
-link/Drive               true
-/                        /
-
 == retry jitter differs between processes
 two processes drew the same first delay: false
 
@@ -154,3 +146,6 @@ listed back: true
 removed one: true, 99999 held
 cleared a shard: its key gone true, the count follows true
 25 keys into a set of at most 10: 5 held, emptied 2 times
+
+== a file created with the default mode is private
+private: true

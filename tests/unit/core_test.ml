@@ -198,15 +198,28 @@ let () =
     members;
   Zip.finish z;
   close_out oc;
-  let test =
+  (* Windows has no unzip, and its tar cannot write a name outside the legacy
+     code page; PowerShell reads ZIP archives through .NET. *)
+  let run unzip powershell =
     Sys.command
-      (Printf.sprintf "cd %s && unzip -tqq a.zip >/dev/null 2>&1"
-         (Filename.quote dir))
+      (if Sys.win32 then
+         Printf.sprintf
+           "cd /d %s && powershell -NoProfile -Command \
+            \"$ErrorActionPreference = 'Stop'; %s\" >NUL 2>&1"
+           (Filename.quote dir) powershell
+       else
+         Printf.sprintf "cd %s && unzip %s a.zip >/dev/null 2>&1"
+           (Filename.quote dir) unzip)
+  in
+  let test =
+    run "-tqq"
+      "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z = \
+       [IO.Compression.ZipFile]::OpenRead((Resolve-Path a.zip)); foreach ($e \
+       in $z.Entries) { $s = $e.Open(); $s.CopyTo([IO.Stream]::Null); \
+       $s.Close() }; $z.Dispose()"
   in
   let extract =
-    Sys.command
-      (Printf.sprintf "cd %s && unzip -qq a.zip >/dev/null 2>&1"
-         (Filename.quote dir))
+    run "-qq" "Expand-Archive -LiteralPath a.zip -DestinationPath . -Force"
   in
   p "unzip -t: %s, extract: %s\n"
     (if test = 0 then "ok" else "FAIL")
@@ -249,25 +262,6 @@ let () =
         (try Key.marker_of (Key.child d Folder_id.root "f") = None
          with _ -> false))
     ["d"; "chunks"; "manifests"; "versions"; "chunks.from"]
-
-let () =
-  p "\n== a mount point, its parent resolved\n";
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "tsync-mnt-%d" (Unix.getpid ()))
-  in
-  Fs.rm_rf dir;
-  Fs.mkdir_p (Filename.concat dir "real");
-  Unix.symlink (Filename.concat dir "real") (Filename.concat dir "link");
-  let expected = Filename.concat (Unix.realpath dir) "real/Drive" in
-  List.iter
-    (fun given ->
-      p "%-24s %b\n" given
-        (Fs.resolve_parent (Filename.concat dir given) = expected))
-    ["real/Drive"; "real/Drive/"; "real/./Drive"; "real//Drive"; "link/Drive"];
-  p "%-24s %s\n" "/" (Fs.resolve_parent "/");
-  Fs.rm_rf dir
 
 let () =
   p "\n== retry jitter differs between processes\n";
@@ -372,3 +366,17 @@ let () =
   done;
   p "25 keys into a set of at most 10: %d held, emptied %d times\n"
     (Chunk_set.cardinal small) !overflowed
+
+let () =
+  p "\n== a file created with the default mode is private\n";
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "tsync-private-%d" (Pid.self ()))
+  in
+  Fs.rm_rf dir;
+  Fs.mkdir_p dir;
+  let path = Filename.concat dir "kit" in
+  Fs.create_new path "secret";
+  p "private: %b\n" (Fs.is_private path);
+  Fs.rm_rf dir

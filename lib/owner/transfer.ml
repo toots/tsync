@@ -3,15 +3,33 @@ open Tsync_core
 let denied path why = Fail.raise_ Fail.Denied "%s: %s" path why
 
 let components path =
-  List.filter (fun c -> c <> "") (String.split_on_char '/' path)
+  let separator c = c = '/' || (Sys.win32 && c = '\\') in
+  let parts = ref [] and start = ref 0 in
+  String.iteri
+    (fun i c ->
+      if separator c then (
+        parts := String.sub path !start (i - !start) :: !parts;
+        start := i + 1))
+    path;
+  parts := String.sub path !start (String.length path - !start) :: !parts;
+  List.filter (fun c -> c <> "") (List.rev !parts)
 
 (* The parent is walked from the root with lstat, so no link on the way
    redirects it. A host declaring no roots (security-model §7.3) walks it from
-   [/]. *)
+   [/], or on Windows from the path's drive. *)
 let check_under ~roots path =
-  let roots = if roots = [] then ["/"] else roots in
   if Filename.is_relative path then denied path "not an absolute path";
   let parts = components path in
+  let roots =
+    match roots with
+      | _ :: _ -> roots
+      | [] when not Sys.win32 -> ["/"]
+      | [] -> (
+          match parts with
+            | drive :: _ when String.length drive = 2 && drive.[1] = ':' ->
+                [drive ^ "\\"]
+            | _ -> denied path "not on a local drive")
+  in
   if List.exists (fun c -> c = "." || c = "..") parts then
     denied path "not a normalised path";
   let under root =
@@ -51,6 +69,6 @@ let check_dest ~roots path =
 let check_staging ~roots path =
   check_under ~roots path;
   match Unix.lstat path with
-    | { st_kind = S_REG; st_uid; _ } when st_uid = Unix.getuid () -> ()
+    | { st_kind = S_REG; _ } when Fs.owned_by_this_user path -> ()
     | _ -> denied path "not a regular file owned by this user"
     | exception Unix.Unix_error _ -> denied path "missing"

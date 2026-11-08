@@ -178,5 +178,5 @@ let temp_owner n =
 let temp_seq = Atomic.make 0
 
 let temp_name () =
-  Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ())
+  Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Pid.self ())
     (Atomic.fetch_and_add temp_seq 1)

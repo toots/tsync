@@ -7,6 +7,7 @@ What the [vault](vault.md) keeps, and how each platform fills it in. A domain ke
 | Command line | `tsync totp` | `tsync passwords` | listed, filed with a login |
 | macOS | menu bar, Safari's AutoFill (macOS 15) | [AutoFill](#autofill-on-macos) | [AutoFill](#autofill-on-macos) |
 | Linux desktop | [tray](desktop.md#tray) | [Chrome extension](#in-chrome) | [Chrome extension](#in-chrome) |
+| Windows | [tray](desktop.md#windows-tray) | `tsync passwords` | not yet |
 | Chrome on a Mac | [extension](#in-chrome) | [extension](#in-chrome) | [extension](#in-chrome) |
 | Android | [Vault screen](android.md#vault), autofill | [autofill](android.md#passwords-and-autofill) | [autofill](android.md#passwords-and-autofill) (Android 14) |
 
@@ -38,7 +39,7 @@ tsync totp code ID            # one code
 
 **Moving out.** `tsync totp export` prints every record as an `otpauth://` link. It asks for the passphrase each time, even on an unlocked machine: no other way gets the seeds out.
 
-**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray lists and copies codes, and unlocks, the same way, on Wayland; it has no *Add a code…* ([desktop](desktop.md#tray)).
+**From the macOS menu bar.** The menu's *One-time codes* lists each record as `issuer — account`. Clicking one copies its current code, marked so clipboard managers and history skip it; the menu never shows a code itself. A locked domain shows *Locked — unlock…*, which asks for the passphrase (and the secret key on a machine not yet enrolled); *Add a code…* takes the issuer, the account and the seed, or a pasted `otpauth://` link. Each secret field has a *Show* box to see what you typed. Creating the vault, changing the passphrase, deleting and exporting stay with the command line. The Linux tray lists and copies codes, and unlocks, the same way, on Wayland; it has no *Add a code…* ([desktop](desktop.md#tray)). The Windows tray does the same ([desktop](desktop.md#windows-tray)).
 
 **On an Android phone.** The app's *Vault* screen appears when the server's domain uses an extension; see [the Android page](android.md#vault).
 
@@ -94,7 +95,7 @@ See [the Android page](android.md#passwords-and-autofill).
 
 <a id="browser"></a>Chrome, Chromium, Brave, Edge or Vivaldi, on Linux or a Mac. tsync's browser extension fills logins and two-factor codes, saves new logins, suggests strong passwords, and makes and uses passkeys.
 
-- **Setting it up.** tsync's packages let your browsers start tsync's bridge; add tsync's extension from the Chrome Web Store, which keeps it up to date. Built from source, run `tsync passwords browser install` once per user instead, after removing the package if one is installed. Its store listing is not published yet; until it is, the extension is loaded from tsync's source, `browser/` in *Developer mode* with *Load unpacked*, which is meant for development.
+- **Setting it up.** tsync's packages let your browsers start tsync's bridge; add tsync's extension from the Chrome Web Store, which keeps it up to date. Built from source, run `tsync passwords browser install` once per user instead, after removing the package if one is installed. Its store listing is not published yet; until it is, the extension is loaded from tsync's source, `browser/` in *Developer mode* with *Load unpacked*, which is meant for development. The extension does not work on Windows yet: nothing registers the bridge with Chrome there. Two-factor codes are in the [Windows tray](desktop.md#windows-tray) and `tsync totp`.
 - **Filling.** A username, password or code field shows tsync's icon; click it, or press Ctrl+Shift+L (⌘⇧L on a Mac), and pick a login from the menu. Nothing is filled without that click. The icon's arrow shows whether the menu is open; click it again, press Escape or click elsewhere to close it. With logins in several vaults, the menu lists them under each vault's name. A login saved for `example.com`, offered on `login.example.com`, asks once before it fills.
 
   <img src="images/browser-icon-closed.png" width="359" alt="A sign-in form: the Email and Password fields each show tsync's icon, its arrow pointing down">
