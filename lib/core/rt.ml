@@ -225,42 +225,43 @@ let sleep d =
   if d <= 0. then check ()
   else
     suspend (fun resolve ->
-        timer ~execution:`Immediate d (fun () -> ignore (resolve (Ok ())));
-        ignore)
+        Duppy.Task.add_withdrawable scheduler
+          {
+            priority = `Immediate;
+            events = [`Delay d];
+            handler =
+              (fun _ ->
+                ignore (resolve (Ok ()));
+                []);
+          })
 
 let yield () =
   suspend (fun resolve ->
       ignore (resolve (Ok ()));
       ignore)
 
-(* Each wait is bounded so that a cancelled one never leaves its task
-   registered on a descriptor for ever. *)
+(* A cancelled wait withdraws its task, so its descriptor may be closed at
+   once. *)
 let wait_fd ?(timeout = infinity) ev fd =
-  let deadline = now () +. timeout in
-  let rec loop () =
-    let left = deadline -. now () in
-    if left <= 0. then raise Timeout;
-    let fired =
-      suspend (fun resolve ->
-          Duppy.Task.add scheduler
-            {
-              priority = `Immediate;
-              events = [ev fd; `Delay (min left 30.)];
-              handler =
-                (fun evs ->
-                  ignore
-                    (resolve
-                       (Ok
-                          (List.exists
-                             (function `Delay _ -> false | _ -> true)
-                             evs)));
-                  []);
-            };
-          ignore)
-    in
-    if not fired then loop ()
+  let delay = if timeout = infinity then [] else [`Delay timeout] in
+  let fired =
+    suspend (fun resolve ->
+        Duppy.Task.add_withdrawable scheduler
+          {
+            priority = `Immediate;
+            events = ev fd :: delay;
+            handler =
+              (fun evs ->
+                ignore
+                  (resolve
+                     (Ok
+                        (List.exists
+                           (function `Delay _ -> false | _ -> true)
+                           evs)));
+                []);
+          })
   in
-  loop ()
+  if not fired then raise Timeout
 
 let wait_readable ?timeout fd = wait_fd ?timeout (fun fd -> `Read fd) fd
 let wait_writable ?timeout fd = wait_fd ?timeout (fun fd -> `Write fd) fd

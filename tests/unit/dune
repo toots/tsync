@@ -147,6 +147,28 @@
   (diff rt_fd_test.expected rt_fd_test.output)))
 
 (executable
+ (name rt_withdraw_test)
+ (modules rt_withdraw_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_core threads.posix unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   rt_withdraw_test.output
+   (run ./rt_withdraw_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff rt_withdraw_test.expected rt_withdraw_test.output)))
+
+(executable
  (name shared_outcome_test)
  (modules shared_outcome_test)
  (libraries test_support tsync_core tsync_store tsync_checkout unix))

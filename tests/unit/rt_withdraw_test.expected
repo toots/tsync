@@ -1,0 +1,2 @@
+a waiting descriptor is watched: true
+once its wait is cancelled, it is not: true
