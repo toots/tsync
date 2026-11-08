@@ -313,9 +313,10 @@ let () =
       p "\n== exclusion\n";
       let to_holder, holder_in = Unix.pipe ~cloexec:true ()
       and holder_out, from_holder = Unix.pipe ~cloexec:true () in
+      (* A settle the previous jobs spawned may hold the run lock a moment. *)
       let pid =
         Unix.create_process "./lock_holder.exe"
-          [| "./lock_holder.exe"; main_root; "d" |]
+          [| "./lock_holder.exe"; main_root; "d"; "wait" |]
           to_holder from_holder Unix.stderr
       in
       Unix.close to_holder;
