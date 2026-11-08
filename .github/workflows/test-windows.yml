@@ -1,4 +1,5 @@
-# Windows (10 §3.1 item 6), outside the gate until its suites pass (10 §8).
+# Windows (10 §3.1 item 6): x86-64 is required for merging, but no release
+# waits for it (10 §8).
 # One x86-64 build: OCaml's configure has no native backend for Windows on
 # ARM64, so the ARM job runs that binary under the system's x64 emulation.
 name: test-windows
@@ -7,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 concurrency:
