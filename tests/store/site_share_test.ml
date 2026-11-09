@@ -82,6 +82,7 @@ let listener : Tsync_http_proxy.Proxy_options.listener =
     max_share_responses = 8;
     max_zip_members = 100;
     sites = Some { root = sites_root; url = "https://sites.example" };
+    push = None;
     limits = Server.default_limits;
   }
 

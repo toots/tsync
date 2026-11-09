@@ -20,6 +20,7 @@ type listener = {
   max_share_responses : int;
   max_zip_members : int;
   sites : sites option;
+  push : Push.options option;  (** the four [push_*] options (§A4.7) *)
   limits : Tsync_http.Server.limits;
 }
 

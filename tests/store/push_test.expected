@@ -1,0 +1,47 @@
+== startup
+a build without push: http-proxy: push_key is set but this build cannot push (build-info says push: none)
+a key others can read: http-proxy: push_key <root>/key-644.p8 is readable by others than its owner
+a missing key: http-proxy: push_key <root>/none.p8: No such file or directory
+
+== a listener without pushes
+push-register: false
+
+== registrations
+push-register 70aaaa: true
+push-register 70bbbb: true
+push-register 70cccc: true
+a malformed body: invalid
+registered: 3
+
+== a change
+pushed to: 70bbbb 70cccc
+url: https://sandbox.test/3/device/70bbbb
+apns-push-type: fileprovider
+apns-topic: app.pushkit.fileprovider
+body: {"container-identifier":"NSFileProviderWorkingSetContainerItemIdentifier","domain":"d-fp"}
+jwt header: {"alg":"ES256","kid":"KEYID12345"}
+jwt issuer: TEAM123456
+signature verifies: true
+the token with other claims verifies: false
+
+== ten changes within the interval
+pushed to: 70bbbb 70cccc
+
+== the author's change of its own
+pushed to: 70aaaa 70cccc
+
+== a token APNs says is gone
+pushed to: 70bbbb 70cccc
+registered: 70aaaa 70bbbb
+
+== a restart
+registered: 70aaaa 70bbbb
+
+== a registration not renewed
+pushed to: 
+registered: 0
+
+== counters
+pushSent: 7
+pushFailed: 0
+pushDropped: 3
