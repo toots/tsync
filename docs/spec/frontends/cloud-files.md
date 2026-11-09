@@ -325,7 +325,7 @@ t1
 | path | `syncRoot` |
 | hydration | progressive: the requested range first, the rest behind it. Automatic dehydration allowed: the content is the domain's |
 | population | full, on demand: a folder's children are asked once, on first enumeration |
-| in-sync tracking | a file's content (its last write time), and nothing else; changes the provider makes do not clear in-sync |
+| in-sync tracking | a file's content (its last write time), and nothing else; changes the provider makes do not clear in-sync. A tool that sets a file's last write time clears it, and the take publishes the change of times; a change of the creation time alone clears nothing and is not taken |
 | hard links | none |
 | pinning | allowed |
 | protection | personal |
@@ -406,7 +406,7 @@ take(item):
   file (placeholder or not):
     wait until it is settled: unchanged for TAKE_SETTLE and openable without sharing write
     u = its update sequence number; copy it into the take staging directory, keeping its last
-      write time, which the domain records as the item's mtime
+      write and creation times, which the domain records as the item's mtime and created
     not a placeholder → write(parentRef, name, staging, aside: true)
     placeholder       → write(ref, staging, base: its contentId)
     landed = the reply's aside when present, else its item  # the item the file's bytes now are

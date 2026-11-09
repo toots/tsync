@@ -390,7 +390,9 @@ a cache, and the domain's cache is left untouched. A key with a pending change o
    - with a **record** (below) whose identity matches and a destination file of the manifest's size →
      resume, skipping claimed chunks;
    - with no record, a destination regular file of the manifest's size and an mtime within
-     `EXPORT_MTIME_SLACK` of the manifest's → `Already_there`;
+     `EXPORT_MTIME_SLACK` of the manifest's → `Already_there`, after setting its times to the
+     manifest's ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm04)), since a change
+     of its creation time alone leaves both of these unchanged;
    - otherwise fresh (a record whose identity no longer matches, because the file changed upstream,
      starts the file over); symlink manifests are always fresh.
 6. Opening a fresh file: write the record header durably **first**, then unlink the
@@ -398,7 +400,7 @@ a cache, and the domain's cache is left untouched. A key with a pending change o
    (no space → fail that file with `not enough space in <dir>: needs X, Y available`, removing file
    and record). Per chunk: read it verified against its key, check its length, write it at its
    offset, fsync, then append its index to the record. When a file has no chunk left: close, set its
-   mtime to the manifest's, remove the record. A symlink manifest: unlink, create the link.
+   times to the manifest's (02 §2.6), remove the record. A symlink manifest: unlink, create the link.
 7. A failure settles its file `Failed` and never stops the other files. Files with no outcome at the
    end count as failed. A failed file is left at full length with its record, for resume.
 
@@ -431,9 +433,10 @@ the same domain.
 ([publication.md §4.4](algorithms/publication.md#44-arrive-fetch-then-merge)), whose failure fails
 the run. Every domain-side fact then comes from the **local tree** (its folders and the manifests of
 its mirror entries), which is where rsync's changes are made (§4.2); a local fact from the local
-filesystem. `source = Missing | Dir | File(local) |
-Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)`;
-`local = Link(target) | Hashed(chunk keys) | Unhashed`.
+filesystem. `source = Missing | Dir | File(local, times) |
+Key(manifest)`; `target = Absent(side) | Dir(side) | File(local, times) | Key(manifest)`;
+`local = Link(target) | Hashed(chunk keys) | Unhashed`; `times` are a local file's `mtime` and
+`created` ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm04)).
 
 **Decision** (pure):
 
@@ -445,16 +448,22 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 | File / Key, Dir | Skip `Target_is_dir` |
 | Key m, Absent Domain, move | Rename_in_domain m |
 | Key m, Absent Domain | Copy_manifest m |
-| Key a, Key b | Identical if the content hashes are equal, else Copy_manifest a |
+| Key a, Key b | `into_domain(b, a's times)` if the content hashes are equal, else Copy_manifest a |
 | File, Absent Domain | Upload Fresh |
-| File l, Key d | Identical if `unchanged(l, d)`, else Upload Replacing |
+| File (l, t), Key d | `into_domain(d, t)` if `unchanged(l, d)`, else Upload Replacing |
 | Key m, Absent Local | Assemble m |
-| Key m, File l | `differing`: unknown → Identical if unchanged else Assemble; none → Identical; some indices → Patch_local(m, indices) |
+| Key m, File (l, t) | `differing`: unknown → `onto_local(t, m)` if unchanged else Assemble; none → `onto_local(t, m)`; some indices → Patch_local(m, indices) |
 | File, Absent Local / File | Skip `Not_in_domain` |
 | any entry inside a folder whose own decision was a Skip | Skip `Under_skipped`, without gathering its facts |
 
 - `unchanged`: link vs symlink manifest → same target; hashed keys vs a file manifest → same count
-  and every key equal; unhashed → false; a kind mismatch → false. **Identity is bytes**, never mtime.
+  and every key equal; unhashed → false; a kind mismatch → false. **Identity is bytes**: times
+  never make two contents the same or different, and between the same bytes they decide only
+  whether a retime is due.
+- `into_domain(d, t)`: `t'` = `t` carried over `d` (never a later `created`, 02 §2.6); `d`'s times
+  equal to `t'` → Identical, else Retime_in_domain(d with `t'`).
+- `onto_local(t, m)`: `t` and `m`'s times the same as 02 §2.6 compares a local file with a manifest
+  → Identical, else Retime_local(m's times).
 - A local file is hashed only against a manifest, cut at that manifest's chunk size.
 - `source_disposal(move)`: Skip, Rename_in_domain and Make_dir keep the source; everything else
   drops it iff `move`.
@@ -469,10 +478,14 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
   so an open collection cannot sweep them) (§4.2).
 - Upload: symlinks per policy (`skip` → Skip `Symlink_policy`; `keep` → install the link; `follow`
   → the target's content, a dangling target → Skip `Dangling_symlink`); a vanished source → Failed;
-  else upload (the store deduplicates, so only differing chunks are sent) and install the manifest
-  (§4.2).
-- Assemble: a symlink manifest → a local symlink; else write the file from its chunks.
-- Patch_local: consecutive indices merged into runs, each fetched into place; then set the mtime.
+  else upload (the store deduplicates, so only differing chunks are sent) and install the manifest,
+  with the source's times, carried over the target's when Replacing (§4.2).
+- Retime_in_domain: install the target's manifest with the new times, a change of times alone; no
+  byte moves.
+- Retime_local: set the local file's times; no byte moves.
+- Assemble: a symlink manifest → a local symlink; else write the file from its chunks, then set
+  its times to the manifest's.
+- Patch_local: consecutive indices merged into runs, each fetched into place; then set the times.
 - Rename_in_domain: a local `rename` of the file
   ([04 §4.5](04-checkout-cache.md#45-namespace-operations)).
 - Make_dir: local `mkdir -p`, or a local `mkdir` in the domain (§4.2).
@@ -814,18 +827,23 @@ Token, expiry, overwrite and revocation rules are
   excludes `.git` directories only; each symlink policy as §4.3 (kept dangling links included; broken
   followed links skipped and counted); planned bytes equal reported bytes and a file's progress sums
   to its size; a restart transfers nothing new; an existing key is skipped even when its content
-  differs, and `--force-rehash` installs it with its new content and re-sends missing chunks;
+  differs, and `--force-rehash` installs it with its new content and re-sends missing chunks, and
+  with its new times alone as a change of times;
   identical content is deduplicated; an import writes chunks and no other store object, and what it
   imported is on the main after the cycle that commits it; killing an import at any point leaves
   every installed file pending and committed after the owner's next start, and a rerun completes
   the rest.
-- **Export**: every file under its own path with the right bytes and mtime, no record left; a rerun
+- **Export**: every file under its own path with the right bytes and times (its creation time where
+  the platform can set one), no record left; a file already there with other times gets the
+  manifest's without a chunk read; a rerun
   finds everything already there with zero chunk reads; a refused chunk fails only its file, left at
   full length with a record claiming the landed chunks, and the next run fetches only the missing
   ones; a file changed upstream restarts from scratch; a file with a staged edit exports the version in
   the main's tree and is listed pending; the domain's cache is untouched; collisions, unknown paths, `..`
   names and relative destinations refused.
 - **Rsync**: the full decision table including patch indices; a copy within a domain moves no bytes;
+  the same bytes with other times are retimed in each direction without moving bytes, never giving
+  a domain file a later creation time, and a rerun then finds them identical;
   a move of a file a peer committed and this client had not merged yet succeeds; a move within a
   domain is committed as one entry holding the removal and the creation.
 - **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; a

@@ -204,17 +204,47 @@ regular file, and for a symlink `count = 0`, `link_len > 0`, `size` = the target
 a partial rewrite needs no reread of unchanged bytes. The recorded name is the leaf of the key the body
 is written to; a body copied to a new location keeps its old name until re-put.
 
-**mtime.** `mtime` is the content's last write time where the content was written, whichever backend
-holds the manifest. Anything that carries an existing file into a domain (an import, an rsync, a
-frontend handing over a whole file, a take) MUST record that file's last write time, never the time
-it was uploaded; only an edit made through a frontend records the time of the edit.
+**File times.** `mtime` is the content's last write time where the content was written, and
+`created` the time the file was created where it was first written. They belong to the file, not to
+a store: whichever backend holds the manifest, and however often it is uploaded, they keep the values
+the file had. A platform that keeps no creation time, or reports one before 1980-01-02 (FAT's unset
+1980-01-01 in any zone, or a zero), has none, and `created` is then the file's `mtime`, the latest
+time it can have been created. Every path below obeys two rules:
 
-**created.** `created` is the time the file was created where it was first written, carried
-like `mtime`: whatever carries an existing file in MUST record its creation time, or its `mtime`
-when the platform keeps none, the latest time it can have been created. A creation time before
-1980-01-02 is a platform's unset value (FAT's 1980-01-01 in any zone, a zero) and counts as none. A file created through a
-frontend records the time of its creation; an edit keeps the `created` of the file it changes, and
-a file carried over another never takes a later `created` than the one it replaces.
+- **Times are content.** The same bytes with other times are another value: a change of times alone
+  is a change, published like any other and merged by
+  [conflict-resolution](algorithms/conflict-resolution.md) §2.
+- **Never later.** A file carried over another takes its `mtime` but never a later `created` than
+  the one it replaces, so a save that writes a temporary file and renames it over the original keeps
+  the creation time, as Windows does for such a rename.
+
+Into a domain:
+
+| Path | `mtime` | `created` |
+|---|---|---|
+| Carrying an existing file in: an import, an rsync into the domain, the Windows take, a frontend handing over a whole file (`write` from staging) | MUST be the file's, never the upload time | MUST be the file's, or the `createdNs` a frontend passes where its staging file cannot hold one ([08](08-frontends.md) §3.3) |
+| The same bytes with other times: a re-import with `force_rehash` ([05](05-ops-config.md) §4.3), an rsync, a save of unchanged bytes | MUST be published as a change of times alone, with no upload | as above |
+| A frontend creating a file | the time of the creation | the time of the creation, or the creation time the platform hands over with the new item (a File Provider item's `creationDate`, so a Finder copy keeps its original's) |
+| An edit through a frontend | the time of the edit | kept |
+| A move or a rename inside the domain, by a frontend or rsync | kept | kept |
+| A copy inside the domain by rsync | the source's | the source's |
+| A frontend setting a file's times: FUSE `utimens`, a Finder date change, a Windows tool setting a placeholder's last write time | SHOULD be published as a change of times alone, with the time set | the time set, where the platform reports one: Finder's does, FUSE's never does, and Windows reports a change of the creation time alone to no provider ([cloud-files](frontends/cloud-files.md) §8.3) |
+
+A copy made through a frontend is a new file, created as the platform's copy creates it: `cp` and
+Explorer give it a creation time of now and, with `cp -p`, set its `mtime` afterwards (the last row).
+
+Out of a domain:
+
+| Path | `mtime` | `created` |
+|---|---|---|
+| An export, an rsync out of the domain | MUST be set to the manifest's | SHOULD be set to the manifest's where the platform can set one (Windows, macOS); elsewhere it stays as the filesystem made it |
+| A frontend presenting a file | MUST be presented as the manifest's | SHOULD be presented where the platform has a field: a Windows placeholder's creation time, a File Provider item's `creationDate`, a FUSE `statx` reply when the kernel asks for one ([fuse](frontends/fuse.md) §4.3); an Android document has none |
+
+**Comparing times.** Two manifests hold the same times when both fields are equal. A local file and
+a manifest of the same bytes hold the same times when their `mtime`s differ by at most
+`EXPORT_MTIME_SLACK` ([05](05-ops-config.md) §8), since a filesystem keeps times only as finely as it
+can, and their `created`s too where the platform can set one; elsewhere `created` is not compared.
+Where only the times differ, a copy MUST set the times and leave the bytes.
 
 Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000500000000`, created
 `1759000000000000000`, chunk size 8 MiB;
@@ -682,6 +712,12 @@ An implementation MUST exhibit these observable properties:
   `06b4b04bae2346bf`.
 - **Recorded name.** A written manifest records the leaf of the key it is written to, whatever name the
   caller supplied.
+- **File times.** Each row of §2.6's tables, on each platform it names: a file carried in records its
+  source's `mtime` and `created` to the nanosecond the source holds, and its `mtime` as `created`
+  where the source has none or one before 1980-01-02; the same bytes with other times are published
+  with no upload; a file carried over another never takes a later `created`; a move keeps both
+  times; a file carried out gets both where the platform can set them, and a rerun then finds it
+  the same.
 - **Folder moves.** Moving a folder changes no key of any object under it; the folder is listed exactly
   once afterwards.
 - **Versions.** With versioning on, each overwrite and each delete leaves the prior manifest body as a
