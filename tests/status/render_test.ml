@@ -3,7 +3,7 @@ module Uplink = Tsync_store.Uplink
 
 let mib n = n * 1024 * 1024
 
-let usage ~cpu ~private_ ~heap : usage =
+let usage ?(stacks = Some (mib 2)) ~cpu ~private_ ~heap () : usage =
   {
     cpu_seconds = 12.;
     cpu_percent = cpu;
@@ -15,13 +15,13 @@ let usage ~cpu ~private_ ~heap : usage =
     file_backed_bytes = Some (mib 9);
     heap_bytes = heap;
     top_heap_bytes = heap;
-    stacks_bytes = Some (mib 2);
+    stacks_bytes = stacks;
     minor_collections = 10;
     major_collections = 1;
   }
 
-let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime
-    ~serves () : self =
+let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ?stacks ~role ~pid
+    ~uptime ~serves () : self =
   {
     server =
       {
@@ -33,7 +33,7 @@ let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime
         role;
         serves;
       };
-    usage = usage ~cpu:1.24 ~private_:(mib 61) ~heap:(mib 18);
+    usage = usage ?stacks ~cpu:1.24 ~private_:(mib 61) ~heap:(mib 18) ();
     uplinks;
     traffic;
     recent_errors = recent;
@@ -418,7 +418,9 @@ let degraded : machine =
           serves = [];
           error = None;
           self =
-            Some (self ~role:"supervisor" ~pid:100 ~uptime:90061. ~serves:[] ());
+            Some
+              (self ~stacks:None ~role:"supervisor" ~pid:100 ~uptime:90061.
+                 ~serves:[] ());
         };
         {
           role = "owner";

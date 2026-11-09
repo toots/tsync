@@ -74,7 +74,7 @@ Domain Media  NOT ANSWERING
 
 Processes
   supervisor   pid 100  up 1d 1h  1.2% cpu
-    memory           private 61.0 MiB (heap 18.0 MiB, stacks 2.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
   owner        pid 102  Media
     NOT ANSWERING    connection refused
 
