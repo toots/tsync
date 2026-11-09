@@ -16,9 +16,9 @@ B sees (override 1015218367123456700, 1015000000000000000):
   Archives/D/deep/second.txt: the source's times true
   Archives/D/first.txt: mtime 1015218367123456700, created 1015000000000000000
 
-== a CRLF line, a name a folder holds, a FIFO
+== a CRLF line, a name a folder holds, a directory as a file
 imported 1, skipped 0, failed 2
   Archives/D failed: true
-  Archives/pipe failed: true
+  Archives/dir failed: true
 B holds crlf.txt: true
 pending: A 0, B 0

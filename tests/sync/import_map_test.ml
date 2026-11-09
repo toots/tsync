@@ -135,8 +135,7 @@ let () =
             ( "Archives/D/deep/second.txt",
               Fs.times (Filename.concat src "y/z/two.txt") );
           ];
-      p "\n== a CRLF line, a name a folder holds, a FIFO\n";
-      Unix.mkfifo (Filename.concat src "pipe") 0o600;
+      p "\n== a CRLF line, a name a folder holds, a directory as a file\n";
       report
         (A.import
            ~map:
@@ -144,7 +143,7 @@ let () =
                 [
                   "x/one.txt\tArchives/crlf.txt\r";
                   "x/one.txt\tArchives/D";
-                  "pipe\tArchives/pipe";
+                  "y\tArchives/dir";
                 ])
            src);
       A.drain ~grace:10. ();
