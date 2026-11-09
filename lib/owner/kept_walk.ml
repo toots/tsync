@@ -45,21 +45,41 @@ let stamp file =
         Int64.to_string (Int64.succ (Int64.of_string old))
     | _ -> now
 
-let write file ~skipped entries =
+let output_line oc json =
+  Out_channel.output_string oc (Yojson.Safe.to_string json);
+  Out_channel.output_char oc '\n'
+
+(* The header names the skipped count, known only once the walk ends: entries
+   go to one temporary, then follow the header into another. *)
+let write file produce =
   let walk = stamp file in
-  let b = Buffer.create 4096 in
-  Buffer.add_string b
-    (Yojson.Safe.to_string
-       (`Assoc [("walk", `String walk); ("skipped", `Int skipped)]));
-  Buffer.add_char b '\n';
-  List.iter
-    (fun e ->
-      Buffer.add_string b (Yojson.Safe.to_string (entry_json e));
-      Buffer.add_char b '\n')
-    entries;
-  Fs.mkdir_p (Filename.dirname file);
-  Fs.replace file (Buffer.contents b);
-  walk
+  let dir = Filename.dirname file in
+  Fs.mkdir_p dir;
+  let body = Fs.temp_in dir and whole = Fs.temp_in dir in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs.unlink_quiet body;
+      Fs.unlink_quiet whole)
+    (fun () ->
+      let skipped =
+        Out_channel.with_open_bin body (fun oc ->
+            produce (fun e -> output_line oc (entry_json e)))
+      in
+      Out_channel.with_open_bin whole (fun oc ->
+          output_line oc
+            (`Assoc [("walk", `String walk); ("skipped", `Int skipped)]);
+          In_channel.with_open_bin body (fun ic ->
+              let chunk = Bytes.create 65536 in
+              let rec copy () =
+                match In_channel.input ic chunk 0 65536 with
+                  | 0 -> ()
+                  | n ->
+                      Out_channel.output oc chunk 0 n;
+                      copy ()
+              in
+              copy ()));
+      Fs.rename whole file;
+      walk)
 
 let path_of_line line =
   match Yojson.Safe.from_string line with
