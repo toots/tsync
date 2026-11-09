@@ -53,6 +53,7 @@ type usage = {
   file_backed_bytes : int option; [@key "fileBackedBytes"] [@default None]
   heap_bytes : int; [@key "heapBytes"]
   top_heap_bytes : int; [@key "topHeapBytes"]
+  stacks_bytes : int option; [@key "stacksBytes"] [@default None]
   minor_collections : int; [@key "minorCollections"]
   major_collections : int; [@key "majorCollections"]
 }

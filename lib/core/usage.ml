@@ -6,6 +6,7 @@ type t = {
   file_backed : int option;
   heap : int;
   top_heap : int;
+  stacks : int;
   minor_collections : int;
   major_collections : int;
   cpu_seconds : float;
@@ -30,6 +31,7 @@ let sample () =
     file_backed = known file_backed;
     heap = g.heap_words * word;
     top_heap = g.top_heap_words * word;
+    stacks = g.live_stacks_words * word;
     minor_collections = g.minor_collections;
     major_collections = g.major_collections;
     cpu_seconds = t.tms_utime +. t.tms_stime;

@@ -58,7 +58,17 @@ jobs:
       # The cross compiler is built from, and for, this compiler version.
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.4.1"
+          ocaml-compiler: "5.5.2"
+
+      # The cache keys name the compiler setup-ocaml resolved, so a new release
+      # of it starts a fresh switch instead of reusing one built on the last.
+      - name: The compiler version
+        id: ocaml
+        shell: bash
+        run: |
+            vnum=$(opam exec -- ocaml -vnum | tr -d '\r')
+            test -n "$vnum"
+            echo "vnum=$vnum" >> "$GITHUB_OUTPUT"
 
       # .github/opam carries the cross packages opam-cross-android does not
       # have yet.
@@ -72,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
+          key: opam-android-cross-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
 
       # 10 §4.1: the package list is tsync-android.opam.
       - name: The cross switch
@@ -83,7 +93,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
+          key: opam-android-cross-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}
 
       # The context's path, not the bare target: the native context would want
       # every desktop dependency.

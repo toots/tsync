@@ -7,7 +7,7 @@ bug-reports: "https://github.com/toots/tsync/issues"
 dev-repo: "git+https://github.com/toots/tsync.git"
 synopsis: "Synchronise folders through object stores"
 depends: [
-  "ocaml" {>= "5.5"}
+  "ocaml" {>= "5.5.1"}
   "dune" {>= "3.17"}
   "base64"
   "cmdliner"

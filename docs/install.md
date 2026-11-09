@@ -57,7 +57,7 @@ Install [`tsync-arm64-v8a.apk`](https://github.com/toots/tsync/releases/download
 
 ## From source
 
-You need [opam](https://opam.ocaml.org/) and OCaml 5.5 or later.
+You need [opam](https://opam.ocaml.org/) and OCaml 5.5.1 or later.
 
 **Linux.** Install the system libraries, then build:
 

@@ -278,8 +278,9 @@ let domain b = function
       List.iter (backend b) d.backends
 
 let memory (u : usage) =
-  Printf.sprintf "private %s (heap %s%s), mapped files %s"
+  Printf.sprintf "private %s (heap %s%s%s), mapped files %s"
     (isize u.private_bytes) (isize u.heap_bytes)
+    (Option.fold ~none:"" ~some:(fun s -> ", stacks " ^ isize s) u.stacks_bytes)
     (Option.fold ~none:""
        ~some:(fun a -> ", anonymous " ^ isize a)
        u.anonymous_bytes)

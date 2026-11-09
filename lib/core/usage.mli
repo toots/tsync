@@ -2,16 +2,22 @@
     where it lives, the OCaml heap, and CPU time. Anonymous memory is live
     allocation, the OCaml heap plus malloc'd buffers such as bigstrings;
     file-backed memory is the kernel paging mapped files in, reclaimable and not
-    the process's to free. *)
+    the process's to free.
+
+    - [anonymous], [file_backed]: [None] where the system does not say.
+    - [heap]: the OCaml major heap.
+    - [stacks]: fiber stacks, malloc'd outside the heap, the domains' stack
+      caches included. *)
 
 type t = {
   resident : int;
   private_ : int;
   swapped : int;
-  anonymous : int option;  (** [None] where the system does not say *)
+  anonymous : int option;
   file_backed : int option;
-  heap : int;  (** the OCaml major heap *)
+  heap : int;
   top_heap : int;
+  stacks : int;
   minor_collections : int;
   major_collections : int;
   cpu_seconds : float;

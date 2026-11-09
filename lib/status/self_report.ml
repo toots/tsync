@@ -67,6 +67,7 @@ let self ?traffic ?listener ~role ~serves () : Status_report.self =
         file_backed_bytes = u.file_backed;
         heap_bytes = u.heap;
         top_heap_bytes = u.top_heap;
+        stacks_bytes = Some u.stacks;
         minor_collections = u.minor_collections;
         major_collections = u.major_collections;
       };
