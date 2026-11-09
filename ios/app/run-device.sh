@@ -16,7 +16,8 @@ if ! xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration 
   exit 1
 fi
 app=~/sources/tsync-ios-dd/Build/Products/Release-iphoneos/tsync.app
-device=$(xcrun devicectl list devices 2>/dev/null | awk '/connected/ && /iPhone/ {print $3; exit}')
+device=$(xcrun devicectl list devices 2>/dev/null | grep -E 'iPhone.*connected' \
+  | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | head -1)
 if [[ -z $device ]]; then
   log "built $app; no connected iPhone found (xcrun devicectl list devices)"
   exit 1
