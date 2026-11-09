@@ -398,7 +398,8 @@ let () =
           | _ -> assert false
       in
       let name = function
-        | Transport.Openssl -> "openssl"
+        | Transport.System -> "system"
+        | Openssl -> "openssl"
         | Native -> "ocaml-tls"
       in
       let servers =
@@ -438,10 +439,13 @@ let () =
           | ADDR_INET (_, port) -> (l, port)
           | _ -> assert false
       in
-      let accept l =
+      let accept_fd l =
         Rt.wait_readable l;
-        Transport.of_fd (fst (Unix.accept l))
+        let fd = fst (Unix.accept l) in
+        Unix.set_nonblock fd;
+        fd
       in
+      let accept l = Transport.of_fd (accept_fd l) in
       let tls =
         { Transport.host = "localhost"; ca_file = Some "tls_cert.pem" }
       in
@@ -454,7 +458,9 @@ let () =
           let l, port = listen () in
           let got =
             Rt.async (fun () ->
-                let conn = Transport.accept_tls ~timeout:5. server (accept l) in
+                let conn =
+                  Transport.accept_tls ~timeout:5. server (accept_fd l)
+                in
                 let buf = Bigstring.create 100 in
                 (* A close before the 3000 bytes ends the count short. *)
                 let rec go n =
