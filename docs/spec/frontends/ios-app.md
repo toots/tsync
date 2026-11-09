@@ -41,7 +41,8 @@ the extension accepted is in the owner's pending set, which removal does not tou
 **Signals.** At launch and each time the app comes to the foreground, after its registration pass,
 the app signals the working set of every configured domain
 ([ios.md §5.1](ios.md#51-the-working-set)). Bringing the app forward is how a user refreshes what the
-Files app shows.
+Files app shows at once; pushes and background runs do it otherwise
+([ios.md §5.2](ios.md#52-in-the-background), [§5.3](ios.md#53-pushes)).
 
 **Enabled state.** The framework adds a new domain turned off; the user turns it on in the Files app.
 The app reads each domain's state (`userEnabled`) at launch, on returning to the foreground, and on
@@ -70,6 +71,10 @@ the framework's domain-change notification.
     restart, and that restarting the iPhone applies them at once. Joining it with the same entry says
     nothing. The kept entry is dropped at that join.
   - A removal the framework refuses leaves the config as it was and shows the reason.
+- **Background refresh**, under Domains, only when the system will not run it: "Background refresh
+  is off for tsync: Files shows changes from other devices when you open tsync. Turn it on in
+  Settings, General, Background App Refresh", or, when the device restricts it, that it is not
+  available on this iPhone.
 - **Add a domain** opens Setup.
 - **About**: the app's version and the commit it was built from.
 - **Diagnostics**: the extension's footprint log ([ios.md §7](ios.md#7-memory-and-observed-behaviour))
@@ -91,5 +96,6 @@ the framework's domain-change notification.
 - A domain turned off in Files is shown so within a second of returning to the app, and the mark goes
   once it is turned on.
 - On a device without the live scanner, Scan setup code is not offered.
+- With Background App Refresh turned off for tsync, Settings says so; turned on, it says nothing.
 - Removing a domain and joining it again with a different server says the new settings may wait for
   a restart; joining it again from the same link says nothing.
