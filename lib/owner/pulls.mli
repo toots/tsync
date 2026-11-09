@@ -46,5 +46,9 @@ val before_open : t -> string -> unit
 (** Rule 4: the pull of a folder a restore walks; raises its failure. *)
 val for_walk : t -> string -> unit
 
+(** android §3.2: starts a refresh pass over the held folders not fresh, unless
+    one runs. *)
+val refresh : t -> unit
+
 (** An [unreachable] answer was given: the next store success is a recovery. *)
 val note_unreachable : t -> unit

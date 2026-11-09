@@ -164,15 +164,17 @@ module Make (C : Engine_ctx.S) = struct
       (Fs.read_file_opt (folder_position_path dir))
       (fun s -> int_of_string_opt (String.trim s))
 
-  let set_folder_position dir n =
+  let set_folder_position ?(durable = true) dir n =
     if Fs.is_dir (Mirror.path mirror dir) then
-      Fs.durable_replace (folder_position_path dir) (Key.entry_number n)
+      (if durable then Fs.durable_replace else Fs.replace_unsynced)
+        (folder_position_path dir) (Key.entry_number n)
 
   let pulled_marker dir =
     Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
 
-  let mark_pulled dir =
-    Fs.replace (pulled_marker dir)
+  let mark_pulled ?(sync = true) dir =
+    (if sync then Fs.replace else Fs.replace_unsynced)
+      (pulled_marker dir)
       (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
 
   (* Every item under a folder, as it would be reported if it had just arrived:
@@ -1105,88 +1107,88 @@ module Make (C : Engine_ctx.S) = struct
       (fun c -> Hashtbl.mem touched (Algebra.key_of c))
       (theirs_of entries)
 
+  let pull_id dir =
+    match Mirror.folder_id mirror dir with
+      | Some id -> id
+      | None ->
+          Fail.raise_ Fail.Unprepared "%s: this client has not resolved it" dir
+
+  (* publication §4.11, by state: the folder's records at the tree head and the
+     entries after it. *)
+  let by_state dir id =
+    let t = Log_store.tree_head log in
+    let records =
+      T.children
+        ~on_unusable:
+          (Tree.Skip (fun u -> Log.debug "pull: %s" (Tree.describe_unusable u)))
+        id
+    in
+    match fetch t with
+      | `Pruned -> Fail.raise_ Fail.Link "the log moved under a pull of %s" dir
+      | `Entries entries ->
+          let walked : Log_entry.command list =
+            List.map
+              (fun (e : Tree.entry) ->
+                match e.body with
+                  | File m ->
+                      `File
+                        ( { Algebra.parent = id; name = m.name },
+                          None,
+                          Some (Log_entry.Known m) )
+                  | Dir m ->
+                      `Folder
+                        (m.id, None, Some { Algebra.parent = id; name = m.name }))
+              records
+          in
+          let held =
+            with_meta (fun () ->
+                children_of dir id
+                @ List.filter_map
+                    (fun c ->
+                      if concerns id c then Some (Algebra.key_of c) else None)
+                    (pending ()))
+          in
+          let gone =
+            List.map
+              (function
+                | `File p -> `File (p, None, None)
+                | `Folder i -> `Folder (i, None, None))
+              held
+          in
+          let all =
+            List.fold_left
+              (fun acc c -> Keys.add (Algebra.key_of c) c acc)
+              Keys.empty
+              (gone @ walked @ view_commands id entries)
+          in
+          (t + List.length entries, List.map snd (Keys.bindings all))
+
+  (* A folder moved into one this client does not hold leaves the view. *)
+  let leaving id =
+    List.map (function
+      | `Folder (i, before, Some (place : Algebra.place))
+        when (not (Folder_id.equal place.parent id))
+             && (not (Folder_id.is_root place.parent))
+             && Mirror.key_of_id mirror place.parent = None ->
+          `Folder (i, before, None)
+      | c -> c)
+
+  (* One arrival for the folder's view; how many changes it made. *)
+  let merge_view dir id (head, theirs) =
+    let theirs = leaving id theirs in
+    if theirs = [] && folder_position dir = Some head then 0
+    else merge_and_enact ~view:id ~head theirs
+
   (* publication §4.11, a pull: an arrival for one folder, by the entries
      after its position, or by state when it has none or they are pruned;
-     whether it changed the local tree. *)
+     whether it changed the local tree. android §3.2: a page at a time, each
+     merged before the next is read. *)
   let pull_folder ?(page = default_pull_page) dir =
-    let id =
-      match Mirror.folder_id mirror dir with
-        | Some id -> id
-        | None ->
-            Fail.raise_ Fail.Unprepared "%s: this client has not resolved it"
-              dir
-    in
-    let by_state () =
-      let t = Log_store.tree_head log in
-      let records =
-        T.children
-          ~on_unusable:
-            (Tree.Skip
-               (fun u -> Log.debug "pull: %s" (Tree.describe_unusable u)))
-          id
-      in
-      match fetch t with
-        | `Pruned ->
-            Fail.raise_ Fail.Link "the log moved under a pull of %s" dir
-        | `Entries entries ->
-            let walked : Log_entry.command list =
-              List.map
-                (fun (e : Tree.entry) ->
-                  match e.body with
-                    | File m ->
-                        `File
-                          ( { Algebra.parent = id; name = m.name },
-                            None,
-                            Some (Log_entry.Known m) )
-                    | Dir m ->
-                        `Folder
-                          ( m.id,
-                            None,
-                            Some { Algebra.parent = id; name = m.name } ))
-                records
-            in
-            let held =
-              with_meta (fun () ->
-                  children_of dir id
-                  @ List.filter_map
-                      (fun c ->
-                        if concerns id c then Some (Algebra.key_of c) else None)
-                      (pending ()))
-            in
-            let gone =
-              List.map
-                (function
-                  | `File p -> `File (p, None, None)
-                  | `Folder i -> `Folder (i, None, None))
-                held
-            in
-            let all =
-              List.fold_left
-                (fun acc c -> Keys.add (Algebra.key_of c) c acc)
-                Keys.empty
-                (gone @ walked @ view_commands id entries)
-            in
-            (t + List.length entries, List.map snd (Keys.bindings all))
-    in
-    (* A folder moved into one this client does not hold leaves the view. *)
-    let leaving =
-      List.map (function
-        | `Folder (i, before, Some (place : Algebra.place))
-          when (not (Folder_id.equal place.parent id))
-               && (not (Folder_id.is_root place.parent))
-               && Mirror.key_of_id mirror place.parent = None ->
-            `Folder (i, before, None)
-        | c -> c)
-    in
-    let merge (head, theirs) =
-      let theirs = leaving theirs in
-      if theirs = [] && folder_position dir = Some head then 0
-      else merge_and_enact ~view:id ~head theirs
-    in
-    (* android §3.2: a page at a time, each merged before the next is read. *)
+    let id = pull_id dir in
+    let merge = merge_view dir id in
     let rec pages h changed =
       match fetch ~max:page h with
-        | `Pruned -> changed + merge (by_state ())
+        | `Pruned -> changed + merge (by_state dir id)
         | `Entries entries ->
             let head = h + List.length entries in
             let changed = changed + merge (head, view_commands id entries) in
@@ -1194,11 +1196,114 @@ module Make (C : Engine_ctx.S) = struct
     in
     let changed =
       match folder_position dir with
-        | None -> merge (by_state ())
+        | None -> merge (by_state dir id)
         | Some h -> pages h 0
     in
     mark_pulled dir;
     changed > 0
+
+  (* android §3.2: every folder with a pull marker. *)
+  let held () =
+    let rec walk dir acc =
+      let acc = if Fs.exists (pulled_marker dir) then dir :: acc else acc in
+      List.fold_left
+        (fun acc name ->
+          let path = Names.join dir name in
+          if Mirror.kind mirror path = `Dir then walk path acc else acc)
+        acc (Mirror.names mirror dir)
+    in
+    walk "" []
+
+  (* The folders a command changes the children of. *)
+  let touched : Log_entry.command -> Folder_id.t list = function
+    | `File (p, _, _) -> [p.parent]
+    | `Folder (_, before, after) ->
+        List.filter_map
+          (Option.map (fun (place : Algebra.place) -> place.parent))
+          [before; after]
+
+  type view = { dir : string; id : Folder_id.t; mutable position : int }
+
+  (* android §3.2, a refresh pass: the log read once from the oldest position,
+     each page merged into the views it touches. A view with no position, or
+     a log pruned past the oldest, is pulled on its own. *)
+  let pull_pass ?(page = default_pull_page) ~stop dirs : Engine_intf.pass =
+    let changed = ref [] in
+    let note dir n = if n > 0 then changed := dir :: !changed in
+    let alone dir = if pull_folder ~page dir then changed := dir :: !changed in
+    let views, unpositioned =
+      List.partition_map
+        (fun dir ->
+          match (Mirror.folder_id mirror dir, folder_position dir) with
+            | Some id, Some position -> Left { dir; id; position }
+            | _ -> Right dir)
+        dirs
+    in
+    let by_id = Hashtbl.create (List.length views) in
+    List.iter (fun v -> Hashtbl.add by_id v.id v) views;
+    let merge_page entries head =
+      let ids = Hashtbl.create 16 in
+      List.iter
+        (fun e ->
+          List.iter
+            (fun c -> List.iter (fun i -> Hashtbl.replace ids i ()) (touched c))
+            (Option.value ~default:[] (Log_store.commands e)))
+        entries;
+      Hashtbl.iter
+        (fun id () ->
+          List.iter
+            (fun v ->
+              let mine =
+                List.filter
+                  (fun (e : Log_store.entry) -> e.n > v.position)
+                  entries
+              in
+              match view_commands v.id mine with
+                | [] -> ()
+                | theirs ->
+                    note v.dir (merge_view v.dir v.id (head, theirs));
+                    v.position <- head)
+            (Hashtbl.find_all by_id id))
+        ids
+    in
+    let rec read from =
+      if stop () then `Stopped
+      else (
+        match fetch ~max:page from with
+          | `Pruned -> `Pruned
+          | `Entries entries ->
+              let head = from + List.length entries in
+              merge_page entries head;
+              if List.length entries < page then `Head head else read head)
+    in
+    let covered =
+      match views with
+        | [] -> []
+        | v :: rest -> (
+            let oldest =
+              List.fold_left (fun m v -> Int.min m v.position) v.position rest
+            in
+            match read oldest with
+              | `Stopped -> []
+              | `Pruned ->
+                  List.iter (fun v -> alone v.dir) views;
+                  List.map (fun v -> v.dir) views
+              | `Head head ->
+                  List.iter
+                    (fun v ->
+                      if v.position < head then
+                        set_folder_position ~durable:false v.dir head;
+                      mark_pulled ~sync:false v.dir)
+                    views;
+                  List.map (fun v -> v.dir) views)
+    in
+    let covered =
+      if stop () then covered
+      else (
+        List.iter alone unpositioned;
+        covered @ unpositioned)
+    in
+    { covered; changed = List.sort_uniq String.compare !changed }
 
   (* publication §4.5: the entry this client creates of a batch. *)
   let entry_of batch : Log_entry.t =
