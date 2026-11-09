@@ -711,6 +711,7 @@ let host ~mount domains ~run =
               Rt.run_sync (fun () ->
                   try Rt.with_timeout 5. (fun () -> Rt.Promise.await unmounted)
                   with Rt.Timeout -> ());
+              Memtrace_hook.stop ();
               flush_all ();
               Unix._exit code
           | _ -> set (`Done code))
