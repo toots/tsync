@@ -41,6 +41,7 @@ let () =
            pull_freshness = fresh_window;
            view_max_age = 3600.;
            pull_patience = 0.5;
+           pull_page = 256;
          }
        "");
   p "  %-34s %S" "boot again" (Android_host.boot "");

@@ -1,0 +1,8 @@
+  boot, a page of 4 entries          ""
+  root                               [sub/] read the store
+  sub                                [a] read the store
+== ten commits, then the store fails after six entry reads
+  pull                               ok
+  kept from the first page           [a, f00, f01, f02, f03]
+== the store returns
+  pull                               [a, f00, f01, f02, f03, f04, f05, f06, f07, f08, f09]

@@ -24,6 +24,15 @@ let store_path = Filename.concat root "store"
 let mode : [ `Up | `Hung | `Bodies_hung | `Down ] Atomic.t = Atomic.make `Up
 let listings = Atomic.make 0
 
+(* Reads of log entries left before they answer unreachable; none: no limit. *)
+let entry_reads_left : int option Atomic.t = Atomic.make None
+
+let spend_entry_read () =
+  match Atomic.get entry_reads_left with
+    | Some 0 -> Fail.raise_ Fail.Unreachable "the store went away mid-pull"
+    | Some n -> Atomic.set entry_reads_left (Some (n - 1))
+    | None -> ()
+
 let gated (s : Store.t) : Store.t =
   let rec gate ?(body = false) f =
     match Atomic.get mode with
@@ -43,6 +52,7 @@ let gated (s : Store.t) : Store.t =
       (fun k ->
         if Key.is_log_entry k || Key.leaf k = "tree-head" then
           Atomic.incr listings;
+        if Key.is_log_entry k then spend_entry_read ();
         gate ~body:(body k) (fun () -> s.get_opt k));
     get_range = (fun k o l -> gate ~body:(body k) (fun () -> s.get_range k o l));
     head_opt = (fun k -> gate (fun () -> s.head_opt k));

@@ -631,17 +631,21 @@ module Make (C : Engine_ctx.S) = struct
 
   let theirs_of = Log_store.last_commands
 
-  (* publication §4.3. *)
-  let fetch h =
+  (* publication §4.3. With [max], at most that many entries: a full answer
+     may have more after it. *)
+  let fetch ?max h =
     let rec go n acc =
-      match Log_store.read_entries log n with
-        | _ :: _ as more -> go (n + List.length more) (acc @ more)
-        | [] ->
-            let t = Log_store.tree_head log in
-            Atomic.set tree_head_seen t;
-            if t < n then `Entries acc
-            else if Log_store.read_entry log n <> None then go n acc
-            else `Pruned
+      let left = Option.map (fun m -> m - List.length acc) max in
+      if left = Some 0 then `Entries acc
+      else (
+        match Log_store.read_entries ?max:left log n with
+          | _ :: _ as more -> go (n + List.length more) (acc @ more)
+          | [] ->
+              let t = Log_store.tree_head log in
+              Atomic.set tree_head_seen t;
+              if t < n then `Entries acc
+              else if Log_store.read_entry log n <> None then go n acc
+              else `Pruned)
     in
     go (h + 1) []
 
@@ -1082,6 +1086,9 @@ module Make (C : Engine_ctx.S) = struct
                               (Domain_name.to_string d) (h + 1) head why;
                             arrive_by_state ?narrate ())))
 
+  (* android §8 pull_page. *)
+  let default_pull_page = 256
+
   (* The commands a pull of one folder merges (publication §4.11): the last
      value the entries give every key that any of them touched in the folder,
      so a key that left the view and changed again is still seen leaving. *)
@@ -1101,7 +1108,7 @@ module Make (C : Engine_ctx.S) = struct
   (* publication §4.11, a pull: an arrival for one folder, by the entries
      after its position, or by state when it has none or they are pruned;
      whether it changed the local tree. *)
-  let pull_folder dir =
+  let pull_folder ?(page = default_pull_page) dir =
     let id =
       match Mirror.folder_id mirror dir with
         | Some id -> id
@@ -1161,30 +1168,34 @@ module Make (C : Engine_ctx.S) = struct
             in
             (t + List.length entries, List.map snd (Keys.bindings all))
     in
-    let head, theirs =
-      match folder_position dir with
-        | None -> by_state ()
-        | Some h -> (
-            match fetch h with
-              | `Pruned -> by_state ()
-              | `Entries entries ->
-                  (h + List.length entries, view_commands id entries))
-    in
     (* A folder moved into one this client does not hold leaves the view. *)
-    let theirs =
-      List.map
-        (function
-          | `Folder (i, before, Some (place : Algebra.place))
-            when (not (Folder_id.equal place.parent id))
-                 && (not (Folder_id.is_root place.parent))
-                 && Mirror.key_of_id mirror place.parent = None ->
-              `Folder (i, before, None)
-          | c -> c)
-        theirs
+    let leaving =
+      List.map (function
+        | `Folder (i, before, Some (place : Algebra.place))
+          when (not (Folder_id.equal place.parent id))
+               && (not (Folder_id.is_root place.parent))
+               && Mirror.key_of_id mirror place.parent = None ->
+            `Folder (i, before, None)
+        | c -> c)
     in
-    let changed =
+    let merge (head, theirs) =
+      let theirs = leaving theirs in
       if theirs = [] && folder_position dir = Some head then 0
       else merge_and_enact ~view:id ~head theirs
+    in
+    (* android §3.2: a page at a time, each merged before the next is read. *)
+    let rec pages h changed =
+      match fetch ~max:page h with
+        | `Pruned -> changed + merge (by_state ())
+        | `Entries entries ->
+            let head = h + List.length entries in
+            let changed = changed + merge (head, view_commands id entries) in
+            if List.length entries < page then changed else pages head changed
+    in
+    let changed =
+      match folder_position dir with
+        | None -> merge (by_state ())
+        | Some h -> pages h 0
     in
     mark_pulled dir;
     changed > 0
