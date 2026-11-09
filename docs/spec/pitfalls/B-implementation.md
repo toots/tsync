@@ -438,6 +438,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — The codes list asked the owner again at each expiry in a `LaunchedEffect` loop. It kept asking while the app was in the background, never asked when the app came back, and a change the screen itself made (adding a code) waited for the next expiry, up to 30 s.
 - **Check** — A loop that polls on behalf of a visible screen runs under `repeatOnLifecycle(RESUMED)`, and its key includes every local change that alters what it shows.
 - **Seen** — android-totp review.
+
+### B-8.19 A registration record written into a directory only another process creates
+- **Pitfall** — The domain registration pass recorded its identity scheme (file-provider §9.1 step 10) in `<group>/tsync/`, which on macOS the daemon creates. On iOS nothing did: the write failed silently, every pass took every domain for stale, and each launch and return to the foreground removed and re-added every domain, deleting its local copies and turning it off in Files. A self-test running meanwhile timed out.
+- **Check** — A record a pass relies on to stop repeating work creates its directory before writing, and a failure to write it is reported, not ignored. Two launches in a row remove no domain.
+- **Seen** — ios-app milestone 1, on an iPhone 14.
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
