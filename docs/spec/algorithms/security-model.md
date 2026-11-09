@@ -245,6 +245,8 @@ The default is the host's platform implementation. Its code and trust store are 
 | Windows | SChannel, MAY be absent; then OpenSSL reading the Windows root stores | over a core connection |
 | Linux and other Unix | OpenSSL with the system's CA bundle | over a core connection |
 
+The platform's own requirements on a server certificate apply under a private CA too. On Apple hosts a certificate issued after 1 July 2019 must be valid for 825 days at most and name `serverAuth` in its extended key usage, or it is refused however it chains.
+
 A desktop build MAY also carry an implementation that does not depend on the platform (an OpenSSL build, or one in the implementation's own language); the `tls` option ([05 §2](../05-ops-config.md)) selects among those a build has. An iOS build carries only its platform implementation.
 
 ---
