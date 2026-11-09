@@ -4,7 +4,10 @@
 open Tsync_core
 
 val home : unit -> string
+
+(** [$TSYNC_CONFIG_FILE] when set to an absolute path (07 §2.7). *)
 val config_file : unit -> string
+
 val data_dir : unit -> string
 val cache_root : unit -> string
 
