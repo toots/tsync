@@ -62,6 +62,10 @@ module type S = sig
   (** Real names, bytewise order; a staged-only file is listed. *)
   val list_children : string -> entry list
 
+  (** The names of {!list_children} without reading an entry; an unreadable one
+      is kept. *)
+  val child_names : string -> string list
+
   val list_tree : string -> (string * Local_ops.stat) list
   val readlink : string -> string
   val availability : string -> [ `Online_only | `Cached | `Pinned of float ]

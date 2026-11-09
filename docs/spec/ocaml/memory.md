@@ -143,5 +143,9 @@ two runs each:
 | no bounds | 43.3–46.2 MiB | 36.9–42.6 MiB | 44 |
 | 1 worker, 4 may-block, 1 MiB release growth, `s=32k` | 17.2 MiB | 16.8–16.9 MiB | 10 |
 
+A `list_dir` page decodes only the manifests it serves (08 §3.7): over the 5,000 entries in pages
+of 1,000 the listing peaked at 18.2–20.3 MiB against 18.6–20.9 decoding the whole folder per page,
+three alternating runs each; the difference grows with the folder's width.
+
 A process that does nothing costs 8.6 MiB in the simulator and 0.9 MiB natively on macOS; the
 simulator's share is not a device's.
