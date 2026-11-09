@@ -6,6 +6,14 @@ log() { print "$(date +%T) $*" | tee -a /tmp/tsync-ios-device.log }
 cd "${0:A:h}"
 export PATH=/opt/homebrew/bin:$PATH
 
+# A test server for Diagnostics, from a file kept out of the repository: two
+# lines, the server's URL then its secret.
+test_server=~/sources/tsync-test-server/phone-test-server
+test_url="" test_secret=""
+if [[ -r $test_server ]]; then
+  { read -r test_url; read -r test_secret } < $test_server
+fi
+
 # devicectl installs by its own identifier; xcodebuild names a device by its UDID.
 xcrun devicectl list devices --json-output /tmp/tsync-devices.json > /dev/null 2>&1
 read device udid < <(python3 -c '
@@ -27,6 +35,7 @@ if ! xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration 
     -destination "id=$udid" -derivedDataPath ~/sources/tsync-ios-dd \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
     TSYNC_COMMIT=$(git rev-parse --short=12 HEAD) \
+    TSYNC_TEST_SERVER_URL="$test_url" TSYNC_TEST_SERVER_SECRET="$test_secret" \
     build > /tmp/tsync-xcodebuild.log 2>&1; then
   grep -E "error:" /tmp/tsync-xcodebuild.log | sort -u
   log "build failed; full log in /tmp/tsync-xcodebuild.log"

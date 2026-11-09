@@ -40,6 +40,12 @@ struct SettingsView: View {
                     message = Configs.add([Configs.localTest()]) ?? ""
                     model.reload()
                 }
+                if let server = Configs.testServer() {
+                    Button("Add the test server domain") {
+                        message = Configs.add([server]) ?? ""
+                        model.reload()
+                    }
+                }
                 Button("Run self-test") { Task.detached { await SelfTest.run() } }
                 Button("Refresh the memory log") { readFootprint() }
                 Button("Clear the memory log", role: .destructive) {

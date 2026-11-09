@@ -4,5 +4,9 @@
 <dict>
     <key>TsyncCommit</key>
     <string>$(TSYNC_COMMIT)</string>
+    <key>TsyncTestServerURL</key>
+    <string>$(TSYNC_TEST_SERVER_URL)</string>
+    <key>TsyncTestServerSecret</key>
+    <string>$(TSYNC_TEST_SERVER_SECRET)</string>
 </dict>
 </plist>
