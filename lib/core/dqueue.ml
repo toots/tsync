@@ -486,17 +486,18 @@ let keyed_worker t =
         if t.paused then `Wait infinity
         else (
           let now = Rt.now () in
-          (* A key whose backoff ended runs before the keys queued meanwhile; a
+          let rec release_due () =
+            match Deadlines.min_elt_opt t.backoff with
+              | Some ((due, k) as e) when due <= now ->
+                  t.backoff <- Deadlines.remove e t.backoff;
+                  Queue.push k t.ready;
+                  release_due ()
+              | _ -> ()
+          in
+          (* A key whose backoff ended queues behind the keys already ready; a
              running key is dropped, as its finish queues it again. *)
           let rec pick () =
-            let next_key =
-              match Deadlines.min_elt_opt t.backoff with
-                | Some ((due, k) as e) when due <= now ->
-                    t.backoff <- Deadlines.remove e t.backoff;
-                    Some k
-                | _ -> Queue.take_opt t.ready
-            in
-            match next_key with
+            match Queue.take_opt t.ready with
               | None -> (
                   match Deadlines.min_elt_opt t.backoff with
                     | Some (due, _) -> `Wait (due -. now)
@@ -518,6 +519,7 @@ let keyed_worker t =
                         pick ()
                     | _ -> pick ())
           in
+          release_due ();
           pick ()))
   in
   let finish k s ~requeue =
@@ -606,11 +608,9 @@ let parked t =
 let retrying t =
   Mutex.protect t.m (fun () ->
       Hashtbl.fold
-        (fun id () acc ->
-          match Hashtbl.find_opt t.failures id with
-            | Some n -> (id, n) :: acc
-            | None -> acc)
-        t.loaded []
+        (fun id n acc ->
+          if Hashtbl.mem t.loaded id then (id, n) :: acc else acc)
+        t.failures []
       |> List.sort compare)
 
 let running t =
