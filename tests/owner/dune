@@ -407,3 +407,18 @@
  (action
   (echo
    "export_test: not run, its CLI config holds a local store, which Windows refuses\n")))
+
+(executable
+ (name list_pages_test)
+ (modules list_pages_test)
+ (libraries tsync_core tsync_config tsync_catalog tsync_owner unix))
+
+(rule
+ (with-stdout-to
+  list_pages_test.output
+  (run ./list_pages_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff list_pages_test.expected list_pages_test.output)))

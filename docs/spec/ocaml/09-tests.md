@@ -47,7 +47,7 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 | `tests/sync` | the merge, enumerated (`algebra_test`), every row of conflict-resolution §8.3 (`rows_test`), the cycle against a faulty main (`cycle_test`), the persistent formats (`formats_test`), the change feed, file ids, import, export, rsync and their plans |
 | `tests/gc` | `Gc_plan`, the collector, resume, queued discards, verify, retention, integrity, mirror, shares |
 | `tests/http`, `tests/ipc` | the HTTP client and server over both TLS implementations, the IPC server and client |
-| `tests/owner`, `tests/status`, `tests/config`, `tests/menu` | the request handler, jobs, the supervisor, status rendering, config parsing, the wizard, the menu model |
+| `tests/owner`, `tests/status`, `tests/config`, `tests/menu` | the request handler, listing pages that skip an unreadable child (`list_pages_test`), jobs, the supervisor, status rendering, config parsing, the wizard, the menu model |
 | `tests/desktop`, `tests/tray` | mount discovery, requests against an owner that never answers (`owner_double`), the tray on a private session bus |
 | `tests/android` | the bridge called from foreign threads (`stress_stubs.c`), the command group, the lazy tree |
 | `tests/support` | `Test_support.finish` |

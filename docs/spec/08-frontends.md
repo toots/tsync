@@ -435,7 +435,9 @@ not grow the log without bound, and one that returns re-lists.
   order sorts on its side or declares the enumeration unordered to the OS.
 - **`list_dir`**: the folder's children filtered to names strictly after `after`; the page takes
   `limit` of them plus one, the extra one only deciding whether `next` (the last name served) is
-  emitted.
+  emitted. The page is chosen from the children's names alone, and only the entries served are
+  read, so a page costs in proportion to `limit`, not to the folder's width. A child that no longer
+  resolves or cannot be read when its row is built is skipped, as in `list_all`.
 - **`list_all`**: first page: walk from the root depth-first through `list_children`; a folder with no
   id counts once in `unnamed` and its subtree is skipped (it cannot be named); sort by path; stamp
   and keep the walk (a failure to keep is logged); serve the first `limit` entries. Later pages seek

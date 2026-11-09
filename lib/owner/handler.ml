@@ -477,6 +477,13 @@ let note_unnamed t n =
 let each_file t path f =
   each_item (List.map (fun p -> `File p) (files_under t path)) f
 
+(* 08 §3.7: [None] skips a child gone or unreadable since its name was read;
+   [Some None] is one that cannot be named. *)
+let served_row t dir name =
+  match row_of t (Names.join dir name) with
+    | row -> Some row
+    | exception Fail.E { kind = Absent | Corrupt; _ } -> None
+
 let list_dir t dir ~after ~limit ~pull : Protocol.page =
   let (module E : Engine.S) = t.engine in
   let path = target t dir in
@@ -492,23 +499,19 @@ let list_dir t dir ~after ~limit ~pull : Protocol.page =
   let limit = Option.value ~default:page_limit limit in
   if limit < 1 then invalid "limit must be positive";
   let names =
-    List.filter
-      (fun (e : E.entry) -> String.compare e.name after > 0)
-      (E.list_children path)
+    List.filter (fun n -> String.compare n after > 0) (E.child_names path)
   in
   let rec take n acc = function
     | x :: rest when n > 0 -> take (n - 1) (x :: acc) rest
     | rest -> (List.rev acc, rest <> [])
   in
   let page, more = take limit [] names in
-  let rows =
-    List.map (fun (e : E.entry) -> row_of t (Names.join path e.name)) page
-  in
+  let rows = List.filter_map (served_row t path) page in
   {
     items = List.filter_map Fun.id rows;
     next =
       (match (more, List.rev page) with
-        | true, (last : E.entry) :: _ -> Some last.name
+        | true, last :: _ -> Some last
         | _ -> None);
     unnamed = note_unnamed t (List.length (List.filter Option.is_none rows));
     pulled_at = Option.bind view (fun (v : Pulls.view) -> v.pulled_at);
