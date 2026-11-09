@@ -1167,7 +1167,7 @@ let serve_setup t (r : Server.request) params rest =
          List.find_map (fun route -> held route k) t.routes))
 
 (* The wire's processing order (backends/http-proxy §6.1). *)
-let handle t (r : Server.request) read_body =
+let answer_request t (r : Server.request) read_body =
   Atomic.incr t.in_flight;
   Fun.protect ~finally:(fun () -> Atomic.decr t.in_flight) @@ fun () ->
   try
@@ -1242,6 +1242,22 @@ let handle t (r : Server.request) read_body =
             in
             if is_data op then admitted t go else go ())
   with Answer response -> response
+
+(* uplink-governor A10: drawn per process, so a restart starts a new epoch. *)
+let epoch = lazy (Ids.hex (Ids.urandom 8))
+
+let stamped (r : Server.request) =
+  ( "x-tsync-received",
+    Printf.sprintf "%s:%.0f" (Lazy.force epoch) (r.received *. 1e6) )
+
+(* wire §2: every API answer, refusals included, carries its receipt stamp. *)
+let handle t (r : Server.request) read_body =
+  let response = answer_request t r read_body in
+  if
+    String.starts_with ~prefix:"/s/" r.path
+    || String.starts_with ~prefix:"/join/" r.path
+  then response
+  else { response with headers = stamped r :: response.headers }
 
 (* replication §4.9: a share written to a copy directly waits for the main. *)
 let guarded composite (m : Composite.member) =

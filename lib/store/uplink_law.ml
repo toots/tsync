@@ -23,6 +23,8 @@ let backoff_hold = 10.
 let restore_fraction = 0.5
 let state_max_age = 86400.
 
+type path_name = [ `Round_trip of string | `One_way of string * string ]
+
 type path = {
   mutable cells : (int * float) list;
       (** cell index, least delay, newest first *)
@@ -40,8 +42,8 @@ type t = {
   mutable never_saturated : bool;
   mutable capacity : float option;
   mutable queueing : float;
-  mutable samples : (string * float) list;
-  paths : (string, path) Hashtbl.t;
+  mutable samples : (path_name * float) list;
+  paths : (path_name, path) Hashtbl.t;
   mutable done_cells : (int * float) list;  (** second, bytes; newest first *)
 }
 
@@ -219,6 +221,9 @@ let limit t =
 
 let base_delay t =
   Hashtbl.fold
-    (fun _ p acc ->
-      Some (match acc with Some b -> Float.min b p.eff | None -> p.eff))
+    (fun name p acc ->
+      match name with
+        | `One_way _ -> acc
+        | `Round_trip _ ->
+            Some (match acc with Some b -> Float.min b p.eff | None -> p.eff))
     t.paths None

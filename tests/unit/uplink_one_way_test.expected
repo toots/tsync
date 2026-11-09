@@ -1,0 +1,12 @@
+== a download queues 100 ms of answers, with a stamping store
+  rate 3.62 MiB/s, control 3.62 MiB/s: holds true
+  capacity kept: true
+== the same with round-trip stores only
+  rate 0.06 MiB/s, control 3.62 MiB/s: holds false
+  capacity kept: false
+== a competitor takes half of the upload direction, with a stamping store
+  yields to its share: 1.96 MiB/s (true)
+== the far end restarts during a download, its clock origin 5 s later
+  rate 3.62 MiB/s, control 3.62 MiB/s: holds true
+  capacity kept: true
+  base delay from round trips only: 30 ms

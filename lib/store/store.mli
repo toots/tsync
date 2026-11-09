@@ -71,6 +71,11 @@ type folder = {
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
 
+(** A far end's receipt of a probe (06 §3.2): [epoch] names the origin of its
+    clock, [at] reads that clock as the request arrived, and [sent] reads
+    {!Tsync_core.Rt.now} as the request was written, all in seconds. *)
+type stamp = { epoch : string; at : float; sent : float }
+
 type t = {
   name : string;  (** for messages: the member's name *)
   put : ?mode:mode -> Key.t -> Bigstring.t -> unit;
@@ -83,6 +88,7 @@ type t = {
       (** [offset], [length]: the bytes up to the end, empty past it, [None]
           when absent. *)
   head_opt : Key.t -> entry option;
+  probe : Key.t -> stamp option;
   compute_checksum : Key.t -> string -> Checksum.t option;
       (** the body's checksum under an algorithm of {!Checksum}, computed where
           the bytes are; [None] when absent *)

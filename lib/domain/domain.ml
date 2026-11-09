@@ -33,7 +33,7 @@ let create_store config d (b : Config.backend) =
       b.fields
   in
   Uplink.attach admission ~store:b.bname
-    ~probe:(fun () -> probe d store)
+    ~probe:(fun () -> store.probe (Key.cursor d))
     ~health:store.health;
   store
 

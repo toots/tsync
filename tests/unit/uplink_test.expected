@@ -26,10 +26,10 @@ idle, idle: 500 500 (sum 1000)
 held back counts as waiting: 900 100 (sum 1000)
 floors fit a small link: 50 50 50
 == renewal shapes
-  {"action":"uplink","pid":1234,"links":{"wan":{"inFlight":10,"completed":200.0,"timeouts":1,"waiting":3,"heldBack":true,"probeMs":41.2,"probesMs":{"gcs":41.2}}}}
-  pid 1234 flat false wan: inFlight 10 heldBack true probes ["gcs" 0.0412]
+  {"action":"uplink","pid":1234,"links":{"wan":{"inFlight":10,"completed":200.0,"timeouts":1,"waiting":3,"heldBack":true,"probeMs":41.2,"probesMs":{"gcs":41.2,"nas":55.0},"oneWayMs":{"nas":{"epoch":"9f2c41d07a3be851","ms":81234567.25}}}}}
+  pid 1234 flat false wan: inFlight 10 heldBack true probes ["gcs" 0.0412, "nas" 0.0550] oneWay ["nas" 9f2c41d07a3be851 81234.5672]
 an old flat report, without heldBack or probesMs:
-  pid 7 flat true wan: inFlight 5 heldBack true probes ["" 0.0125]
+  pid 7 flat true wan: inFlight 5 heldBack true probes ["" 0.0125] oneWay []
   {"ok":true,"interval":2.0,"rate":1250000.0,"links":{"wan":{"rate":1250000.0,"limit":"measured"}}}
 answer with links: interval 2, wan 1250000
 answer without links: refused

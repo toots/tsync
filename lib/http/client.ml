@@ -92,7 +92,12 @@ let host e = e.host
 let authority e = e.authority
 let url e = e.url
 
-type response = { status : int; headers : Codec.headers; body : Bigstring.t }
+type response = {
+  status : int;
+  headers : Codec.headers;
+  body : Bigstring.t;
+  sent : float;
+}
 
 let excerpt body =
   let s = Bigstring.to_string ~len:(min (Bigstring.length body) 4096) body in
@@ -190,6 +195,7 @@ let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
   Codec.write_head b
     (Printf.sprintf "%s %s HTTP/1.1" meth (e.base ^ target))
     head;
+  let sent = Rt.now () in
   (try
      Transport.write_string c.t (Buffer.contents b);
      Option.iter (write_body ~stall ~progress ~pace c.t) body
@@ -229,7 +235,7 @@ let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
       | None -> true)
     && not (Codec.buffered c.reader)
   in
-  ({ status; headers; body }, keep)
+  ({ status; headers; body; sent }, keep)
 
 (* A pooled connection the server closed while idle fails on write or answers
    nothing at all; only then is the request sent again, on a fresh one, with

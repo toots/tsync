@@ -60,7 +60,7 @@ let tick ?(demand = true) ?(probe = true) s =
   second s ~demand;
   if s.sent > 0. then L.completed s.law ~now:s.now s.sent ~elapsed:2.;
   s.sent <- 0.;
-  if probe && demand then L.observe_delay s.law "gcs" (delay s);
+  if probe && demand then L.observe_delay s.law (`Round_trip "gcs") (delay s);
   let before = L.rate s.law in
   L.tick s.law ~now:s.now
     ~limited:(demand && s.offer >= L.rate s.law)
@@ -294,7 +294,7 @@ let bodies ~paced =
     for _ = 1 to int_of_float (L.tick_interval /. dt) do
       step ()
     done;
-    if !open_count > 0 then L.observe_delay law "store" (delay ());
+    if !open_count > 0 then L.observe_delay law (`Round_trip "store") (delay ());
     L.tick law ~now:!now ~limited:true ~busy:(!open_count > 0);
     B.set_rate budget ~now:!now (L.rate law);
     if tick > 90 then (

@@ -28,8 +28,12 @@ val restore : settings -> now:float -> capacity:float -> saved_at:float -> t
 (** Bytes spread over the whole seconds they took to cross. *)
 val completed : t -> now:float -> float -> elapsed:float -> unit
 
-(** A probe's round-trip delay on a path, in seconds. *)
-val observe_delay : t -> string -> float -> unit
+(** A probe's path (§4.4): a store's round trip, or a store's one-way delay
+    within one stamp epoch, whose samples carry an arbitrary clock offset. *)
+type path_name = [ `Round_trip of string | `One_way of string * string ]
+
+(** A probe's delay on a path, in seconds. *)
+val observe_delay : t -> path_name -> float -> unit
 
 val timed_out : t -> now:float -> unit
 
@@ -44,5 +48,5 @@ val queueing : t -> float
 val achieved : t -> now:float -> float
 val limit : t -> limit
 
-(** The least effective baseline across paths, in seconds. *)
+(** The least effective baseline across round-trip paths, in seconds. *)
 val base_delay : t -> float option

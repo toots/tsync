@@ -22,6 +22,7 @@ type response = {
   status : int;
   headers : Codec.headers;
   body : Tsync_core.Bigstring.t;
+  sent : float;  (** {!Tsync_core.Rt.now} as the request head was written *)
 }
 
 (** [headers] is computed inside the stall timeout, per attempt. [pace] is

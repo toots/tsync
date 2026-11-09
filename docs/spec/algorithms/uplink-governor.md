@@ -10,7 +10,7 @@ A delay-driven rate controller for background uploads over a shared network link
 
 tsync uploads file content in the background: chunk bodies of several MiB, and small metadata bodies. The upload link is usually a consumer uplink with a deep buffer in the modem or router, and the user is on the same link. A sender limited only by TCP fills that buffer, and every interactive flow on the link then waits behind seconds of queued upload.
 
-The control problem: **choose a send rate `r(t)` per link so that the link is used near its free capacity while the standing queue at the bottleneck stays near zero.** The only observation available is the round-trip delay of small requests.
+The control problem: **choose a send rate `r(t)` per link so that the link is used near its free capacity while the standing queue at the bottleneck stays near zero.** The observations available are the delays of small requests: their round trip, from every store, and their one-way delay in the upload direction, from a store that stamps when it received them.
 
 Goals:
 
@@ -23,6 +23,7 @@ Goals:
 - **G7 Commits before chunks.** A body that is not a chunk (a log entry, a tree record, the tree head, the cursor) is admitted before every waiting chunk, whatever its size.
 - **G8 Stop quickly.** At shutdown, bodies waiting for admission give up at once and stay owed on disk.
 - **G9 Warm restart.** A restarted controller does not rediscover a known link from scratch.
+- **G10 Downloads do not throttle uploads.** On a link with a store that stamps its receipts, a queue in the download direction, which uploading less cannot shorten, does not lower the rate.
 
 Non-goals:
 
@@ -38,12 +39,13 @@ Non-goals:
 - **A1 One bottleneck per link.** All stores naming one link share one bottleneck queue. Different links are independent paths, and a store sits on exactly one link. Stores on one link may be at different network distances, so each has its own base round-trip time.
 - **A2 Bodies are opaque and written in slices.** An upload attempt is one request, answered only after the whole body arrived. The transport writes the body in slices, each when the governor allows it. Its timeout is a **stall detector**: it fires after STALL_TIMEOUT with no progress, and a request slice accepted by the transport is progress ([01 §10](../01-core.md#10-http-request-discipline)). Time spent waiting for the governor, for admission or for a slice, is outside the detector: the wait is local, and says nothing about the link.
 - **A3 Completion is observable per attempt.** For every admitted attempt the sender learns once whether it was answered, and after how long, or abandoned. Every attempt, retries included, is admitted ([06-backends.md](../06-backends.md) admission seam).
-- **A4 Delay is observable only by probing.** The signal is the round-trip time of a small, idempotent metadata read of a key every store holds (the domain cursor). It carries the bottleneck's queue on the request path, plus propagation, plus server time. Probes are billed requests, so they are sent only while bytes are in flight.
+- **A4 Delay is observable only by probing.** The probe is a small, idempotent metadata read of a key every store holds (the domain cursor). Its round-trip time carries the queues of both directions, plus propagation, plus server time. A store that stamps its receipt also gives the probe's **one-way delay**: the far end's clock when the request arrived minus the sender's clock when it was written. That carries the upload-direction queue and propagation only, plus the unknown, constant offset between the two clocks. Probes are billed requests, so they are sent only while bytes are in flight.
 - **A5 Foreign traffic is invisible except through delay.**
-- **A6 Monotonic clock.** Every duration and rate uses a monotonic clock (P5). Stored timestamps use the wall clock.
+- **A6 Monotonic clock.** Every duration and rate uses a monotonic clock (P5), one clock shared by every process of a machine. Stored timestamps use the wall clock.
 - **A7 Local request interface.** Processes on one machine reach the governor owner with a short request and response. The owner may be absent, restarting, or of an older build.
 - **A8 Timeouts are counted per store.** Each store keeps a monotonically increasing count of its attempts that hit the stall detector.
 - **A9 Crashes lose no data.** An upload that never ran is still owed by whatever queued it. Governor state is advisory: losing it costs only rate knowledge.
+- **A10 Steady stamp clocks.** A receipt stamp is read on a monotonic clock of the far end and names its **epoch**, which changes whenever that clock's origin may have (a restart of the far end). Within an epoch the far clock never steps, and its rate differs from the sender's by much less than BASE_MAX_RISE per BASE_WINDOW.
 
 ---
 
@@ -62,13 +64,13 @@ Non-goals:
 
 | Part | State | Lives in |
 |---|---|---|
-| **Law** | `rate`; `phase ∈ {Ramping, Steady, BackingOff}`; `since`; `settled`; `over_target`; `never_saturated`; `capacity C` (optional); `queueing` (EWMA); pending `samples` (path, delay); per path a sliding minimum over BASE_CELLS × BASE_CELL and an effective baseline `eff[path]` with the time it last changed; `completed`, a sliding sum over RATE_WINDOW in 1 s cells; `drops` | Owner and Local processes |
+| **Law** | `rate`; `phase ∈ {Ramping, Steady, BackingOff}`; `since`; `settled`; `over_target`; `never_saturated`; `capacity C` (optional); `queueing` (EWMA); pending `samples` (path, delay); per path (§4.4) a sliding minimum over BASE_CELLS × BASE_CELL and an effective baseline `eff[path]` with the time it last changed; `completed`, a sliding sum over RATE_WINDOW in 1 s cells; `drops` | Owner and Local processes |
 | **Budget** | `share_rate`; `tokens`; `filled_at`; `in_flight` | Every process |
 | **Gate** | three FIFOs of (bytes, waker): `first` for bodies that are not chunks, `slices` for the next slice of admitted chunks, and `chunks`; `armed` (one timer at most); `held_back` (read and clear) | Every process |
-| **Probes** | per attached store: path name, is-held, timeout counter, probe action; `last_timeouts`; `completed_since` | Every process |
+| **Probes** | per attached store: store name, is-held, timeout counter, probe action, which answers a receipt stamp or none; `last_timeouts`; `completed_since` | Every process |
 | **Lessee table** | rows `pid → {last report, seen, grant}`; accumulated lessee `completed` and `timeouts`; `own_grant`; `last_total` | Owner |
 
-A **report**, whether a lessee's or the owner's own row, carries `in_flight`, `completed` and `timeouts` since the last report, `waiting` (line length), `held_back`, and `probes` (path → delay). A report **wants** more when `waiting > 0 ∨ held_back`.
+A **report**, whether a lessee's or the owner's own row, carries `in_flight`, `completed` and `timeouts` since the last report, `waiting` (line length), `held_back`, `probes` (store → round-trip delay) and `one_way` (store → stamp epoch and one-way delay). A report **wants** more when `waiting > 0 ∨ held_back`.
 
 **Saved state** (local, owner only): per link `{capacity, rate, saved_at}` (§4.7).
 
@@ -169,7 +171,7 @@ fail_waiting(kind):  wake every queued waiter of every line with kind, having ta
 The law is pure and handed `now`. Inputs:
 
 - `completed(bytes, elapsed)` spreads `bytes` evenly over `max(1, ⌈elapsed⌉)` one-second cells ending now. A 40 s body counts as 40 s of throughput, not a 1 s burst followed by nothing.
-- `observe_delay(path, d)` appends a sample.
+- `observe_delay(path, d)` appends a sample. A path is a store's round trip, or a store's one-way delay within one stamp epoch.
 - `timed_out()`.
 - `tick(now, limited, busy)`, called every TICK. `busy` says whether any party has bytes in flight.
 
@@ -193,8 +195,10 @@ else:
 samples = []
 ```
 
-- **Per-path baselines.** A store twice as far away as another would otherwise read its extra distance as a queue.
-- **Minimum across paths.** Queueing at the shared bottleneck shows on every path. Extra delay on one path only lies beyond the bottleneck, and backing off would not help it.
+- **Per-path baselines.** A store twice as far away as another would otherwise read its extra distance as a queue. A one-way sample also carries the offset between the two clocks, which its baseline cancels: only `above` has meaning on a one-way path.
+- **Minimum across paths.** Queueing at the shared bottleneck in the upload direction shows on every path. Extra delay on one path only lies beyond the bottleneck, and backing off would not help it.
+- **Download queues.** A queue in the download direction delays the answers, so it shows on round-trip paths only. A stamping store's one-way path then reads no queue, and the minimum ignores it: uploading less cannot shorten that queue, and a sender that cut for it would fall to `min_rate` while it stood. On a link whose stores give no stamp, every path is a round trip, and a download queue is read as an upload queue. A stamping store's round-trip path bounds its one-way reading from above.
+- **Epochs.** A new stamp epoch is a new path with no baseline, so a far end's restart, which moves its clock origin, does not read as a queue.
 - **Bounded baseline rise.** The minimum forgets samples older than BASE_WINDOW, so a queue that stood for the whole window would otherwise become the new baseline at once, and the sender would stop yielding to it. The effective baseline follows a lower minimum at once, but rises by at most BASE_MAX_RISE per BASE_WINDOW. A real path change is adopted gradually, in the conservative direction (the sender reads the extra delay as queue and slows down meanwhile). A standing foreign queue is absorbed only slowly, and each rise is conditional on the queue still being there.
 
 **Controller (one tick).** Let `T = target_delay`, `q = queueing`, `h = headroom`, `g = GAIN`, `r = rate` before the tick:
@@ -236,6 +240,8 @@ enter(p):     phase = p; since = now; settled = false
 - **Decrease floor.** No tick lowers the rate by more than DECREASE_FLOOR. A ramp end, a lowered capacity, or a timeout that leaves the rate far above the new ceiling brings it down over a few ticks, halving at most each time. A single noisy tick therefore cannot collapse the rate, and a real queue still takes it down geometrically.
 - **One timeout cut per step**, however many timeouts occurred (§4.6).
 
+**Base delay.** The least effective baseline over round-trip paths.
+
 **Reported limit.** `Configured` when `rate ≥ 0.999·max_rate`; otherwise `Measured` when `C` is known; otherwise `Estimating`.
 
 ### 4.5 Governor ownership and the lease protocol
@@ -253,12 +259,13 @@ One process per machine is the **governor owner**. It runs each link's law, spli
 
 ```json
 → {"action":"uplink","pid":1234,"links":{"wan":{"inFlight":8388608,"completed":16777216,"timeouts":0,
-     "waiting":3,"heldBack":true,"probeMs":41.2,"probesMs":{"gcs":41.2,"s3":55.0}}}}
+     "waiting":3,"heldBack":true,"probeMs":41.2,"probesMs":{"gcs":41.2,"nas":55.0},
+     "oneWayMs":{"nas":{"epoch":"9f2c41d07a3be851","ms":81234567.25}}}}}
 ← {"ok":true,"interval":2.0,"links":{"wan":{"rate":1250000.0,"limit":"measured"}}}
 ```
 
-- `probesMs` maps store name → delay in ms. `probeMs`, the least of them, is sent too.
-- Readers MUST accept the older shapes. A report without `links` is a single-link report for the link `"wan"`, with its fields at top level, and is answered with a top-level `"rate"` as well as `links`. A report without `heldBack` has `held_back = inFlight > 0`. A report without `probesMs` has a single probe under the empty path name, with the value of `probeMs`.
+- `probesMs` maps store name → round-trip delay in ms. `probeMs`, the least of them, is sent too. `oneWayMs` maps the name of each store whose probe answered a stamp → its epoch and one-way delay in ms.
+- Readers MUST accept the older shapes. A report without `links` is a single-link report for the link `"wan"`, with its fields at top level, and is answered with a top-level `"rate"` as well as `links`. A report without `heldBack` has `held_back = inFlight > 0`. A report without `probesMs` has a single probe under the empty store name, with the value of `probeMs`. A report without `oneWayMs` has no one-way samples.
 - An answer without `links` is a refusal.
 
 A lessee takes each answer as follows:
@@ -274,7 +281,7 @@ A Local process that tries to lease sends the report its step just built, so it 
 
 - Create the link on the owner's settings if it has never seen it. Its law then runs on lessee-reported probes only.
 - Record the report and stamp `seen`. Accumulate its `completed` and `timeouts` for the next step.
-- Feed its probe samples to the law as `observe_delay`, keyed by store name, so one store has one baseline across processes.
+- Feed its probe samples to the law as `observe_delay`, keyed by store name, and one-way samples by store name and epoch, so one store has one baseline per path across processes. One-way samples of one store from several processes share their clock offset, since the processes of a machine share their clock (A6).
 - A pid not in the table is a newcomer: run the split at once with it included, set the owner's own budget to its new grant, and answer the newcomer with its share. Other lessees adopt the new split at their next renewal.
 - Otherwise answer with the pid's grant from the last split.
 
@@ -309,7 +316,9 @@ busy    = own in_flight + Σ lessee in_flight > 0
 if busy:                                             -- never probe an idle link (billed)
     concurrently for each attached store not held down:
         d = time(probe) under PROBE_TIMEOUT; a timeout reads as d = PROBE_TIMEOUT; other failures drop the sample
-    law.observe_delay(store, d) for each
+        if the probe answered a stamp (epoch, at): o = at − sent, sent read when the request was written
+    law.observe_delay(round trip of store, d) for each
+    law.observe_delay(one way of store in epoch, o) for each o
 mine    = own report (reads and clears held_back and completed_since)
 limited = wants(mine) ∨ ∃ lessee: wants(lessee)
 law.tick(now, limited, busy)
@@ -375,6 +384,8 @@ Model the bottleneck as a fluid queue draining at the available capacity `A` (li
 | **Stalled request** | Its bytes stay in flight, and its next slice is not accepted by the transport; a full window waits for its ticket, not a timer. When the stall detector fires, the store's timeout count rises and the next step halves the rate. The retry is admitted afresh. |
 | **Many small bodies** | Each costs its payload plus REQUEST_OVERHEAD in tokens. Those that are not chunks are admitted before any waiting chunk and before the next slice of any admitted one. |
 | **Large chunks on a fast link** | A chunk many times the bucket is written over `size / share_rate`, in slices, interleaved with the other chunks in flight. Its admission costs only REQUEST_OVERHEAD, so the window, not the bucket, bounds how many are open at once. |
+| **Download on the same link** | With a stamping store on the link, its one-way path reads no queue and the rate holds. Only what the download really takes from the upload direction, such as airtime on a shared Wi-Fi channel, shows on it, and that much is yielded. Without one, the download's queue is read as the sender's, and the rate falls toward `min_rate`. |
+| **Far end restarts** | Its stamps name a new epoch: a new one-way path, whose baseline is learnt afresh. |
 | **Mixed near and far stores** | Each store has its own baseline, and the least queued path is read. A store held down by health is not probed. If every store is held while bytes are in flight, `queueing` holds its value. |
 | **Shutdown** | Waiters fail at once with STOPPING. The owner saves its state. |
 | **Owner restarts** | Lessees miss renewals and go Local after MISSED_BEFORE_LOCAL. A Local process takes the governor lock when it frees and becomes owner; the others lease from it. The new owner's laws start from saved state. |
@@ -435,7 +446,7 @@ Counts are idempotent where it matters: tickets report once, `held_back` is spen
 | DECREASE_FLOOR | 0.5 | MUST be in (0, 1). Largest cut in one tick; the timeout cut. |
 | CAPACITY_FLOOR | 0.8 | MUST be in (0, 1). Largest cut of `C` in one episode over the target, a timeout aside. |
 | BASE_CELL × BASE_CELLS = BASE_WINDOW | 60 s × 10 = 600 s | Memory of the per-path minimum. |
-| BASE_MAX_RISE | `T` per BASE_WINDOW | How fast an effective baseline may rise. |
+| BASE_MAX_RISE | `T` per BASE_WINDOW | How fast an effective baseline may rise. MUST exceed the rate difference of stamp clocks (A10): about 83 ppm at the recommended values. |
 | RATE_WINDOW | 10 s (1 s cells) | `achieved` averaging. |
 | PROBE_UP_EVERY | 60 s | Periodic ceiling lift in Steady. |
 | BACKOFF_HOLD | 10 s | Hold after a timeout before ramping. |
@@ -466,6 +477,7 @@ Counts are idempotent where it matters: tickets report once, `held_back` is spen
 - **AIMD** does not scale over three orders of magnitude of link speed at a 2 s period. Multiplicative steps are scale-free; fairness on one machine comes from the owner's split, and between machines from each sender lowering `C` to its own share.
 - **Kernel-level pacing** (`SO_MAX_PACING_RATE`, router queue management) still needs someone to choose the rate, paces per socket rather than per link, or is out of reach.
 - **One law per process.** N independent laws on one link each see the others' queue as foreign traffic and all back off to the floor, and a new process starts cold. Hence one owner and leases.
+- **One-way delay where the store gives it.** A probe's round trip also carries its answer's queue, behind whatever the link downloads. A governor reading only round trips fell to a few KiB/s while a download filled the downlink, sending nothing itself. LEDBAT measures the same one-way delay with unsynchronised clocks, the offset cancelled by the base minimum. Object stores give no time finer than a second, so their probes stay round trips.
 - **Probe choice.** A metadata read of the domain cursor exists on every written store and costs almost nothing. It is sent only while bytes are in flight, because probes are billed.
 - **Growth requires held-back demand and completing bytes**, and completions are credited over their duration: without that, an idle daemon's rate ran away to terabytes a second and a long body read as a burst.
 - **Capacity bounded by 2× achieved**: a single-body-in-flight sender once read a link of a few MB/s as twenty.
@@ -483,8 +495,8 @@ An implementation MUST exhibit:
 
 - **Budget.** Full at birth (BURST_SECONDS of rate); an oversize body that is not a chunk is admitted on a full bucket and its debt is paid before the next; a chunk's admission takes REQUEST_OVERHEAD and each slice its size; the long-run rate holds; window = `STALL_TIMEOUT · WINDOW_SAFETY · rate`; a lone oversize body passes when nothing is in flight; a rate change keeps earned tokens and clips the depth; the rate floor is 1 B/s.
 - **Gate.** FIFO order within each line; with a chunk and a log entry both waiting, the log entry is admitted first whatever their sizes and arrival order, and so is every later body that is not a chunk; a log entry asked while a chunk is mid-body is admitted before that chunk's next slice; a body that is not a chunk asked after another never passes it; a body of `first` held by a full window lets the slices of the chunks in flight go, and is admitted once they complete; two admitted chunks alternate slices; a window-bound head does not hold slices back and arms no timer; a best-effort chunk is refused while the bucket cannot hold its whole body; a slice that waited sets `held_back`; a head blocked by the window is woken by a completion; `try_acquire` takes atomically, and a refusal counts a drop; `fail_waiting` fails every waiter having taken nothing; a disabled link's tickets release nothing.
-- **Law, driven against a simulated fluid link on a fake clock.** A doubling first ramp; steady within 40 s at headroom of the measured capacity with the queue drained; lowering to a competing share and recovering within a probe interval; a timeout halves the rate, holds 10 s, then ramps; no tick lowers the rate by more than DECREASE_FLOOR; a `maxRate` ceiling is reported `configured`; the `minRate` floor holds; no growth without being held back or without completions; base delay learnt, and a standing queue held for longer than BASE_WINDOW raises the effective baseline by at most BASE_MAX_RISE per window; a held-down near store does not cut; no samples while busy holds `queueing`; a link of 8 MiB/s dropping to 0.5 MiB/s for 4 s every 50 s keeps `C` above a third of the link; a competitor filling the link while the sender offers less than its rate leaves `C` where it was.
-- **Lease.** An even split among waiting parties; the floor for an idle party; 1.25× use for a mover; the leftover shared; grants summing to the total with floors included; a newcomer answered from an immediate re-split; a row dropped at once when its pid is gone and after LEASE_TTL of silence; `heldBack` spent by one split; old report and answer shapes read as specified.
+- **Law, driven against a simulated fluid link on a fake clock.** A doubling first ramp; steady within 40 s at headroom of the measured capacity with the queue drained; lowering to a competing share and recovering within a probe interval; a timeout halves the rate, holds 10 s, then ramps; no tick lowers the rate by more than DECREASE_FLOOR; a `maxRate` ceiling is reported `configured`; the `minRate` floor holds; no growth without being held back or without completions; base delay learnt, and a standing queue held for longer than BASE_WINDOW raises the effective baseline by at most BASE_MAX_RISE per window; a held-down near store does not cut; no samples while busy holds `queueing`; a link of 8 MiB/s dropping to 0.5 MiB/s for 4 s every 50 s keeps `C` above a third of the link; a competitor filling the link while the sender offers less than its rate leaves `C` where it was; on a link with a stamping store, a queue on the answer path alone lowers neither the rate nor `C`, while one on the request path cuts as before; on a link of round-trip stores only, either queue cuts; a new stamp epoch starts a path with no baseline; the base delay ignores one-way paths.
+- **Lease.** An even split among waiting parties; the floor for an idle party; 1.25× use for a mover; the leftover shared; grants summing to the total with floors included; a newcomer answered from an immediate re-split; a row dropped at once when its pid is gone and after LEASE_TTL of silence; `heldBack` spent by one split; a report's `oneWayMs` fed per store and epoch; old report and answer shapes read as specified.
 - **Modes.** Two missed renewals keep a lessee Leased, the third makes it Local; a refusal makes it Local at once; a Local process takes the governor lock when it is free; the owner probes on behalf of a busy lessee; cuts are per link; one request renews every link.
 - **Restart.** A law with fresh saved state starts at `RESTORE_FRACTION · headroom · capacity` with ×1.25 steps; stale or missing state starts cold.
 - **Pacing.** A chunk of many times the bucket is handed to the transport over `size / share_rate`, never faster than the bucket allows, in slices of at most `max(MIN_SLICE, share_rate · SLICE_TIME)`; a slice is never written before its `pace` returns; `pace` on a disabled link returns at once; `fail_waiting` fails a waiting slice and its attempt reports `abandoned`; a slice that waits for the governor longer than STALL_TIMEOUT does not fail its request, while a transport that stops accepting slices still does; a `pace` that fails STOPPING on a pooled connection is not taken for a dead connection, and the request is not sent again.

@@ -2,13 +2,18 @@
     algorithms/uplink-governor.md §3, §4.5): per-link reports, the max-min fair
     split of a law's rate, and the renewal's wire shapes. Pure. *)
 
+(** A store's one-way delay within a stamp epoch, in seconds, offset by the
+    difference of the two clocks. *)
+type one_way = { epoch : string; delay : float }
+
 type report = {
   in_flight : int;
   completed : float;  (** bytes since the last report *)
   timeouts : int;  (** since the last report *)
   waiting : int;
   held_back : bool;
-  probes : (string * float) list;  (** store name, delay in seconds *)
+  probes : (string * float) list;  (** store name, round trip in seconds *)
+  one_way : (string * one_way) list;  (** store name *)
 }
 
 val idle : report

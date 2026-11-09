@@ -10,10 +10,11 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Admission (§4.1), the ticket | `Uplink.acquire`, `try_acquire`, `completed`, `abandoned`, `Uplink.ticket`; `request_overhead` is added inside both |
 | One attempt, admitted and reported once | `Uplink.admitted`, called by `Object_store.make` inside `Retry.ladder`, so a retry is admitted again, and by `request` in `http_proxy/http_proxy_client.ml` |
 | A store without a link | `Uplink.none` |
-| Store → link wiring, probe | `create_store` in `lib/domain/domain.ml`: `Uplink.link`, then `Uplink.attach` with a `head_opt` of the domain cursor and the store's `Health.t` |
+| Store → link wiring, probe | `create_store` in `lib/domain/domain.ml`: `Uplink.link`, then `Uplink.attach` with the store's `probe` of the domain cursor and its `Health.t` |
+| Receipt stamp | `Store.stamp`, `Store.t.probe`; the server reads `Server.request.received` and `Store_server.handle` adds `x-tsync-received`; the client's `Client.response.sent` and `Http_proxy_client.probe`. Object, local and composite stores answer `None` |
 | Budget (§4.2) | `Uplink.Budget` (`create`, `fits`, `admits`, `take`, `spends`, `spend`, `slice`, `release`, `wait_for`, `set_rate`); `burst_seconds`, `stall_timeout`, `window_safety`, `slice_time`, `min_slice` |
 | Gate (§4.3) | the lines `first`, `chunks` and `slices`, `next`, `room`, `enter`, `await_turn`, `pump`, `arm`, `left` in `uplink.ml`; the class is the `~chunk` argument of `acquire` and `admitted`; `pace` serves the slices, and `admitted` hands it to the attempt, which passes it to `Tsync_http.Client.request ~pace` |
-| Law (§4.4) | `Uplink_law`: `tick`, `completed`, `observe_delay`, `timed_out`, `rate`, `phase`, `capacity`, `queueing`, `achieved`, `limit`, `base_delay`; the signal filter is `filter` |
+| Law (§4.4) | `Uplink_law`: `path_name` (`` `Round_trip `` or `` `One_way ``), `tick`, `completed`, `observe_delay`, `timed_out`, `rate`, `phase`, `capacity`, `queueing`, `achieved`, `limit`, `base_delay`; the signal filter is `filter` |
 | Report, split, wire shapes (§4.5) | `Uplink_lease`: `report`, `wants`, `split`, `request`, `answer`, `grant`, their JSON codecs, `default_link` for the flat shape |
 | Modes | `Uplink.own`, `Uplink.lease`, `Uplink.renewal`; `set_mode`, `renew`; `missed_before_local`, `renewal_timeout`, `local_retry` |
 | The step (§4.6) | `step`, `lessee_report`, `probe_round`, `timeouts_since`, `split`, `dormant`, `lease_ttl`; `ticker`, `ensure_ticking`, `step_all` |
@@ -23,7 +24,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Stall detector | `Rt.with_stall_timeout` in `Client.request` (`lib/http/client.ml`) |
 | Status (§4.9) | `Uplink.status`, `link_status`, `lessee_status` |
 | Who owns | the supervisor (`lib/supervisor/supervisor.ml`), or the service process on macOS (`bin/daemon_cmds.ml`); every command sets `Uplink.lease` over the supervisor's socket (`bin/cli.ml`) |
-| Tests | `tests/unit/uplink_test` (budget, gate), `uplink_law_test` (the law against a simulated link), `uplink_modes_test` |
+| Tests | `tests/unit/uplink_test` (budget, gate, wire shapes), `uplink_law_test` (the law against a simulated link), `uplink_one_way_test` (download queues against a control link), `uplink_modes_test`; `tests/store/proxy_stamp_test` (the stamp over the wire) |
 
 ## Where the code departs from the spec
 
@@ -53,6 +54,8 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 - The capacity estimate is bounded by twice the achieved rate, and an edge is confirmed on two ticks: a
   single-body sender otherwise reads a slow link as a fast one.
 - A missing sample while bytes are in flight leaves `queueing` unchanged; only an idle link halves it.
+- Both stamp clocks are `Rt.now` (`CLOCK_MONOTONIC`, shared by every process of a machine, which A6 asks). `Rt.boottime` is not used: on Windows it is `GetTickCount64`, whose 10–16 ms steps are a third of the target delay.
+- A law test that disturbs a link compares it with an undisturbed twin: the periodic ramp builds its own queue every minute, and a before/after reading takes that queue for the disturbance.
 - A simulated link needs a bounded buffer (a few hundred ms of capacity) past which the sender is held
   to its share: with an unbounded queue the first doubling builds seconds of delay that no real
   bottleneck holds, and Steady spends a minute draining it.

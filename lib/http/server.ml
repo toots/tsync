@@ -25,6 +25,7 @@ type request = {
   headers : Codec.headers;
   peer : string;
   body_length : [ `Length of int | `Chunked | `Eof ];
+  received : float;
 }
 
 type body =
@@ -153,6 +154,7 @@ let serve_conn lim handle conn requests =
           write_response lim conn ~head_only:false ~close:true
             (text 431 "request headers too large")
       | Some (line, headers) -> (
+          let received = Rt.now () in
           match String.split_on_char ' ' line with
             | [meth; target; version]
               when String.starts_with ~prefix:"HTTP/1." version ->
@@ -165,7 +167,16 @@ let serve_conn lim handle conn requests =
                 in
                 let path, query = split_target target in
                 let req =
-                  { meth; target; path; query; headers; peer; body_length }
+                  {
+                    meth;
+                    target;
+                    path;
+                    query;
+                    headers;
+                    peer;
+                    body_length;
+                    received;
+                  }
                 in
                 (* Pitfall A-9.10: the connection is reused only once the
                    body was read to its end; [started] refuses a second read

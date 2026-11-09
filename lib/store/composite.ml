@@ -666,6 +666,10 @@ let make_store t ~source_only =
       get_range =
         (fun key off len -> rd_key key (fun s -> s.get_range key off len));
       head_opt = (fun key -> rd_key key (fun s -> s.head_opt key));
+      probe =
+        (fun key ->
+          ignore (rd_key key (fun s -> s.head_opt key));
+          None);
       compute_checksum = (fun key algo -> compute_checksum tt key algo);
       delete = (fun key -> write_job (Delete key) (fun s -> s.delete key));
       delete_multi =

@@ -195,6 +195,7 @@ let served video root =
           headers = [];
           peer = "";
           body_length = `Length 0;
+          received = 0.;
         }
         ~token ~sub:"preview" []
     in

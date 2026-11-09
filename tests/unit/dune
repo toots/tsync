@@ -7,8 +7,8 @@
  (libraries test_support tsync_core unix))
 
 (executables
- (names uplink_test uplink_law_test uplink_modes_test)
- (modules uplink_test uplink_law_test uplink_modes_test)
+ (names uplink_test uplink_law_test uplink_modes_test uplink_one_way_test)
+ (modules uplink_test uplink_law_test uplink_modes_test uplink_one_way_test)
  (libraries tsync_core tsync_store yojson unix))
 
 (rule
@@ -20,6 +20,16 @@
  (alias runtest)
  (action
   (diff uplink_modes_test.expected uplink_modes_test.output)))
+
+(rule
+ (with-stdout-to
+  uplink_one_way_test.output
+  (run ./uplink_one_way_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_one_way_test.expected uplink_one_way_test.output)))
 
 (rule
  (with-stdout-to
