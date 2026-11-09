@@ -15,6 +15,7 @@ let usage ~cpu ~private_ ~heap : usage =
     file_backed_bytes = Some (mib 9);
     heap_bytes = heap;
     top_heap_bytes = heap;
+    stacks_bytes = Some (mib 2);
     minor_collections = 10;
     major_collections = 1;
   }

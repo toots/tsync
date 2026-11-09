@@ -36,6 +36,7 @@ type usage = {
   file_backed_bytes : int option;
   heap_bytes : int;
   top_heap_bytes : int;
+  stacks_bytes : int option;
   minor_collections : int;
   major_collections : int;
 }

@@ -72,6 +72,7 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
 | `anonymousBytes` | Linux `RssAnon`, macOS `task_vm_info.internal` | live allocations: the OCaml heap plus malloc'd memory (bigstrings, C stubs, runtime) |
 | `fileBackedBytes` | Linux `RssFile`, macOS `task_vm_info.external` | mapped files the kernel pages in; reclaimable, not the process's to free |
 | `heapBytes`, `topHeapBytes` | `Gc.quick_stat` | the OCaml major heap now and at its largest; cheap, never walks the heap |
+| `stacksBytes` | `Gc.quick_stat` `live_stacks_words` | fiber stacks, malloc'd outside the heap, the per-domain stack caches included |
 
 `anonymous − heap` is memory outside the OCaml heap. A high `topHeapBytes` with many major
 collections and little retained heap is a garbage storm, not a leak.

@@ -707,7 +707,7 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
 
 - a process self-description: `server {hostname, pid, startedAt, uptimeSeconds, loadAvg?, role,
   serves:[domains]}`, `process {cpuSeconds, cpuPercent, cpuPercentAvg, rssBytes, privateBytes,
-  swappedBytes, heapBytes, topHeapBytes, minorCollections, majorCollections}`, `backend`, `pools
+  swappedBytes, heapBytes, topHeapBytes, stacksBytes?, minorCollections, majorCollections}`, `backend`, `pools
   [{name, inFlight, waiting, max}]`, `uplinks`, `traffic`, `recentErrors [{t, level, message}]`
   (the last 50 warnings and errors). `cpuPercent` covers the interval since the previous report
   (reports under 1 s apart reuse it; the first is the lifetime average);

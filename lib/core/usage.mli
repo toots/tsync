@@ -12,6 +12,9 @@ type t = {
   file_backed : int option;
   heap : int;  (** the OCaml major heap *)
   top_heap : int;
+  stacks : int;
+      (** fiber stacks, malloc'd outside the heap, the domains' stack caches
+          included *)
   minor_collections : int;
   major_collections : int;
   cpu_seconds : float;
