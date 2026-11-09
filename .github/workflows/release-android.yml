@@ -58,7 +58,7 @@ jobs:
       # The cross compiler is built from, and for, this compiler version.
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.4.1"
+          ocaml-compiler: "5.5.2"
 
       # .github/opam carries the cross packages opam-cross-android does not
       # have yet.

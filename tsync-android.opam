@@ -12,7 +12,7 @@ core library (spec 10 §4.1), from https://github.com/ocaml-cross/opam-cross-and
 Build with `dune build -x android`."""
 depends: [
   "dune" {>= "3.17"}
-  "ocaml-android"
+  "ocaml-android" {>= "5.5.1"}
   # dune runs the preprocessor in the native context.
   "ppx_deriving_yojson"
   # Cross-builds GMP into the sysroot, for conf-gmp-android.

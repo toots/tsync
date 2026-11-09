@@ -5,7 +5,7 @@
 set -eu
 
 SWITCH=${SWITCH:-tsync}
-COMPILER=${COMPILER:-ocaml-base-compiler.5.5.0}
+COMPILER=${COMPILER:-ocaml-base-compiler.5.5.2}
 
 export OPAMYES=1
 # In a CI container the checkout belongs to another uid, which git refuses to

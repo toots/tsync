@@ -42,7 +42,7 @@ Companion to the language-neutral specs [../../frontends/android.md](../../front
 
 ## 4. Cross-compilation
 
-- Toolchain: [opam-cross-android](https://github.com/ocaml-cross/opam-cross-android), OCaml 5.4.1 (the desktop build asks for 5.5; the core builds with both), NDK API 26, arm64-v8a. The package list is `tsync-android.opam`.
+- Toolchain: [opam-cross-android](https://github.com/ocaml-cross/opam-cross-android), OCaml 5.5.2, which bounds the per-domain fiber stack caches (5.4 does not), NDK API 26, arm64-v8a. The package list is `tsync-android.opam`.
 - `ppx_deriving_yojson` is needed twice: natively, since dune runs the preprocessor in the native context, and as `ppx_deriving_yojson-android` for its runtime. The cross package of `ppx_deriving` drops its standalone driver, which wants `findlib.dynload`.
 - Build the context's path, not `-x android` alone: the native context would want every desktop dependency.
   `dune build -x android _build/default.android/lib/frontends/android/jni/libtsyncjni.so`
