@@ -27,7 +27,7 @@ pinned() {
 }
 # A library by its prefix, the fuse3 package by its whole name, which
 # libfuse3 would otherwise satisfy.
-for lib in libssl libfuse3 libgmp; do
+for lib in libssl libfuse3 libgmp libcurl; do
   depends tsync | grep -q "^$lib"
 done
 depends tsync | grep -qx fuse3
