@@ -8,9 +8,9 @@ type endpoint
 
 (** [url] is [http(s)://host[:port][/base]]; the base path prefixes every
     target. [ca_file] replaces the system trust store. With [spill], a
-    successful response body of 256 KiB or more, or of unannounced length, is
-    written to an unlinked file in that directory and answered as its mapping.
-*)
+    successful response body that reaches 256 KiB is written to an unlinked file
+    in that directory and answered as its mapping; the directory is made at the
+    first one. *)
 val endpoint :
   ?ca_file:string -> ?max_connections:int -> ?spill:string -> string -> endpoint
 

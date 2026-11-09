@@ -27,6 +27,12 @@ let handler (r : Server.request) _ : Server.response =
                   [0; 102400; 204800; 307200; 409600; 512000]);
         }
     | "/small" -> Server.text 200 "small"
+    | "/small-chunked" ->
+        {
+          status = 200;
+          headers = [];
+          body = Server.stream (fun w -> w (Bigstring.of_string "small"));
+        }
     | "/missing" -> { status = 404; headers = []; body = Bigstring large }
     | _ -> Server.text 404 "not found"
 
@@ -66,9 +72,7 @@ let () =
       let e =
         Client.endpoint ~spill:dir (Printf.sprintf "http://127.0.0.1:%d" port)
       in
-      p "a stale temporary is swept: %b" (not (Sys.file_exists stale));
-      p "a fresh temporary is kept: %b" (Sys.file_exists fresh);
-      Sys.remove fresh;
+      p "nothing is swept before a body spills: %b" (Sys.file_exists stale);
       let get ?max_body path expected =
         let before = mappings_under dir in
         match Client.request ?max_body e ~meth:"GET" path with
@@ -81,8 +85,12 @@ let () =
               p "%s: %s: %s" path (Fail.kind_name f.kind) f.reason
       in
       get "/large" large;
+      p "a stale temporary is swept: %b" (not (Sys.file_exists stale));
+      p "a fresh temporary is kept: %b" (Sys.file_exists fresh);
+      Sys.remove fresh;
       get "/chunked" chunked;
       get "/small" (Bigstring.of_string "small\n");
+      get "/small-chunked" (Bigstring.of_string "small");
       get "/missing" large;
       get ~max_body:1000 "/large" large;
       p "the spill directory is empty: %b" (Fs.readdir dir = []);

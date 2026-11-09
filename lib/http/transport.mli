@@ -6,7 +6,7 @@
 type t
 
 (** [System] is the platform's implementation, OpenSSL where the build registers
-    none of its own (security-model §9.2). *)
+    none of its own, else the OCaml one (security-model §9.2). *)
 type tls_impl = System | Openssl | Native
 
 (** The implementation new connections use; [None] is the build's default:
