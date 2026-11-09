@@ -40,4 +40,9 @@
    catalog_cloud_files.ml
    from
    (tsync_cloud_files -> catalog_cloud_files.enabled.ml)
-   (-> catalog_cloud_files.disabled.ml))))
+   (-> catalog_cloud_files.disabled.ml))
+  (select
+   catalog_push.ml
+   from
+   (tsync_http_curl -> catalog_push.enabled.ml)
+   (-> catalog_push.disabled.ml))))

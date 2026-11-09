@@ -11,7 +11,7 @@
 (package
  (name tsync))
 
-; tsync-tls, tsync-ssl, tsync-fuse and tsync-ffmpeg install nothing of their
+; tsync-tls, tsync-ssl, tsync-fuse, tsync-ffmpeg and tsync-push install nothing of their
 ; own: each brings a library that tsync takes as a depopt, so installing one
 ; rebuilds tsync, whose optional library and the catalog's select then link it
 ; in.
@@ -26,6 +26,13 @@
 
 (package
  (name tsync-fuse)
+ (allow_empty))
+
+; Pushes to iOS clients (frontends/http-proxy.md §A4.7), over the system's
+; libcurl.
+
+(package
+ (name tsync-push)
  (allow_empty))
 
 (package

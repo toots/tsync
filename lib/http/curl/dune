@@ -1,0 +1,7 @@
+; linkall: the implementation registers itself when linked.
+
+(library
+ (name tsync_http_curl)
+ (optional)
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_http curl))
