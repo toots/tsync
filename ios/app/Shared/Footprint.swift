@@ -1,16 +1,15 @@
 import Darwin
 import Foundation
 
-/// The process's phys_footprint, the figure iOS holds against its limit,
-/// sampled every 20 ms; each core request appends the current value and the
-/// peak since the previous record to `footprint.log` in the App Group.
+/// The process's phys_footprint, the figure iOS holds against its limit, and
+/// the kernel's record of its peak; each core request appends both to
+/// `footprint.log` in the App Group (ios.md §7).
 enum Footprint {
     private static let lock = NSLock()
-    private static let logLock = NSLock()
-    private static var peak: UInt64 = 0
-    private static var started = false
+    static let limit: UInt64 = 1 << 20
 
-    static var now: UInt64 {
+    /// The current footprint and the peak since the process started.
+    static var now: (current: UInt64, peak: UInt64) {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(
             MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
@@ -19,43 +18,30 @@ enum Footprint {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        return status == KERN_SUCCESS ? info.phys_footprint : 0
+        guard status == KERN_SUCCESS else { return (0, 0) }
+        return (info.phys_footprint, UInt64(max(info.ledger_phys_footprint_peak, 0)))
     }
 
     static var log: URL { Tsync.groupContainer.appendingPathComponent("footprint.log") }
-
-    static func startSampling() {
-        lock.lock()
-        defer { lock.unlock() }
-        if started { return }
-        started = true
-        Thread.detachNewThread {
-            while true {
-                let value = now
-                lock.lock()
-                peak = max(peak, value)
-                lock.unlock()
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-        }
-    }
+    static var oldLog: URL { Tsync.groupContainer.appendingPathComponent("footprint.old.log") }
 
     static func record(_ label: String) {
         let value = now
-        lock.lock()
-        let seen = max(peak, value)
-        peak = value
-        lock.unlock()
         let mib = { (bytes: UInt64) in String(format: "%.1f", Double(bytes) / 1_048_576) }
-        append("\(label) now \(mib(value)) peak \(mib(seen))")
+        append("\(label) now \(mib(value.current)) peak \(mib(value.peak))")
     }
 
     /// One line, stamped, at the end of the log; callbacks append from many
-    /// threads.
+    /// threads. At `limit` the log becomes the old log.
     static func append(_ text: String) {
         let line = "\(stamp()) \(text)\n"
-        logLock.lock()
-        defer { logLock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: log.path)
+        if let size = attributes?[.size] as? UInt64, size >= limit {
+            try? FileManager.default.removeItem(at: oldLog)
+            try? FileManager.default.moveItem(at: log, to: oldLog)
+        }
         guard let handle = try? FileHandle(forWritingTo: log) else {
             try? line.write(to: log, atomically: false, encoding: .utf8)
             return
