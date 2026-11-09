@@ -23,5 +23,9 @@ if [[ -z $device ]]; then
   exit 1
 fi
 log "installing on $device"
-xcrun devicectl device install app --device $device $app | tee -a /tmp/tsync-ios-device.log
+if ! xcrun devicectl device install app --device $device $app >> /tmp/tsync-ios-device.log 2>&1; then
+  grep -E "ERROR" /tmp/tsync-ios-device.log | tail -1
+  log "install failed; full log in /tmp/tsync-ios-device.log"
+  exit 1
+fi
 log "done: open tsync, add the local test domain or join, enable tsync in Files (Browse, ..., Edit), then Run self-test"
