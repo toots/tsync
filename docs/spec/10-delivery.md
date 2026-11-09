@@ -112,7 +112,9 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 ### 4.2 Release builds
 
 - A desktop release ships its host's platform TLS implementation, the default, and OpenSSL where that is another one ([security-model §9.2](algorithms/security-model.md#92-implementation-per-host)); an iOS build ships only the platform one. It uses the release profile.
-- A Linux release includes the FUSE frontend, the tray, the discovery library and the Dolphin
+- A Linux release includes pushes ([http-proxy §A4.7](frontends/http-proxy.md#a47-pushes)), the
+  `tsync-push` package over the system's libcurl, and fails when that libcurl lacks HTTP/2. The
+  FUSE frontend, the tray, the discovery library and the Dolphin
   plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
   ships. A macOS release includes the File Provider app.
@@ -126,7 +128,10 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 
 ### 4.3 Optional components
 
-A build skips an optional library whose dependency is missing, without an error. Every build meant
+A build skips an optional library whose dependency is missing, without an error. The optional
+components are the OpenSSL and native TLS implementations, FUSE, the tray, share previews, and pushes
+(`tsync-push`, over the `curl` bindings and a libcurl with HTTP/2; `build-info` says `push: libcurl`,
+else `push: none`). Every build meant
 to contain a component asserts it from `tsync build-info` before it is tested or packaged.
 
 ## 5. Releases
