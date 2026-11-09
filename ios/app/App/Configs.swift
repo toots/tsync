@@ -29,6 +29,15 @@ enum Configs {
         ])
     }
 
+    /// The test server the build was given (run-device.sh), if any.
+    static func testServer() -> [String: Any]? {
+        let info = Bundle.main.infoDictionary ?? [:]
+        guard let url = info["TsyncTestServerURL"] as? String, !url.isEmpty,
+            let secret = info["TsyncTestServerSecret"] as? String, !secret.isEmpty
+        else { return nil }
+        return server(name: "Phone Test", url: url, secret: secret)
+    }
+
     private static func domain(_ name: String, backend: [String: Any]) -> [String: Any] {
         // No `symlinks`: the domain takes its main's policy (android.md §3.4).
         [
