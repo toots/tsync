@@ -1,0 +1,21 @@
+; The core as one object file the iOS app and its File Provider extension link:
+; the OCaml runtime, the owner and the bridge of android §5. Built only for iOS.
+
+(executable
+ (name libtsyncios)
+ (enabled_if
+  (= %{context_name} default.ios))
+ (modes object)
+ (modules libtsyncios)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names ios_host))
+ (libraries
+  tsync_core
+  tsync_owner
+  tsync_android_bridge
+  tsync_store
+  tsync_http_proxy_client
+  tsync_http_apple
+  threads.posix))

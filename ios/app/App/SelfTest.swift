@@ -1,0 +1,137 @@
+import FileProvider
+import Foundation
+
+/// Launched with `-selftest`: drives the local test domain through file
+/// coordination, so every step reaches the File Provider extension as the
+/// Files app's would, and marks each step in the extension's footprint log.
+/// Progress goes to `selftest.log` in the App Group container.
+enum SelfTest {
+    static let files = 1000
+    static let bigBytes = 256 << 20
+
+    static var log: URL { Core.group.appendingPathComponent("selftest.log") }
+
+    static func run() async {
+        try? FileManager.default.removeItem(at: log)
+        do {
+            note("start")
+            if let refusal = Configs.add([Configs.localTest()]), refusal != "already joined" {
+                throw failure(refusal)
+            }
+            let domain = NSFileProviderDomain(
+                identifier: NSFileProviderDomainIdentifier(domainIdentifier("Test")), displayName: "Test")
+            try await NSFileProviderManager.add(domain)
+            guard let manager = NSFileProviderManager(for: domain) else { throw failure("no manager") }
+            let root = try await manager.getUserVisibleURL(for: .rootContainer)
+            note("root \(root.path)")
+            note("temporary directory \(try manager.temporaryDirectoryURL().path)")
+            let many = root.appendingPathComponent("many", isDirectory: true)
+            try coordinatedWrite(many) { try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true) }
+            for i in 0..<files {
+                let name = String(format: "file-%05d.txt", i)
+                try coordinatedWrite(many.appendingPathComponent(name)) {
+                    try Data(name.utf8).write(to: $0)
+                }
+                if i % 250 == 0 { note("wrote \(i) files") }
+            }
+            note("wrote \(files) files")
+            let listed = try coordinatedRead(many) {
+                try FileManager.default.contentsOfDirectory(atPath: $0.path).count
+            }
+            note("listed \(listed) entries")
+            let big = FileManager.default.temporaryDirectory.appendingPathComponent("big.bin")
+            try writeRandom(big, bytes: bigBytes)
+            let target = root.appendingPathComponent("big.bin")
+            try coordinatedWrite(target) { url in
+                try? FileManager.default.removeItem(at: url)
+                try FileManager.default.copyItem(at: big, to: url)
+            }
+            try? FileManager.default.removeItem(at: big)
+            note("wrote big.bin")
+            try await evictOnceUploaded(target, manager)
+            note("evicted big.bin")
+            let read = try coordinatedRead(target) { url -> Int in
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                var total = 0
+                while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { total += chunk.count }
+                return total
+            }
+            note("read big.bin: \(read) bytes")
+            note(read == bigBytes && listed == files ? "PASS" : "FAIL")
+        } catch {
+            note("FAIL \(error)")
+        }
+    }
+
+    /// The system creates the item only once the extension has taken the
+    /// copy, and evicts it only once it is uploaded.
+    private static func evictOnceUploaded(_ url: URL, _ manager: NSFileProviderManager) async throws {
+        var last: Error = failure("never tried")
+        for _ in 0..<300 {
+            do {
+                try await manager.evictItem(identifier: try await identifier(of: url))
+                return
+            } catch {
+                last = error
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        throw last
+    }
+
+    private static func identifier(of url: URL) async throws -> NSFileProviderItemIdentifier {
+        try await withCheckedThrowingContinuation { continuation in
+            NSFileProviderManager.getIdentifierForUserVisibleFile(at: url) { identifier, _, error in
+                if let identifier = identifier { return continuation.resume(returning: identifier) }
+                continuation.resume(throwing: error ?? failure("no identifier for \(url.path)"))
+            }
+        }
+    }
+
+    private static func coordinatedWrite(_ url: URL, _ body: (URL) throws -> Void) throws {
+        var outer: NSError?
+        var inner: Error?
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &outer) {
+            do { try body($0) } catch { inner = error }
+        }
+        if let error = outer ?? inner { throw error }
+    }
+
+    private static func coordinatedRead<T>(_ url: URL, _ body: (URL) throws -> T) throws -> T {
+        var outer: NSError?
+        var result: Result<T, Error> = .failure(failure("not read"))
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &outer) { url in
+            result = Result { try body(url) }
+        }
+        if let outer = outer { throw outer }
+        return try result.get()
+    }
+
+    private static func writeRandom(_ url: URL, bytes: Int) throws {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        var buffer = [UInt8](repeating: 0, count: 1 << 20)
+        for _ in 0..<(bytes >> 20) {
+            arc4random_buf(&buffer, buffer.count)
+            try handle.write(contentsOf: buffer)
+        }
+    }
+
+    private static func failure(_ why: String) -> NSError {
+        NSError(domain: "tsync.selftest", code: 1, userInfo: [NSLocalizedDescriptionKey: why])
+    }
+
+    static func note(_ step: String) {
+        Footprint.append("--- \(step)")
+        let line = "\(Date()) \(step)\n"
+        if let handle = try? FileHandle(forWritingTo: log) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? line.write(to: log, atomically: false, encoding: .utf8)
+        }
+    }
+}

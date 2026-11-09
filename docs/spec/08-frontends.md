@@ -12,6 +12,7 @@ to all frontends. Where frontends run and how processes are arranged is
 | `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
 | `android` | [frontends/android.md](frontends/android.md) | The owner embedded in a host process on Android; the app is [frontends/android-app.md](frontends/android-app.md) |
 | `cloud_files` | [frontends/cloud-files.md](frontends/cloud-files.md) | Windows Cloud Files sync roots, the Windows host and its tray |
+| (iOS) | [frontends/ios.md](frontends/ios.md) | The owner embedded in the iOS File Provider extension, through the `android` frontend |
 
 Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
