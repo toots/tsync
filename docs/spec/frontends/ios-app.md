@@ -28,11 +28,11 @@ is reached by **Add a domain**.
 
 ## 3. Registration and signals
 
-**Registration** reconciles the framework's domains with the config, at every launch and after every
-change to the config. It is the steps 2, 4, 5, 6, 8, 9 and 10 of
-[file-provider.md §9.1](file-provider.md#91-registration-app), with the identity-scheme record kept in
-the app's preferences. iOS has no menu, purge marker or reset marker, so steps 1, 3, 7, 11 and 12 do
-not apply. Passes do not overlap.
+**Registration** reconciles the framework's domains with the config, at every launch, on every
+return to the foreground and after every change to the config. It is the pass of
+[file-provider.md §9.1](file-provider.md#91-registration-app) over the domains configured with the
+`android` frontend. iOS has no menu and writes no purge or reset marker, so steps 1 and 12 do not
+apply and steps 3, 7 and 11 never act. Passes do not overlap.
 
 **Removal loses what the extension has not taken.** iOS offers only the framework's remove-all mode:
 edits the system has not yet handed to the extension are deleted with the domain's files. Everything
