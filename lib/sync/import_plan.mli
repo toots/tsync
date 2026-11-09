@@ -4,7 +4,12 @@
 
 type entry =
   | Folder of string  (** its domain-relative path *)
-  | File of { rel : string; path : string; size : int }
+  | File of {
+      rel : string;
+      path : string;
+      size : int;
+      times : Tsync_core.Fs.times option;
+    }  (** [times] overrides the source's own *)
   | Link of { rel : string; path : string; target : string; size : int }
       (** [size] as the policy plans it: 0 to skip, the target's length to keep,
           the target's size to follow *)
@@ -41,3 +46,11 @@ val plan :
   symlinks:[ `Keep | `Follow | `Skip ] ->
   string ->
   plan
+
+(** A plan from a map file of lines [LOCAL_PATH TAB DOMAIN_PATH], optionally
+    followed by [TAB MTIME_NS TAB CREATED_NS], a relative [LOCAL_PATH] taken
+    from [base]. Every folder above a domain path is planned. A malformed line,
+    an invalid or reserved domain path, a duplicate, or a domain path that is
+    also a planned folder raises INVALID. An unreadable [LOCAL_PATH] is planned
+    with 0 bytes and fails at upload. *)
+val of_map : base:string -> string -> plan

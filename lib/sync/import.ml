@@ -4,13 +4,14 @@ module Make (C : Engine_ctx.S) = struct
   include Bulk.Make (C)
 
   let import ?(narrate = Narrate.none) ?(cancelled = Fun.const false)
-      ?(only = []) ?(exclude = []) ?(force_rehash = false) src =
+      ?(only = []) ?(exclude = []) ?(force_rehash = false) ?map src =
     let run = Bulk.run () in
     ignore (run_cycle ~push_now:false ());
     let import_one (e : Import_plan.entry) : Import_plan.outcome =
       match e with
         | Folder _ -> Skipped_exists
-        | File { rel; path; _ } -> Imported (Bulk.upload_file run rel path)
+        | File { rel; path; times; _ } ->
+            Imported (Bulk.upload_file ?times run rel path)
         | Link { rel; path; target; _ } -> (
             match Bulk.local_symlinks () with
               | `Skip -> Skipped_symlink
@@ -32,11 +33,16 @@ module Make (C : Engine_ctx.S) = struct
       | File { size; _ } | Link { size; _ } -> size
     in
     let plan =
-      Import_plan.plan ~only ~exclude ~symlinks:(Bulk.local_symlinks ()) src
+      match map with
+        | Some m -> Import_plan.of_map ~base:src m
+        | None ->
+            Import_plan.plan ~only ~exclude ~symlinks:(Bulk.local_symlinks ())
+              src
     in
     Narrate.say narrate "planned %s (%s) from %s"
       (Narrate.count plan.files "file")
-      (Narrate.size plan.bytes) src;
+      (Narrate.size plan.bytes)
+      (Option.value map ~default:src);
     List.iter
       (fun d -> Narrate.say narrate "  could not list %s; counted as empty" d)
       plan.unreadable;

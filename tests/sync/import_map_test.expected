@@ -1,0 +1,17 @@
+== bad maps upload nothing
+a duplicate domain path: refused
+a file holding another: refused
+three fields: refused
+a reserved path: refused
+domain entries: 0
+
+== a map of two folders, one time override, one missing file
+imported 2, skipped 0, failed 1
+  Archives/D/gone.txt failed: true
+B sees (override 1015218367123456700, 1015000000000000000):
+  Archives/
+  Archives/D/
+  Archives/D/deep/
+  Archives/D/deep/second.txt: the source's times true
+  Archives/D/first.txt: mtime 1015218367123456700, created 1015000000000000000
+pending: A 0, B 0

@@ -366,6 +366,21 @@ entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
 A rerun after a crash skips the keys the local tree holds and sends only the chunks the main lacks
 (§4.2).
 
+**With a map.** `import ~src ~map` takes its plan from a map file instead of a walk (step 2), and
+`only` and `exclude` do not apply. Each non-blank line is `LOCAL_PATH TAB DOMAIN_PATH`, optionally
+followed by `TAB MTIME_NS TAB CREATED_NS`:
+- a relative `LOCAL_PATH` is taken from `src`; its content is read through links, and one that
+  cannot be read is planned with 0 bytes and fails as its entry;
+- `DOMAIN_PATH` is a user path ([01 §2.3](01-core.md#23-leaf-names-and-logical-paths)), and every folder above
+  it is planned, in sort order;
+- the times, nanoseconds since the epoch, replace the file's own in its manifest, the creation time
+  floored as any from outside ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm04)). They serve sources whose
+  times the platform misreads, such as FAT's zone-less clock shown as UTC.
+
+The map is refused `invalid` before anything is uploaded when a line has neither 2 nor 4 fields,
+its times are not integers, its domain path is invalid, reserved or the root, a domain path appears
+twice, or a domain path is also a folder above another. Steps 4 and 5 then run as written.
+
 ### 4.4 Export
 
 `export ~dst ~paths` → `{exported, already_there, failed, pending}`; events `Plan{files, bytes,

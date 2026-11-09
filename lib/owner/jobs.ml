@@ -14,6 +14,7 @@ type t =
       only : string list;
       exclude : string list;
       force_rehash : bool;
+      map : string option; [@default None]
     }
   | Rsync of {
       src : string;
@@ -383,11 +384,11 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
     else 0)
 
 let import io (module E : Tsync_sync.Engine.S) ~src ~only ~exclude ~force_rehash
-    =
+    ~map =
   let say fmt = Printf.ksprintf io.out fmt in
   let r =
     E.import ~narrate:io.narrate ~cancelled:io.cancelled ~only ~exclude
-      ~force_rehash src
+      ~force_rehash ?map src
   in
   say
     "imported %s (%s); %d already in the domain, %d links skipped, %d failed%s"
@@ -489,11 +490,11 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
         Fail.raise_ Fail.Read_only "%s is read-only"
           (Domain_name.to_string dom.name);
       mirror io dom ~source ~skip_chunks ~path
-  | Import { src; only; exclude; force_rehash } ->
+  | Import { src; only; exclude; force_rehash; map } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"
           (Domain_name.to_string dom.name);
-      import io engine ~src ~only ~exclude ~force_rehash
+      import io engine ~src ~only ~exclude ~force_rehash ~map
   | Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run } ->
       let side b : Tsync_sync.Rsync_plan.side = if b then Domain else Local in
       if
