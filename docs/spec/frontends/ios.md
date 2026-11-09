@@ -1,9 +1,9 @@
 # The iOS client
 
 Scope: tsync on iOS: which process owns a domain, where its files live, what the host gives the
-core, and how the File Provider framework is served from Android's lazy tree. The app's own screens
-are only those §6 names; the full app (browser, Save to tsync, camera backup, vault, credentials) is
-[§9](#9-not-yet-specified).
+core, and how the File Provider framework is served from Android's lazy tree. The app's screens are
+[ios-app.md](ios-app.md)'s; the rest of the app (Save to tsync, camera backup, vault, credentials) is
+[§9](#9-not-yet-specified). There is no in-app browser: the Files app is the browser.
 
 This page is a delta. What it does not restate is owned by:
 - the embedded owner, the lazy tree, the bridge and notices: [android.md](android.md), which applies
@@ -102,33 +102,42 @@ with an in-process owner in place of the socket. What differs:
 - **Writes await their upload**: `write` carries `await`, so the reply describes an uploaded item.
   The system learns that an item is uploaded only from the reply of the callback that wrote it, and
   evicts nothing before.
-- **The working set is empty**: its enumeration lists nothing and its changes are always none at one
-  fixed anchor. Remote changes reach the system only when it enumerates a folder again. A change feed
-  over the pulled folders is §9's first item.
+- **The working set is the feed over held folders** (§5.1).
 - **Custom actions** are not offered: on iOS they need an actions UI extension.
 - A request cannot be interrupted once in the core: a cancelled callback completes at once and the
   call's reply is dropped.
 
+### 5.1 The working set
+
+The system enumerates a folder once and never again: it learns of every later change from the
+working set alone, and asks the working set only when signalled (§7.1). So the working set is the
+whole change feed of [file-provider.md](file-provider.md) §6.5, over the feed a pulled tree keeps
+([android.md §6](android.md#6-the-handler-on-a-pulled-tree)):
+
+- **Items**: `list_all`, the held folders' contents and nothing else.
+- **Changes**: `refresh`, then `changes_since`. The changes answered are those already applied; what
+  the refresh pass brings is announced by its notices, and the system asks again.
+- **Signals**: the extension signals the working set of a domain after each `changed` and
+  `recovered` notice naming it, read from the bridge's notices
+  ([android.md §4.2](android.md#42-notices)), and once at each domain boot. The app signals every
+  configured domain's working set at launch and each time it comes to the foreground
+  ([ios-app.md §3](ios-app.md#3-registration-and-signals)).
+
+A refresh pass runs only while the system lets the extension run: one cut short by suspension is
+taken up by the next signal. Nothing refreshes while neither the Files app nor the tsync app is in
+use (§9).
+
 ## 6. The app
 
-- **Joining**: a setup link is opened with `setup_link`
-  ([setup-link §6.1](../algorithms/setup-link.md#61-opening-a-link)); each domain it carries becomes an http-proxy domain, as
-  [android-app.md §6.1](android-app.md) builds them. A test domain whose store is a local directory
-  in the group may be added for trying the extension without a server.
-- **Registering**: at every launch and after every change to the config, each configured domain is
-  added to the File Provider by its identifier and display name.
-- **Enabling**: a new domain is disabled until the user turns it on in the Files app; until then
-  every callback fails with `domainDisabled`. The app says so after a join.
-- **Removing**: every domain is removed at once, then the config.
-- **Self-test**: drives the test domain through file coordination, so each step reaches the extension
-  as the Files app's would: create 1,000 small files and a 256 MiB file, list the folder, evict the
-  large file and read it back.
+[ios-app.md](ios-app.md).
 
-## 7. Memory
+## 7. Memory and observed behaviour
 
 The extension appends one line per core request to the footprint log: the action, the process's
-`phys_footprint` after it and the peak since the line before, sampled every 20 ms. The app shows the
-log.
+`phys_footprint` after it, and the kernel's record of its peak since the process started
+(`ledger_phys_footprint_peak`). Nothing samples in between, so the log costs one system call and one
+append per request. At 1 MiB the log is renamed to `footprint.old.log`, replacing the previous one,
+and a new log begins. The app shows the log.
 
 Measured in the iOS 26.5 simulator, one self-test per build, the test domain's local store:
 
@@ -141,6 +150,14 @@ Measured in the iOS 26.5 simulator, one self-test per build, the test domain's l
 A process that does nothing costs 8.6 MiB in the simulator. On an iPhone 14 (iOS 18.1.1), Release,
 the self-test passes with the extension at 8.4 MiB at most.
 
+### 7.1 Enumeration, observed
+
+On the iPhone 14, with every enumerator callback logged:
+
+- reopening a folder, also after leaving the Files app for minutes, makes no listing call;
+- the working set is asked nothing unprompted, not even after a local `mkdir`;
+- a signal of the working set from the app is followed by its change enumeration within a second.
+
 ## 8. Conformance
 
 [android.md §9](android.md#9-conformance) applies, except the command group and the handle API. In
@@ -150,21 +167,28 @@ addition:
 - A thousand callbacks, each on a new thread, leave the extension's footprint where one thread's
   would.
 - The self-test passes with the extension below its memory limit on a device.
+- On a desktop, through `tsync android request`: after a peer commits into a held folder, a
+  `refresh` followed by `changes_since` names the change; `list_all` makes no store request and
+  lists no item of a folder not held; `refresh` while a pass runs starts none.
+- With 5,000 held folders and a peer's commits into a few of them, a refresh pass makes as many log
+  reads as the new entries fill pages, not one per folder, and merges only the folders concerned.
+- A pull of a folder 10,000 entries behind holds no more than one page of entries at a time.
+- In the extension, a refresh pass over 5,000 held folders and the working-set listing that follows
+  stay below the memory limit.
+- On a device: a peer's change to a folder the Files app already shows appears there after the
+  tsync app is brought to the foreground, without the folder being opened again.
 
 ## 9. Not yet specified
 
 Each becomes a section above before its code.
 
-1. A change feed for the working set over the folders the lazy tree holds, so remote changes reach
-   the system without re-enumeration.
-2. A service the extension vends (`NSFileProviderServiceSource`) for the app and other extensions,
+1. A service the extension vends (`NSFileProviderServiceSource`) for the app and other extensions,
    one connection per domain, with deadlines, and the transfer root for its callers.
-3. Refresh passes the app requests when the system lets it run.
-4. The keystore (the keychain, after first unlock, this device only), the vault, passwords, passkeys
+2. Refresh passes in the background, when the system lets the app run.
+3. The keystore (the keychain, after first unlock, this device only), the vault, passwords, passkeys
    and one-time codes (iOS 18), the credential provider and share extensions.
-5. Camera backup with PhotoKit's change tracking.
-6. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
+4. Camera backup with PhotoKit's change tracking.
+5. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
-7. Open on a device: the extension's limit on the oldest supported device; whether one process
-   serves every domain; whether the Files app enumerates a folder it holds when the user opens it
-   again.
+6. Open on a device: the extension's limit on the oldest supported device; whether one process
+   serves every domain.
