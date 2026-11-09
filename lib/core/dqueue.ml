@@ -154,8 +154,15 @@ type slot = {
 
 module Ids = Set.Make (String)
 
-(* Ids sort in creation order, so [order]'s minimum is the head. [ready] is a
-   front list plus a reversed back list; [ready_keys] is their membership. *)
+module Deadlines = Set.Make (struct
+  type t = float * string
+
+  let compare = compare
+end)
+
+(* Ids sort in creation order, so [order]'s minimum is the head. A key with a
+   pending job is in [ready] or, until its [not_before], in [backoff]; [ready_keys]
+   is their membership. *)
 type 'job t = {
   name : string;
   log : Records.t;
@@ -167,8 +174,8 @@ type 'job t = {
   mutable order : Ids.t;
   loaded : (string, unit) Hashtbl.t;
   slots : (string, slot) Hashtbl.t;
-  mutable ready : string list;
-  mutable ready_back : string list;
+  ready : string Queue.t;
+  mutable backoff : Deadlines.t;
   ready_keys : (string, unit) Hashtbl.t;
   parked : (string, failure_note) Hashtbl.t;
   failures : (string, failure_note) Hashtbl.t;
@@ -193,8 +200,8 @@ let create ?(workers = 1) ~name ~ordered kind log =
     order = Ids.empty;
     loaded = Hashtbl.create 16;
     slots = Hashtbl.create 16;
-    ready = [];
-    ready_back = [];
+    ready = Queue.create ();
+    backoff = Deadlines.empty;
     ready_keys = Hashtbl.create 16;
     parked = Hashtbl.create 16;
     failures = Hashtbl.create 16;
@@ -229,7 +236,10 @@ let get_slot t k =
 let enqueue_ready t k =
   if not (Hashtbl.mem t.ready_keys k) then (
     Hashtbl.replace t.ready_keys k ();
-    t.ready_back <- k :: t.ready_back)
+    match Hashtbl.find_opt t.slots k with
+      | Some s when s.not_before > Rt.now () ->
+          t.backoff <- Deadlines.add (s.not_before, k) t.backoff
+      | _ -> Queue.push k t.ready)
 
 (* Must hold [t.m]. *)
 let take t id job =
@@ -476,36 +486,39 @@ let keyed_worker t =
         if t.paused then `Wait infinity
         else (
           let now = Rt.now () in
-          (* ponytail: keys in backoff are rescanned on every pick, O(backoff
-             keys) per job; a deadline heap fixes it if outages get large. *)
-          let rec pick skipped soonest = function
-            | [] when t.ready_back = [] ->
-                t.ready <- List.rev skipped;
-                `Wait (soonest -. now)
-            | [] ->
-                let back = List.rev t.ready_back in
-                t.ready_back <- [];
-                pick skipped soonest back
-            | k :: rest -> (
-                match Hashtbl.find_opt t.slots k with
-                  | Some ({ running = None; pending = Some id; _ } as s)
-                    when s.not_before <= now ->
-                      t.ready <- List.rev_append skipped rest;
-                      Hashtbl.remove t.ready_keys k;
-                      s.running <- Some id;
-                      s.pending <- None;
-                      s.cancel <- Atomic.make false;
-                      t.active <- t.active + 1;
-                      `Job (k, s, id)
-                  | Some { running = None; pending = Some _; not_before; _ } ->
-                      pick (k :: skipped) (min soonest not_before) rest
-                  | Some { pending = Some _; _ } ->
-                      pick (k :: skipped) soonest rest
-                  | _ ->
-                      Hashtbl.remove t.ready_keys k;
-                      pick skipped soonest rest)
+          (* A key whose backoff ended runs before the keys queued meanwhile; a
+             running key is dropped, as its finish queues it again. *)
+          let rec pick () =
+            let next_key =
+              match Deadlines.min_elt_opt t.backoff with
+                | Some ((due, k) as e) when due <= now ->
+                    t.backoff <- Deadlines.remove e t.backoff;
+                    Some k
+                | _ -> Queue.take_opt t.ready
+            in
+            match next_key with
+              | None -> (
+                  match Deadlines.min_elt_opt t.backoff with
+                    | Some (due, _) -> `Wait (due -. now)
+                    | None -> `Wait infinity)
+              | Some k -> (
+                  Hashtbl.remove t.ready_keys k;
+                  match Hashtbl.find_opt t.slots k with
+                    | Some ({ running = None; pending = Some id; _ } as s)
+                      when s.not_before <= now ->
+                        s.running <- Some id;
+                        s.pending <- None;
+                        s.cancel <- Atomic.make false;
+                        t.active <- t.active + 1;
+                        `Job (k, s, id)
+                    | Some { running = None; pending = Some _; not_before; _ }
+                      ->
+                        Hashtbl.replace t.ready_keys k ();
+                        t.backoff <- Deadlines.add (not_before, k) t.backoff;
+                        pick ()
+                    | _ -> pick ())
           in
-          pick [] infinity t.ready))
+          pick ()))
   in
   let finish k s ~requeue =
     Mutex.protect t.m (fun () ->

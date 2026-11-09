@@ -41,7 +41,16 @@ let timed f =
 
 let ran = ref []
 let ran_m = Mutex.create ()
-let run id _ ~cancel:_ = Mutex.protect ran_m (fun () -> ran := id :: !ran)
+let outage = Atomic.make false
+
+let run id body ~cancel:_ =
+  if Atomic.get outage && body.[0] = 'd' then Fail.raise_ Link "outage";
+  Mutex.protect ran_m (fun () -> ran := id :: !ran)
+
+let rec wait_for ?(deadline = Unix.gettimeofday () +. 300.) f =
+  if (not (f ())) && Unix.gettimeofday () < deadline then (
+    Rt.sleep 0.05;
+    wait_for ~deadline f)
 
 let drain q =
   Dqueue.resume q;
@@ -90,5 +99,34 @@ let () =
       p "records on disk: %d\n"
         (List.length
            (Dqueue.Records.list
-              (Dqueue.Records.open_ (Filename.concat dir "keyed")))));
+              (Dqueue.Records.open_ (Filename.concat dir "keyed"))));
+      p "\n== keyed: %d keys back off in an outage while %d others run\n"
+        records records;
+      let q = open_queue "outage" ~ordered:false in
+      Dqueue.start q run;
+      let run_fresh prefix ~left =
+        timed (fun () ->
+            for i = 1 to records do
+              ignore (Dqueue.post q (Printf.sprintf "%s%d.x" prefix i))
+            done;
+            wait_for (fun () -> Dqueue.pending q = left))
+      in
+      let alone = run_fresh "b" ~left:0 in
+      Atomic.set outage true;
+      for i = 1 to records do
+        ignore (Dqueue.post q (Printf.sprintf "d%d.x" i))
+      done;
+      wait_for (fun () -> List.length (Dqueue.retrying q) = records);
+      p "backing off: %d\n" (List.length (Dqueue.retrying q));
+      let others = run_fresh "u" ~left:records in
+      (* Picks that walk the keys in backoff take about six times as long as
+         the same jobs run alone. *)
+      p "others ran within 3x their time alone: %b; ran: %d\n"
+        (others < (3. *. alone) +. 1.)
+        (List.length !ran);
+      Printf.eprintf "alone %.3fs, during the outage %.3fs\n%!" alone others;
+      Atomic.set outage false;
+      wait_for (fun () -> Dqueue.idle q);
+      p "after the outage, ran: %d; pending: %d\n" (List.length !ran)
+        (Dqueue.pending q));
   Test_support.finish dir

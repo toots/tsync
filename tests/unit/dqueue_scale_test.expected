@@ -7,3 +7,8 @@ pending: 50000; start under 10s: true; second rescan under 10s: true
 pending with the repeated key: 50001
 ran: 50001; the repeated key ran once, its newest post: true
 records on disk: 0
+
+== keyed: 50000 keys back off in an outage while 50000 others run
+backing off: 50000
+others ran within 3x their time alone: true; ran: 100000
+after the outage, ran: 150000; pending: 0
