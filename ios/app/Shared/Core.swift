@@ -3,18 +3,9 @@ import Foundation
 /// The core linked into this process (ios/core/tsync_ios.h). Its home is in
 /// the process's own container (ios.md §3.2): a file lock held in the App
 /// Group by a suspended process gets it killed. The group holds what both
-/// processes read: the config, which the host names, and the footprint log.
+/// processes read: `Tsync.configFile`, which the host names, and the
+/// footprint log.
 enum Core {
-    static var group: URL {
-        guard
-            let url = FileManager.default.containerURL(
-                forSecurityApplicationGroupIdentifier: Tsync.appGroup)
-        else { fatalError("the app group \(Tsync.appGroup) is not in the entitlements") }
-        return url
-    }
-
-    static var configFile: URL { group.appendingPathComponent("config.json") }
-
     static var home: URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/tsync", isDirectory: true)
@@ -29,11 +20,9 @@ enum Core {
     /// keeps the core's defaults. Only the first call of a process counts.
     static func start(bounded: Bool) {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        if bounded { setenv("OCAMLRUNPARAM", "s=32k", 0) }
-        setenv("TSYNC_CONFIG_FILE", configFile.path, 1)
         tsync_ios_start(
-            home.path, transferRoot.path, bounded ? 1 : 0, bounded ? 4 : 0,
-            bounded ? 1 << 20 : 0)
+            home.path, Tsync.configFile.path, transferRoot.path, bounded ? 32 << 10 : 0,
+            bounded ? 1 : 0, bounded ? 4 : 0, bounded ? 1 << 20 : 0)
     }
 
     /// A text call of tsync_bridge.h; nil before the core started.

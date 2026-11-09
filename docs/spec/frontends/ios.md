@@ -77,13 +77,13 @@ These are persistent: changing one orphans an installation's domains.
 The host environment of [android.md §4.1](android.md#41-what-the-host-provides), given once per
 process before the first call:
 
-- **home** and **config file**: §3.2;
+- **home** and **config file**: §3.2, both in the environment before the runtime starts;
 - **trust store**: none; Network.framework verifies against the system's store, and an iOS build
   carries no other TLS implementation ([security-model.md §9.2](../algorithms/security-model.md#92-implementation-per-host));
 - **transfer root**: §3.2;
-- **resource bounds** (item 7), in the extension only: one executor, four may-block in flight, 1 MiB
-  release growth, and a 32k-word minor heap through `OCAMLRUNPARAM`
-  ([memory.md §M.5](../ocaml/memory.md#m5-a-memory-capped-host)); the app keeps the defaults;
+- **resource bounds** (item 7), in the extension only: the capped host's of
+  [memory.md §M.5](../ocaml/memory.md#m5-a-memory-capped-host), the minor heap included; the app
+  keeps the defaults;
 - **log sink**: the unified log;
 - **keystore**: none yet, so a domain using the vault does not boot here (§9).
 
@@ -126,7 +126,7 @@ with an in-process owner in place of the socket. What differs:
 
 ## 7. Memory
 
-The extension appends one line per callback to the footprint log: the action, the process's
+The extension appends one line per core request to the footprint log: the action, the process's
 `phys_footprint` after it and the peak since the line before, sampled every 20 ms. The app shows the
 log.
 

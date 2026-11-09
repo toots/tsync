@@ -253,8 +253,8 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — PR #79, rewrite notes (frontends/android, frontends/fuse); recurred ×2.
 
 ### B-5.7 Foreign threads and JNI
-- **Pitfall** — An unregistered foreign thread has no `Caml_state` and segfaults at its first blocking section. Registration returns with the lock released. Registering the startup thread fails (`caml_c_thread_register` answers 0). Dead threads left registered make the GC scan a vanished stack. `GetPrimitiveArrayCritical` stalls the JVM GC for a whole network read. HOME and `SSL_CERT_FILE` must be set before `caml_startup`; a raising getenv is `exit 2` to an unread stderr. JNI `caml_shutdown` leaks threads bionic cannot cancel.
-- **Check** — Threads register lazily, acquire/release around every entry, and unregister in a key destructor. No critical array spans I/O. The environment is ready before runtime start; every entry checks the runtime is up. Embedding that must shut down execs a process instead.
+- **Pitfall** — An unregistered foreign thread has no `Caml_state` and segfaults at its first blocking section. Registration returns with the lock released. Registering the startup thread fails (`caml_c_thread_register` answers 0). Dead threads left registered make the GC scan a vanished stack; on Darwin a pthread key destructor runs after the runtime's thread-local state is gone, so unregistering there frees nothing and each ended thread keeps about 50 KB. `GetPrimitiveArrayCritical` stalls the JVM GC for a whole network read. HOME and `SSL_CERT_FILE` must be set before `caml_startup`; a raising getenv is `exit 2` to an unread stderr. JNI `caml_shutdown` leaks threads bionic cannot cancel.
+- **Check** — A foreign thread is registered for the length of each entry, acquiring and releasing around it, and unregistered before the entry returns. No critical array spans I/O. The environment is ready before runtime start; every entry checks the runtime is up. Embedding that must shut down execs a process instead.
 - **Seen** — 5ac172e2, rewrite notes (frontends/android).
 
 ### B-5.8 Names that cannot cross an FFI encoding

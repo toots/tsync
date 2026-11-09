@@ -1,5 +1,6 @@
 import FileProvider
 import Foundation
+import UIKit
 
 /// The config file, as android-app §6.1 keeps it: only a text every new
 /// domain's check accepts is written, and each domain is registered with
@@ -8,8 +9,15 @@ enum Configs {
     static func server(name: String, url: String, secret: String) -> [String: Any] {
         domain(name, backend: [
             "type": "http-proxy", "name": "server", "role": "main",
-            "url": url.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")), "secret": secret,
+            "url": trimmedURL(url), "secret": secret,
         ])
+    }
+
+    /// android-app §6.1: surrounding blanks, then trailing slashes.
+    private static func trimmedURL(_ url: String) -> String {
+        var url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        while url.hasSuffix("/") { url.removeLast() }
+        return url
     }
 
     /// A domain whose store is in the container, to try the extension
@@ -17,13 +25,14 @@ enum Configs {
     static func localTest() -> [String: Any] {
         domain("Test", backend: [
             "type": "local", "name": "main", "role": "main",
-            "path": Core.group.appendingPathComponent("test-store").path,
+            "path": Tsync.groupContainer.appendingPathComponent("test-store").path,
         ])
     }
 
     private static func domain(_ name: String, backend: [String: Any]) -> [String: Any] {
+        // No `symlinks`: the domain takes its main's policy (android.md §3.4).
         [
-            "name": name, "versioning": true, "maxCache": "2G", "symlinks": "skip",
+            "name": name, "versioning": true, "maxCache": "2G",
             "frontends": ["android"], "backends": [backend],
         ]
     }
@@ -34,9 +43,9 @@ enum Configs {
         let kept = current["domains"] as? [[String: Any]] ?? []
         let names = Set(kept.compactMap { $0["name"] as? String })
         let fresh = added.filter { !names.contains($0["name"] as? String ?? "") }
-        if fresh.isEmpty { return "already joined" }
+        if fresh.isEmpty { return nil }
         let config: [String: Any] = [
-            "name": current["name"] as? String ?? "iphone", "domains": kept + fresh,
+            "name": current["name"] as? String ?? deviceName(), "domains": kept + fresh,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: config),
             let candidate = String(data: data, encoding: .utf8)
@@ -48,7 +57,7 @@ enum Configs {
             }
         }
         do {
-            let file = Core.configFile
+            let file = Tsync.configFile
             try FileManager.default.createDirectory(
                 at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700])
@@ -60,15 +69,20 @@ enum Configs {
         return nil
     }
 
+    private static func deviceName() -> String {
+        let name = UIDevice.current.name.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "iphone" : name
+    }
+
     private static func read() -> [String: Any] {
-        guard let data = try? Data(contentsOf: Core.configFile),
+        guard let data = try? Data(contentsOf: Tsync.configFile),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [:] }
         return json
     }
 
     static func registerAll() {
-        for name in Tsync.domainNames(Core.configFile) {
+        for name in Tsync.domainNames(Tsync.configFile) {
             let domain = NSFileProviderDomain(
                 identifier: NSFileProviderDomainIdentifier(domainIdentifier(name)), displayName: name)
             NSFileProviderManager.add(domain) { error in

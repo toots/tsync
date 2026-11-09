@@ -71,7 +71,7 @@ final class Cancellation {
     }
 }
 
-// ponytail: the lazy tree has no change feed yet (ios.md open problem 1), so the
+// ponytail: the lazy tree has no change feed yet (ios.md §9 item 1), so the
 // working set is empty and remote changes appear when a folder is listed again.
 func workingSetEnumerator(_ owner: Owner) -> NSFileProviderEnumerator {
     EmptyWorkingSet()
