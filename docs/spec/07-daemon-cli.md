@@ -252,7 +252,10 @@ context. `$TSYNC_MEMTRACE_RATE` is the sampling rate, in (0, 1], default `1e-5`;
 reported on stderr and the default used. A process that cannot open its trace reports it on stderr
 and runs untraced. memtrace before v0.18 is not safe with several domains, so v0.18 or later is required.
 
-`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
+`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file.
+`$TSYNC_CONFIG_FILE`, when set to an absolute path, names the config file in place of the row
+above; an embedding host whose config is shared with another process outside its home (the iOS File
+Provider extension) sets it before the core starts. Modes and
 ownership of the data dir and of every directory holding a socket, lock or flag:
 [security-model.md §7.1](algorithms/security-model.md#71-socket-directory-and-files).
 
