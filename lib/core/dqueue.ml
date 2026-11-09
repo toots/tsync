@@ -157,12 +157,14 @@ module Ids = Set.Make (String)
 module Deadlines = Set.Make (struct
   type t = float * string
 
-  let compare = compare
+  let compare (due, k) (due', k') =
+    match Float.compare due due' with 0 -> String.compare k k' | c -> c
 end)
 
-(* Ids sort in creation order, so [order]'s minimum is the head. A key with a
-   pending job is in [ready] or, until its [not_before], in [backoff]; [ready_keys]
-   is their membership. *)
+(* Ids sort in creation order, so [order]'s minimum is the head.
+
+   A key with a pending job is in [ready] or, until its [not_before], in
+   [backoff], and [ready_keys] is their membership. *)
 type 'job t = {
   name : string;
   log : Records.t;
@@ -233,11 +235,11 @@ let get_slot t k =
         s
 
 (* Must hold [t.m]. *)
-let enqueue_ready t k =
+let enqueue_ready t ~now k =
   if not (Hashtbl.mem t.ready_keys k) then (
     Hashtbl.replace t.ready_keys k ();
     match Hashtbl.find_opt t.slots k with
-      | Some s when s.not_before > Rt.now () ->
+      | Some s when s.not_before > now ->
           t.backoff <- Deadlines.add (s.not_before, k) t.backoff
       | _ -> Queue.push k t.ready)
 
@@ -268,7 +270,7 @@ let take t id job =
                   Records.complete t.log id;
                   Hashtbl.remove t.loaded id
               | None -> s.pending <- Some id);
-            enqueue_ready t k))
+            enqueue_ready t ~now:(Rt.now ()) k))
 
 (* durable-queue R6: a record that cannot be read stays in place for a later
    attempt. *)
@@ -512,10 +514,8 @@ let keyed_worker t =
                         s.cancel <- Atomic.make false;
                         t.active <- t.active + 1;
                         `Job (k, s, id)
-                    | Some { running = None; pending = Some _; not_before; _ }
-                      ->
-                        Hashtbl.replace t.ready_keys k ();
-                        t.backoff <- Deadlines.add (not_before, k) t.backoff;
+                    | Some { running = None; pending = Some _; _ } ->
+                        enqueue_ready t ~now k;
                         pick ()
                     | _ -> pick ())
           in
@@ -526,7 +526,7 @@ let keyed_worker t =
     Mutex.protect t.m (fun () ->
         s.running <- None;
         t.active <- t.active - 1;
-        if s.pending <> None then enqueue_ready t k;
+        if s.pending <> None then enqueue_ready t ~now:(Rt.now ()) k;
         if s.pending = None && s.running = None then Hashtbl.remove t.slots k;
         ignore requeue);
     Rt.Signal.broadcast t.wake

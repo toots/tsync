@@ -16,9 +16,10 @@ let kind =
     accepts = (fun _ -> true);
   }
 
+(* Under the build directory, on disk: 100k records would take 1.6 GB of a
+   tmpfs at one 16 KiB page each. *)
 let dir =
-  Filename.concat
-    (Filename.get_temp_dir_name ())
+  Filename.concat (Sys.getcwd ())
     (Printf.sprintf "tsync-dqs-%d" (Unix.getpid ()))
 
 let id i = Printf.sprintf "%020d-%08d-%d" (1794176842225094 + i) i 1
@@ -119,8 +120,8 @@ let () =
       wait_for (fun () -> List.length (Dqueue.retrying q) = records);
       p "backing off: %d\n" (List.length (Dqueue.retrying q));
       let others = run_fresh "u" ~left:records in
-      (* Picks that walk the keys in backoff take about six times as long as
-         the same jobs run alone. *)
+      (* Keys in backoff cost a pick nothing, so 3x leaves room for a loaded
+         runner. *)
       p "others ran within 3x their time alone: %b; ran: %d\n"
         (others < (3. *. alone) +. 1.)
         (List.length !ran);
