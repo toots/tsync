@@ -32,7 +32,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync status [--json] [-w SECONDS]` | Report on everything tsync runs on this machine |
 | `tsync logs [-f] [-n N]` | Show the service log; the last 200 lines by default |
 | `tsync stop` | Stop it |
-| `tsync start [--mount PATH] [--tls native\|openssl]` | Run in the foreground. `--mount` works with a single domain. |
+| `tsync start [--mount PATH] [--tls system\|openssl\|native]` | Run in the foreground. `--mount` works with a single domain. |
 | `tsync pause`, `tsync resume` | Hold or release every change of a domain |
 | `tsync retry` | Run parked work again now |
 
