@@ -24,7 +24,10 @@ enum SelfTest {
             try await NSFileProviderManager.add(domain)
             guard let manager = NSFileProviderManager(for: domain) else { throw failure("no manager") }
             let root = try await manager.getUserVisibleURL(for: .rootContainer)
-            note("root \(root.path)")
+            // The domain's folder is outside the app's sandbox on a device.
+            let scoped = root.startAccessingSecurityScopedResource()
+            defer { if scoped { root.stopAccessingSecurityScopedResource() } }
+            note("root \(root.path), security scoped: \(scoped)")
             note("temporary directory \(try manager.temporaryDirectoryURL().path)")
             let many = root.appendingPathComponent("many", isDirectory: true)
             try coordinatedWrite(many) { try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true) }
