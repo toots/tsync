@@ -32,6 +32,7 @@ let bucket ~function_on (inner : Store.t) =
   {
     inner with
     local_path = None;
+    push_register = None;
     bucket_functions = true;
     put =
       (fun ?mode key body ->

@@ -513,6 +513,7 @@ let () =
         {
           (Local.create ~name:"bucket" (Filename.concat root "bucket")) with
           local_path = None;
+          push_register = None;
           bucket_functions = true;
         }
       in

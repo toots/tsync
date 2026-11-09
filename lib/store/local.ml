@@ -420,6 +420,7 @@ let create ?(verify_writes = true) ~name root =
       watch;
       get_many = None;
       list_many = None;
+      push_register = None;
       bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
       (* A local disk read by position is still cheap: 06 §3.9 asks a filesystem. *)
