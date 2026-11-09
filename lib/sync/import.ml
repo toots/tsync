@@ -10,8 +10,11 @@ module Make (C : Engine_ctx.S) = struct
     let import_one (e : Import_plan.entry) : Import_plan.outcome =
       match e with
         | Folder _ -> Skipped_exists
-        | File { rel; path; times; _ } ->
-            Imported (Bulk.upload_file ?times run rel path)
+        | File { rel; path; times; _ } -> (
+            match Unix.stat path with
+              | { st_kind = S_REG; _ } ->
+                  Imported (Bulk.upload_file ?times run rel path)
+              | _ -> Failed "not a regular file")
         | Link { rel; path; target; _ } -> (
             match Bulk.local_symlinks () with
               | `Skip -> Skipped_symlink
@@ -89,6 +92,9 @@ module Make (C : Engine_ctx.S) = struct
       let rel = rel_of e in
       if under_blocked rel then (
         note e (Failed "its folder could not be created");
+        false)
+      else if kind rel = `Dir then (
+        note e (Failed "a folder holds this name in the domain");
         false)
       else if (not force_rehash) && Bulk.exists rel then (
         note e Skipped_exists;

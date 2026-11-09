@@ -190,17 +190,29 @@ let import src map only exclude force_rehash name verbose =
   let absolute p =
     if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
   in
-  let src = absolute (Option.value src ~default:".") in
-  let map = Option.map absolute map in
   let refuse msg =
     prerr_endline ("tsync: " ^ msg);
     2
   in
-  if map <> None && (only <> [] || exclude <> []) then
-    refuse "--map takes no --only or --exclude"
-  else if map = None && not (Sys.file_exists src && Sys.is_directory src) then
-    refuse (src ^ " is not a directory")
-  else run_job ?name verbose (Import { src; only; exclude; force_rehash; map })
+  match (src, map) with
+    | None, None -> refuse "DIR is required without --map"
+    | _, Some _ when only <> [] || exclude <> [] ->
+        refuse "--map takes no --only or --exclude"
+    | _, Some m when not (Sys.file_exists m) -> refuse (m ^ " does not exist")
+    | src, map ->
+        let src = absolute (Option.value src ~default:".") in
+        if not (Sys.file_exists src && Sys.is_directory src) then
+          refuse (src ^ " is not a directory")
+        else
+          run_job ?name verbose
+            (Import
+               {
+                 src;
+                 only;
+                 exclude;
+                 force_rehash;
+                 map = Option.map absolute map;
+               })
 
 let import_cmd =
   let src =

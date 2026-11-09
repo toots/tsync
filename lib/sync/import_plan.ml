@@ -143,13 +143,18 @@ let plan ?(only = []) ?(exclude = []) ~symlinks src =
     unreadable = List.rev !unreadable;
   }
 
+let nanoseconds s =
+  if s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s then
+    int_of_string_opt s
+  else None
+
 let map_line ~base ~file n line =
   let invalid fmt = Fail.invalid ("%s:%d: " ^^ fmt) file n in
   let local, domain, times =
     match String.split_on_char '\t' line with
       | [local; domain] -> (local, domain, None)
       | [local; domain; mtime; created] -> (
-          match (int_of_string_opt mtime, int_of_string_opt created) with
+          match (nanoseconds mtime, nanoseconds created) with
             | Some mtime, Some created ->
                 ( local,
                   domain,
@@ -176,7 +181,12 @@ let map_line ~base ~file n line =
 let of_map ~base file =
   let base = absolute base in
   let lines =
-    In_channel.with_open_bin file In_channel.input_lines
+    (try In_channel.with_open_bin file In_channel.input_lines
+     with Sys_error reason -> Fail.invalid "cannot read the map: %s" reason)
+    |> List.map (fun l ->
+        if String.ends_with ~suffix:"\r" l then
+          String.sub l 0 (String.length l - 1)
+        else l)
     |> List.mapi (fun i l -> (i + 1, l))
     |> List.filter (fun (_, l) -> String.trim l <> "")
   in

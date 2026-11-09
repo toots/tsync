@@ -107,6 +107,8 @@ let () =
       refused a "a file holding another"
         (map "clash.map" ["x/one.txt\tArchives/a"; "y/z/two.txt\tArchives/a/b"]);
       refused a "three fields" (map "short.map" ["x/one.txt\tArchives/a\t1"]);
+      refused a "times in hex"
+        (map "hex.map" ["x/one.txt\tArchives/h\t0x10\t1"]);
       refused a "a reserved path"
         (map "reserved.map" ["x/one.txt\t.tsync-ext/a"]);
       p "domain entries: %d\n" (List.length (tree a));
@@ -133,5 +135,20 @@ let () =
             ( "Archives/D/deep/second.txt",
               Fs.times (Filename.concat src "y/z/two.txt") );
           ];
+      p "\n== a CRLF line, a name a folder holds, a FIFO\n";
+      Unix.mkfifo (Filename.concat src "pipe") 0o600;
+      report
+        (A.import
+           ~map:
+             (map "more.map"
+                [
+                  "x/one.txt\tArchives/crlf.txt\r";
+                  "x/one.txt\tArchives/D";
+                  "pipe\tArchives/pipe";
+                ])
+           src);
+      A.drain ~grace:10. ();
+      ignore (B.resync ());
+      p "B holds crlf.txt: %b\n" (List.mem_assoc "Archives/crlf.txt" (tree b));
       p "pending: A %d, B %d\n" (A.activity ()).pending (B.activity ()).pending);
   Test_support.finish root
