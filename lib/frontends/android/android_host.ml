@@ -52,7 +52,18 @@ type host = { trust_store : string; transfer_root : string }
 
 let host : host option Atomic.t = Atomic.make None
 
-let init ~trust_store ~transfer_root =
+type bounds = {
+  workers : int option;
+  may_block : int option;
+  release_growth : int option;
+}
+
+let init ?bounds ~trust_store ~transfer_root () =
+  Option.iter
+    (fun b ->
+      Rt.configure ?workers:b.workers ?max_blocking:b.may_block ();
+      Option.iter Usage.set_release_growth b.release_growth)
+    bounds;
   Atomic.set host (Some { trust_store; transfer_root });
   Atomic.set Tsync_http.Transport.cleartext_loopback_only true
 
@@ -268,10 +279,15 @@ let on_owner name ~failed f =
         failed (Fail.E (Fail.make Fail.Unprepared (name ^ " is not booted")))
     | Some owner -> ( try Rt.run_sync (fun () -> f owner) with e -> failed e)
 
+(* android §4.1 item 7: a request's burst goes back to the system at once. *)
 let request name text =
-  on_owner name
-    ~failed:(fun e -> Yojson.Safe.to_string (Ipc.failure (Fail.classify e)))
-    (fun owner -> request_in owner text)
+  let reply =
+    on_owner name
+      ~failed:(fun e -> Yojson.Safe.to_string (Ipc.failure (Fail.classify e)))
+      (fun owner -> request_in owner text)
+  in
+  Usage.compact_if_grown ();
+  reply
 
 let status name = on_owner name ~failed:sentence status_in
 

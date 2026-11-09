@@ -37,11 +37,13 @@ let sample () =
     cpu_seconds = t.tms_utime +. t.tms_stime;
   }
 
+let bytes words = words * (Sys.word_size / 8)
+let compacted_heap = Atomic.make 0
+
 let release () =
   Gc.compact ();
-  trim ()
-
-let bytes words = words * (Sys.word_size / 8)
+  trim ();
+  Atomic.set compacted_heap (bytes (Gc.quick_stat ()).heap_words)
 
 let release_if_fragmented ?(free = 16 * 1024 * 1024) () =
   let before = Gc.quick_stat () in
@@ -52,3 +54,12 @@ let release_if_fragmented ?(free = 16 * 1024 * 1024) () =
       (Narrate.size (bytes (Gc.quick_stat ()).heap_words))
       (Narrate.size (bytes before.live_words)))
   else trim ()
+
+let release_growth = Atomic.make (64 * 1024 * 1024)
+let set_release_growth bytes = Atomic.set release_growth bytes
+
+let compact_if_grown () =
+  if
+    bytes (Gc.quick_stat ()).heap_words
+    > Atomic.get compacted_heap + Atomic.get release_growth
+  then release ()
