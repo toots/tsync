@@ -13,11 +13,12 @@ type bounds = {
 }
 
 (** What the host provides before the core initialises (android §4.1): its
-    bounds, trust store and one transfer root. Marks this process as an
-    embedding host, which refuses cleartext to anything but loopback. Raises
-    [Invalid_argument] when bounds come after the scheduler started. *)
+    bounds, trust store (none: the system's) and one transfer root. Marks this
+    process as an embedding host, which refuses cleartext to anything but
+    loopback. Raises [Invalid_argument] when bounds come after the scheduler
+    started. *)
 val init :
-  ?bounds:bounds -> trust_store:string -> transfer_root:string -> unit -> unit
+  ?bounds:bounds -> ?trust_store:string -> transfer_root:string -> unit -> unit
 
 (** [""] when the config, or the [candidate] text in its place, loads and names
     the domain ([""]: its only one). Starts nothing and takes no lock. *)
