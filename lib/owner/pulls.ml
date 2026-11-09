@@ -28,6 +28,7 @@ type t = {
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
   offline : bool Atomic.t;
+  refreshing : bool Atomic.t;
 }
 
 type view = { pulled_at : float option; outdated : bool }
@@ -43,6 +44,7 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
     offline = Atomic.make false;
+    refreshing = Atomic.make false;
   }
 
 let note_unreachable t = Atomic.set t.offline true
@@ -177,3 +179,36 @@ let before_open t path =
                  Ok ()
              | exception e -> Error e)));
   ignore (wait_patiently t done_)
+
+let stamp_fresh t dirs =
+  let now = Rt.now () in
+  let keys = List.filter_map (key t) dirs in
+  Mutex.protect t.m (fun () ->
+      List.iter (fun k -> Hashtbl.replace t.fresh k now) keys;
+      List.filter
+        (fun dir ->
+          let owed = Hashtbl.mem t.owed_notice dir in
+          Hashtbl.remove t.owed_notice dir;
+          owed)
+        dirs)
+
+let refresh t =
+  if Atomic.compare_and_set t.refreshing false true then
+    Rt.spawn ~name:"refresh pass" (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Atomic.set t.refreshing false)
+          (fun () ->
+            let (module E : Engine.S) = t.engine in
+            match
+              E.pull_pass ~page:t.params.pull_page ~stop:t.silent
+                (List.filter (fun dir -> not (is_fresh t dir)) (E.held ()))
+            with
+              | pass ->
+                  let owed = stamp_fresh t pass.covered in
+                  if pass.covered <> [] then succeeded t;
+                  let notice =
+                    List.sort_uniq String.compare (pass.changed @ owed)
+                  in
+                  if notice <> [] then (try t.changed notice with _ -> ())
+              | exception e when not (Rt.is_cancelled e) ->
+                  Log.info "refresh pass failed: %s" (Printexc.to_string e)))

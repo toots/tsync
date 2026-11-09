@@ -98,6 +98,10 @@ val durable_replace : ?perm:int -> string -> string -> unit
 (** Replace without the directory fsync: never torn, not yet durable. *)
 val replace : ?perm:int -> string -> string -> unit
 
+(** Replace with no fsync at all: after a crash the file may be lost or empty,
+    for data whose loss costs work, never correctness. *)
+val replace_unsynced : ?perm:int -> string -> string -> unit
+
 (** Durable create-if-absent by hard link (or no-replace rename). *)
 val create_if_absent : ?perm:int -> string -> string -> [ `Created | `Exists ]
 
@@ -172,7 +176,8 @@ val temp_in : string -> string
 
 (** Runs [write] on a new temporary in [dir], then fsyncs it; the temporary is
     removed when [write] raises. *)
-val write_temp_with : ?perm:int -> string -> (Unix.file_descr -> unit) -> string
+val write_temp_with :
+  ?sync:bool -> ?perm:int -> string -> (Unix.file_descr -> unit) -> string
 
 (** Write [data] to a new temporary in [dir] and fsync it. *)
 val write_temp : ?perm:int -> string -> string -> string

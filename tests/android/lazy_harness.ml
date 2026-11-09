@@ -26,8 +26,10 @@ let listings = Atomic.make 0
 
 (* Reads of log entries left before they answer unreachable; none: no limit. *)
 let entry_reads_left : int option Atomic.t = Atomic.make None
+let entry_reads = Atomic.make 0
 
 let spend_entry_read () =
+  Atomic.incr entry_reads;
   match Atomic.get entry_reads_left with
     | Some 0 -> Fail.raise_ Fail.Unreachable "the store went away mid-pull"
     | Some n -> Atomic.set entry_reads_left (Some (n - 1))

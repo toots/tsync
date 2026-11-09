@@ -44,7 +44,7 @@ let () =
          {
            pull_freshness = fresh_window;
            view_max_age = 3600.;
-           pull_patience = 0.5;
+           pull_patience = 30.;
            pull_page = 256;
          }
        "");

@@ -202,7 +202,7 @@ let release p =
 
 let temp_in dir = Filename.concat dir (Names.temp_name ())
 
-let write_temp_with ?(perm = 0o600) dir write =
+let write_temp_with ?(sync = true) ?(perm = 0o600) dir write =
   let tmp = temp_in dir in
   let fd = openfile ~perm tmp [O_WRONLY; O_CREAT; O_EXCL] in
   (try
@@ -210,7 +210,7 @@ let write_temp_with ?(perm = 0o600) dir write =
      if Sys.win32 && perm land 0o077 = 0 then make_private tmp;
      with_fd fd (fun fd ->
          write fd;
-         fsync fd)
+         if sync then fsync fd)
    with e ->
      unlink_quiet tmp;
      raise e);
@@ -231,10 +231,10 @@ let create_new ?perm p data =
     (fun () -> sys ~op:"link" (fun () -> Unix.link tmp p));
   fsync_dir dir
 
-let replace_gen ~dir_sync ?perm p data =
+let replace_gen ?(sync = true) ~dir_sync ?perm p data =
   let dir = Filename.dirname p in
   mkdir_p dir;
-  let tmp = write_temp ?perm dir data in
+  let tmp = write_temp_with ~sync ?perm dir (fun fd -> write_all fd data) in
   (try rename tmp p
    with e ->
      unlink_quiet tmp;
@@ -243,6 +243,10 @@ let replace_gen ~dir_sync ?perm p data =
 
 let durable_replace ?perm p data = replace_gen ~dir_sync:true ?perm p data
 let replace ?perm p data = replace_gen ~dir_sync:false ?perm p data
+
+let replace_unsynced ?perm p data =
+  replace_gen ~sync:false ~dir_sync:false ?perm p data
+
 let link a b = sys (fun () -> Unix.link a b)
 
 (* Durable create-if-absent: the winner's body is whole the instant its name
