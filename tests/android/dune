@@ -1,7 +1,27 @@
+(library
+ (name lazy_harness)
+ (modules lazy_harness)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_owner
+  tsync_catalog
+  tsync_android
+  tsync_http
+  threads.posix
+  unix
+  yojson))
+
 (executable
  (name lazy_test)
  (modules lazy_test)
  (libraries
+  lazy_harness
   test_support
   tsync_core
   tsync_store
