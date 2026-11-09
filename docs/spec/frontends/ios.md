@@ -176,7 +176,7 @@ The key signs pushes to every app of its team, so it is given to no other server
   registering got the same token and neither saw it invalidated. The app does not register.
 
 **The server** pushes as [http-proxy §A4.7](http-proxy.md#a47-pushes) specifies: its operator sets
-the listener's `push` option, and a build without libcurl cannot.
+the listener's `push_*` options, and a build without libcurl cannot.
 
 ## 6. The app
 
@@ -229,7 +229,7 @@ addition:
   stay below the memory limit.
 - On a device: a peer's change to a folder the Files app already shows appears there after the
   tsync app is brought to the foreground, without the folder being opened again.
-- A server with `push` set sends one push to each other registered client of a domain within
+- A server with the `push_*` options set sends one push to each other registered client of a domain within
   `push_coalesce` of a change, and none to the change's author; one without answers
   `push_register` with `unsupported`.
 - On a device, with neither app in use, a peer's change to a folder the Files app already shows
