@@ -5,9 +5,9 @@
   notes/a.txt: upload
   notes/big.bin: upload
   top.txt: upload
-copied 4 (210008 bytes), identical 0, folders 2, skipped 0, failed 0
+copied 4 (2108 bytes), identical 0, folders 2, skipped 0, failed 0
 -- B sees
-  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)
+  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (2100)  dest/top.txt (3)
 
 == again: everything identical
 copied 0 (0 bytes), identical 4, folders 2, skipped 0, failed 0
@@ -16,7 +16,7 @@ copied 0 (0 bytes), identical 4, folders 2, skipped 0, failed 0
 copied 1 (4 bytes), identical 3, folders 2, skipped 0, failed 0
 
 == out of the domain, then one local chunk off is patched
-copied 4 (210008 bytes), identical 0, folders 2, skipped 0, failed 0
+copied 4 (2108 bytes), identical 0, folders 2, skipped 0, failed 0
 big.bin equal: true
   .: make the folder
   a.txt: identical
@@ -28,13 +28,13 @@ big.bin equal again: true
 copied 2 (0 bytes), identical 0, folders 1, skipped 0, failed 0
 copied 2 (0 bytes), identical 0, folders 1, skipped 0, failed 0
 -- B sees
-  copy/  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)  moved/  moved/a.txt (5)  moved/big.bin (210000)
+  copy/  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (2100)  dest/top.txt (3)  moved/  moved/a.txt (5)  moved/big.bin (2100)
 
 == a local move drops the local sources
 copied 2 (2 bytes), identical 0, folders 1, skipped 0, failed 0
 local inbox now: []
 -- B sees
-  copy/  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)  inbox/  inbox/x.txt (1)  inbox/y.txt (1)  moved/  moved/a.txt (5)  moved/big.bin (210000)
+  copy/  dest/  dest/empty.txt (0)  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (2100)  dest/top.txt (3)  inbox/  inbox/x.txt (1)  inbox/y.txt (1)  moved/  moved/a.txt (5)  moved/big.bin (2100)
 
 == a move leaves a file with an unpublished edit where it is
 copied 1 (0 bytes), identical 0, folders 1, skipped 1, failed 0

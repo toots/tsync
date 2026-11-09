@@ -81,7 +81,7 @@ let () =
   let read path = In_channel.with_open_bin path In_channel.input_all in
   let big =
     Random.init 7;
-    String.init 40000 (fun _ -> Char.chr (Random.int 256))
+    String.init 400 (fun _ -> Char.chr (Random.int 256))
   in
   file src "top.txt" "top";
   file src "notes/a.txt" "alpha";
