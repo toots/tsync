@@ -138,7 +138,8 @@ Measured in the iOS 26.5 simulator, one self-test per build, the test domain's l
 | 1,000 creations and their listing | 19.0 MiB | 20.0 MiB |
 | 256 MiB write, evict, read back | 20.5 MiB | 20.3 MiB |
 
-A process that does nothing costs 8.6 MiB in the simulator; a device's figure is to be measured.
+A process that does nothing costs 8.6 MiB in the simulator. On an iPhone 14 (iOS 18.1.1), Release,
+the self-test passes with the extension at 8.4 MiB at most.
 
 ## 8. Conformance
 
