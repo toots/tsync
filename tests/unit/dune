@@ -234,3 +234,18 @@
  (alias runtest)
  (action
   (diff cache_states_test.expected cache_states_test.output)))
+
+(executable
+ (name dqueue_scale_test)
+ (modules dqueue_scale_test)
+ (libraries test_support tsync_core unix))
+
+(rule
+ (with-stdout-to
+  dqueue_scale_test.output
+  (run ./dqueue_scale_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dqueue_scale_test.expected dqueue_scale_test.output)))

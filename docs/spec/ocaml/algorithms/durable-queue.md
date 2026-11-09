@@ -26,8 +26,9 @@ Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite
 ## Departures from the spec
 
 - **Every record is loaded.** `post` and `rescan` take each record into memory; nothing stays on disk
-  past a window (§4.4 leaves this to the implementation). `loaded`, `order` and `ready` are lists, so a
-  backlog of hundreds of thousands of records makes start-up and each rescan quadratic (finding 90).
+  past a window (§4.4 leaves this to the implementation). Membership is hashed and the ordered run order
+  is a set, so adopting a backlog is linear and a rescan costs one lookup per record on disk (finding 90).
+  A keyed pick still walks the keys in backoff.
 - **A keyed queue retries UNEXPLAINED at the tail** (`failed`), as failure-model §7.1 asks; the outcome
   table of §4.6 lists it as non-retryable.
 - **`settle` polls.** It samples the queue every 50 ms instead of waiting on a condition; a

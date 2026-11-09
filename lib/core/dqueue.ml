@@ -152,6 +152,10 @@ type slot = {
   mutable not_before : float;
 }
 
+module Ids = Set.Make (String)
+
+(* Ids sort in creation order, so [order]'s minimum is the head. [ready] is a
+   front list plus a reversed back list; [ready_keys] is their membership. *)
 type 'job t = {
   name : string;
   log : Records.t;
@@ -160,11 +164,13 @@ type 'job t = {
   workers : int;
   m : Mutex.t;
   wake : Rt.Signal.t;
-  mutable order : string list;
-  mutable loaded : string list;
+  mutable order : Ids.t;
+  loaded : (string, unit) Hashtbl.t;
   slots : (string, slot) Hashtbl.t;
   mutable ready : string list;
-  mutable parked : (string * failure_note) list;
+  mutable ready_back : string list;
+  ready_keys : (string, unit) Hashtbl.t;
+  parked : (string, failure_note) Hashtbl.t;
   failures : (string, failure_note) Hashtbl.t;
   mutable paused : bool;
   mutable started : bool;
@@ -184,11 +190,13 @@ let create ?(workers = 1) ~name ~ordered kind log =
     workers = (if ordered then 1 else max 1 workers);
     m = Mutex.create ();
     wake = Rt.Signal.create ();
-    order = [];
-    loaded = [];
+    order = Ids.empty;
+    loaded = Hashtbl.create 16;
     slots = Hashtbl.create 16;
     ready = [];
-    parked = [];
+    ready_back = [];
+    ready_keys = Hashtbl.create 16;
+    parked = Hashtbl.create 16;
     failures = Hashtbl.create 16;
     paused = false;
     started = false;
@@ -218,10 +226,16 @@ let get_slot t k =
         s
 
 (* Must hold [t.m]. *)
+let enqueue_ready t k =
+  if not (Hashtbl.mem t.ready_keys k) then (
+    Hashtbl.replace t.ready_keys k ();
+    t.ready_back <- k :: t.ready_back)
+
+(* Must hold [t.m]. *)
 let take t id job =
-  if not (List.mem id t.loaded) then (
-    t.loaded <- id :: t.loaded;
-    if t.ordered then t.order <- List.merge compare t.order [id]
+  if not (Hashtbl.mem t.loaded id) then (
+    Hashtbl.replace t.loaded id ();
+    if t.ordered then t.order <- Ids.add id t.order
     else (
       let k = slot_key t id job in
       let s = get_slot t k in
@@ -231,20 +245,20 @@ let take t id job =
             Option.iter
               (fun old ->
                 Records.complete t.log old;
-                t.loaded <- List.filter (( <> ) old) t.loaded)
+                Hashtbl.remove t.loaded old)
               s.pending;
             s.pending <- Some id
         | None ->
             (match s.pending with
               | Some old when old < id ->
                   Records.complete t.log old;
-                  t.loaded <- List.filter (( <> ) old) t.loaded;
+                  Hashtbl.remove t.loaded old;
                   s.pending <- Some id
               | Some _ ->
                   Records.complete t.log id;
-                  t.loaded <- List.filter (( <> ) id) t.loaded
+                  Hashtbl.remove t.loaded id
               | None -> s.pending <- Some id);
-            if not (List.mem k t.ready) then t.ready <- t.ready @ [k]))
+            enqueue_ready t k))
 
 (* durable-queue R6: a record that cannot be read stays in place for a later
    attempt. *)
@@ -276,8 +290,6 @@ let post ?mint t job =
   Rt.Signal.broadcast t.wake;
   id
 
-let is_parked t id = List.mem_assoc id t.parked
-
 (* Records a submitter still holds are skipped until a later rescan, and a
    submitter's records are adopted in id order. *)
 let rescan ?(rekey : (string -> string option) option) t =
@@ -285,7 +297,8 @@ let rescan ?(rekey : (string -> string option) option) t =
   List.iter
     (fun id ->
       let loaded =
-        Mutex.protect t.m (fun () -> List.mem id t.loaded || is_parked t id)
+        Mutex.protect t.m (fun () ->
+            Hashtbl.mem t.loaded id || Hashtbl.mem t.parked id)
       in
       if not loaded then (
         let pid = submitter_pid id in
@@ -314,11 +327,11 @@ let rescan ?(rekey : (string -> string option) option) t =
 let rearm t =
   let ps =
     Mutex.protect t.m (fun () ->
-        let l = t.parked in
-        t.parked <- [];
-        l)
+        let l = List.of_seq (Hashtbl.to_seq_keys t.parked) in
+        Hashtbl.reset t.parked;
+        List.sort compare l)
   in
-  List.iter (fun (id, _) -> adopt t id) ps;
+  List.iter (adopt t) ps;
   List.length ps
 
 let pause t = Mutex.protect t.m (fun () -> t.paused <- true)
@@ -355,7 +368,7 @@ let note_failure t id fl =
 
 (* Holding [t.m]. *)
 let forget_locked t id =
-  t.loaded <- List.filter (( <> ) id) t.loaded;
+  Hashtbl.remove t.loaded id;
   Hashtbl.remove t.failures id
 
 let forget t id = Mutex.protect t.m (fun () -> forget_locked t id)
@@ -381,8 +394,8 @@ let failed t id e =
   else (
     Log.warn "%s: %s parked: %s" t.name id (Fail.to_string fl);
     Mutex.protect t.m (fun () ->
-        t.loaded <- List.filter (( <> ) id) t.loaded;
-        t.parked <- (id, note) :: List.remove_assoc id t.parked);
+        Hashtbl.remove t.loaded id;
+        Hashtbl.replace t.parked id note);
     `Parked)
 
 (* One job, to one outcome (durable-queue §4.6). *)
@@ -422,8 +435,7 @@ let ordered_worker t =
     let since = Rt.Signal.version t.wake in
     let head =
       Mutex.protect t.m (fun () ->
-          if t.paused then None
-          else (match t.order with id :: _ -> Some id | [] -> None))
+          if t.paused then None else Ids.min_elt_opt t.order)
     in
     match head with
       | None ->
@@ -431,8 +443,7 @@ let ordered_worker t =
           loop ()
       | Some id -> (
           let drop () =
-            Mutex.protect t.m (fun () ->
-                t.order <- List.filter (( <> ) id) t.order)
+            Mutex.protect t.m (fun () -> t.order <- Ids.remove id t.order)
           in
           match decode_record t id with
             | `Gone ->
@@ -458,34 +469,49 @@ let ordered_worker t =
   try loop () with Stop.Stopping -> ()
 
 let keyed_worker t =
+  (* A record ready while paused waits for the resume: nothing else would end
+     the wait, and looping at once spins a core. *)
   let next () =
     Mutex.protect t.m (fun () ->
-        if t.paused then None
+        if t.paused then `Wait infinity
         else (
           let now = Rt.now () in
-          let rec pick skipped = function
-            | [] -> None
+          (* ponytail: keys in backoff are rescanned on every pick, O(backoff
+             keys) per job; a deadline heap fixes it if outages get large. *)
+          let rec pick skipped soonest = function
+            | [] when t.ready_back = [] ->
+                t.ready <- List.rev skipped;
+                `Wait (soonest -. now)
+            | [] ->
+                let back = List.rev t.ready_back in
+                t.ready_back <- [];
+                pick skipped soonest back
             | k :: rest -> (
                 match Hashtbl.find_opt t.slots k with
                   | Some ({ running = None; pending = Some id; _ } as s)
                     when s.not_before <= now ->
                       t.ready <- List.rev_append skipped rest;
+                      Hashtbl.remove t.ready_keys k;
                       s.running <- Some id;
                       s.pending <- None;
                       s.cancel <- Atomic.make false;
                       t.active <- t.active + 1;
-                      Some (k, s, id)
-                  | Some { pending = Some _; _ } -> pick (k :: skipped) rest
-                  | _ -> pick skipped rest)
+                      `Job (k, s, id)
+                  | Some { running = None; pending = Some _; not_before; _ } ->
+                      pick (k :: skipped) (min soonest not_before) rest
+                  | Some { pending = Some _; _ } ->
+                      pick (k :: skipped) soonest rest
+                  | _ ->
+                      Hashtbl.remove t.ready_keys k;
+                      pick skipped soonest rest)
           in
-          pick [] t.ready))
+          pick [] infinity t.ready))
   in
   let finish k s ~requeue =
     Mutex.protect t.m (fun () ->
         s.running <- None;
         t.active <- t.active - 1;
-        if s.pending <> None && not (List.mem k t.ready) then
-          t.ready <- t.ready @ [k];
+        if s.pending <> None then enqueue_ready t k;
         if s.pending = None && s.running = None then Hashtbl.remove t.slots k;
         ignore requeue);
     Rt.Signal.broadcast t.wake
@@ -494,25 +520,14 @@ let keyed_worker t =
     Stop.check ();
     let since = Rt.Signal.version t.wake in
     match next () with
-      | None ->
-          let delay =
-            Mutex.protect t.m (fun () ->
-                Hashtbl.fold
-                  (fun _ s acc ->
-                    if s.pending <> None && s.running = None then
-                      min acc (s.not_before -. Rt.now ())
-                    else acc)
-                  t.slots infinity)
-          in
-          (* A record ready while paused waits for the resume: nothing else
-             would end the wait, and looping at once spins a core. *)
+      | `Wait delay ->
           if delay < infinity && delay > 0. then
             ignore
               (Rt.first
                  [(fun () -> Stop.sleep delay); (fun () -> wait_work ~since t)])
           else wait_work ~since t;
           loop ()
-      | Some (k, s, id) ->
+      | `Job (k, s, id) ->
           (* Pitfall C-7.10: the slot is finished once, on every path; a record
              that fails to decode is retried like an unreadable one. *)
           let requeue = ref false and stopping = ref false in
@@ -566,16 +581,24 @@ let start ?(paused = false) ?rekey t run =
           if t.ordered then ordered_worker t else keyed_worker t)
     done)
 
-let pending t = Mutex.protect t.m (fun () -> List.length t.loaded)
-let idle t = Mutex.protect t.m (fun () -> t.loaded = [] && t.active = 0)
-let parked t = Mutex.protect t.m (fun () -> t.parked)
+let pending t = Mutex.protect t.m (fun () -> Hashtbl.length t.loaded)
+
+let idle t =
+  Mutex.protect t.m (fun () -> Hashtbl.length t.loaded = 0 && t.active = 0)
+
+let parked t =
+  Mutex.protect t.m (fun () ->
+      List.sort compare (List.of_seq (Hashtbl.to_seq t.parked)))
 
 let retrying t =
   Mutex.protect t.m (fun () ->
-      List.filter_map
-        (fun id ->
-          Option.map (fun n -> (id, n)) (Hashtbl.find_opt t.failures id))
-        t.loaded)
+      Hashtbl.fold
+        (fun id () acc ->
+          match Hashtbl.find_opt t.failures id with
+            | Some n -> (id, n) :: acc
+            | None -> acc)
+        t.loaded []
+      |> List.sort compare)
 
 let running t =
   Mutex.protect t.m (fun () ->
@@ -584,7 +607,10 @@ let running t =
           match s.running with Some id -> id :: acc | None -> acc)
         t.slots [])
 
-let loaded t = Mutex.protect t.m (fun () -> List.sort compare t.loaded)
+let loaded t =
+  Mutex.protect t.m (fun () ->
+      List.sort compare (List.of_seq (Hashtbl.to_seq_keys t.loaded)))
+
 let completed t = Mutex.protect t.m (fun () -> t.completed)
 
 let cancel_key t k =
@@ -602,9 +628,9 @@ let settle ?(timeout = settle_timeout) t =
   let rec loop () =
     let stop =
       Mutex.protect t.m (fun () ->
-          (t.loaded = [] && t.active = 0)
+          (Hashtbl.length t.loaded = 0 && t.active = 0)
           || (not t.started) || t.paused || t.last_failure_at >= began
-          || List.for_all (fun id -> List.mem_assoc id t.parked) t.loaded
+          || Seq.for_all (Hashtbl.mem t.parked) (Hashtbl.to_seq_keys t.loaded)
           || (Stop.requested () && t.active = 0))
     in
     if stop || Rt.now () >= deadline then ()

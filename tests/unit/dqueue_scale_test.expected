@@ -1,0 +1,9 @@
+== ordered: 50000 records adopted from disk run in id order
+pending: 50000; start under 10s: true; second rescan under 10s: true
+ran: 50000; in id order: true; pending after: 0
+
+== keyed: 50000 distinct keys, then 50000 posts on one key coalesce
+pending: 50000; start under 10s: true; second rescan under 10s: true
+pending with the repeated key: 50001
+ran: 50001; the repeated key ran once, its newest post: true
+records on disk: 0
