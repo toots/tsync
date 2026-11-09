@@ -114,3 +114,33 @@ collections and little retained heap is a garbage storm, not a leak.
   owner importing 20,000 small files (22 MiB before): 125 and 361 MiB resident after the job in two
   runs without the release, 85 and 81 MiB with it.
 - Peaks vary by about 100 MiB between identical runs with scheduling; compare retained figures.
+
+## M.5 A memory-capped host
+
+An iOS File Provider extension is killed past 20 MB of `phys_footprint`, the dirty memory iOS
+charges to the process; clean pages of a mapped file are not counted. The host's bounds
+([android §4.1](../frontends/android.md#41-what-the-host-provides) item 7) and its `OCAMLRUNPARAM`
+set the core for it:
+
+| Bound | Desktop default | Capped host | Why |
+|---|---|---|---|
+| executors (`Rt.configure ~workers`) | 2 to 8 domains | 1 | each domain costs about 0.65 MiB, and eight multiplied the peak of a large write |
+| may-block in flight (`~max_blocking`) | 256 | 4 | a slot's helper thread never exits; each costs about 200 KiB (a 128 KiB OCaml stack, a 32 KiB record, its pthread stack) |
+| release growth (`Usage.set_release_growth`) | 64 MiB | 1 MiB | OCaml keeps freed major-heap pools until it compacts |
+| minor heap (`OCAMLRUNPARAM=s=32k`) | 256k words (2 MiB) | 32k words (256 KiB) | resident from the first allocation |
+
+A slot is held only while a fiber's code runs, not while it waits on the scheduler, so fibers
+waiting on each other cannot exhaust it; a call stalled in the kernel holds one, and 01 §6.5 keeps
+deadlines, stop and `ping` independent of them.
+
+Measured in the iOS simulator on the owner through the bridge, three tsync domains in one process,
+local stores, after a 5,000-entry listing, a 512 MiB write and its read, whole bodies mapped (M.2b),
+two runs each:
+
+| | Idle | Write peak | Threads |
+|---|---|---|---|
+| no bounds | 43.3–46.2 MiB | 36.9–42.6 MiB | 44 |
+| 1 worker, 4 may-block, 1 MiB release growth, `s=32k` | 17.2 MiB | 16.8–16.9 MiB | 10 |
+
+A process that does nothing costs 8.6 MiB in the simulator and 0.9 MiB natively on macOS; the
+simulator's share is not a device's.

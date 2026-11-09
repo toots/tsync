@@ -1,0 +1,4 @@
+bounds before the first fiber: taken
+first fiber answers 42
+bounds after it: refused
+no bounds after it: taken

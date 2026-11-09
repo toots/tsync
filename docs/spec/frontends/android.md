@@ -230,6 +230,11 @@ Before the core initialises:
    ([security-model.md §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). A
    call that fails answers its reason; the core then keeps K in memory. The calls are made on a
    thread of the core's and MUST NOT call back into the bridge.
+7. **Resource bounds**, optional, for a process the platform caps in memory: how many executors
+   run work in parallel, how much may-block work ([01 §6.5](../01-core.md#65-scheduling)) is in
+   flight at once, and how far the heap may grow before the core gives freed memory back to the
+   system. They hold for the life of the process; absent, the core's defaults apply. The core
+   checks the last one after every request as well as periodically.
 
 **Cleartext.** The core's network traffic does not go through the platform's network stack, so the
 platform's cleartext switch does not reach it. On this host the core MUST refuse to connect to a

@@ -15,7 +15,10 @@ void tsync_bridge_started(void);
 char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
                         size_t *length);
 
-void tsync_bridge_init(const char *trust_store, const char *transfer_root);
+/* The host's resource bounds (android §4.1 item 7), 0 keeping the core's
+   default; release_growth is in bytes. */
+void tsync_bridge_init(const char *trust_store, const char *transfer_root,
+                       long workers, long may_block, long release_growth);
 long tsync_bridge_open(const char *domain, size_t domain_length,
                        const char *ref, size_t ref_length);
 long tsync_bridge_size(long handle);

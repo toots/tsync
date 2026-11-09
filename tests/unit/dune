@@ -249,3 +249,18 @@
  (alias runtest)
  (action
   (diff staged_whole_test.expected staged_whole_test.output)))
+
+(executable
+ (name rt_configure_test)
+ (modules rt_configure_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  rt_configure_test.output
+  (run ./rt_configure_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_configure_test.expected rt_configure_test.output)))
