@@ -13,6 +13,7 @@ type listener = {
   max_share_responses : int;
   max_zip_members : int;
   sites : sites option;
+  push : Push.options option;  (** the four [push_*] options (§A4.7) *)
   limits : Tsync_http.Server.limits;
 }
 
@@ -132,6 +133,20 @@ let resolve (config : Config.t) =
             | Some root, Some url -> Some { root; url = sites_url url }
             | None, None -> None
             | _ -> invalid "http-proxy: sites_root and sites_url go together");
+        push =
+          (match
+             ( str (lv "push_key"),
+               str (lv "push_key_id"),
+               str (lv "push_team_id"),
+               str (lv "push_topic") )
+           with
+            | Some key, Some key_id, Some team_id, Some topic ->
+                Some { Push.key; key_id; team_id; topic }
+            | None, None, None, None -> None
+            | _ ->
+                invalid
+                  "http-proxy: push_key, push_key_id, push_team_id and \
+                   push_topic go together");
         limits =
           {
             d with

@@ -403,3 +403,46 @@
   (<> %{os_type} Win32))
  (action
   (diff proxy_stamp_test.expected proxy_stamp_test.output)))
+
+(executable
+ (name push_test)
+ (modules push_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_config
+  tsync_store
+  tsync_http
+  tsync_http_proxy_client
+  tsync_http_proxy
+  base64
+  digestif
+  mirage-crypto-ec
+  x509
+  yojson
+  re
+  unix))
+
+; The listener serves a local store, and Windows holds neither (cloud-files §2).
+
+(rule
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   push_test.output
+   (run ./push_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (diff push_test.expected push_test.output)))
+
+(rule
+ (alias runtest-serial)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (diff push_test.expected push_test.output)))
