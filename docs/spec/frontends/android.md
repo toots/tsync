@@ -261,7 +261,9 @@ The host calls the core from threads it owns (binder threads, descriptor callbac
 threads). The core MUST accept calls from threads it did not create, MUST block only the calling
 thread, and MUST apply the per-domain serialisation of
 [08 §3.5](../08-frontends.md#35-rules-the-handler-enforces) whatever thread a call arrives on. Every
-piece of state a call touches, the handle table included, is touched only on the scheduler.
+piece of state a call touches, the handle table included, is touched only on the scheduler. A call
+leaves nothing of the core on its thread once it returns: a host MAY make each call from a new
+thread that then ends, as the iOS File Provider does for every callback.
 
 ## 5. The bridge
 
@@ -358,6 +360,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
   naming a domain not booted is refused as §5 says.
 - Every bridge entry is total, before boot included; a non-JSON request is answered with the exact
   `invalid JSON` reply.
+- A thousand calls, each from a new thread that then ends, leave the process's memory where one
+  thread's would.
 - Concurrent reads from foreign threads return exact bytes; a read after close is −EBADF; an open of
   an absent reference is −ENOENT; a handle keeps serving the version it opened after the file is
   rewritten.
