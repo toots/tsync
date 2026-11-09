@@ -162,8 +162,13 @@ final class Reconciler {
 
         // Steps 10, 11: only what this pass completed is recorded.
         if listed && staleRemoved && !schemeRecorded {
-            try? String(Tsync.identityScheme).write(
-                to: Tsync.identitySchemeRecord, atomically: true, encoding: .utf8)
+            do {
+                try fm.createDirectory(at: Tsync.dataDir, withIntermediateDirectories: true)
+                try String(Tsync.identityScheme).write(
+                    to: Tsync.identitySchemeRecord, atomically: true, encoding: .utf8)
+            } catch {
+                report.failures.append("the identity scheme is not recorded: \(error.localizedDescription)")
+            }
         }
         if listed && requestedRemoved && !resetLines.isEmpty {
             try? fm.removeItem(at: Tsync.resetMarker)
