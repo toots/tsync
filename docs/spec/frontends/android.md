@@ -330,8 +330,9 @@ The actions are [08 §3.3](../08-frontends.md#33-actions)'s. What differs here:
   included, so the feed names what peers changed in held folders as well as this client's own
   changes. A folder that leaves the view by the move rule of
   [publication §4.11](../algorithms/publication.md#411-the-lazy-tree) is reported as removed.
-- `list_all` walks the mirror only, through held folders only, and never pulls: a folder not held is
-  served as a row and its subtree is not walked. The walk is written to the kept walk file as it goes
+- `list_all` walks the mirror only and never pulls. The mirror holds what pulls brought and this
+  client's own changes, so a folder never pulled is served as a row with nothing under it but what
+  this client put there. The walk is written to the kept walk file as it goes
   and never held whole, depth first with each folder's children in bytewise order of names, which
   needs no sort: its order is that one, not 08 §3.7's order of paths. What it holds at once is
   bounded by the widest folder's names.
