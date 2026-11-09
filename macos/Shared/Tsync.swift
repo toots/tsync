@@ -16,8 +16,12 @@ enum Tsync {
         {
             return url
         }
+        #if os(macOS)
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Group Containers/\(appGroup)")
+        #else
+        fatalError("the app group \(appGroup) is not in the entitlements")
+        #endif
     }
 
     static var configFile: URL { groupContainer.appendingPathComponent("config.json") }
