@@ -341,8 +341,9 @@ let timeouts_since g =
   g.last_timeouts <- total;
   max 0 fresh
 
-(* An unanswered probe reads as PROBE_TIMEOUT; other failures drop the sample.
-   Round trips and one-way delays, as a report carries them. *)
+(* Round trips and one-way delays, as a report carries them.
+
+   An unanswered probe reads as PROBE_TIMEOUT; other failures drop the sample. *)
 let probe_round g =
   let probes =
     Mutex.protect g.m (fun () ->

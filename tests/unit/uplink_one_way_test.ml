@@ -106,11 +106,33 @@ let () =
     (L.rate s.law < 2. *. mib);
 
   p "== the far end restarts during a download, its clock origin 5 s later";
-  let s =
-    against_control ~stamping:true ~secs:120. (fun s ->
-        download s;
-        s.epoch <- "b";
-        s.offset <- s.offset +. 5.)
+  p "  within the new epoch's first window:";
+  let restart s =
+    download s;
+    s.epoch <- "b";
+    s.offset <- s.offset +. 5.
   in
+  ignore (against_control ~stamping:true ~secs:120. restart);
+  p "  after it:";
+  let s = against_control ~stamping:true ~secs:1500. restart in
   p "  base delay from round trips only: %.0f ms"
-    (Option.get (L.base_delay s.law) *. 1000.)
+    (Option.get (L.base_delay s.law) *. 1000.);
+
+  p "== the sender sleeps 8 h, then a download starts";
+  let sleep s =
+    s.offset <- s.offset +. 28800.;
+    download s
+  in
+  ignore (against_control ~stamping:true ~secs:1500. sleep);
+
+  p "== the far end restarts while a competitor holds a queue";
+  let s = sim ~stamping:true () in
+  run s 60.;
+  s.competitor <- 2. *. mib;
+  run s 20.;
+  s.epoch <- "b";
+  s.offset <- s.offset +. 5.;
+  run s 40.;
+  p "  yields to its share: %s (%b)"
+    (mbs (L.rate s.law))
+    (L.rate s.law < 2. *. mib)

@@ -30,6 +30,7 @@ type t = {
   traffic : (string, traffic) Hashtbl.t;  (** per route name *)
   total : traffic;  (** every answer, shares included *)
   in_flight : int Atomic.t;
+  epoch : string;  (** uplink-governor A10: drawn at start *)
 }
 
 and traffic = { read : int Atomic.t; written : int Atomic.t }
@@ -104,6 +105,7 @@ let create ?max_concurrent ?listener routes =
        h);
     total = { read = Atomic.make 0; written = Atomic.make 0 };
     in_flight = Atomic.make 0;
+    epoch = Ids.hex (Ids.urandom 8);
     traffic =
       (let h = Hashtbl.create 4 in
        List.iter
@@ -1243,12 +1245,8 @@ let answer_request t (r : Server.request) read_body =
             if is_data op then admitted t go else go ())
   with Answer response -> response
 
-(* uplink-governor A10: drawn per process, so a restart starts a new epoch. *)
-let epoch = lazy (Ids.hex (Ids.urandom 8))
-
-let stamped (r : Server.request) =
-  ( "x-tsync-received",
-    Printf.sprintf "%s:%.0f" (Lazy.force epoch) (r.received *. 1e6) )
+let stamped t (r : Server.request) =
+  ("x-tsync-received", Printf.sprintf "%s:%.0f" t.epoch (r.received *. 1e6))
 
 (* wire §2: every API answer, refusals included, carries its receipt stamp. *)
 let handle t (r : Server.request) read_body =
@@ -1257,7 +1255,7 @@ let handle t (r : Server.request) read_body =
     String.starts_with ~prefix:"/s/" r.path
     || String.starts_with ~prefix:"/join/" r.path
   then response
-  else { response with headers = stamped r :: response.headers }
+  else { response with headers = stamped t r :: response.headers }
 
 (* replication §4.9: a share written to a copy directly waits for the main. *)
 let guarded composite (m : Composite.member) =
