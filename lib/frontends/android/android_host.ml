@@ -48,7 +48,7 @@ end
 
 let next_notice = Notices.next
 
-type host = { trust_store : string; transfer_root : string }
+type host = { trust_store : string option; transfer_root : string }
 
 let host : host option Atomic.t = Atomic.make None
 
@@ -58,7 +58,7 @@ type bounds = {
   release_growth : int option;
 }
 
-let init ?bounds ~trust_store ~transfer_root () =
+let init ?bounds ?trust_store ~transfer_root () =
   Option.iter
     (fun b ->
       Rt.configure ?workers:b.workers ?max_blocking:b.may_block ();
@@ -111,7 +111,7 @@ let load ?candidate name =
 let check_config ?candidate name =
   match load ?candidate name with _ -> "" | exception e -> sentence e
 
-let check_trust_store { trust_store; _ } =
+let check_trust_store trust_store =
   let certificate = "-----BEGIN CERTIFICATE-----" in
   let holds_one =
     match Fs.read_file_opt trust_store with
@@ -173,7 +173,7 @@ let boot_once ?pull_params name =
   let roots =
     match Atomic.get host with
       | Some h ->
-          check_trust_store h;
+          Option.iter check_trust_store h.trust_store;
           [h.transfer_root]
       | None -> [Paths.home ()]
   in
