@@ -170,6 +170,18 @@ let capability t prefix path =
     | { status = 404; _ } -> None
     | r -> failure t ~op:path r
 
+(* §5.6: a 404 is a server that does not push. *)
+let push_register t body =
+  let r =
+    call t "push-register" ~meth:"POST"
+      ~query:[("prefix", Key.prefix_to_string (Key.domain_prefix t.domain))]
+      ~body:(Bigstring.of_string body) "/push-register"
+  in
+  match r.status with
+    | s when success s -> true
+    | 404 -> false
+    | _ -> failure t ~op:"push-register" r
+
 let positive j k =
   match j with
     | Some (`Assoc l) -> (
@@ -533,6 +545,7 @@ let create ?spill ~domain ~admission ~name fields =
       watch = watch t;
       get_many = Some (get_many t);
       list_many = Some (list_many t);
+      push_register = Some (push_register t);
       bucket_functions = false;
       capabilities = capabilities t;
       fast_read = Fun.const false;
