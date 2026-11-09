@@ -214,6 +214,10 @@ jobs:
 
       - uses: ./.github/actions/windows-switch
 
+      # In parallel, so the -j1 step below compiles only its tests.
+      - name: Build
+        run: opam exec -- dune build bin/tsync.exe bin/tsyncd.exe
+
       - name: Timing-sensitive tests
         id: serial
         run: opam exec -- dune build @runtest-serial -j1
