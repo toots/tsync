@@ -9,7 +9,7 @@ struct Owner {
     init(domain: String) {
         self.domain = domain
         Core.start(bounded: true)
-        Footprint.startSampling()
+        Notices.start()
     }
 
     func call(
@@ -17,6 +17,8 @@ struct Owner {
     ) throws -> [String: Any] {
         if cancellation.isCancelled { throw OwnerFailure.cancelled }
         try boot()
+        // ios.md §5.1: what the pass brings is announced by its notices.
+        if action == "changes_since" { _ = Core.text("request", domain: domain, #"{"action":"refresh"}"#) }
         var request = fields
         request["action"] = action
         let line = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
@@ -43,12 +45,14 @@ struct Owner {
         return try call(action, fields, cancellation: cancellation)
     }
 
-    /// Idempotent per domain in the core; a failure answers `internal`.
+    /// Idempotent per domain in the core; a failure answers `internal`. The
+    /// first boot in a process signals the working set (ios.md §5.1).
     private func boot() throws {
         let sentence = Core.text("boot", Data(domain.utf8)) ?? "the core is not started"
         if !sentence.isEmpty {
             throw OwnerFailure.refused(code: "internal", message: sentence, item: nil)
         }
+        if Notices.firstBoot(domain) { Notices.signal(domain) }
     }
 }
 
@@ -68,33 +72,5 @@ final class Cancellation {
         lock.lock()
         cancelled = true
         lock.unlock()
-    }
-}
-
-// ponytail: the lazy tree has no change feed yet (ios.md §9 item 1), so the
-// working set is empty and remote changes appear when a folder is listed again.
-func workingSetEnumerator(_ owner: Owner) -> NSFileProviderEnumerator {
-    EmptyWorkingSet()
-}
-
-final class EmptyWorkingSet: NSObject, NSFileProviderEnumerator {
-    private static let anchor = NSFileProviderSyncAnchor(Data("0".utf8))
-
-    func invalidate() {}
-
-    func enumerateItems(
-        for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage
-    ) {
-        observer.finishEnumerating(upTo: nil)
-    }
-
-    func enumerateChanges(
-        for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor
-    ) {
-        observer.finishEnumeratingChanges(upTo: Self.anchor, moreComing: false)
-    }
-
-    func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        completionHandler(Self.anchor)
     }
 }

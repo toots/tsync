@@ -54,7 +54,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension {
         for containerItemIdentifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest
     ) throws -> NSFileProviderEnumerator {
         switch containerItemIdentifier {
-        case .workingSet: return workingSetEnumerator(owner)
+        case .workingSet: return WorkingSetEnumerator(owner: owner)
         case .trashContainer: return TrashEnumerator()
         default: return DirectoryEnumerator(owner: owner, ref: ItemRef.ref(containerItemIdentifier))
         }
