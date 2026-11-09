@@ -31,6 +31,11 @@ let fields =
       f "max_connections" "Connections" Int;
       f "max_share_responses" "Concurrent share responses" Int;
       f "max_zip_members" "ZIP members" Int;
+      f ~check:absolute_path ~blank:"no pushes to iOS clients" "push_key"
+        "APNs signing key (.p8)" Path;
+      f "push_key_id" "APNs key ID" String;
+      f "push_team_id" "Apple team ID" String;
+      f "push_topic" "APNs topic (<app id>.pushkit.fileprovider)" String;
     ]
 
 let () =

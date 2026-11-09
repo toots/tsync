@@ -10,6 +10,7 @@ type listener = {
   max_body_memory : int;
   max_share_responses : int;
   max_zip_members : int;
+  push : Push.options option;  (** the four [push_*] options (§A4.7) *)
   limits : Tsync_http.Server.limits;
 }
 
@@ -118,6 +119,20 @@ let resolve (config : Config.t) =
         max_body_memory = size "max_body_memory" (1024 * mib);
         max_share_responses = size "max_share_responses" 64;
         max_zip_members = size "max_zip_members" 100_000;
+        push =
+          (match
+             ( str (lv "push_key"),
+               str (lv "push_key_id"),
+               str (lv "push_team_id"),
+               str (lv "push_topic") )
+           with
+            | Some key, Some key_id, Some team_id, Some topic ->
+                Some { Push.key; key_id; team_id; topic }
+            | None, None, None, None -> None
+            | _ ->
+                invalid
+                  "http-proxy: push_key, push_key_id, push_team_id and \
+                   push_topic go together");
         limits =
           {
             d with

@@ -30,6 +30,7 @@ type t = {
   traffic : (string, traffic) Hashtbl.t;  (** per route name *)
   total : traffic;  (** every answer, shares included *)
   in_flight : int Atomic.t;
+  mutable push : Push.t option;  (** set once, at creation *)
 }
 
 and traffic = { read : int Atomic.t; written : int Atomic.t }
@@ -54,6 +55,10 @@ let tally_names =
     "chunkSize";
     "maxConcurrency";
     "verified";
+    "pushRegister";
+    "pushSent";
+    "pushFailed";
+    "pushDropped";
     "share";
     "page";
     "stats";
@@ -84,37 +89,43 @@ let derive_bound ?max_concurrent routes =
           | [] -> (default_max_concurrent, "default")
           | l -> (List.fold_left min max_int l, "the stores' opinion"))
 
-let create ?max_concurrent ?listener routes =
+let count t name = Option.iter Atomic.incr (Hashtbl.find_opt t.tallies name)
+
+let create ?max_concurrent ?listener ?push routes =
   let bound, origin = derive_bound ?max_concurrent routes in
   Log.info "http-proxy: at most %d data operations at once (%s)" bound origin;
-  {
-    routes;
-    listener;
-    bound;
-    slots = Rt.Semaphore.create ~name:"http-proxy data" bound;
-    pending = Atomic.make 0;
-    body_memory = Atomic.make 0;
-    gates = Watch_gates.create ();
-    share_slots =
-      Rt.Semaphore.create ~name:"share responses"
-        (match listener with Some l -> l.max_share_responses | None -> 64);
-    tallies =
-      (let h = Hashtbl.create 32 in
-       List.iter (fun n -> Hashtbl.replace h n (Atomic.make 0)) tally_names;
-       h);
-    total = { read = Atomic.make 0; written = Atomic.make 0 };
-    in_flight = Atomic.make 0;
-    traffic =
-      (let h = Hashtbl.create 4 in
-       List.iter
-         (fun route ->
-           Hashtbl.replace h route.name
-             { read = Atomic.make 0; written = Atomic.make 0 })
-         routes;
-       h);
-  }
+  let t =
+    {
+      routes;
+      listener;
+      bound;
+      slots = Rt.Semaphore.create ~name:"http-proxy data" bound;
+      pending = Atomic.make 0;
+      body_memory = Atomic.make 0;
+      gates = Watch_gates.create ();
+      share_slots =
+        Rt.Semaphore.create ~name:"share responses"
+          (match listener with Some l -> l.max_share_responses | None -> 64);
+      tallies =
+        (let h = Hashtbl.create 32 in
+         List.iter (fun n -> Hashtbl.replace h n (Atomic.make 0)) tally_names;
+         h);
+      total = { read = Atomic.make 0; written = Atomic.make 0 };
+      in_flight = Atomic.make 0;
+      push = None;
+      traffic =
+        (let h = Hashtbl.create 4 in
+         List.iter
+           (fun route ->
+             Hashtbl.replace h route.name
+               { read = Atomic.make 0; written = Atomic.make 0 })
+           routes;
+         h);
+    }
+  in
+  t.push <- Option.map (fun make -> make (count t)) push;
+  t
 
-let count t name = Option.iter Atomic.incr (Hashtbl.find_opt t.tallies name)
 let text = Server.text
 let empty status = { Server.status; headers = []; body = Empty }
 
@@ -158,6 +169,7 @@ type op =
   | Domain_settings of Key.prefix
   | Max_concurrency of Key.prefix
   | Verified of Key.prefix
+  | Push_register of Key.prefix
 
 let tally = function
   | Get _ -> "get"
@@ -178,6 +190,7 @@ let tally = function
   | Domain_settings _ -> "domainSettings"
   | Max_concurrency _ -> "maxConcurrency"
   | Verified _ -> "verified"
+  | Push_register _ -> "pushRegister"
 
 (* §A5: data operations are gated, metadata never waits behind transfers. *)
 let is_data = function
@@ -315,6 +328,7 @@ let parse_op t (r : Server.request) params =
     | "GET", [""; "domain-settings"] -> Domain_settings (needs_prefix ())
     | "GET", [""; "max-concurrency"] -> Max_concurrency (needs_prefix ())
     | "GET", [""; "verified"] -> Verified (needs_prefix ())
+    | "POST", [""; "push-register"] -> Push_register (needs_prefix ())
     | _ ->
         count t "notFound";
         answer (text 404 "not found")
@@ -336,7 +350,8 @@ let key_names = function
   | Share_url p
   | Domain_settings p
   | Max_concurrency p
-  | Verified p ->
+  | Verified p
+  | Push_register p ->
       [Key.prefix_to_string p]
   | Get_multi | Children_multi | Delete_multi -> []
 
@@ -459,6 +474,8 @@ let fresh (r : Server.request) =
     | Some ts -> W.fresh ~now:(Unix.gettimeofday ()) ts
     | None -> false
 
+let push_register_body = 4096
+
 let body_limit t op =
   let l = t.listener in
   match op with
@@ -471,6 +488,7 @@ let body_limit t op =
         Option.fold ~none:(1024 * 1024)
           ~some:(fun (l : Proxy_options.listener) -> l.max_bulk_body)
           l
+    | Push_register _ -> push_register_body
     | _ -> 0
 
 let max_body_memory t =
@@ -658,6 +676,15 @@ let children route prefixes =
   in
   go false 0 [] prefixes
 
+(* §A4.7: the entry's author is not pushed to. *)
+let changed push domain body =
+  match Yojson.Safe.from_string (Bigstring.to_string body) with
+    | `Assoc l -> (
+        match List.assoc_opt "author" l with
+          | Some (`String author) -> Push.changed push domain ~author
+          | _ -> ())
+    | _ | (exception Yojson.Json_error _) -> ()
+
 let execute ?(partial = false) t route op body =
   let s = route.store in
   let bs = Bigstring.of_string in
@@ -711,8 +738,13 @@ let execute ?(partial = false) t route op body =
         match s.put_if_absent k body with
           | Won ->
               (* publication §4.6: the serving owner projects the entry. *)
-              if Key.under (Key.log route.domain) k then
+              if Key.under (Key.log route.domain) k then (
                 Rt.spawn ~name:"wake the owner" route.wake;
+                Option.iter
+                  (fun push ->
+                    Rt.spawn ~name:"push" (fun () ->
+                        changed push route.domain body))
+                  t.push);
               { Server.status = 200; headers = []; body = Bigstring body }
           | Held b -> { Server.status = 200; headers = []; body = Bigstring b })
     | Put_if_unchanged (k, etag) -> (
@@ -830,6 +862,18 @@ let execute ?(partial = false) t route op body =
     | Max_concurrency _ -> json (`Assoc [("maxConcurrency", `Int t.bound)])
     | Verified p ->
         json (`Assoc [("verified", `Bool (s.capabilities p).verified)])
+    | Push_register _ -> (
+        match t.push with
+          | None -> text 404 "not found"
+          | Some push -> (
+              match
+                Push.parse_registration ~now:(Unix.gettimeofday ())
+                  (Bigstring.to_string body)
+              with
+                | Some r ->
+                    Push.register push route.domain r;
+                    json (`Assoc [])
+                | None -> bad_request t))
 
 (* §A12: bytes clients wrote in request bodies and read in answers, per route
    and for the whole listener. *)
@@ -1430,7 +1474,17 @@ let run config =
             bindings
         in
         let t =
-          create ?max_concurrent:listener.max_concurrent ~listener routes
+          create ?max_concurrent:listener.max_concurrent ~listener
+            ?push:
+              (Option.map
+                 (fun options count ->
+                   Push.create ~count
+                     ~dir:
+                       (Filename.concat (Tsync_config.Paths.data_dir ()) "push")
+                     options
+                     (List.map (fun r -> r.domain) routes))
+                 listener.push)
+            routes
         in
         let ctl =
           Tsync_ipc.Ipc.serve
