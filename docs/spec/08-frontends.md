@@ -12,7 +12,7 @@ to all frontends. Where frontends run and how processes are arranged is
 | `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
 | `android` | [frontends/android.md](frontends/android.md) | The owner embedded in a host process on Android; the app is [frontends/android-app.md](frontends/android-app.md) |
 | `cloud_files` | [frontends/cloud-files.md](frontends/cloud-files.md) | Windows Cloud Files sync roots, the Windows host and its tray |
-| (iOS) | [frontends/ios.md](frontends/ios.md) | The owner embedded in the iOS File Provider extension, through the `android` frontend |
+| (iOS) | [frontends/ios.md](frontends/ios.md) | The owner embedded in the iOS File Provider extension, through the `android` frontend; the app is [frontends/ios-app.md](frontends/ios-app.md) |
 
 Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
@@ -269,6 +269,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `evict` | `ref`\|`rel` | `{evicted, failed}` | B for a folder |
 | `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B (it fetches a whole file's bytes, or walks a subtree) |
 | `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
+| `refresh` | — | `{}` once a refresh pass is started or already running; pulled tree only ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)), `invalid` elsewhere | |
 | `sync` | `arg`: `""` runs one cycle now; `"full"` arrives by state ([publication.md §4.7](algorithms/publication.md#47-state-read-and-arrival-by-state)) | the result of [05 §4.7](05-ops-config.md) | B, P |
 | `job` | `job`: the owner job and its arguments; `narrate?` | streamed lines, then `{exit}`: the command's exit status ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)) | B, P |
 | `cancel` | `job`: the id a `job` streamed | `{cancelled}`: whether that job was running; it stops at its next unit boundary | |
@@ -476,7 +477,7 @@ publishes, and when, is in its frontend spec. Every owner publishes:
 | Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
 | Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_stats` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
 | Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | notices to the host in place of events ([android.md §4.2](frontends/android.md#42-notices)) |
-| Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)) |
+| Change feed | `changes_since` plus events | pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)); the feed over held folders is read on iOS only ([android.md §6](frontends/android.md#6-the-handler-on-a-pulled-tree)) |
 | Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |
 
 Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/android.md), [android-app.md](frontends/android-app.md).
