@@ -30,13 +30,18 @@ targets:
     sources:
       - path: Shared
       - path: App
+        excludes: [Info.plist]
       - path: ../../macos/Shared/Tsync.swift
+      - path: ../../macos/TsyncApp/Reconciler.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.phone
         PRODUCT_NAME: tsync
         CODE_SIGN_ENTITLEMENTS: App/App.entitlements
         GENERATE_INFOPLIST_FILE: YES
+        # The commit About shows: run-device.sh passes TSYNC_COMMIT.
+        INFOPLIST_FILE: App/Info.plist
+        INFOPLIST_KEY_NSCameraUsageDescription: "tsync scans setup codes to join a domain."
         INFOPLIST_KEY_CFBundleDisplayName: tsync
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

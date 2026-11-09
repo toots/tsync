@@ -1,6 +1,16 @@
 import FileProvider
 import Foundation
+#if os(macOS)
 import ServiceManagement
+#endif
+
+/// The frontend a File Provider domain is configured with: iOS domains use the
+/// android frontend's lazy tree (ios.md §9).
+#if os(macOS)
+let presentingFrontend = "file_provider"
+#else
+let presentingFrontend = "android"
+#endif
 
 /// The domains of the config that are presented by the File Provider (§9.1
 /// step 1); nil when the config cannot be read.
@@ -13,8 +23,8 @@ func configuredDomainNames(_ url: URL = Tsync.configFile) -> [String]? {
     return domains.compactMap { domain in
         let frontends = domain["frontends"] as? [Any] ?? []
         let presented = frontends.contains { frontend in
-            if let name = frontend as? String { return name == "file_provider" }
-            return (frontend as? [String: Any])?["type"] as? String == "file_provider"
+            if let name = frontend as? String { return name == presentingFrontend }
+            return (frontend as? [String: Any])?["type"] as? String == presentingFrontend
         }
         return presented ? domain["name"] as? String : nil
     }
@@ -84,7 +94,9 @@ final class Reconciler {
             let (existing, _) = listDomains(until)
             let removed = existing.filter { remove($0, until, &report) }
             if removed.count == existing.count {
+                #if os(macOS)
                 try? SMAppService.mainApp.unregister()
+                #endif
                 try? fm.removeItem(at: Tsync.purgeMarker)
             }
             return ([], report)
@@ -139,7 +151,7 @@ final class Reconciler {
         for (id, name) in wanted.sorted(by: { $0.key < $1.key }) where !present.contains(id) {
             let domain = NSFileProviderDomain(
                 identifier: NSFileProviderDomainIdentifier(id), displayName: name)
-            domain.supportsSyncingTrash = false
+            if #available(macOS 13, iOS 18, *) { domain.supportsSyncingTrash = false }
             if let error = call(until, { NSFileProviderManager.add(domain, completionHandler: $0) }) {
                 report.failures.append("\(name): \(error.localizedDescription)")
                 continue
@@ -175,16 +187,21 @@ final class Reconciler {
         return (domains, error == nil)
     }
 
-    /// Removal keeps local edits the system had not handed over yet.
+    /// Removal keeps local edits the system had not handed over yet, where the
+    /// system offers it: iOS removes them (ios-app.md §3).
     private func remove(
         _ domain: NSFileProviderDomain, _ until: Date, _ report: inout ReconcileReport
     ) -> Bool {
         var location: URL?
         let error = call(until) { done in
+            #if os(macOS)
             NSFileProviderManager.remove(domain, mode: .preserveDirtyUserData) { url, error in
                 location = url
                 done(error)
             }
+            #else
+            NSFileProviderManager.remove(domain) { error in done(error) }
+            #endif
         }
         if let error = error {
             report.failures.append("\(domain.displayName): \(error.localizedDescription)")

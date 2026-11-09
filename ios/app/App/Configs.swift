@@ -56,6 +56,11 @@ enum Configs {
                 return "\(name): \(sentence)"
             }
         }
+        return write(data)
+    }
+
+    /// android-app §6.1: atomically, owner-only.
+    private static func write(_ data: Data) -> String? {
         do {
             let file = Tsync.configFile
             try FileManager.default.createDirectory(
@@ -69,6 +74,65 @@ enum Configs {
         return nil
     }
 
+    /// A configured domain, as Settings lists it.
+    struct Entry: Identifiable {
+        let name: String
+        let server: String
+        var id: String { name }
+    }
+
+    static func entries() -> [Entry] {
+        (read()["domains"] as? [[String: Any]] ?? []).compactMap { domain in
+            guard let name = domain["name"] as? String else { return nil }
+            let backend = (domain["backends"] as? [[String: Any]])?.first ?? [:]
+            let server = backend["url"] as? String ?? backend["path"] as? String ?? ""
+            return Entry(name: name, server: server)
+        }
+    }
+
+    static var exists: Bool { FileManager.default.fileExists(atPath: Tsync.configFile.path) }
+
+    /// The core's sentence when the config does not load, else nil.
+    static func loadFailure() -> String? {
+        guard let first = entries().first else { return "the config names no domain" }
+        guard let text = try? String(contentsOf: Tsync.configFile, encoding: .utf8) else {
+            return "the config cannot be read"
+        }
+        return Core.checkConfig(first.name, candidate: text)
+    }
+
+    /// Takes the domain out of the config, keeping its entry for `waitsForRestart`.
+    static func remove(_ name: String) -> String? {
+        var current = read()
+        let domains = current["domains"] as? [[String: Any]] ?? []
+        guard let removed = domains.first(where: { $0["name"] as? String == name }) else { return nil }
+        current["domains"] = domains.filter { $0["name"] as? String != name }
+        guard let data = try? JSONSerialization.data(withJSONObject: current) else {
+            return "the config does not encode"
+        }
+        if let refusal = write(data) { return refusal }
+        UserDefaults.standard.set(
+            try? JSONSerialization.data(withJSONObject: removed), forKey: keptKey(name))
+        return nil
+    }
+
+    /// ios-app.md §5: the joined domains whose settings differ from those they
+    /// were removed with, which a booted extension may still serve. Their
+    /// kept entries go.
+    static func waitsForRestart(_ joined: [[String: Any]]) -> [String] {
+        joined.compactMap { domain in
+            guard let name = domain["name"] as? String else { return nil }
+            let key = keptKey(name)
+            defer { UserDefaults.standard.removeObject(forKey: key) }
+            guard let data = UserDefaults.standard.data(forKey: key),
+                let kept = try? JSONSerialization.jsonObject(with: data) as? NSDictionary
+            else { return nil }
+            return kept.isEqual(to: domain) ? nil : name
+        }
+    }
+
+    private static func keptKey(_ name: String) -> String { "removed-domain." + name }
+
     private static func deviceName() -> String {
         let name = UIDevice.current.name.trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? "iphone" : name
@@ -79,15 +143,5 @@ enum Configs {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [:] }
         return json
-    }
-
-    static func registerAll() {
-        for name in Tsync.domainNames(Tsync.configFile) {
-            let domain = NSFileProviderDomain(
-                identifier: NSFileProviderDomainIdentifier(domainIdentifier(name)), displayName: name)
-            NSFileProviderManager.add(domain) { error in
-                if let error = error { NSLog("tsync: registering \(name): \(error)") }
-            }
-        }
     }
 }

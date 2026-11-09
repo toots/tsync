@@ -3,103 +3,103 @@ import SwiftUI
 
 @main
 struct TsyncPhoneApp: App {
+    @StateObject private var model = AppModel()
+
     init() {
         Core.start(bounded: false)
         if CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
     }
 
     var body: some Scene {
-        WindowGroup { ContentView() }
+        WindowGroup { RootView().environmentObject(model) }
     }
 }
 
-/// Joins domains from a setup link (setup-link §6.3), registers them with
-/// the File Provider, and shows the extension's footprint log.
-struct ContentView: View {
-    @State private var link = ""
-    @State private var message = ""
-    @State private var domains = Tsync.domainNames(Tsync.configFile)
-    @State private var footprint = ""
+/// ios-app.md §2: Setup until a config loads, then Settings.
+struct RootView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var phase
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Domains") {
-                    if domains.isEmpty { Text("None yet") }
-                    ForEach(domains, id: \.self) { Text($0) }
-                }
-                Section("Join") {
-                    TextField("Setup link", text: $link, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("Join") { join() }.disabled(link.isEmpty)
-                    Button("Add a local test domain") { addLocalTest() }
-                    Button("Remove every domain", role: .destructive) { removeAll() }
-                    if !message.isEmpty { Text(message).font(.footnote) }
-                }
-                Section("Self-test") {
-                    Text("Creates \(SelfTest.files) files and a \(SelfTest.bigBytes >> 20) MiB file in the Test domain, lists them, evicts the large one and reads it back, all through the Files extension.")
-                        .font(.footnote)
-                    Button("Run self-test") {
-                        message = "Self-test running; refresh the memory log"
-                        Task.detached { await SelfTest.run() }
-                    }
-                }
-                Section("Extension memory") {
-                    Button("Refresh") { readFootprint() }
-                    Button("Clear", role: .destructive) {
-                        try? FileManager.default.removeItem(at: Footprint.log)
-                        readFootprint()
-                    }
-                    Text(footprint).font(.system(.caption2, design: .monospaced))
-                }
+            if model.loadFailure != nil || !model.configured {
+                SetupView(failure: model.loadFailure)
+            } else {
+                SettingsView()
             }
-            .navigationTitle("tsync")
-            .onAppear {
-                Configs.registerAll()
-                readFootprint()
+        }
+        .onChange(of: phase) { phase in
+            if phase == .active { model.reload() }
+        }
+    }
+}
+
+/// What the screens show of the config and of the framework's domains, and
+/// the registration passes (ios-app.md §3).
+@MainActor
+final class AppModel: ObservableObject {
+    @Published private(set) var configured = false
+    @Published private(set) var loadFailure: String?
+    @Published private(set) var entries: [Configs.Entry] = []
+    @Published private(set) var turnedOff: Set<String> = []
+    @Published private(set) var passFailures: [String] = []
+
+    private let reconciler = Reconciler()
+    private var observer: NSObjectProtocol?
+
+    init() {
+        reconciler.onPass = { [weak self] domains, report in
+            // ios.md §5.1: bringing the app forward refreshes what Files shows.
+            for domain in domains {
+                NSFileProviderManager(for: domain)?.signalEnumerator(for: .workingSet) { _ in }
             }
+            let off = Set(domains.filter { !$0.userEnabled }.map(\.displayName))
+            let failures = report.failures + report.collisions.map { "\($0): its identifier collides" }
+            Task { @MainActor in
+                self?.turnedOff = off
+                self?.passFailures = failures
+            }
+        }
+        observer = NotificationCenter.default.addObserver(
+            forName: .fileProviderDomainDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.readStates() }
+        }
+        reload()
+    }
+
+    /// After launch, on every return to the foreground and every config change.
+    func reload() {
+        configured = Configs.exists
+        loadFailure = configured ? Configs.loadFailure() : nil
+        entries = Configs.entries()
+        reconciler.request()
+    }
+
+    private func readStates() {
+        NSFileProviderManager.getDomainsWithCompletionHandler { domains, _ in
+            let off = Set(domains.filter { !$0.userEnabled }.map(\.displayName))
+            Task { @MainActor in self.turnedOff = off }
         }
     }
 
-    private func join() {
-        guard let reply = Core.text("setup_link", Data(link.utf8)),
-            let json = try? JSONSerialization.jsonObject(with: Data(reply.utf8)) as? [String: Any]
-        else { return message = "the core gave no answer" }
-        if let error = json["error"] as? String { return message = error }
-        let joined = (json["domains"] as? [[String: Any]] ?? []).compactMap { d -> [String: Any]? in
-            guard let name = d["name"] as? String, let url = d["url"] as? String,
-                let secret = d["secret"] as? String
-            else { return nil }
-            return Configs.server(name: name, url: url, secret: secret)
-        }
-        finish(Configs.add(joined))
-    }
-
-    private func addLocalTest() {
-        finish(Configs.add([Configs.localTest()]))
-    }
-
-    private func finish(_ refusal: String?) {
-        message = refusal ?? "Joined; open the Files app"
-        domains = Tsync.domainNames(Tsync.configFile)
-        if refusal == nil { link = "" }
-        Configs.registerAll()
-    }
-
-    private func removeAll() {
-        NSFileProviderManager.removeAllDomains { error in
-            DispatchQueue.main.async {
-                if let error = error { return message = error.localizedDescription }
-                try? FileManager.default.removeItem(at: Tsync.configFile)
-                domains = []
-                message = "Removed; restart the app to join again"
+    /// ios-app.md §5: out of the framework, then out of the config; the reason
+    /// when either refuses.
+    func remove(_ entry: Configs.Entry) async -> String? {
+        let domain = NSFileProviderDomain(
+            identifier: NSFileProviderDomainIdentifier(domainIdentifier(entry.name)),
+            displayName: entry.name)
+        do {
+            try await NSFileProviderManager.remove(domain)
+        } catch {
+            // providerDomainNotFound, named only from iOS 17.1: nothing to remove.
+            let error = error as NSError
+            if !(error.domain == NSFileProviderErrorDomain && error.code == -2013) {
+                return error.localizedDescription
             }
         }
-    }
-
-    private func readFootprint() {
-        let text = (try? String(contentsOf: Footprint.log, encoding: .utf8)) ?? "no record yet"
-        footprint = text.split(separator: "\n").suffix(60).joined(separator: "\n")
+        let refusal = Configs.remove(entry.name)
+        reload()
+        return refusal
     }
 }
