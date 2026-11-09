@@ -84,10 +84,13 @@ let impl_names =
   String.concat ", " (List.map impl_name [System; Openssl; Native])
 
 (* security-model §9.2: [System] is OpenSSL on a host that registers no
-   platform implementation of its own. *)
+   platform implementation of its own, or the OCaml one in a build without
+   OpenSSL. *)
 let built impl =
   let find impl = List.assoc_opt impl (Atomic.get backends) in
-  match (impl, find impl) with System, None -> find Openssl | _, b -> b
+  match impl with
+    | System -> List.find_map find [System; Openssl; Native]
+    | impl -> find impl
 
 (* 05 §2 [tls]: unset is the platform implementation, else OpenSSL, else the
    OCaml one. *)
@@ -100,7 +103,7 @@ let backend () =
               Fail.raise_ Fail.Invalid "this build has no %s TLS"
                 (impl_name impl))
     | None -> (
-        match List.find_map built [System; Openssl; Native] with
+        match built System with
           | Some b -> b
           | None -> Fail.raise_ Fail.Invalid "this build has no TLS")
 

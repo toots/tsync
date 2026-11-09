@@ -3,8 +3,7 @@ module Transport = Tsync_http.Transport
 
 type connection
 
-external open_ :
-  string -> int -> string -> string array option -> connection
+external open_ : string -> int -> string -> string array option -> connection
   = "tsync_http_apple_open"
 
 external wake_fd : connection -> Unix.file_descr = "tsync_http_apple_wake_fd"
@@ -14,7 +13,7 @@ external reason : connection -> string = "tsync_http_apple_reason"
 external receive : connection -> Bigstring.t -> int -> int -> int
   = "tsync_http_apple_receive"
 
-external send : connection -> Bigstring.t -> int -> int -> bool
+external send : connection -> Bigstring.t -> int -> int -> int
   = "tsync_http_apple_send"
 
 external sent : connection -> int = "tsync_http_apple_sent"
@@ -68,12 +67,13 @@ let stream c =
     let rec go off =
       if off < Bigstring.length b then (
         let len = min piece (Bigstring.length b - off) in
-        until ?timeout c (fun () -> if send c b off len then Some () else None);
         until ?timeout c (fun () ->
-            match sent c with
+            match send c b off len with
               | 0 -> None
               | 1 -> Some ()
               | _ -> broken c "write");
+        until ?timeout c (fun () ->
+            match sent c with 0 -> None | 1 -> Some () | _ -> broken c "write");
         go (off + len))
     in
     go 0
@@ -82,9 +82,14 @@ let stream c =
 
 let open_connection ~host ~port (tls : Transport.tls) =
   let anchors =
-    Option.map (fun f -> Array.of_list (ders_of_pem (Fs.read_file f))) tls.ca_file
+    Option.map
+      (fun f -> Array.of_list (ders_of_pem (Fs.read_file f)))
+      tls.ca_file
   in
-  let c = open_ host port tls.host anchors in
+  let c =
+    try open_ host port tls.host anchors
+    with Failure why -> Transport.tls_failure tls.host why
+  in
   match
     until c (fun () ->
         match status c with
