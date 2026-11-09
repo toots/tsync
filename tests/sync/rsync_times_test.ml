@@ -80,6 +80,8 @@ let () =
       ignore (B.resync ());
       p "a peer holds the new mtime: %b\n"
         ((domain_times b "a.txt").mtime = written);
+      p "a peer holds the source's creation time: %b\n"
+        ((domain_times b "a.txt").created = (Fs.times path).created);
       report "out of the domain" (B.rsync ~src:domain ~dst:(local out) ());
       let copy = Filename.concat out "a.txt" in
       Fs.set_times copy { mtime = 0; created = 0 };
@@ -87,5 +89,8 @@ let () =
         (B.rsync ~src:domain ~dst:(local out) ());
       p "the local copy holds the domain's mtime: %b\n"
         ((Fs.times copy).mtime = written);
+      p "the local copy holds the domain's creation time where one is set: %b\n"
+        ((not Fs.sets_created)
+        || (Fs.times copy).created = (domain_times b "a.txt").created);
       p "pending: A %d, B %d\n" (A.activity ()).pending (B.activity ()).pending);
   Test_support.finish root
