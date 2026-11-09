@@ -822,9 +822,10 @@ let of_json j =
   in
   let tls =
     match string_field "" l "tls" with
-      | Some ("native" | "openssl") as t -> t
+      | Some s when Tsync_http.Transport.tls_impl_of_string s <> None -> Some s
       | None -> None
-      | Some _ -> fail "tls" "expected native or openssl"
+      | Some _ ->
+          fail "tls" "expected one of %s" Tsync_http.Transport.impl_names
   in
   {
     client_name = name;

@@ -57,7 +57,7 @@ type t = {
   finished : unit Rt.Promise.t;
   connections : int Atomic.t;
   requests : int Atomic.t;
-  conns : Transport.t list Atomic.t;
+  conns : Unix.file_descr list Atomic.t;
 }
 
 let reason = function
@@ -137,9 +137,8 @@ let split_target target =
           String.sub target (i + 1) (String.length target - i - 1) )
     | None -> (target, "")
 
-let serve_conn lim handle conn requests =
+let serve_conn lim handle ~peer conn requests =
   let reader = Codec.reader conn in
-  let peer = Transport.peer conn in
   let rec loop first =
     let timeout = if first then lim.header_timeout else lim.keepalive_timeout in
     (* One deadline for the whole head: a client trickling a byte at a time
@@ -248,15 +247,14 @@ let rec accept_loop ?tls t lim handle lfd =
               Atomic.incr t.connections;
               let rec add () =
                 let l = Atomic.get t.conns in
-                if not (Atomic.compare_and_set t.conns l (conn :: l)) then
-                  add ()
+                if not (Atomic.compare_and_set t.conns l (fd :: l)) then add ()
               in
               let rec remove () =
                 let l = Atomic.get t.conns in
                 if
                   not
                     (Atomic.compare_and_set t.conns l
-                       (List.filter (( != ) conn) l))
+                       (List.filter (( <> ) fd) l))
                 then remove ()
               in
               add ();
@@ -275,11 +273,12 @@ let rec accept_loop ?tls t lim handle lfd =
                               | Some tls ->
                                   Rt.with_timeout lim.header_timeout (fun () ->
                                       Transport.accept_tls
-                                        ~timeout:lim.header_timeout tls conn)
+                                        ~timeout:lim.header_timeout tls fd)
                           in
-                          serve_conn lim handle conn t.requests
+                          serve_conn lim handle ~peer:(Transport.peer fd) conn
+                            t.requests
                         with e when not (Rt.is_cancelled e) ->
-                          Log.debug "http %s: %s" (Transport.peer conn)
+                          Log.debug "http %s: %s" (Transport.peer fd)
                             (Printexc.to_string e)))
               with
                 | () -> ()

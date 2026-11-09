@@ -568,10 +568,12 @@ let globals io ~advanced j =
       links (links_used j)
   in
   let j = if fields links = [] then unset j "links" else set j "links" links in
-  field io j "tls" "TLS implementation (openssl, native)" ~default:"openssl"
+  field io j "tls"
+    ("TLS implementation (" ^ Tsync_http.Transport.impl_names ^ ")")
+    ~default:"system"
     ~check:(fun s ->
-      if List.mem s ["openssl"; "native"] then None
-      else Some "openssl or native")
+      if Tsync_http.Transport.tls_impl_of_string s <> None then None
+      else Some ("one of " ^ Tsync_http.Transport.impl_names))
     String
 
 let describe_domain d =
