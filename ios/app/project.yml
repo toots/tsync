@@ -1,8 +1,9 @@
 # The iOS app and its File Provider extension. Generate with xcodegen on a Mac
-# after ./build-core.sh has put the core's objects in core/.
+# after ./build-core.sh has put the core's objects in core/. The identifiers
+# (ios.md §3.1) come from the environment at generation: run-device.sh checks
+# them.
 name: TsyncPhone
 options:
-  bundleIdPrefix: org.feverdreamtv
   deploymentTarget:
     iOS: "16.0"
   xcodeVersion: "16"
@@ -11,7 +12,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
-    DEVELOPMENT_TEAM: PSE2VP6582
+    DEVELOPMENT_TEAM: ${TSYNC_TEAM_ID}
+    TSYNC_APP_GROUP: ${TSYNC_APP_GROUP}
     CODE_SIGN_STYLE: Automatic
     SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridge.h
     HEADER_SEARCH_PATHS: "$(SRCROOT)/../core $(SRCROOT)/../../lib/frontends/android/jni"
@@ -35,7 +37,7 @@ targets:
       - path: ../../macos/TsyncApp/Reconciler.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.phone
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}
         PRODUCT_NAME: tsync
         CODE_SIGN_ENTITLEMENTS: App/App.entitlements
         GENERATE_INFOPLIST_FILE: YES
@@ -71,7 +73,7 @@ targets:
       - path: ../../macos/TsyncFileProvider/ChangeBatch.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.phone.fileprovider
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}.fileprovider
         CODE_SIGN_ENTITLEMENTS: FileProvider/FileProvider.entitlements
         INFOPLIST_FILE: FileProvider/Info.plist
         MARKETING_VERSION: "0.1"

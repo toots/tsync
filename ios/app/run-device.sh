@@ -6,6 +6,20 @@ log() { print "$(date +%T) $*" | tee -a /tmp/tsync-ios-device.log }
 cd "${0:A:h}"
 export PATH=/opt/homebrew/bin:$PATH
 
+# ios.md §3.1: the identifiers come from the environment, else from this
+# machine's file of `export` lines, kept out of the repository.
+identifiers=${TSYNC_IOS_IDENTIFIERS:-~/.config/tsync/ios-identifiers}
+[[ -r $identifiers ]] && source $identifiers
+missing=()
+for name in TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP; do
+  [[ -n ${(P)name:-} ]] || missing+=$name
+done
+if (( $#missing )); then
+  log "missing identifiers: ${missing[*]} (set them, or export them in $identifiers)"
+  exit 1
+fi
+export TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP
+
 # A test server for Diagnostics, from a file kept out of the repository: two
 # lines, the server's URL then its secret.
 test_server=~/sources/tsync-test-server/phone-test-server
