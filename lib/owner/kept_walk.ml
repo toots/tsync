@@ -5,7 +5,7 @@ type entry = {
   container : string;
   kind : [ `Dir | `File ];
   size : int;
-  mtime : float;
+  mtime : int;
 }
 
 let entry_json e =
@@ -18,7 +18,7 @@ let entry_json e =
     @
       match e.kind with
       | `Dir -> []
-      | `File -> [("size", `Int e.size); ("mtime", `Float e.mtime)])
+      | `File -> [("size", `Int e.size); ("mtimeNs", `Int e.mtime)])
 
 let header_of line =
   match Yojson.Safe.from_string line with

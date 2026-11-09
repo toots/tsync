@@ -113,17 +113,24 @@ let plan_row (row : Protocol.row) : Apply_plan.row =
     is_dir = row.kind = `Dir;
     is_link = row.kind = `Symlink;
     size = row.size;
-    mtime = row.mtime;
+    times = row.times;
     content_id = row.content_id;
     read_only = row.read_only;
   }
+
+(* §8.2: a row with no time gives its placeholder the time it is made. *)
+let placeholder_times (t : Fs.times) =
+  if t.mtime > 0 then t
+  else (
+    let now = Fs.now () in
+    { mtime = now; created = now })
 
 let placeholder name (row : Apply_plan.row) : Cf.placeholder =
   {
     name;
     is_dir = row.is_dir;
     size = (if row.is_dir then 0 else row.size);
-    mtime = (if row.mtime > 0. then row.mtime else Unix.gettimeofday ());
+    times = placeholder_times row.times;
     identity =
       Identity.encode
         (Identity.of_item ~ref_:row.ref_ ~is_dir:row.is_dir
@@ -216,7 +223,7 @@ let children dir =
                       (if st.placeholder then Identity.decode st.identity
                        else None);
                     size = Int64.to_int stat.st_size;
-                    mtime = stat.st_mtime;
+                    times = Fs.times path;
                     read_only = stat.st_perm land 0o200 = 0;
                   }))
       (Array.to_list (try Sys.readdir dir with Sys_error _ -> [||]))

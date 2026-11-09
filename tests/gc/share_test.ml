@@ -33,7 +33,9 @@ let () =
     [
       (Key.chunk d (Chunk_key.of_body "x"), "x");
       ( Key.child d Folder_id.root "a.txt",
-        (Manifest.make ~name:"a.txt" ~size:cs ~mtime:0. ~chunk_size:cs
+        (Manifest.make ~name:"a.txt" ~size:cs
+           ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+           ~chunk_size:cs
            [Chunk_key.of_body "x"])
           .body );
       ( Key.child d Folder_id.root "docs",
@@ -41,11 +43,15 @@ let () =
       ( Key.anchor d folder,
         Folder.anchor_body { parent = Folder_id.root; aname = "docs" } );
       ( Key.child d folder "b.txt",
-        (Manifest.make ~name:"b.txt" ~size:cs ~mtime:0. ~chunk_size:cs
+        (Manifest.make ~name:"b.txt" ~size:cs
+           ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+           ~chunk_size:cs
            [Chunk_key.of_body "x"])
           .body );
       ( Key.child d Folder_id.root "p.jpg",
-        (Manifest.make ~name:"p.jpg" ~size:cs ~mtime:0. ~chunk_size:cs
+        (Manifest.make ~name:"p.jpg" ~size:cs
+           ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+           ~chunk_size:cs
            [Chunk_key.of_body "x"])
           .body );
       ( Key.child d Folder_id.root "empty",

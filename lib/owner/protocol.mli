@@ -22,7 +22,7 @@ type row = {
   name : string;
   kind : [ `Dir | `File | `Symlink ];
   size : int;
-  mtime : float;
+  times : Fs.times;
   etag : string;
   is_uploaded : bool;
   content_id : string option;
@@ -51,7 +51,7 @@ type listing = Listed of page | Walk_stale
 
 (** [aside]: the row of the item made at the conflicted-copy name, when the
     action landed there (08 §3.3). *)
-type written = { size : int; mtime : float; item : row; aside : row option }
+type written = { size : int; times : Fs.times; item : row; aside : row option }
 
 (** The item at the destination, and [aside] as for {!written}. *)
 type placed = { item : row; aside : row option }
@@ -281,6 +281,8 @@ type _ request =
   | Write : {
       at : target;  (** a file by [Ref], or a place by [Child] *)
       staging : string;
+      created : int option;
+          (** the file's creation time, where the staging file cannot hold it *)
       base : string option;
       exclusive : bool;
       aside : bool;

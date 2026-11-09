@@ -79,7 +79,12 @@ let routes () =
           | Some content ->
               let m =
                 R.upload_chunks ~name ~size:(String.length content)
-                  ~chunk_size:8 ~mtime:1. (fun i ->
+                  ~chunk_size:8
+                  ~times:
+                    {
+                      Tsync_core.Fs.mtime = 1_000_000_000;
+                      created = 1_000_000_000;
+                    } (fun i ->
                     Bytes
                       (Bigstring.of_string
                          (String.sub content (i * 8)
@@ -204,8 +209,10 @@ let routes () =
       put (Key.anchor d ext)
         (Folder.anchor_body { parent = Folder_id.root; aname = ".tsync-ext" });
       let m =
-        R.upload_chunks ~name:"r1" ~size:6 ~chunk_size:8 ~mtime:1. (fun _ ->
-            Bytes (Bigstring.of_string "sealed"))
+        R.upload_chunks ~name:"r1" ~size:6 ~chunk_size:8
+          ~times:
+            { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+          (fun _ -> Bytes (Bigstring.of_string "sealed"))
       in
       R.put_manifest (Key.child d ext "r1") (Manifest.rename m "r1");
       get "d1" "list" [];

@@ -1,15 +1,22 @@
-(** The file manifest, binary [tsyncm03] (spec 02 §2.6): a frozen format read
+(** The file manifest, binary [tsyncm04] (spec 02 §2.6): a frozen format read
     and written exactly as specified. *)
 
+(** A manifest:
+    - [body]: the exact bytes;
+    - [mtime], [created]: nanoseconds since the epoch;
+    - [name]: the leaf recorded at write time;
+    - [link]: a symlink's target;
+    - [h1]: the whole-file digest, seed 0, the content identity. *)
 type t = private {
-  body : string;  (** the exact bytes *)
+  body : string;
   size : int;
-  mtime : float;
+  mtime : int;
+  created : int;
   chunk_size : int;
   count : int;
-  name : string;  (** the leaf recorded at write time *)
-  link : string option;  (** a symlink's target *)
-  h1 : string;  (** the whole-file digest, seed 0: the content identity *)
+  name : string;
+  link : string option;
+  h1 : string;
   h2 : string;
 }
 
@@ -41,17 +48,20 @@ val digest_of : size:int -> cs:int -> Chunk_key.t list -> string * string
 val make :
   name:string ->
   size:int ->
-  mtime:float ->
+  times:Fs.times ->
   chunk_size:int ->
   Chunk_key.t list ->
   t
 
-val symlink : name:string -> mtime:float -> string -> t
+val symlink : name:string -> times:Fs.times -> string -> t
 
 (** The same content recorded under another leaf. *)
 val rename : t -> string -> t
 
-val with_mtime : t -> float -> t
+(** The same content with other times. *)
+val times : t -> Fs.times
+
+val with_times : t -> Fs.times -> t
 
 (** [h1]. *)
 val content_id : t -> string

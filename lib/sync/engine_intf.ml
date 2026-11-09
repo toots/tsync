@@ -93,10 +93,17 @@ module type S = sig
   val create : string -> exclusive:bool -> unit
 
   (** Adopt a complete file by rename, then close; staged aside when [base] is
-      not the key's current content, nothing when the content is the same. The
-      path that holds what was written. *)
+      not the key's current content, only its times when the content is the
+      same. [created] stands for the file's own where its frontend passes one.
+      The path that holds what was written. *)
   val write_whole :
-    string -> src:string -> ?base:string -> exclusive:bool -> unit -> string
+    ?created:int ->
+    string ->
+    src:string ->
+    ?base:string ->
+    exclusive:bool ->
+    unit ->
+    string
 
   (** [aside(key)] (conflict-resolution §5): the conflicted-copy name beside the
       key that nothing holds yet. *)

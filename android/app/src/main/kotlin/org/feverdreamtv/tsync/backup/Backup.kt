@@ -212,7 +212,10 @@ class Backup(private val context: Context) {
         val ingest = tsync.ingest
         // The intent stays open: the media store keeps the photo, so a failed or interrupted
         // commit drops the staged copy and the record retries.
-        val name = ingest.stage(domain, Target.Child(folder, Naming.leaf(record.target)), firstUpload, Processing.base(record), row.captureMillis)
+        val name = ingest.stage(
+            domain, Target.Child(folder, Naming.leaf(record.target)), firstUpload, Processing.base(record),
+            modified = row.modifiedSeconds * 1000, created = row.captureMillis,
+        )
         try {
             val copied = media.open(record.volume, row).use { input -> ingest.staging(name).outputStream().use(input::copyTo) }
             if (copied != row.size) throw java.io.IOException("copied $copied bytes of ${row.size}")

@@ -57,7 +57,9 @@ data class Item(
     val name: String,
     val kind: Kind,
     val size: Long,
-    val mtime: Double,
+    /** Nanoseconds since the epoch; 0 for a folder. */
+    val mtimeNs: Long,
+    val createdNs: Long,
     val etag: String,
     val isUploaded: Boolean,
     val contentId: String?,
@@ -66,7 +68,8 @@ data class Item(
     val pinnedUntil: Long?,
 ) {
     val isDir: Boolean get() = kind == Kind.DIR
-    val mtimeMillis: Long get() = (mtime * 1000).toLong()
+    val mtimeMillis: Long get() = mtimeNs / 1_000_000
+    val createdMillis: Long get() = createdNs / 1_000_000
 
     companion object {
         fun of(row: JSONObject): Item = Item(
@@ -75,7 +78,8 @@ data class Item(
             name = row.optString("name", ""),
             kind = Kind.of(row.optString("kind", "file")),
             size = row.optLong("size", 0),
-            mtime = row.optDouble("mtime", 0.0),
+            mtimeNs = row.optLong("mtimeNs", 0),
+            createdNs = row.optLong("createdNs", 0),
             etag = row.optString("etag", ""),
             isUploaded = row.optBoolean("isUploaded", true),
             contentId = text(row, "contentId"),
@@ -147,16 +151,19 @@ object Requests {
     private fun child(verb: String, parentRef: String, name: String, exclusive: Boolean) =
         action(verb).put("parentRef", parentRef).put("name", name).put("exclusive", exclusive)
 
-    fun writeChild(parentRef: String, name: String, staging: String, base: String?, exclusive: Boolean): JSONObject {
+    fun writeChild(parentRef: String, name: String, staging: String, base: String?, exclusive: Boolean, createdNs: Long? = null): JSONObject {
         val request = action("write").put("parentRef", parentRef).put("name", name)
-        return write(request, staging, base).put("exclusive", exclusive)
+        return write(request, staging, base, createdNs).put("exclusive", exclusive)
     }
 
-    fun writeRef(ref: String, staging: String, base: String?) = write(action("write").put("ref", ref), staging, base)
+    fun writeRef(ref: String, staging: String, base: String?, createdNs: Long? = null) =
+        write(action("write").put("ref", ref), staging, base, createdNs)
 
-    private fun write(request: JSONObject, staging: String, base: String?): JSONObject {
+    /** [createdNs]: the file's creation time, which the staging file cannot hold (08 §3.3). */
+    private fun write(request: JSONObject, staging: String, base: String?, createdNs: Long?): JSONObject {
         request.put("staging", staging).put("await", true)
         base?.let { request.put("base", it) }
+        createdNs?.let { request.put("createdNs", it) }
         return request
     }
 
@@ -219,10 +226,11 @@ class Client(private val core: Core) {
     fun mkdir(parentRef: String, name: String, exclusive: Boolean): Item = item(Requests.mkdir(parentRef, name, exclusive))
     fun create(parentRef: String, name: String): Item = item(Requests.create(parentRef, name, true))
 
-    fun writeChild(parentRef: String, name: String, staging: String, base: String?, exclusive: Boolean): Item =
-        item(Requests.writeChild(parentRef, name, staging, base, exclusive))
+    fun writeChild(parentRef: String, name: String, staging: String, base: String?, exclusive: Boolean, createdNs: Long? = null): Item =
+        item(Requests.writeChild(parentRef, name, staging, base, exclusive, createdNs))
 
-    fun writeRef(ref: String, staging: String, base: String?): Item = item(Requests.writeRef(ref, staging, base))
+    fun writeRef(ref: String, staging: String, base: String?, createdNs: Long? = null): Item =
+        item(Requests.writeRef(ref, staging, base, createdNs))
     fun rename(ref: String, parentRef: String, name: String): Item = item(Requests.rename(ref, parentRef, name))
 
     fun delete(item: Item) {

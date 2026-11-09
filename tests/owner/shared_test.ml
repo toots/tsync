@@ -79,7 +79,8 @@ let rec scrub = function
            (fun (k, v) ->
              match k with
                | "id" -> (k, `String "<n>")
-               | "ref" | "parentRef" | "etag" | "contentId" | "mtime" ->
+               | "ref" | "parentRef" | "etag" | "contentId" | "mtimeNs"
+               | "createdNs" ->
                    (k, `String "<x>")
                | _ -> (k, scrub v))
            l)

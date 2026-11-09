@@ -130,7 +130,8 @@ let served video root =
     R.put_manifest
       (Key.child C.domain Folder_id.root name)
       (R.upload_chunks ~name ~size:(String.length content) ~chunk_size:cs
-         ~mtime:1. (fun i ->
+         ~times:{ Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+         (fun i ->
            Bytes
              (Bigstring.of_string
                 (String.sub content (i * cs)

@@ -103,7 +103,7 @@ module Make (C : Engine_ctx.S) = struct
             let path = local_path dst.path rel in
             match Unix.lstat path with
               | { st_kind = S_DIR; _ } -> Dir_at Local
-              | _ -> File_at (local_fact path ~against)
+              | _ -> File_at (local_fact path ~against, Fs.times path)
               | exception Unix.Unix_error (ENOENT, _, _) -> Absent Local)
         | Domain -> (
             match in_domain (domain_path dst.path rel) with
@@ -155,7 +155,8 @@ module Make (C : Engine_ctx.S) = struct
                 | `Missing -> Missing
                 | `Local_dir | `Domain_dir -> Dir
                 | `Key m -> Key m
-                | `Local_file -> File Unhashed
+                | `Local_file ->
+                    File (Unhashed, Fs.times (local_path src.path rel))
             in
             let target =
               target_fact rel
@@ -163,11 +164,11 @@ module Make (C : Engine_ctx.S) = struct
             in
             let source : Rsync_plan.source =
               match (source, target) with
-                | File _, Key_at d ->
+                | File (_, t), Key_at d ->
                     File
-                      (local_fact (local_path src.path rel) ~against:(Some d))
-                | File _, _ ->
-                    File (local_fact (local_path src.path rel) ~against:None)
+                      (local_fact (local_path src.path rel) ~against:(Some d), t)
+                | File (_, t), _ ->
+                    File (local_fact (local_path src.path rel) ~against:None, t)
                 | s, _ -> s
             in
             let d = Rsync_plan.decide ~move source target in
@@ -250,7 +251,7 @@ module Make (C : Engine_ctx.S) = struct
           ignore
           @@ attempt rel (fun () ->
               match d with
-                | Rsync_plan.Copy_manifest m ->
+                | Rsync_plan.Copy_manifest m | Retime_in_domain m ->
                     Bulk.install run tp m;
                     succeed rel 0
                 | _ -> (
@@ -260,7 +261,7 @@ module Make (C : Engine_ctx.S) = struct
                           skipped := (rel, "symlinks are skipped") :: !skipped
                       | { st_kind = S_LNK; _ }, `Keep ->
                           Bulk.install_link run tp ~target:(Unix.readlink path)
-                            ~mtime:(Unix.lstat path).st_mtime;
+                            ~times:(Fs.times path);
                           succeed rel 0
                       | { st_kind = S_LNK; _ }, `Follow -> (
                           match Unix.stat path with
@@ -270,7 +271,7 @@ module Make (C : Engine_ctx.S) = struct
                                   (rel, "a dangling symlink") :: !skipped)
                       | _ -> upload rel tp path)))
         (with_decision (function
-          | Copy_manifest _ | Upload _ -> true
+          | Copy_manifest _ | Retime_in_domain _ | Upload _ -> true
           | _ -> false));
       (* Downloads into local files, whole or the differing chunks only. *)
       List.iter
@@ -301,7 +302,7 @@ module Make (C : Engine_ctx.S) = struct
                                 ~len:(Bigstring.length b) ~off:(i * m.chunk_size)
                             done;
                             Fs.fsync fd);
-                        Unix.utimes tmp m.mtime m.mtime;
+                        Fs.set_times tmp (Manifest.times m);
                         Fs.unix_rename tmp path);
                     succeed rel m.size
                 | Patch_local (m, indices) ->
@@ -316,11 +317,14 @@ module Make (C : Engine_ctx.S) = struct
                           indices;
                         Unix.ftruncate fd m.size;
                         Fs.fsync fd);
-                    Unix.utimes path m.mtime m.mtime;
+                    Fs.set_times path (Manifest.times m);
                     succeed rel !sent
+                | Retime_local times ->
+                    Fs.set_times path times;
+                    succeed rel 0
                 | _ -> ()))
         (with_decision (function
-          | Assemble _ | Patch_local _ -> true
+          | Assemble _ | Patch_local _ | Retime_local _ -> true
           | _ -> false));
       List.iter
         (fun (rel, d) ->

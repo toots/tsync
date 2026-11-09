@@ -235,9 +235,9 @@ def assemble(m, chunk_prefix, cache_key):
     store.assemble([chunk_key(chunk_prefix, k) for k in m.keys()], cache_key)
 
 
-def mtime_tuple(mtime):
+def mtime_tuple(mtime_ns):
     try:
-        t = time.localtime(mtime)
+        t = time.localtime(mtime_ns / 1e9)
         if t.tm_year < 1980:
             return (1980, 1, 1, 0, 0, 0)
         return t[:6]

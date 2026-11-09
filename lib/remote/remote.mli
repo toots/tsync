@@ -52,7 +52,7 @@ module Make (_ : Context.S) : sig
     name:string ->
     size:int ->
     chunk_size:int ->
-    mtime:float ->
+    times:Fs.times ->
     (int -> source) ->
     Manifest.t
 

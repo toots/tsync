@@ -81,7 +81,9 @@ let () =
       p "== files and deduplication\n";
       let build name content =
         R.upload_chunks ~name ~size:(String.length content) ~chunk_size:8
-          ~mtime:1. (fun i ->
+          ~times:
+            { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+          (fun i ->
             Bytes
               (Bigstring.of_string
                  (String.sub content (i * 8)
@@ -106,7 +108,9 @@ let () =
        let total = ref 0 and calls = Atomic.make 0 in
        let content = String.init (n * 8) (fun i -> Char.chr (i mod 251)) in
        ignore
-         (R.upload_chunks ~name:"counted" ~size:(n * 8) ~chunk_size:8 ~mtime:1.
+         (R.upload_chunks ~name:"counted" ~size:(n * 8) ~chunk_size:8
+            ~times:
+              { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
             ~sent:(fun k ->
               let seen = !total in
               Atomic.incr calls;

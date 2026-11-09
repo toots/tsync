@@ -636,7 +636,7 @@ of a chunk key.
 | Folder id | [01-core.md §2.5](../01-core.md#25-folder-ids); reserved `.tsync-root` |
 | Namespace | prefix `tsync/D/manifests/<folder id>/` |
 | Child slot | `tsync/D/manifests/<folder id>/<dual hash of leaf name>` |
-| File manifest | binary `tsyncm03` body at the child slot |
+| File manifest | binary `tsyncm04` body at the child slot |
 | Folder marker | JSON `{"dir":true,"name","id"}` at the child slot |
 | Anchor | JSON `{"parent","name"}` at `…/manifests/<folder id>/.tsync-parent` |
 | Folder index | binary `tsyncidx1` at `…/manifests/<folder id>/.tsync-index` |

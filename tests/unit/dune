@@ -259,3 +259,18 @@
  (alias runtest-serial)
  (action
   (diff dqueue_scale_test.expected dqueue_scale_test.output)))
+
+(executable
+ (name file_times_test)
+ (modules file_times_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  file_times_test.output
+  (run ./file_times_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff file_times_test.expected file_times_test.output)))

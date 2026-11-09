@@ -28,6 +28,8 @@ class WireShapeTest {
         assertTrue(write.getBoolean("await") && write.getBoolean("exclusive"))
         assertEquals("abc", write.getString("base"))
         assertFalse(Requests.writeRef("i:1", "/s/1", null).has("base"))
+        assertFalse(Requests.writeRef("i:1", "/s/1", null).has("createdNs"))
+        assertEquals(7L, Requests.writeRef("i:1", "/s/1", null, 7).getLong("createdNs"))
         assertTrue(Requests.rename("i:1", "root", "b").getBoolean("noreplace"))
         assertEquals("off", Requests.pause(false).getString("arg"))
     }
@@ -35,12 +37,13 @@ class WireShapeTest {
     @Test
     fun rowIsReadFromItsFieldsNotItsReference() {
         val row = """{"ok":true,"ref":"i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384","parentRef":"d:9f3a","name":"big.txt","kind":"file",
-            "size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":false,"contentId":"1294bbe85c2f380b",
+            "size":24,"mtimeNs":1400000000000000000,"createdNs":1300000000000000000,"etag":"1294bbe85c2f380b","isUploaded":false,"contentId":"1294bbe85c2f380b",
             "readOnly":true,"availability":"pinned","pinnedUntil":1755347464}"""
         val item = Client(core(row)).stat("i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384")
         assertEquals(Kind.FILE, item.kind)
         assertEquals(24, item.size)
         assertEquals(1_400_000_000_000, item.mtimeMillis)
+        assertEquals(1_300_000_000_000, item.createdMillis)
         assertFalse(item.isUploaded)
         assertTrue(item.readOnly)
         assertEquals(Availability.PINNED, item.availability)

@@ -16,6 +16,10 @@ val create :
   unit ->
   t
 
+(** §8.2: a row's times, or now for a row with none; the host's placeholders
+    take them too. *)
+val placeholder_times : Tsync_core.Fs.times -> Tsync_core.Fs.times
+
 (** Applies the folder this reference names at the next round. *)
 val schedule : t -> string -> unit
 

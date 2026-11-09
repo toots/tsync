@@ -45,8 +45,12 @@ final class Item: NSObject, NSFileProviderItem {
     /// Exactly the bytes a fetch delivers.
     var documentSize: NSNumber? { row.kind == .dir ? nil : NSNumber(value: row.size) }
 
-    var contentModificationDate: Date? {
-        row.mtime > 0 ? Date(timeIntervalSince1970: row.mtime) : nil
+    var contentModificationDate: Date? { Item.date(row.mtimeNs) }
+
+    var creationDate: Date? { Item.date(row.createdNs) }
+
+    private static func date(_ ns: Int64) -> Date? {
+        ns > 0 ? Date(timeIntervalSince1970: Double(ns) / 1e9) : nil
     }
 
     var isUploaded: Bool { row.isUploaded }

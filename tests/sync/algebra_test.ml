@@ -22,6 +22,11 @@ type state = {
   folders : (Folder_id.t * A.place) list;
 }
 
+(* A value [10 c + a] is content [c] with attribute [a]. *)
+let alike a b = a / 10 = b / 10
+let join = max
+let alike_file a b = Option.equal alike a b
+
 let commands s : int A.command list =
   List.map (fun (p, v) -> `File (p, None, Some v)) s.files
   @ List.map (fun (i, p) -> `Folder (i, None, Some p)) s.folders
@@ -267,7 +272,7 @@ let check tally ~r ~l ~m =
   tally.triples <- tally.triples + 1;
   let before = diff r l and theirs = diff r m in
   let merge ?priority () =
-    A.merge ?priority ~equal:Int.equal ~aside
+    A.merge ?priority ~equal:Int.equal ~alike ~join ~aside
       ~l:(A.to_base (build l))
       ~before ~theirs ()
   in
@@ -324,7 +329,11 @@ let check tally ~r ~l ~m =
         List.iter
           (fun (p, v) ->
             if
-              file n p <> Some v && not (file r p = Some v && file l p <> Some v)
+              file n p <> Some v
+              && (not (alike_file (file r p) (Some v) && file l p <> Some v))
+              && not
+                   (Option.map (join v) (file l p) = file n p
+                   && alike_file (file l p) (Some v))
             then fail "3 the main is preserved (file)")
           m.files;
         List.iter
@@ -336,14 +345,19 @@ let check tally ~r ~l ~m =
           m.folders;
         List.iter
           (fun ((p : A.place), v) ->
-            if file r p <> Some v then (
+            if not (alike_file (file r p) (Some v)) then (
               let p = { p with parent = home p.parent } in
               let kept (q : A.place) =
-                q.parent = p.parent && file n q = Some v
+                q.parent = p.parent && alike_file (file n q) (Some v)
               in
               let copy = List.assoc_opt p merged.asides in
               if not (kept p || Option.fold ~none:false ~some:kept copy) then
                 fail "4 nothing local is lost"))
+          l.files;
+        List.iter
+          (fun ((p : A.place), v) ->
+            if alike_file (file m p) (Some v) && List.mem_assoc p merged.asides
+            then fail "the same content makes no copy")
           l.files;
         let ours = List.map A.key_of before in
         List.iter
@@ -439,14 +453,21 @@ let () =
         label = "one folder, two names, one file";
         ids = [a];
         names = ["x"; "y"];
-        contents = [1; 2];
+        contents = [10; 20];
         max_files = 1;
       };
       {
         label = "two folders, one name, one file";
         ids = [a; b];
         names = ["x"];
-        contents = [1; 2];
+        contents = [10; 20];
+        max_files = 1;
+      };
+      {
+        label = "one folder, two names, one file, two attributes";
+        ids = [a];
+        names = ["x"; "y"];
+        contents = [10; 11; 20];
         max_files = 1;
       };
       {
@@ -463,14 +484,14 @@ let () =
         label = "two folders, two names, one file";
         ids = [a; b];
         names = ["x"; "y"];
-        contents = [1; 2];
+        contents = [10; 20];
         max_files = 1;
       };
       {
         label = "one folder, two names, two files";
         ids = [a];
         names = ["x"; "y"];
-        contents = [1; 2];
+        contents = [10; 20];
         max_files = 2;
       };
       {

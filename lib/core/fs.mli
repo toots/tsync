@@ -17,6 +17,40 @@ val opt : (unit -> 'a) -> 'a option
 
 val stat_opt : string -> Unix.LargeFile.stats option
 val lstat_opt : string -> Unix.LargeFile.stats option
+
+(** A file's times in nanoseconds since the epoch (02 §2.6). [created] is the
+    [mtime] where the platform keeps no creation time, or keeps one before
+    1980-01-02, the unset value of FAT and the zero of others. *)
+type times = { mtime : int; created : int }
+
+(** The wall clock, as [times] counts. *)
+val now : unit -> int
+
+(** Seconds, for the interfaces that take a float. *)
+val seconds : int -> float
+
+(** [created], or [mtime] where [created] is before 1980-01-02: FAT's unset
+    1980-01-01 in any zone, or a platform's zero. Every creation time from
+    outside goes through it, so one read from disk and one a frontend passes
+    agree. *)
+val creation : mtime:int -> int -> int
+
+(** [t] carried over a file that holds [held]: a creation time never moves later
+    (02 §2.6). *)
+val carried_over : held:times -> times -> times
+
+(** Of the link itself, not its target. *)
+val times : string -> times
+
+val ftimes : Unix.file_descr -> times
+
+(** Whether {!set_times} sets [created]: Windows and macOS. Linux keeps a
+    creation time but offers no call to set one. *)
+val sets_created : bool
+
+(** Of the link itself, like {!times}; [created] only where {!sets_created}. *)
+val set_times : string -> times -> unit
+
 val exists : string -> bool
 val is_dir : string -> bool
 

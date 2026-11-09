@@ -81,7 +81,9 @@ let () =
   p "\n== commands and log entries (03 §2.3–2.4)\n";
   let chunk content = Chunk_key.of_bigstring (Bigstring.of_string content) in
   let manifest name content =
-    Manifest.make ~name ~size:(String.length content) ~mtime:1. ~chunk_size:8
+    Manifest.make ~name ~size:(String.length content)
+      ~times:{ Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+      ~chunk_size:8
       [chunk content]
   in
   let one = manifest "one.jpg" "first" and two = manifest "two.jpg" "second" in
@@ -376,7 +378,7 @@ let () =
       | None -> "set aside");
   p "\n== staged manifests (04 §2.5)\n";
   let ex =
-    {|{"v":2,"name":"report.txt","size":34,"mtime":1727600000.25,"chunkSize":8,"slots":[{}, {"u":"9f3c1a2b4d5e6f70"}, {"u":"9f3c1a2b4d5e6f70","o":8}, {"z":true}]}|}
+    {|{"v":3,"name":"report.txt","size":34,"mtimeNs":1727600000250000000,"createdNs":1727500000000000000,"chunkSize":8,"slots":[{}, {"u":"9f3c1a2b4d5e6f70"}, {"u":"9f3c1a2b4d5e6f70","o":8}, {"z":true}]}|}
   in
   let uploaded = Base64.encode_string one.body in
   List.iter
@@ -406,17 +408,18 @@ let () =
           | None -> "set aside"))
     [
       ("spec example", ex);
-      ("no v, no chunkSize", {|{"name":"a","size":1,"mtime":0}|});
+      ("no v, no chunkSize", {|{"name":"a","size":1,"mtimeNs":0,"createdNs":0}|});
       ( "fewer slots",
-        {|{"v":2,"name":"a","size":20,"mtime":0,"chunkSize":8,"slots":[{}]}|} );
+        {|{"v":3,"name":"a","size":20,"mtimeNs":0,"createdNs":0,"chunkSize":8,"slots":[{}]}|}
+      );
       ( "uploaded",
         Printf.sprintf
-          {|{"v":2,"name":"a","size":5,"mtime":0,"chunkSize":8,"slots":[{}],"uploaded":%S}|}
+          {|{"v":3,"name":"a","size":5,"mtimeNs":0,"createdNs":0,"chunkSize":8,"slots":[{}],"uploaded":%S}|}
           uploaded );
       ( "uploaded, not a manifest",
-        {|{"v":2,"name":"a","size":5,"mtime":0,"chunkSize":8,"slots":[{}],"uploaded":"aGVsbG8="}|}
+        {|{"v":3,"name":"a","size":5,"mtimeNs":0,"createdNs":0,"chunkSize":8,"slots":[{}],"uploaded":"aGVsbG8="}|}
       );
-      ("version 3", {|{"v":3,"name":"a","size":1,"mtime":0}|});
+      ("version 4", {|{"v":4,"name":"a","size":1,"mtimeNs":0,"createdNs":0}|});
     ];
   let e = Option.get (Staged.decode ex) in
   p "round trip: %b\n" (Staged.decode (Staged.encode e) = Some e);

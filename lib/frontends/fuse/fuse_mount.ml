@@ -19,7 +19,7 @@ type handle = {
 type retained = {
   content : Tsync_sync.Local_ops.handle;
   size : int;
-  mtime : float;
+  mtime : int;
   mutable scratch : string option;
 }
 
@@ -87,9 +87,9 @@ let stats t ~kind ~perm ~nlink ~size ~mtime : Unix.LargeFile.stats =
     st_gid = t.gid;
     st_rdev = 0;
     st_size = Int64.of_int size;
-    st_atime = mtime;
-    st_mtime = mtime;
-    st_ctime = mtime;
+    st_atime = Fs.seconds mtime;
+    st_mtime = Fs.seconds mtime;
+    st_ctime = Fs.seconds mtime;
   }
 
 let retained_size r =
@@ -113,13 +113,13 @@ let getattr t path _ =
         match st.kind with
           | `Dir ->
               stats t ~kind:S_DIR ~perm:t.dir_mode ~nlink:2 ~size:0
-                ~mtime:st.mtime
+                ~mtime:st.times.mtime
           | `File ->
               stats t ~kind:S_REG ~perm:t.file_mode ~nlink:1 ~size:st.size
-                ~mtime:st.mtime
+                ~mtime:st.times.mtime
           | `Symlink ->
               stats t ~kind:S_LNK ~perm:0o777 ~nlink:1 ~size:st.size
-                ~mtime:st.mtime))
+                ~mtime:st.times.mtime))
 
 let readlink t path =
   let (module E : Tsync_sync.Engine.S) = t.engine in
@@ -382,7 +382,7 @@ let hide t src dst =
       let content = E.retain src in
       locked t (fun () ->
           Hashtbl.replace t.hidden dst
-            { content; size = st.size; mtime = st.mtime; scratch = None });
+            { content; size = st.size; mtime = st.times.mtime; scratch = None });
       E.delete src)
 
 let rename t src dst (flags : Fuse.rename_flags) =

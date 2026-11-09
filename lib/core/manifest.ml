@@ -1,10 +1,11 @@
-let magic = "tsyncm03"
-let header = 72
+let magic = "tsyncm04"
+let header = 80
 
 type t = {
   body : string;
   size : int;
-  mtime : float;
+  mtime : int;
+  created : int;
   chunk_size : int;
   count : int;
   name : string;
@@ -20,11 +21,12 @@ let decode body =
   if n < header || String.sub body 0 8 <> magic then None
   else (
     let size = Int64.to_int (String.get_int64_le body 8) in
-    let mtime = Int64.float_of_bits (String.get_int64_le body 16) in
-    let chunk_size = u32 body 24
-    and count = u32 body 28
-    and name_len = u32 body 32
-    and link_len = u32 body 36 in
+    let mtime = Int64.to_int (String.get_int64_le body 16) in
+    let created = Int64.to_int (String.get_int64_le body 24) in
+    let chunk_size = u32 body 32
+    and count = u32 body 36
+    and name_len = u32 body 40
+    and link_len = u32 body 44 in
     let expected = header + name_len + link_len + (33 * count) in
     if size < 0 || count > (max_int - header) / 33 || expected <> n then None
     else
@@ -33,14 +35,15 @@ let decode body =
           body;
           size;
           mtime;
+          created;
           chunk_size;
           count;
           name = String.sub body header name_len;
           link =
             (if link_len = 0 then None
              else Some (String.sub body (header + name_len) link_len));
-          h1 = String.sub body 40 16;
-          h2 = String.sub body 56 16;
+          h1 = String.sub body 48 16;
+          h2 = String.sub body 64 16;
         })
 
 let has_magic body =
@@ -94,13 +97,14 @@ let digest_of ~size ~cs keys =
     | [a; b] -> (a, b)
     | _ -> assert false
 
-let encode ~name ~size ~mtime ~chunk_size ?link ~h1 ~h2 keys =
+let encode ~name ~size ~mtime ~created ~chunk_size ?link ~h1 ~h2 keys =
   let b =
     Buffer.create (header + String.length name + (33 * List.length keys))
   in
   Buffer.add_string b magic;
   Buffer.add_int64_le b (Int64.of_int size);
-  Buffer.add_int64_le b (Int64.bits_of_float mtime);
+  Buffer.add_int64_le b (Int64.of_int mtime);
+  Buffer.add_int64_le b (Int64.of_int created);
   Buffer.add_int32_le b (Int32.of_int chunk_size);
   Buffer.add_int32_le b (Int32.of_int (List.length keys));
   Buffer.add_int32_le b (Int32.of_int (String.length name));
@@ -113,32 +117,38 @@ let encode ~name ~size ~mtime ~chunk_size ?link ~h1 ~h2 keys =
   List.iter (fun k -> Buffer.add_string b (Chunk_key.to_string k)) keys;
   Buffer.contents b
 
-let make ~name ~size ~mtime ~chunk_size keys =
+let make ~name ~size ~(times : Fs.times) ~chunk_size keys =
   let h1, h2 = digest_of ~size ~cs:chunk_size keys in
-  Option.get (decode (encode ~name ~size ~mtime ~chunk_size ~h1 ~h2 keys))
+  Option.get
+    (decode
+       (encode ~name ~size ~mtime:times.mtime ~created:times.created ~chunk_size
+          ~h1 ~h2 keys))
 
-let symlink ~name ~mtime target =
+let symlink ~name ~(times : Fs.times) target =
   let d = Xxh.dual target in
   let h1 = String.sub d 0 16 and h2 = String.sub d 17 16 in
   Option.get
     (decode
-       (encode ~name ~size:(String.length target) ~mtime
-          ~chunk_size:Chunking.default_chunk_size ~link:target ~h1 ~h2 []))
+       (encode ~name ~size:(String.length target) ~mtime:times.mtime
+          ~created:times.created ~chunk_size:Chunking.default_chunk_size
+          ~link:target ~h1 ~h2 []))
+
+let reencode m ~name ~mtime ~created =
+  Option.get
+    (decode
+       (encode ~name ~size:m.size ~mtime ~created ~chunk_size:m.chunk_size
+          ?link:m.link ~h1:m.h1 ~h2:m.h2 (keys m)))
 
 (* The recorded name is the leaf of the key a body is written to. *)
 let rename m name =
   if m.name = name then m
-  else
-    Option.get
-      (decode
-         (encode ~name ~size:m.size ~mtime:m.mtime ~chunk_size:m.chunk_size
-            ?link:m.link ~h1:m.h1 ~h2:m.h2 (keys m)))
+  else reencode m ~name ~mtime:m.mtime ~created:m.created
 
-let with_mtime m mtime =
-  Option.get
-    (decode
-       (encode ~name:m.name ~size:m.size ~mtime ~chunk_size:m.chunk_size
-          ?link:m.link ~h1:m.h1 ~h2:m.h2 (keys m)))
+let times m = { Fs.mtime = m.mtime; created = m.created }
+
+let with_times m (t : Fs.times) =
+  if t = times m then m
+  else reencode m ~name:m.name ~mtime:t.mtime ~created:t.created
 
 let content_id m = m.h1
 

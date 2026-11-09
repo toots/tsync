@@ -558,8 +558,8 @@ let zip_response t ~max_members id filename =
               | `File (name, key) -> (
                   match Option.bind (t.store.get_opt key) Manifest.of_body with
                     | Some m when m.link = None ->
-                        Zip.add_file z ~name ~mtime:m.mtime (fun feed ->
-                            stream t m ~off:0 ~len:m.size feed)
+                        Zip.add_file z ~name ~mtime:(Fs.seconds m.mtime)
+                          (fun feed -> stream t m ~off:0 ~len:m.size feed)
                     | _ -> Log.info "share: %s vanished since the walk" name))
             members;
           Zip.finish z);

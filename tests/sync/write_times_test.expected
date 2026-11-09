@@ -1,0 +1,4 @@
+a creation time of 0 reads as the mtime: true
+the same bytes again take the new times: true
+a peer holds them: true
+pending: A 0, B 0

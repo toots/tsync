@@ -7,8 +7,27 @@ let identity = function
   | Identity i -> Some i
   | Unknown -> None
 
-let equal a b =
+let alike a b =
   match (identity a, identity b) with Some a, Some b -> a = b | _ -> false
+
+(* An identity carries no time, so it is equal to every alike manifest. *)
+let equal a b =
+  alike a b
+  &&
+    match (a, b) with
+    | Known a, Known b -> Manifest.times a = Manifest.times b
+    | _ -> true
+
+(* conflict-resolution §2: the later mtime, the earlier creation time. *)
+let join a b =
+  match (a, b) with
+    | Known a, Known b ->
+        let later = if b.mtime > a.mtime then b else a in
+        Known
+          (Manifest.with_times later
+             { mtime = later.mtime; created = min a.created b.created })
+    | Known _, _ -> a
+    | _ -> b
 
 type command = value Algebra.command
 

@@ -18,10 +18,10 @@ class Ingest(val intents: IntentStore, private val firstDomain: () -> String?, p
     private val claimed = ConcurrentHashMap.newKeySet<String>()
 
     /** Writes the open intent for a new staging name, before the file is handed to anyone. */
-    fun stage(domain: String, target: Target, exclusive: Boolean, base: String? = null, modified: Long? = null): String {
+    fun stage(domain: String, target: Target, exclusive: Boolean, base: String? = null, modified: Long? = null, created: Long? = null): String {
         val name = intents.newName()
         claimed += name
-        intents.put(name, Intent(target, exclusive, base, modified, domain = domain))
+        intents.put(name, Intent(target, exclusive, base, modified, domain = domain, created = created))
         return name
     }
 
@@ -80,19 +80,21 @@ class Ingest(val intents: IntentStore, private val firstDomain: () -> String?, p
         }
     }
 
-    private fun Client.writeTo(target: Target, intent: Intent, staging: String, candidates: (String) -> Sequence<String>): Item =
-        when (target) {
-            is Target.Existing -> writeRef(target.ref, staging, intent.base)
+    private fun Client.writeTo(target: Target, intent: Intent, staging: String, candidates: (String) -> Sequence<String>): Item {
+        val createdNs = intent.created?.let { it * 1_000_000 }
+        return when (target) {
+            is Target.Existing -> writeRef(target.ref, staging, intent.base, createdNs)
             is Target.Child ->
-                if (!intent.exclusive) writeChild(target.parentRef, target.name, staging, intent.base, false)
+                if (!intent.exclusive) writeChild(target.parentRef, target.name, staging, intent.base, false, createdNs)
                 else firstFree(candidates(target.name)) { name ->
                     try {
-                        writeChild(target.parentRef, name, staging, intent.base, true)
+                        writeChild(target.parentRef, name, staging, intent.base, true, createdNs)
                     } catch (e: CoreException) {
                         adoptedBefore(e, intent, File(staging)) ?: throw e
                     }
                 }
         }
+    }
 
     /**
      * app §8.1: the name is held by this very body, adopted by a process that died before it
@@ -100,9 +102,11 @@ class Ingest(val intents: IntentStore, private val firstDomain: () -> String?, p
      */
     private fun adoptedBefore(refusal: CoreException, intent: Intent, staging: File): Item? {
         val occupant = refusal.occupant ?: return null
-        val modified = intent.modified ?: return null
+        // A photo's capture time is its creation time, which an edit never moves.
+        val (held, wanted) = intent.created?.let { occupant.createdMillis to it }
+            ?: intent.modified?.let { occupant.mtimeMillis to it } ?: return null
         val same = refusal.code == Code.EXISTS && !occupant.isDir && occupant.size == staging.length() &&
-            Math.abs(occupant.mtimeMillis - modified) < 1000
+            Math.abs(held - wanted) < 1000
         if (!same) return null
         staging.delete()
         return occupant

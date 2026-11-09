@@ -167,33 +167,34 @@ The folder-id grammar is owned by
 [03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). Reserved id used in this layout: `.tsync-root` (the root's namespace). Example
 minted id: `3f2a9c1b7d4e-1a`.
 
-### 2.6 File manifest: binary `tsyncm03`
+### 2.6 File manifest: binary `tsyncm04`
 
 Little-endian, a fixed header then variable fields, no escaping. A body with another magic is not a
 manifest.
 
 ```
 off  len  field
-0    8    magic "tsyncm03"
+0    8    magic "tsyncm04"
 8    8    size        signed 64-bit: logical file size in bytes
-16   8    mtime       IEEE-754 double (seconds since the epoch)
-24   4    chunk_size  unsigned 32-bit
-28   4    count       unsigned 32-bit: number of chunk keys
-32   4    name_len    unsigned 32-bit
-36   4    link_len    unsigned 32-bit; 0 for a regular file
-40   16   h1          ASCII hex, whole-file digest, seed 0
-56   16   h2          ASCII hex, seed 1
-72   name_len         leaf name bytes, recorded at write time
+16   8    mtime       signed 64-bit: nanoseconds since the epoch
+24   8    created     signed 64-bit: nanoseconds since the epoch
+32   4    chunk_size  unsigned 32-bit
+36   4    count       unsigned 32-bit: number of chunk keys
+40   4    name_len    unsigned 32-bit
+44   4    link_len    unsigned 32-bit; 0 for a regular file
+48   16   h1          ASCII hex, whole-file digest, seed 0
+64   16   h2          ASCII hex, seed 1
+80   name_len         leaf name bytes, recorded at write time
 ..   link_len         symlink target bytes
 ..   count × 33       chunk keys, in index order, no separators
 ```
 
-**Reader.** A body MUST be rejected as malformed if it is shorter than 72 bytes, has another magic, has
-`size < 0`, or its length differs from `72 + name_len + link_len + 33 × count` (computed without
+**Reader.** A body MUST be rejected as malformed if it is shorter than 80 bytes, has another magic, has
+`size < 0`, or its length differs from `80 + name_len + link_len + 33 × count` (computed without
 overflow). A chunk key that is not a well-formed chunk key (§2.1) makes the manifest malformed when that
 key is used; a reader MUST NOT fetch or trust it. A reader MUST NOT serve bytes of a range that no key
 covers (a count too small for the size): that range reads as damaged, never as zeros. A reader need not
-parse keys eagerly: key *i* is the 33 bytes at `72 + name_len + link_len + 33·i`. A manifest read from
+parse keys eagerly: key *i* is the 33 bytes at `80 + name_len + link_len + 33·i`. A manifest read from
 local disk MAY, and SHOULD, be read through an immutable memory mapping: a manifest file is only ever
 replaced by rename, never modified in place.
 
@@ -208,18 +209,26 @@ holds the manifest. Anything that carries an existing file into a domain (an imp
 frontend handing over a whole file, a take) MUST record that file's last write time, never the time
 it was uploaded; only an edit made through a frontend records the time of the edit.
 
-Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000.5`, chunk size 8 MiB;
-`h = dual("d447b1ea40e6988b-b7aeb52a10fdaf2d-11;") = d94b4e9626fdc9c1-f3f6d793ca1ea424`; 114 bytes:
+**created.** `created` is the time the file was created where it was first written, carried
+like `mtime`: whatever carries an existing file in MUST record its creation time, or its `mtime`
+when the platform keeps none, the latest time it can have been created. A creation time before
+1980-01-02 is a platform's unset value (FAT's 1980-01-01 in any zone, a zero) and counts as none. A file created through a
+frontend records the time of its creation; an edit keeps the `created` of the file it changes, and
+a file carried over another never takes a later `created` than the one it replaces.
+
+Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000500000000`, created
+`1759000000000000000`, chunk size 8 MiB;
+`h = dual("d447b1ea40e6988b-b7aeb52a10fdaf2d-11;") = d94b4e9626fdc9c1-f3f6d793ca1ea424`; 122 bytes:
 
 ```
-0000  74 73 79 6e 63 6d 30 33 0b 00 00 00 00 00 00 00  tsyncm03........
-0010  00 00 20 28 96 36 da 41 00 00 80 00 01 00 00 00  .. (.6.A........
-0020  09 00 00 00 00 00 00 00 64 39 34 62 34 65 39 36  ........d94b4e96
-0030  32 36 66 64 63 39 63 31 66 33 66 36 64 37 39 33  26fdc9c1f3f6d793
-0040  63 61 31 65 61 34 32 34 68 65 6c 6c 6f 2e 74 78  ca1ea424hello.tx
-0050  74 64 34 34 37 62 31 65 61 34 30 65 36 39 38 38  td447b1ea40e6988
-0060  62 2d 62 37 61 65 62 35 32 61 31 30 66 64 61 66  b-b7aeb52a10fdaf
-0070  32 64                                            2d
+0000  74 73 79 6e 63 6d 30 34 0b 00 00 00 00 00 00 00  tsyncm04........
+0010  00 a5 fb 97 82 b8 69 18 00 80 e9 2f 2e 39 69 18  ......i..../.9i.
+0020  00 00 80 00 01 00 00 00 09 00 00 00 00 00 00 00  ................
+0030  64 39 34 62 34 65 39 36 32 36 66 64 63 39 63 31  d94b4e9626fdc9c1
+0040  66 33 66 36 64 37 39 33 63 61 31 65 61 34 32 34  f3f6d793ca1ea424
+0050  68 65 6c 6c 6f 2e 74 78 74 64 34 34 37 62 31 65  hello.txtd447b1e
+0060  61 34 30 65 36 39 38 38 62 2d 62 37 61 65 62 35  a40e6988b-b7aeb5
+0070  32 61 31 30 66 64 61 66 32 64                    2a10fdaf2d
 ```
 
 ### 2.7 Folder marker (JSON)

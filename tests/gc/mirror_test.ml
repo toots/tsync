@@ -66,7 +66,8 @@ let () =
   let manifest name chunks =
     (Manifest.make ~name
        ~size:(List.length chunks * cs)
-       ~mtime:0. ~chunk_size:cs (List.map chunk chunks))
+       ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+       ~chunk_size:cs (List.map chunk chunks))
       .body
   in
   let folder = Folder_id.v "0000000000a1-1" in

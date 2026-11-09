@@ -23,7 +23,7 @@ after the first rebuilds: changed docs, changed pics
 notify_reset of pics         {"ok":true,"delivered":1}
 full_resync of docs          {"ok":true}
 then: changed docs, reset pics
-write, no declared roots     {"ok":true,"size":5,"mtime":"<x>","item":{"ref":"<x>","parentRef":"<x>","name":"f.txt","kind":"file","size":5,"mtime":"<x>","etag":"<x>","isUploaded":false,"contentId":"<x>","availability":"cached"}}
+write, no declared roots     {"ok":true,"size":5,"mtimeNs":"<x>","createdNs":"<x>","item":{"ref":"<x>","parentRef":"<x>","name":"f.txt","kind":"file","size":5,"mtimeNs":"<x>","createdNs":"<x>","etag":"<x>","isUploaded":false,"contentId":"<x>","availability":"cached"}}
 a dest that exists           {"ok":false,"code":"denied","error":"<dir>/taken: already exists"}
 a dest under a link          {"ok":false,"code":"denied","error":"<dir>/link/out: a component is not a directory"}
 menu_codes, no vault: No vault — run tsync vault init

@@ -114,8 +114,11 @@ class IngestTest {
     private val clients = mapOf("docs" to Client(fake), "photos" to Client(other))
     private val ingest = Ingest(IntentStore(home), { "docs" }, clients::getValue)
 
-    private fun stage(target: Target, exclusive: Boolean = true, body: String = "body", ready: Boolean = true, base: String? = null, modified: Long? = null, domain: String = "docs"): String {
-        val name = ingest.stage(domain, target, exclusive, base, modified)
+    private fun stage(
+        target: Target, exclusive: Boolean = true, body: String = "body", ready: Boolean = true, base: String? = null,
+        modified: Long? = null, created: Long? = null, domain: String = "docs",
+    ): String {
+        val name = ingest.stage(domain, target, exclusive, base, modified, created)
         ingest.staging(name).writeText(body)
         if (ready) ingest.markReady(name)
         return name
@@ -159,6 +162,17 @@ class IngestTest {
         assertNull(fake.child("root", "photo (1).jpg"))
         val other = ingest.commit(stage(Target.Child("root", "photo.jpg"), body = "another photo", modified = modified))
         assertEquals("photo (1).jpg", other.item.name)
+    }
+
+    @Test
+    fun aCaptureTimeIsSentAsTheCreationTimeAndMatchesTheSaveBeforeAKill() {
+        val captured = 1_755_347_464_000
+        val first = ingest.commit(stage(Target.Child("root", "photo.jpg"), modified = captured + 60_000, created = captured))
+        assertEquals(captured, first.item.createdMillis)
+        assertEquals(captured + 60_000, first.item.mtimeMillis)
+        val again = ingest.commit(stage(Target.Child("root", "photo.jpg"), modified = captured + 120_000, created = captured))
+        assertEquals("photo.jpg", again.item.name)
+        assertNull(fake.child("root", "photo (1).jpg"))
     }
 
     @Test

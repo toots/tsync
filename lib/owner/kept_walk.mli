@@ -7,7 +7,7 @@ type entry = {
   container : string;  (** the parent folder's id *)
   kind : [ `Dir | `File ];
   size : int;
-  mtime : float;
+  mtime : int;  (** nanoseconds since the epoch *)
 }
 
 (** Replaces the kept walk with [entries], already sorted; answers its stamp,

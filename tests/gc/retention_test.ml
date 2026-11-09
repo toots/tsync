@@ -43,7 +43,9 @@ let () =
     put (Key.anchor d (id child)) (Folder.anchor_body { parent; aname = name })
   in
   let empty name =
-    (Manifest.make ~name ~size:0 ~mtime:0. ~chunk_size:Chunking.chunk_size_min
+    (Manifest.make ~name ~size:0
+       ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+       ~chunk_size:Chunking.chunk_size_min
        [Chunk_key.of_body ""])
       .body
   in

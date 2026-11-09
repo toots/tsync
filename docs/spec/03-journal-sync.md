@@ -230,10 +230,11 @@ made durable as [publication.md](algorithms/publication.md) §4.1 says, and remo
 
 | Key | Record name | Body |
 |---|---|---|
-| file key `(d, a)` | `f-<d>-<leaf hash of a>` ([02](02-remote-model.md) §2.1) | `{"file":["<d>","<a>"],"before":<null or "<h1>-<h2>">}` |
+| file key `(d, a)` | `f-<d>-<leaf hash of a>` ([02](02-remote-model.md) §2.1) | `{"file":["<d>","<a>"],"before":<null or manifest>}` |
 | folder key `i` | `d-<i>` | `{"folder":"<i>","before":<null or ["<parent id>","<leaf>"]>}` |
 
-- The presence of a record is what makes a key pending. `before` is the main's value at the key as
+- A file's `before` is its manifest in base64, as a command's `after` (§2.3), so a change of time
+  alone differs from it. The presence of a record is what makes a key pending. `before` is the main's value at the key as
   this client last knew it ([publication.md](algorithms/publication.md) §3.2).
 - Local only: a before-value reaches the store only as the `before` of a command.
 - An unparseable record is set aside, and the client arrives by state before it pushes again. A

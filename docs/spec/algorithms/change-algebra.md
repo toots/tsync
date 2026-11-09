@@ -94,7 +94,14 @@ finitely many non-empty:
 
 - for a folder key $i$: the place $(p, a)$ where the folder is, or
   $\varnothing$ if it does not exist;
-- for a file key $(d, a)$: a content hash, or $\varnothing$.
+- for a file key $(d, a)$: a file value, or $\varnothing$.
+
+A **file value** is a content hash and attributes. Two file values are
+*equal* when both match, and *alike*, $f \approx g$, when their hashes match.
+On alike values there is a **join** $f \sqcup g$, alike to both,
+commutative, associative and idempotent. Attributes say nothing about content,
+so the join loses none. Every $=$ between values below is equality; a guard
+compares the hash only (Definition 4).
 
 A present folder *occupies* the place that is its value. A present file
 occupies the place that is its key.
@@ -115,7 +122,9 @@ The folder half of the state is the tree of [K21, section 3.1]:
 **Definition 4 (command).** A command is $\langle k, x, y \rangle$: a key,
 the value before, the value after. It is *applicable* to $\Phi$ if
 $\Phi(k) = x$ and the state with $y$ at $k$ is well-formed. The value $x$ is
-the **guard**.
+the **guard**. A guard is checked against the main as a hash: for a file key,
+$\Phi(k) \approx x$. A command that changes attributes alone has
+$x \approx y$ and is not null.
 
 This is the command of [C23, Definition 1], on other keys:
 
@@ -450,13 +459,18 @@ is keyed by the folder's identity, which the rename does not change.
 | $l = r$: only they changed, or nobody | $m$ |
 | $m = r$: only we changed | $l$ |
 | $l = m$: the same change | $m$ |
+| all differ, $l \approx m$: the same content | $l \sqcup m$ |
+| all differ, $l \approx r$: we changed attributes alone | $m$ |
+| all differ, $m \approx r$: they changed attributes alone | $l$ |
 | all differ, $m = \varnothing$, $k$ a file key | $l$ |
 | all differ, otherwise | $m$; and if $k = (d, a)$ is a file key with $l \neq \varnothing$, also $l$ at a fresh key $(d, a')$ |
 
-The third row takes the main's value: the two are equal as values, and where a
-value carries more than what equality compares (a file's modification time),
-the main's is the one every client ends with. The fourth row is "an edit
-outlives a delete". The fifth is the conflicted copy.
+The rows with $\approx$ concern file keys, where $\varnothing$ is alike only
+to itself. The fourth row makes no conflicted copy of identical content: the
+join may differ from both sides, and is then published like any change. In
+the fifth and sixth, a change of attributes alone yields to a change of
+content or a removal. The seventh row is "an edit outlives a delete". The
+eighth is the conflicted copy.
 
 *Step 2, repair.* $N_1$ may violate Definition 3. Apply the first rule that
 applies, in the order R1, R2, R3, until none applies:
@@ -485,9 +499,9 @@ absent from $R$, $j$ with its value from $M$. Merging $i$ into $j$ sets
 $N(i) = \varnothing$ and empties $i$ into $j$:
 
 - a folder placed at $(i, a)$ is placed at $(j, a)$;
-- a file key $(i, a)$ becomes $\varnothing$. Its content $f$ goes to the key
-  $(j, a)$ when that key is $\varnothing$; when $(j, a)$ holds $f$ already,
-  nothing more is done; otherwise $f$ goes to a fresh key $(j, a')$.
+- a file key $(i, a)$ becomes $\varnothing$. Its value $f$ goes to the key
+  $(j, a)$ when that key is $\varnothing$; when $(j, a)$ holds $g \approx f$,
+  $(j, a)$ takes $f \sqcup g$; otherwise $f$ goes to a fresh key $(j, a')$.
 
 A folder moved into $j$ that meets another folder there is one more clash for
 R2, and is merged in turn when both are absent from $R$.
@@ -527,9 +541,10 @@ locally.
 1. **Well-formed.** The repair ends, and $N$ is well-formed.
 2. **Identity.** If $M = R$ then $N = L$. If $L = R$ then $N = M$.
 3. **The main is preserved.** If $M(k) \neq \varnothing$ then
-   $N(k) = M(k)$, unless $M(k) = R(k)$ and the client changed $k$.
+   $N(k) = M(k)$, unless $M(k) \approx R(k)$ and the client changed $k$, or
+   $N(k) = L(k) \sqcup M(k)$.
 4. **Nothing local is lost.** Every file content the client wrote
-   ($L(k) \neq R(k)$, $L(k) \neq \varnothing$) is in $N$, at $k$ or at a
+   ($L(k) \not\approx R(k)$, $L(k) \neq \varnothing$) is in $N$, at $k$ or at a
    fresh key in the same folder, or, where that folder was merged into
    another, at the same name or a fresh one in that other; and the folder
    that holds it is present.
@@ -548,11 +563,13 @@ another: that folder is then $\varnothing$ for good, since nothing is placed
 in it afterwards and R1 restores only folders of $R$ or $M$, and there are
 finitely many such folders. When none applies, W1 to W3 hold. (2) Step 1
 gives $L$, respectively $M$, which is well-formed, so step 2 does nothing.
-(3) Step 1 gives $m$ whenever $m \neq r$ and $m \neq \varnothing$. R2 moves
-only the key that is not from $M$; a merge into another sets a folder absent
-from $M$, and a file key $(j, a)$ only where $M$ holds $\varnothing$ or the
-same content. R3 resets to $M$, R1 touches only absent folders. (4) Step 1
-keeps $l$ at $k$, or at a fresh key in the same folder when the main wins.
+(3) Step 1 gives $m$ whenever $m \not\approx r$, $m \neq \varnothing$ and
+$l \not\approx m$, and $l \sqcup m$ when $l \approx m$. A value alike to
+$M$'s counts as from $M$ for R2, which moves only the key that is not; a
+merge into another sets a folder absent from $M$, and a file key $(j, a)$
+only where $M$ holds $\varnothing$ or alike content, which it joins. R3 resets to $M$, R1 touches only absent folders. (4) Step 1
+keeps $l$ at $k$, its content in a join, or $l$ at a fresh key in the same
+folder when the main wins; the fifth row drops only attributes.
 R2 may move it again, within the folder, or carry it into the folder its own
 was merged into. R1 keeps the folder. (5) By inspection of both steps.
 $\square$
@@ -693,7 +710,7 @@ Each follows from a numbered result.
     dropped (R3).
 20. Both sides make the same change: nothing is sent and nothing is copied.
 21. Every triple $(R, L, M)$ of well-formed trees over a small universe (two
-    or three folders, one or two names, two contents): the five properties of
+    or three folders, one or two names, two contents, two attribute values): the five properties of
     Theorem 8, the pending set equal to $\mathit{diff}(M, N)$, and the same
     $N$ up to fresh names under every order of R1 to R3. Every pair of such
     trees: the difference applied in an order Theorem 3 gives passes only
@@ -704,6 +721,13 @@ Each follows from a numbered result.
     folder at each level, and the folder moved in keeps its identity
     (Definition 8). A peer that moves an existing folder to the place where
     the client created one: both exist, the client's under a fresh name.
+23. The client changes a file's attributes alone: one command, published.
+24. Both sides write the same content with different attributes: no
+    conflicted copy; the join at the name, published when it differs from the
+    main's.
+25. The client changes a file's attributes alone while a peer writes or
+    removes it: the peer's change, no copy. A peer changes attributes alone
+    while the client writes: the client's content, no copy.
 
 ## 11. Open questions
 

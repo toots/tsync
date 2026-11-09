@@ -27,6 +27,9 @@ external is_private : string -> bool = "tsync_is_private"
 external owned_by_this_user : string -> bool = "tsync_owned_by_this_user"
 external end_with_this_process : int -> unit = "tsync_end_with_this_process"
 external std_handle_missing_ : int -> bool = "tsync_std_handle_missing"
+external times_ : string -> int * int = "tsync_times"
+external ftimes_ : Unix.file_descr -> int * int = "tsync_ftimes"
+external set_times_ : string -> int -> int -> unit = "tsync_set_times"
 
 let std_handle_missing = function
   | `Stdin -> std_handle_missing_ 0
@@ -67,6 +70,21 @@ let opt f =
 let stat_opt p = opt (fun () -> Unix.LargeFile.stat p)
 let lstat_opt p = opt (fun () -> Unix.LargeFile.lstat p)
 let exists p = stat_opt p <> None
+
+type times = { mtime : int; created : int }
+
+(* 1980-01-02: a creation time before it is FAT's unset 1980-01-01, read in
+   whatever zone the mount gives, or another platform's zero. *)
+let created_floor = 315_619_200_000_000_000
+let creation ~mtime created = if created < created_floor then mtime else created
+let times_of (mtime, created) = { mtime; created = creation ~mtime created }
+let sets_created = Sys.win32 || is_macos
+let carried_over ~held t = { t with created = min held.created t.created }
+let now () = Int.of_float (Unix.gettimeofday () *. 1e9)
+let seconds ns = Float.of_int ns /. 1e9
+let times p = times_of (sys (fun () -> times_ p))
+let ftimes fd = times_of (sys (fun () -> ftimes_ fd))
+let set_times p t = sys (fun () -> set_times_ p t.mtime t.created)
 
 let kind p =
   match lstat_opt p with

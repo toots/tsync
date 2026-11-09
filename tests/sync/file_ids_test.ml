@@ -287,7 +287,9 @@ let () =
       let m = restarted () in
       Mirror.load_file_ids m;
       Mirror.write_file m "during.txt"
-        (Manifest.make ~name:"during.txt" ~size:1 ~mtime:0. ~chunk_size:4
+        (Manifest.make ~name:"during.txt" ~size:1
+           ~times:{ Tsync_core.Fs.mtime = 0; created = 0 }
+           ~chunk_size:4
            [Chunk_key.of_bigstring (Bigstring.of_string "x")]);
       let during = Mirror.ensure_file_id m "during.txt" in
       p "  %s resolves to %s\n" (alias fid) (resolves m fid);

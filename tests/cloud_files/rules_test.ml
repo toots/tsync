@@ -118,7 +118,10 @@ let () =
 
 let () =
   p "\n== applying a folder (§10.2)\n";
-  let row ?(is_dir = false) ?(is_link = false) ?(size = 5) ?(mtime = 100.)
+  let at s =
+    { Tsync_core.Fs.mtime = s * 1_000_000_000; created = s * 1_000_000_000 }
+  in
+  let row ?(is_dir = false) ?(is_link = false) ?(size = 5) ?(times = at 100)
       ?(content = "c1") ?(read_only = false) ref_ leaf : Apply_plan.row =
     {
       ref_;
@@ -126,14 +129,14 @@ let () =
       is_dir;
       is_link;
       size;
-      mtime;
+      times;
       content_id = (if is_dir then None else Some content);
       read_only;
     }
   in
-  let child ?(owed = false) ?identity ?(size = 5) ?(mtime = 100.) name :
+  let child ?(owed = false) ?identity ?(size = 5) ?(times = at 100) name :
       Apply_plan.child =
-    { name; owed; identity; size; mtime; read_only = false }
+    { name; owed; identity; size; times; read_only = false }
   in
   let id ref_ content_id = Some { Identity.ref_; content_id } in
   let show label ?(locate = fun _ -> `Not_held) rows children =
@@ -177,11 +180,18 @@ let () =
     [row ~content:"c2" "i:1" "b.txt"]
     [child ?identity:(id "i:1" "c1") "a.txt"];
   show "only its time changed"
-    [row ~mtime:200. "i:1" "a.txt"]
+    [row ~times:(at 200) "i:1" "a.txt"]
+    [child ?identity:(id "i:1" "c1") "a.txt"];
+  show "only its creation time changed"
+    [
+      row
+        ~times:{ (at 100) with created = 500_000_000_000_000_000 }
+        "i:1" "a.txt";
+    ]
     [child ?identity:(id "i:1" "c1") "a.txt"];
   show "a row with no time is not compared on it"
-    [row ~mtime:0. "i:1" "a.txt"]
-    [child ~mtime:1700000000. ?identity:(id "i:1" "c1") "a.txt"];
+    [row ~times:(at 0) "i:1" "a.txt"]
+    [child ~times:(at 1700000000) ?identity:(id "i:1" "c1") "a.txt"];
   show "an owed child is taken, and a row of its name not created"
     [row "i:3" "notes.txt"]
     [child ~owed:true "notes.txt"];

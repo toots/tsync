@@ -115,7 +115,8 @@
   A: f="from A"  mine="from B"  shared="from A"  shared (conflicted copy from B)="from B"
 
 == a file written again with the bytes it had
-  A, once the upload ended: position 1, 0 pending
+  A, once the upload ended: position 1, 1 pending
+  A, synced: 0 entries merged, 1 committed, 0 pending
 
 == a write that waits for its base while another file arrives
   B, its write waiting: 1 entries merged, 0 committed, 1 pending
@@ -133,9 +134,10 @@
   A: position 1, 0 pending
 
 == the same bytes written on two machines
-  B: 1 entries merged, 0 committed, 0 pending; f="abcd"
-  B has the file as the main holds it: true
-  entries: 1
+  B: 1 entries merged, 1 committed, 0 pending; f="abcd"
+  B keeps the later time: true
+  A takes it: true
+  entries: 2
 
 == a read-only client leaves an entry to those that write
   read-only B: f="abcd"; the tree head 0, takeovers 0

@@ -197,7 +197,7 @@ is refused.
 - **Document.** A domain's root is synthesised (a fresh install has no mirror). Otherwise `stat`.
   - Folder: the directory MIME type; supports create, delete, rename and move.
   - File: MIME type from the name's extension (default octet-stream); supports write, delete,
-    rename and move; size; last-modified = `mtime`, absent when 0.
+    rename and move; size; last-modified = `mtimeNs` in milliseconds, absent when 0.
   - A row carrying `readOnly` supports none of create, write, delete, rename or move.
 - **Children.** Walk every page of `list_dir` into one result, registered on the folder's
   notification address (that of its document id) so a `changed` notice of its domain refreshes it. While the result is open the folder is
@@ -256,18 +256,20 @@ Bytes enter the domain from the app only through ingest.
 
 ### 8.1 Commit
 
-`commit(target, staging, modified?, exclusive?, base?)`, where the target is a parent reference and a
+`commit(target, staging, modified?, created?, exclusive?, base?)`, where the target is a parent reference and a
 name, or the reference of an existing file:
 
 1. fsync the staging file: adoption is a rename, and unsynced bytes would publish a truncated body
    after a power loss.
 2. If `modified` is given, set the staging file's mtime to it; the adopted file's mtime becomes the
-   item's mtime, which is how a photo keeps its capture time.
-3. `write` with `await`, the given exclusivity and base. On success the core owns the file and the
+   item's mtime.
+3. `write` with `await`, the given exclusivity and base, and `createdNs` from `created`: Android
+   cannot set a file's creation time, so it is sent, which is how a photo keeps its capture time. On success the core owns the file and the
    intent is deleted. On failure the staging file is kept while its intent is ready, else deleted.
 
-4. An exclusive commit carrying `modified` that is refused `exists` by an occupant of the staging
-   file's size and of that modification time has already happened: a process died between the
+4. An exclusive commit carrying `created`, or else `modified`, that is refused `exists` by an
+   occupant of the staging file's size and of that creation time, or else modification time, to the
+   second, has already happened: a process died between the
    adoption and its own record of it. The commit succeeds with the occupant and the staging file
    is deleted; picking the next name would save the body twice.
 
@@ -290,7 +292,7 @@ durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
 - `target`: `{"parentRef","name"}` for a file to be made, or `{"ref","name"}` for an existing
   file, `name` being its name when the intent was written (only the fallback below uses it).
 - `exclusive`: whether the commit must not replace an existing item. `base` (optional): the
-  `contentId` the edit started from. `modified` (optional): epoch milliseconds.
+  `contentId` the edit started from. `modified`, `created` (optional): epoch milliseconds.
 - `state`: `open` or `ready`. Readers ignore unknown fields.
 - The record is written and replaced atomically and durably (temporary file, fsync, rename, fsync
   of the directory). A record that does not decode, or whose state is neither of the two, is left
@@ -648,7 +650,7 @@ Records in `PENDING`, and in `FAILED` whose next attempt is due, are processed i
 1. Re-read the row by id. Gone → delete the record. Still pending in the media store, empty, or
    modified less than `settle_time` ago → leave it and report more work.
 2. Check the budgets (§11.6) and the gate (§11.7); if either says stop, stop the pass with more work.
-3. `folderFor(dir of target)`; copy the **original** stream (with location metadata) into a staging
+4. Commit with `modified` = the row's date-modified and `created` = capture time:
    file with an intent; a copied length different from the row's size is a failure.
 4. Commit with `modified` = capture time:
    - a first upload is exclusive: on `exists` (another device's photo holds the name) the target moves

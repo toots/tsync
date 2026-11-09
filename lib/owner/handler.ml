@@ -278,7 +278,7 @@ let row (module E : Engine.S) ~root_name ~read_only path : Protocol.row option =
             name;
             kind;
             size = st.size;
-            mtime = st.mtime;
+            times = st.times;
             etag = st.etag;
             is_uploaded = not st.staged;
             content_id = None;
@@ -293,7 +293,7 @@ let row (module E : Engine.S) ~root_name ~read_only path : Protocol.row option =
                 {
                   (file `Dir) with
                   size = 0;
-                  mtime = 0.;
+                  times = { mtime = 0; created = 0 };
                   is_uploaded = true;
                   etag =
                     (match st.folder_id with
@@ -397,7 +397,7 @@ let occupied t path f =
 let transfer_attempts = 3
 
 let serving t path dest f =
-  let identity (r : Protocol.row) = (r.content_id, r.etag, r.size, r.mtime) in
+  let identity (r : Protocol.row) = (r.content_id, r.etag, r.size, r.times) in
   let rec go n =
     let before = row_or_unnamed t path in
     let result = f () in
@@ -656,7 +656,7 @@ let walk_domain t =
                      container;
                      kind = `Dir;
                      size = 0;
-                     mtime = 0.;
+                     mtime = 0;
                    }
                   :: acc))
         else
@@ -665,7 +665,7 @@ let walk_domain t =
             container;
             kind = `File;
             size = e.st.size;
-            mtime = e.st.mtime;
+            mtime = e.st.times.mtime;
           }
           :: acc)
       acc (E.list_children dir)
@@ -1159,7 +1159,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               in
               let written =
                 occupied t placed (fun () ->
-                    E.write_whole placed ~src:r.staging ?base:r.base
+                    E.write_whole ?created:r.created placed ~src:r.staging
+                      ?base:r.base
                       ~exclusive:(r.exclusive || placed <> path)
                       ())
               in
@@ -1180,7 +1181,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             E.await_upload written;
             try row_or_unnamed t path with Fail.E _ -> item)
         in
-        { Protocol.size = item.size; mtime = item.mtime; item; aside }
+        { Protocol.size = item.size; times = item.times; item; aside }
     | Mkdir r ->
         pull_destination r.at;
         mutate (fun () ->

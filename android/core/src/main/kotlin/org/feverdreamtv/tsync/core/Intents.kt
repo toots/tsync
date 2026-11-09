@@ -23,6 +23,8 @@ data class Intent(
     val state: IntentState = IntentState.OPEN,
     /** Null in a record written before domains were named: the config's first domain. */
     val domain: String? = null,
+    /** Milliseconds, like [modified]: the photo's capture time. */
+    val created: Long? = null,
 ) {
     fun encode(): String {
         val where = JSONObject().put("name", target.name)
@@ -35,10 +37,14 @@ data class Intent(
         record.put("exclusive", exclusive).put("state", state.wire)
         base?.let { record.put("base", it) }
         modified?.let { record.put("modified", it) }
+        created?.let { record.put("created", it) }
         return record.toString()
     }
 
     companion object {
+        private fun long(record: JSONObject, key: String): Long? =
+            if (record.has(key) && !record.isNull(key)) record.getLong(key) else null
+
         /** @return null for a record that does not decode or whose state is neither of the two. */
         fun decode(text: String): Intent? = try {
             val record = JSONObject(text)
@@ -54,7 +60,8 @@ data class Intent(
                     target = target,
                     exclusive = record.getBoolean("exclusive"),
                     base = text(record, "base"),
-                    modified = if (record.has("modified") && !record.isNull("modified")) record.getLong("modified") else null,
+                    modified = long(record, "modified"),
+                    created = long(record, "created"),
                     state = it,
                     domain = text(record, "domain"),
                 )

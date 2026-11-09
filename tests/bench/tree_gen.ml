@@ -53,7 +53,13 @@ let () =
                   None,
                   Some
                     (Log_entry.Known
-                       (Manifest.symlink ~name:leaf ~mtime:1. "target")) )))
+                       (Manifest.symlink ~name:leaf
+                          ~times:
+                            {
+                              Tsync_core.Fs.mtime = 1_000_000_000;
+                              created = 1_000_000_000;
+                            }
+                          "target")) )))
       done;
       Printf.printf "%d entries, %d folders, %d files\n" !n folders
         (folders * files))

@@ -56,8 +56,10 @@ let () =
       let module P = Projection.Make (C) in
       let content =
         Log_entry.Known
-          (R.upload_chunks ~name:"f" ~size:4 ~chunk_size:8 ~mtime:1. (fun _ ->
-               Bytes (Bigstring.of_string "body")))
+          (R.upload_chunks ~name:"f" ~size:4 ~chunk_size:8
+             ~times:
+               { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+             (fun _ -> Bytes (Bigstring.of_string "body")))
       in
       let place folder i =
         {

@@ -16,7 +16,7 @@ type state = Owed | Uploaded of Manifest.t
 type edit = {
   name : string;
   size : int;
-  mtime : float;
+  times : Fs.times;
   chunk_size : int;
   content : content;
   state : state;
@@ -31,10 +31,11 @@ let encode_slot = function
 let encode e =
   let fields =
     [
-      ("v", `Int 2);
+      ("v", `Int 3);
       ("name", `String e.name);
       ("size", `Int e.size);
-      ("mtime", `Float e.mtime);
+      ("mtimeNs", `Int e.times.mtime);
+      ("createdNs", `Int e.times.created);
       ("chunkSize", `Int e.chunk_size);
     ]
     @ (match e.content with
@@ -57,19 +58,15 @@ let decode body =
   match Yojson.Safe.from_string body with
     | exception _ -> None
     | `Assoc f -> (
-        let num n =
-          match List.assoc_opt n f with
-            | Some (`Int i) -> Some (float_of_int i)
-            | Some (`Float x) -> Some x
-            | _ -> None
-        in
         let int n =
           match List.assoc_opt n f with Some (`Int i) -> Some i | _ -> None
         in
-        let version = Option.value ~default:2 (int "v") in
-        match (List.assoc_opt "name" f, int "size", num "mtime") with
-          | Some (`String name), Some size, Some mtime
-            when version <= 2 && size >= 0 -> (
+        let version = Option.value ~default:3 (int "v") in
+        match
+          (List.assoc_opt "name" f, int "size", int "mtimeNs", int "createdNs")
+        with
+          | Some (`String name), Some size, Some mtime, Some created
+            when version = 3 && size >= 0 -> (
               let chunk_size =
                 match int "chunkSize" with
                   | Some cs when cs > 0 -> Some cs
@@ -147,7 +144,14 @@ let decode body =
                     in
                     Option.map
                       (fun content ->
-                        { name; size; mtime; chunk_size; content; state })
+                        {
+                          name;
+                          size;
+                          times = { mtime; created };
+                          chunk_size;
+                          content;
+                          state;
+                        })
                       content)
           | _ -> None)
     | _ -> None

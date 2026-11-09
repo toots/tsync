@@ -65,7 +65,7 @@ module Make (C : Engine_ctx.S) = struct
           let m =
             try
               R.upload_chunks ?sent ~name:(Names.leaf_of rel) ~size
-                ~chunk_size:cs ~mtime:st.st_mtime (fun i ->
+                ~chunk_size:cs ~times:(Fs.ftimes fd) (fun i ->
                   Remote.Lazy (fun () -> read i))
             with Remote.Source_changed _ -> changed ()
           in
@@ -73,8 +73,8 @@ module Make (C : Engine_ctx.S) = struct
           install run rel m;
           size)
 
-    let install_link run rel ~target ~mtime =
-      install run rel (Manifest.symlink ~name:(Names.leaf_of rel) ~mtime target)
+    let install_link run rel ~target ~times =
+      install run rel (Manifest.symlink ~name:(Names.leaf_of rel) ~times target)
 
     (* [Ok false] when the folder was already there. *)
     let folder run rel =

@@ -724,8 +724,10 @@ let () =
           end in
           let module R = Remote.Make (C) in
           let m =
-            R.upload_chunks ~name:"g" ~size:4 ~chunk_size:4 ~mtime:1. (fun _ ->
-                Bytes (Bigstring.of_string "dead"))
+            R.upload_chunks ~name:"g" ~size:4 ~chunk_size:4
+              ~times:
+                { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+              (fun _ -> Bytes (Bigstring.of_string "dead"))
           in
           ignore
             (Log_store.create_entry (log root) 2
@@ -785,7 +787,8 @@ let () =
           settle a;
           write a "f" "abcd";
           uploaded a;
-          p "  A, once the upload ended: %s\n" (status a));
+          p "  A, once the upload ended: %s\n" (status a);
+          p "  A, synced: %s\n" (sync a));
       scenario "a write that waits for its base while another file arrives"
         (fun root ->
           let link = link () in
@@ -858,17 +861,20 @@ let () =
                 (fun (e : E.entry) -> e.name = "f")
                 (E.list_children "")
             with
-              | Some e -> e.st.mtime
-              | None -> nan
+              | Some e -> e.st.times.mtime
+              | None -> -1
           in
           write a "f" "abcd";
           Rt.sleep 0.05;
           write b "f" "abcd";
           uploaded b;
           settle a;
+          let later = mtime b in
           let synced = sync b in
           p "  B: %s; %s\n" synced (tree b);
-          p "  B has the file as the main holds it: %b\n" (mtime a = mtime b);
+          p "  B keeps the later time: %b\n" (mtime b = later);
+          ignore (sync a);
+          p "  A takes it: %b\n" (mtime a = later);
           p "  entries: %d\n" (entries root));
       scenario "a read-only client leaves an entry to those that write"
         (fun root ->

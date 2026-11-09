@@ -47,7 +47,8 @@ let rec scrub : Yojson.Safe.t -> Yojson.Safe.t = function
                        (placeholder
                           (if String.contains h '-' then "folder" else "hash")
                           h)
-                 | "mtime", `Float t when t > 0. -> `String "<time>"
+                 | ("mtimeNs" | "createdNs"), `Int t when t > 0 ->
+                     `String "<time>"
                  | ("pulledAt" | "expires"), _ -> `String "<time>"
                  | "url", _ -> `String "<url>"
                  | ("localPath" | "error"), `String s ->

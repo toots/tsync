@@ -1,0 +1,8 @@
+into the domain: copied 1, identical 0, failed 0
+the same bytes, other times: copied 1, identical 0, failed 0
+again: copied 0, identical 1, failed 0
+a peer holds the new mtime: true
+out of the domain: copied 1, identical 0, failed 0
+a local copy with other times: copied 1, identical 0, failed 0
+the local copy holds the domain's mtime: true
+pending: A 0, B 0

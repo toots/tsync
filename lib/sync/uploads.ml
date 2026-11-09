@@ -61,7 +61,7 @@ module Make (C : Engine_ctx.S) = struct
                   uploading path ~size:e.size (fun progress ->
                       R.upload_chunks ~cancel ~progress
                         ~name:(Names.leaf_of path) ~size:e.size
-                        ~chunk_size:e.chunk_size ~mtime:e.mtime (source path e))
+                        ~chunk_size:e.chunk_size ~times:e.times (source path e))
                 in
                 with_key path (fun () ->
                     if generation path <> g || Atomic.get cancel then

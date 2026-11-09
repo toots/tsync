@@ -68,7 +68,8 @@ let version_not_saved () =
   let upload content =
     Log_entry.Known
       (R.upload_chunks ~name:"f" ~size:(String.length content) ~chunk_size:8
-         ~mtime:1. (fun _ -> Bytes (Bigstring.of_string content)))
+         ~times:{ Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+         (fun _ -> Bytes (Bigstring.of_string content)))
   in
   let old = upload "old" and edited = upload "edited" in
   let state () =
@@ -168,7 +169,8 @@ let parallel ~width ~together =
   let upload content =
     Log_entry.Known
       (R.upload_chunks ~name:"f" ~size:(String.length content) ~chunk_size:8
-         ~mtime:1. (fun _ -> Bytes (Bigstring.of_string content)))
+         ~times:{ Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+         (fun _ -> Bytes (Bigstring.of_string content)))
   in
   let a = id 1 and b = id 2 and c = id 3 in
   let kept = upload "kept" and gone = upload "gone" in
@@ -245,8 +247,9 @@ let refused () =
   let module P = Projection.Make (C) in
   let content =
     Log_entry.Known
-      (R.upload_chunks ~name:"f" ~size:4 ~chunk_size:8 ~mtime:1. (fun _ ->
-           Bytes (Bigstring.of_string "body")))
+      (R.upload_chunks ~name:"f" ~size:4 ~chunk_size:8
+         ~times:{ Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+         (fun _ -> Bytes (Bigstring.of_string "body")))
   in
   refusing := true;
   let failed =
@@ -318,7 +321,9 @@ let () =
       let upload name content =
         Log_entry.Known
           (R.upload_chunks ~name ~size:(String.length content) ~chunk_size:8
-             ~mtime:1. (fun i ->
+             ~times:
+               { Tsync_core.Fs.mtime = 1_000_000_000; created = 1_000_000_000 }
+             (fun i ->
                Bytes
                  (Bigstring.of_string
                     (String.sub content (i * 8)

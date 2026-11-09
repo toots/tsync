@@ -36,7 +36,7 @@ let placeholder (row : Protocol.row) name : Cf.placeholder =
     name;
     is_dir;
     size = (if is_dir then 0 else row.size);
-    mtime = (if row.mtime > 0. then row.mtime else Unix.gettimeofday ());
+    times = Apply.placeholder_times row.times;
     identity =
       Identity.encode
         {
