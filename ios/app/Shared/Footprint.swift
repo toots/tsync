@@ -2,10 +2,11 @@ import Darwin
 import Foundation
 
 /// The process's phys_footprint, the figure iOS holds against its limit,
-/// sampled every 20 ms; each record appends the current value and the peak
-/// since the previous record to `footprint.log` in the App Group container.
+/// sampled every 20 ms; each core request appends the current value and the
+/// peak since the previous record to `footprint.log` in the App Group.
 enum Footprint {
     private static let lock = NSLock()
+    private static let logLock = NSLock()
     private static var peak: UInt64 = 0
     private static var started = false
 
@@ -21,7 +22,7 @@ enum Footprint {
         return status == KERN_SUCCESS ? info.phys_footprint : 0
     }
 
-    static var log: URL { Core.group.appendingPathComponent("footprint.log") }
+    static var log: URL { Tsync.groupContainer.appendingPathComponent("footprint.log") }
 
     static func startSampling() {
         lock.lock()
@@ -49,9 +50,12 @@ enum Footprint {
         append("\(label) now \(mib(value)) peak \(mib(seen))")
     }
 
-    /// One line, stamped, at the end of the log.
+    /// One line, stamped, at the end of the log; callbacks append from many
+    /// threads.
     static func append(_ text: String) {
         let line = "\(stamp()) \(text)\n"
+        logLock.lock()
+        defer { logLock.unlock() }
         guard let handle = try? FileHandle(forWritingTo: log) else {
             try? line.write(to: log, atomically: false, encoding: .utf8)
             return

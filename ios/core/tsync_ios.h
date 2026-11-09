@@ -5,10 +5,11 @@
 
 #include "tsync_bridge.h"
 
-/* Sets HOME, starts the runtime and passes the host's bounds (0: the core's
-   default); later calls do nothing. The minor heap is set by OCAMLRUNPARAM in
-   the environment before the first call. */
-void tsync_ios_start(const char *home, const char *transfer_root, long workers,
-                     long may_block, long release_growth);
+/* Sets the environment the core reads (ios.md §3.2, §4), starts the runtime
+   and passes the host's bounds; 0 keeps the core's default. Later calls do
+   nothing. */
+void tsync_ios_start(const char *home, const char *config_file,
+                     const char *transfer_root, long minor_heap_words,
+                     long workers, long may_block, long release_growth);
 
 #endif

@@ -18,7 +18,7 @@ struct TsyncPhoneApp: App {
 struct ContentView: View {
     @State private var link = ""
     @State private var message = ""
-    @State private var domains = Tsync.domainNames(Core.configFile)
+    @State private var domains = Tsync.domainNames(Tsync.configFile)
     @State private var footprint = ""
 
     var body: some View {
@@ -82,7 +82,7 @@ struct ContentView: View {
 
     private func finish(_ refusal: String?) {
         message = refusal ?? "Joined; open the Files app"
-        domains = Tsync.domainNames(Core.configFile)
+        domains = Tsync.domainNames(Tsync.configFile)
         if refusal == nil { link = "" }
         Configs.registerAll()
     }
@@ -91,7 +91,7 @@ struct ContentView: View {
         NSFileProviderManager.removeAllDomains { error in
             DispatchQueue.main.async {
                 if let error = error { return message = error.localizedDescription }
-                try? FileManager.default.removeItem(at: Core.configFile)
+                try? FileManager.default.removeItem(at: Tsync.configFile)
                 domains = []
                 message = "Removed; restart the app to join again"
             }

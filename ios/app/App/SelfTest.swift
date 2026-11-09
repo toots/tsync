@@ -9,13 +9,13 @@ enum SelfTest {
     static let files = 1000
     static let bigBytes = 256 << 20
 
-    static var log: URL { Core.group.appendingPathComponent("selftest.log") }
+    static var log: URL { Tsync.groupContainer.appendingPathComponent("selftest.log") }
 
     static func run() async {
         try? FileManager.default.removeItem(at: log)
         do {
             note("start")
-            if let refusal = Configs.add([Configs.localTest()]), refusal != "already joined" {
+            if let refusal = Configs.add([Configs.localTest()]) {
                 throw failure(refusal)
             }
             let domain = NSFileProviderDomain(

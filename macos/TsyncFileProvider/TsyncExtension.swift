@@ -1,14 +1,12 @@
 #if os(macOS)
 import AppKit
-#else
-import UIKit
 #endif
 import FileProvider
 import UniformTypeIdentifiers
 
 /// The File Provider callbacks (§6.5): each one asks the owner and translates.
 /// No rule is decided here, and nothing is kept between callbacks.
-final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileProviderCustomAction {
+final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension {
     let domain: NSFileProviderDomain
     let owner: Owner
 
@@ -93,7 +91,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                 let row = try Owner.row(reply)
                 progress.totalUnitCount = max(1, row.size)
                 progress.completedUnitCount = progress.totalUnitCount
-                done((url, Item(row), nil))
+                // A cancellation that already completed the callback leaves
+                // the file to nobody.
+                if !done((url, Item(row), nil)) { try? FileManager.default.removeItem(at: url) }
             } catch {
                 if let dest = dest { try? FileManager.default.removeItem(at: dest) }
                 done((nil, nil, Errors.map(error, .read, missing: itemIdentifier)))
@@ -290,7 +290,11 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         // Bulk: adopting the file digests all of it (08 §3.3).
         return try Owner.row(owner.bulk("write", request, cancellation: c))
     }
+}
 
+#if os(macOS)
+/// Custom actions need an actions UI extension on iOS (ios.md §5).
+extension TsyncExtension: NSFileProviderCustomAction {
     // MARK: Custom actions (§6.7)
 
     static let copyShareURL = "org.feverdreamtv.tsync.copyShareURL"
@@ -308,7 +312,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
             [owner, manager] c, _ in
             switch action {
             case Self.copyShareURL:
-                guard let first = itemIdentifiers.first else { return done(nil) }
+                guard let first = itemIdentifiers.first else {
+                    done(nil)
+                    return
+                }
                 do {
                     let reply = try owner.call(
                         "share", ["ref": ItemRef.ref(first)], cancellation: c)
@@ -316,12 +323,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                         throw OwnerFailure.transport("the owner's reply has no url")
                     }
                     DispatchQueue.main.sync {
-                        #if os(macOS)
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
-                        #else
-                        UIPasteboard.general.string = url
-                        #endif
                     }
                     done(nil)
                 } catch {
@@ -379,7 +382,6 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
     }
 }
 
-#if os(macOS)
 /// Ranged reads exist on macOS only.
 extension TsyncExtension: NSFileProviderPartialContentFetching {
     func fetchPartialContents(
@@ -405,14 +407,16 @@ extension TsyncExtension: NSFileProviderPartialContentFetching {
                 if options.contains(.strictVersioning)
                     && stat.contentVersion != requestedVersion.contentVersion
                 {
-                    return done((nil, nil, none, gone))
+                    done((nil, nil, none, gone))
+                    return
                 }
                 let range = alignedRange(
                     requestedRange, alignment: alignment, documentSize: stat.size)
                 // An empty range is invalid to the owner, and an unknown error
                 // would be retried forever.
                 if range.length == 0 {
-                    return done((nil, nil, none, gone))
+                    done((nil, nil, none, gone))
+                    return
                 }
                 guard let temp = try manager?.temporaryDirectoryURL() else {
                     throw OwnerFailure.transport("no temporary directory for the domain")
@@ -429,7 +433,8 @@ extension TsyncExtension: NSFileProviderPartialContentFetching {
                 // The content changed in between: the range may be misaligned.
                 if row.contentVersion != stat.contentVersion {
                     try? FileManager.default.removeItem(at: url)
-                    return done((nil, nil, none, gone))
+                    done((nil, nil, none, gone))
+                    return
                 }
                 let offset = (reply["offset"] as? NSNumber)?.intValue ?? Int(range.start)
                 let length = (reply["length"] as? NSNumber)?.intValue ?? Int(range.length)
@@ -454,12 +459,15 @@ final class Once<Value> {
         self.handler = handler
     }
 
-    func callAsFunction(_ value: Value) {
+    /// Whether this call was the one that completed the callback.
+    @discardableResult
+    func callAsFunction(_ value: Value) -> Bool {
         lock.lock()
         let first = !done
         done = true
         lock.unlock()
         if first { handler(value) }
+        return first
     }
 }
 
