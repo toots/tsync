@@ -1,0 +1,17 @@
+; linkall: the implementation registers itself when linked.
+
+(library
+ (name tsync_http_apple)
+ (enabled_if
+  (or
+   (= %{system} macosx)
+   (= %{system} ios)))
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_http base64 unix)
+ (foreign_stubs
+  (language c)
+  (names http_apple_stubs)
+  (flags
+   (:standard -fblocks)))
+ (c_library_flags
+  (-framework Network -framework Security -framework CoreFoundation)))
