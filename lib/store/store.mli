@@ -88,7 +88,9 @@ type t = {
       (** [offset], [length]: the bytes up to the end, empty past it, [None]
           when absent. *)
   head_opt : Key.t -> entry option;
-  probe : Key.t -> stamp option;
+  probe : (Key.t -> stamp option) option;
+      (** declared where the far end stamps its receipt; without it the probe is
+          a [head_opt] *)
   compute_checksum : Key.t -> string -> Checksum.t option;
       (** the body's checksum under an algorithm of {!Checksum}, computed where
           the bytes are; [None] when absent *)

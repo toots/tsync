@@ -143,7 +143,7 @@ type t = {
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> entry option;
-  probe : Key.t -> stamp option;
+  probe : (Key.t -> stamp option) option;
   compute_checksum : Key.t -> string -> Checksum.t option;
   delete : Key.t -> bool;
   delete_multi : Key.t list -> unit;

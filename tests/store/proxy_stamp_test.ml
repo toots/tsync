@@ -8,6 +8,7 @@ module P = Tsync_http_proxy.Store_server
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let secret = String.make 40 's'
 let key = Key.cursor (Domain_name.v "d")
+let probe (s : Store.t) = Option.get s.probe key
 
 let () =
   let root =
@@ -71,7 +72,7 @@ let () =
       in
       let server, s = serve false in
       p "== a server that stamps";
-      (match (s.probe key, s.probe key) with
+      (match (probe s, probe s) with
         | Some a, Some b ->
             p "  stamped, absent key included: true";
             p "  one epoch across answers: %b" (a.epoch = b.epoch);
@@ -87,6 +88,6 @@ let () =
       Server.close server;
       let old, s = serve true in
       p "== a server without the stamp";
-      p "  probe answers none: %b" (s.probe key = None);
+      p "  probe answers none: %b" (probe s = None);
       Server.close old);
   Fs.rm_rf root

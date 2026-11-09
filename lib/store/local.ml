@@ -395,10 +395,7 @@ let create ?(verify_writes = true) ~name root =
       get_opt = (fun key -> fed (fun () -> read_opt key));
       get_range;
       head_opt;
-      probe =
-        (fun key ->
-          ignore (head_opt key);
-          None);
+      probe = None;
       compute_checksum =
         (fun key algo ->
           fed (fun () -> Option.map (Checksum.of_body algo) (read_opt key)));

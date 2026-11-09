@@ -327,17 +327,11 @@ let head_opt t k =
     | { status = 404; _ } -> None
     | r -> failure t ~op:"head" r
 
-(* §2: [x-tsync-received] is [<epoch>:<µs>]. *)
 let stamp (r : answer) =
-  match
-    Option.map (String.split_on_char ':')
-      (Tsync_http.Codec.header r.headers "x-tsync-received")
-  with
-    | Some [epoch; us]
-      when epoch <> "" && us <> ""
-           && String.for_all (function '0' .. '9' -> true | _ -> false) us ->
-        Some { Store.epoch; at = float_of_string us /. 1e6; sent = r.sent }
-    | _ -> None
+  Option.bind
+    (Tsync_http.Codec.header r.headers W.receipt_header)
+    W.receipt_of_string
+  |> Option.map (fun (epoch, at) -> { Store.epoch; at; sent = r.sent })
 
 let probe t k =
   match call t "head" ~meth:"HEAD" (obj k) with
@@ -524,7 +518,7 @@ let create ~domain ~admission ~name fields =
       get_opt = get_opt t;
       get_range = get_range t;
       head_opt = head_opt t;
-      probe = probe t;
+      probe = Some (probe t);
       compute_checksum = compute_checksum t;
       delete = delete t;
       delete_multi = delete_multi t;

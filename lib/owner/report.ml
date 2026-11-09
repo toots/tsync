@@ -86,7 +86,7 @@ let refresh_probe t s =
   let reach =
     match
       Rt.with_timeout ~detach:true probe_wait (fun () ->
-          Domain.probe t.domain.name store)
+          ignore (Domain.probe t.domain.name store))
     with
       | () -> R.Reachable { latency_ms = (Rt.now () -. t0) *. 1000. }
       | exception e -> Unreachable (Fail.classify e).reason

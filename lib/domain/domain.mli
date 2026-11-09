@@ -33,8 +33,9 @@ val build :
     owner, which keeps it. *)
 val engine : t -> (module Engine.S)
 
-(** A store's liveness probe: one cheap read of the domain cursor. *)
-val probe : Tsync_core.Domain_name.t -> Store.t -> unit
+(** A store's liveness and uplink probe: one cheap read of the domain cursor,
+    with the far end's receipt stamp where the store gives one. *)
+val probe : Tsync_core.Domain_name.t -> Store.t -> Store.stamp option
 
 (** The remote layer's view of the domain, for readers that are not its owner.
     [reading_from] sends every read to that member, writes still going through
