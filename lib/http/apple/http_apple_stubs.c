@@ -181,6 +181,10 @@ static void configure_tls(sec_protocol_options_t options, apple_connection *conn
   sec_protocol_options_set_tls_server_name(options, server_name);
   sec_protocol_options_set_min_tls_protocol_version(options,
                                                     tls_protocol_version_TLSv12);
+  /* Network.framework resumes a TLS 1.2 session by host and port, under any
+     server name and without the verify block, so a resumed session would skip
+     the name check. */
+  sec_protocol_options_set_tls_resumption_enabled(options, false);
   if (connection->anchors == NULL)
     return;
   sec_protocol_options_set_verify_block(
