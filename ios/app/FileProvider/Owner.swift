@@ -25,11 +25,15 @@ struct Owner {
         guard let text = Core.text("request", domain: domain, line) else {
             throw OwnerFailure.transport("the core is not started")
         }
-        Footprint.record(action)
         guard
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
             let reply = object as? [String: Any]
-        else { throw OwnerFailure.transport("the core's reply is not a JSON object") }
+        else {
+            Footprint.record(action + " (no JSON reply)")
+            throw OwnerFailure.transport("the core's reply is not a JSON object")
+        }
+        let failed = reply["ok"] as? Bool == false
+        Footprint.record(failed ? "\(action) failed: \(reply["code"] ?? "?") \(reply["error"] ?? "")" : action)
         return try OwnerFailure.checked(reply)
     }
 
