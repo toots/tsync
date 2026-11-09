@@ -4,7 +4,8 @@ import Foundation
 /// Launched with `-selftest`: drives the local test domain through file
 /// coordination, so every step reaches the File Provider extension as the
 /// Files app's would, and marks each step in the extension's footprint log.
-/// Progress goes to `selftest.log` in the App Group container.
+/// Progress goes to `selftest.log` in the App Group container, copied with the
+/// footprint log into the app's Documents when the test ends.
 enum SelfTest {
     static let files = 1000
     static let bigBytes = 256 << 20
@@ -61,6 +62,17 @@ enum SelfTest {
             note(read == bigBytes && listed == files ? "PASS" : "FAIL")
         } catch {
             note("FAIL \(error)")
+        }
+        copyLogsToDocuments()
+    }
+
+    /// `devicectl` reads the app's own container but not the App Group's.
+    private static func copyLogsToDocuments() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        for source in [log, Footprint.log] {
+            let copy = documents.appendingPathComponent(source.lastPathComponent)
+            try? FileManager.default.removeItem(at: copy)
+            try? FileManager.default.copyItem(at: source, to: copy)
         }
     }
 
