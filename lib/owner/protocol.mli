@@ -317,6 +317,7 @@ type _ request =
   | Revert : { item : target; version : int64 option } -> unit request
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
+  | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
   | Sync : { full : bool } -> resynced request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)

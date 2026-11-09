@@ -1090,6 +1090,12 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Full_resync ->
         E.stamp_generation ();
         t.hooks.reannounce ()
+    | Refresh -> (
+        match t.pulls with
+          | Some pulls -> Pulls.refresh pulls
+          | None ->
+              invalid "%s keeps a full tree, which has no refresh"
+                (domain_name t))
     | Cursor -> E.cursor ()
     | Changes_since r -> changes t ~anchor:r.anchor ~limit:r.limit
     | Sync r ->

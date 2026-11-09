@@ -47,6 +47,12 @@ type synced = {
   pending : int;
 }
 
+(** android §3.2: what a refresh pass did. *)
+type pass = {
+  covered : string list;  (** the folders it brought to the head *)
+  changed : string list;  (** those whose children changed *)
+}
+
 module type S = sig
   (** Holds the metadata lock across [f]; every operation called inside joins
       the same hold. *)
@@ -258,6 +264,13 @@ module type S = sig
       read. The log is read and merged [page] entries at a time (android §8
       [pull_page], 256 by default). *)
   val pull : ?page:int -> string -> bool
+
+  (** Every folder with a pull marker. *)
+  val held : unit -> string list
+
+  (** android §3.2, a refresh pass over these folders: the log read once, a page
+      at a time, ending early when [stop] says so. *)
+  val pull_pass : ?page:int -> stop:(unit -> bool) -> string list -> pass
 
   (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
   val pulled_at : string -> float option

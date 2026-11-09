@@ -304,6 +304,7 @@ type _ request =
   | Revert : { item : target; version : int64 option } -> unit request
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
+  | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
   | Sync : { full : bool } -> resynced request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)
@@ -410,6 +411,7 @@ let action : type a. a request -> string = function
   | Restore _ -> "restore"
   | Revert _ -> "revert"
   | Full_resync -> "full_resync"
+  | Refresh -> "refresh"
   | Sync _ -> "sync"
   | Share _ -> "share"
   | Share_revoke _ -> "share_revoke"
@@ -558,8 +560,8 @@ let destination_of j =
 
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
-  | Ping | Cursor | Full_resync | Retry | Poll | Wake | Notify_reset | Status
-  | Stop | Share_clear_cache ->
+  | Ping | Cursor | Full_resync | Refresh | Retry | Poll | Wake | Notify_reset
+  | Status | Stop | Share_clear_cache ->
       []
   | Vault_status pull -> pull_fields pull
   | Totp_export p | Vault_init p -> [("passphrase", `String p)]
@@ -766,6 +768,7 @@ let decode j =
         in
         Request (Revert { item = target_of j; version })
     | "full_resync" -> Request Full_resync
+    | "refresh" -> Request Refresh
     | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
     | "share" ->
         Request
@@ -1079,7 +1082,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
     | Delete _ -> ok (if reply = `Kept then [("kept", `Bool true)] else [])
-    | Ping | Full_resync | Poll | Wake | Stop | Rmdir _ | Revert _
+    | Ping | Full_resync | Refresh | Poll | Wake | Stop | Rmdir _ | Revert _
     | Vault_unlock _ | Vault_lock _ | Vault_appearance _ | Totp_rename _
     | Totp_remove _ ->
         ok []
@@ -1565,6 +1568,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               (member j "appearance");
         }
     | Full_resync -> ()
+    | Refresh -> ()
     | Revert _ -> ()
     | Poll -> ()
     | Wake -> ()
