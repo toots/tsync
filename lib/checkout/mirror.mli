@@ -94,6 +94,10 @@ type child = {
 (** Real names; internal leaves, temporaries and undecodable entries skipped. *)
 val list : t -> string -> child list
 
+(** The real names of {!list}, decoding a manifest only behind an escape handle;
+    an undecodable entry is not skipped. *)
+val names : t -> string -> string list
+
 (** The time the folder's set of children last changed here. *)
 val dir_mtime : t -> string -> float
 
