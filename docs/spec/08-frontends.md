@@ -270,7 +270,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B (it fetches a whole file's bytes, or walks a subtree) |
 | `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
 | `refresh` | — | `{}` once a refresh pass is started or already running; pulled tree only ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)), `invalid` elsewhere | |
-| `push_register` | `token`, `environment`, `fileProviderDomain` | `{}` once the domain's server holds the registration; `unsupported` when the domain's main is not an `http-proxy` store or its server does not push ([http-proxy wire §5.6](backends/http-proxy.md#56-push-registration)) | P |
+| `push_register` | `token`, `environment`, `fileProviderDomain` | `{pushes:true}` once the domain's server holds the registration; `{pushes:false}` when the domain's main is not an `http-proxy` store or its server does not push ([http-proxy wire §5.6](backends/http-proxy.md#56-push-registration)) | P |
 | `sync` | `arg`: `""` runs one cycle now; `"full"` arrives by state ([publication.md §4.7](algorithms/publication.md#47-state-read-and-arrival-by-state)) | the result of [05 §4.7](05-ops-config.md) | B, P |
 | `job` | `job`: the owner job and its arguments; `narrate?` | streamed lines, then `{exit}`: the command's exit status ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)) | B, P |
 | `cancel` | `job`: the id a `job` streamed | `{cancelled}`: whether that job was running; it stops at its next unit boundary | |
