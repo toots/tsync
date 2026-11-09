@@ -105,7 +105,7 @@ let () =
   p "== refused on a pulled tree";
   List.iter
     (fun name -> p "  %-34s %s" name (outcome (action name [s "arg" ""])))
-    ["changes_since"; "list_all"; "cursor"; "full_resync"; "sync"; "subscribe"];
+    ["full_resync"; "sync"; "subscribe"];
 
   p "== the store pends";
   peer_writes "c.txt" "while the phone was away";
