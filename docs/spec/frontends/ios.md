@@ -154,8 +154,6 @@ neither the core nor a service, and is far inside the time the system gives it.
 
 ### 5.3 Pushes
 
-*The server part moves to the page that owns the listener when it is implemented.*
-
 A server holding a push key tells phones when a domain changed. The system turns a file provider push
 naming a domain into a signal of that domain's working set (§5.1): the extension's refresh pass
 follows, with neither app running.
@@ -168,7 +166,8 @@ The key signs pushes to every app of its team, so it is given to no other server
 
 **The phone.**
 - At each domain boot, and whenever the system hands it a new token, the extension registers for
-  file provider pushes and sends the domain's server a `push_register` request: the token, its
+  file provider pushes and sends the core a `push_register` request
+  ([08 §4](../08-frontends.md)): the token, its
   environment (`development` for builds signed for development, else `production`), and the domain's
   File Provider identifier.
 - A server without a key answers `unsupported`; the extension does not ask that server again in this
@@ -176,33 +175,8 @@ The key signs pushes to every app of its team, so it is given to no other server
 - The extension obtains the token itself: on a device (iOS 18.1), the app and the extension each
   registering got the same token and neither saw it invalidated. The app does not register.
 
-**The server** (the http-proxy listener).
-- A listener option `push`: `{"key": path, "keyId", "teamId", "topic"}`, where `key` is the team's
-  APNs signing key (a `.p8` file, read at start, its mode no wider than the owner's) and `topic` is
-  `<app identifier>.pushkit.fileprovider`. Absent, every `push_register` is answered `unsupported`.
-- Registrations are kept per domain and per client, durably in the server's data directory: the
-  token, environment, File Provider identifier and when it was last registered. A new registration
-  of a client replaces its old one. A registration is dropped when APNs answers that the token is
-  gone, and when not renewed for `push_registration_max_age`.
-- When the listener wins the create of a log entry for a domain, it pushes to every registration of
-  that domain except the entry author's. Pushes to one registration are coalesced: at most one per
-  `push_coalesce`, and always one after the last change.
-- A push is an HTTP/2 POST to APNs (`api.push.apple.com`, or `api.sandbox.push.apple.com` for the
-  `development` environment) at `/3/device/<token>`, with push type `fileprovider`, the topic, and
-  a bearer token signed with ES256 by the key, renewed every `push_auth_renewal`. Its body is
-  `{"container-identifier":"NSFileProviderWorkingSetContainerItemIdentifier","domain":"<File
-  Provider identifier>"}`. One connection to each APNs host is kept open while pushes flow.
-- Pushes go through libcurl (HTTP/2 negotiated by ALPN), not the core's HTTP/1.1 client. libcurl is
-  a build switch beside the TLS implementations: a build without it answers every `push_register`
-  `unsupported` and refuses a config that sets `push`, naming the missing feature. A build asked for
-  push fails when libcurl or its HTTP/2 support is missing. A failed push is logged; a push is never
-  retried past the next change's.
-
-| Parameter | Recommended | Constraint |
-|---|---|---|
-| `push_coalesce` | 10 s | the shortest interval between two pushes to one registration |
-| `push_registration_max_age` | 60 days | a registration not renewed for this long is dropped |
-| `push_auth_renewal` | 30 min | between 20 and 60 min, APNs's bounds for a bearer token |
+**The server** pushes as [http-proxy §A4.7](http-proxy.md#a47-pushes) specifies: its operator sets
+the listener's `push` option, and a build without libcurl cannot.
 
 ## 6. The app
 
