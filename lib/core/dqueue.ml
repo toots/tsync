@@ -402,7 +402,9 @@ let failed t id e =
   let retryable = retryable || ((not t.ordered) && fl.kind = Unexplained) in
   if retryable then (
     Log.info "%s: %s failed (%s), retrying" t.name id (Fail.to_string fl);
-    `Retry (backoff note.attempts))
+    `Retry
+      (Float.max (backoff note.attempts)
+         (Option.value ~default:0. fl.retry_after)))
   else (
     Log.warn "%s: %s parked: %s" t.name id (Fail.to_string fl);
     Mutex.protect t.m (fun () ->

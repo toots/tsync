@@ -11,4 +11,4 @@ records on disk: 0
 == keyed: 50000 keys back off in an outage while 50000 others run
 backing off: 50000
 others ran within 3x their time alone: true; ran: 100000
-after the outage, ran: 150000; pending: 0
+still backing off, each after one attempt as retry_after asks: true

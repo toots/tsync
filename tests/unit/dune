@@ -246,6 +246,6 @@
   (run ./dqueue_scale_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff dqueue_scale_test.expected dqueue_scale_test.output)))

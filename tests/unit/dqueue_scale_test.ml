@@ -45,7 +45,8 @@ let ran_m = Mutex.create ()
 let outage = Atomic.make false
 
 let run id body ~cancel:_ =
-  if Atomic.get outage && body.[0] = 'd' then Fail.raise_ Link "outage";
+  if Atomic.get outage && body.[0] = 'd' then
+    Fail.raise_ ~retry_after:600. Link "outage";
   Mutex.protect ran_m (fun () -> ran := id :: !ran)
 
 let rec wait_for ?(deadline = Unix.gettimeofday () +. 300.) f =
@@ -126,8 +127,9 @@ let () =
         (others < (3. *. alone) +. 1.)
         (List.length !ran);
       Printf.eprintf "alone %.3fs, during the outage %.3fs\n%!" alone others;
-      Atomic.set outage false;
-      wait_for (fun () -> Dqueue.idle q);
-      p "after the outage, ran: %d; pending: %d\n" (List.length !ran)
-        (Dqueue.pending q));
+      p "still backing off, each after one attempt as retry_after asks: %b\n"
+        (List.for_all
+           (fun (_, (n : Dqueue.failure_note)) -> n.attempts = 1)
+           (Dqueue.retrying q)
+        && Dqueue.pending q = records));
   Test_support.finish dir
