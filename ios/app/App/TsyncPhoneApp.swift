@@ -12,6 +12,7 @@ struct TsyncPhoneApp: App {
 
     var body: some Scene {
         WindowGroup { RootView().environmentObject(model) }
+            .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) { await BackgroundRefresh.run() }
     }
 }
 
@@ -28,8 +29,12 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        .onAppear { BackgroundRefresh.schedule() }
         .onChange(of: phase) { phase in
-            if phase == .active { model.reload() }
+            if phase == .active {
+                model.reload()
+                BackgroundRefresh.schedule()
+            }
         }
     }
 }
@@ -43,6 +48,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var entries: [Configs.Entry] = []
     @Published private(set) var turnedOff: Set<String> = []
     @Published private(set) var passFailures: [String] = []
+    @Published private(set) var refreshStatus = UIBackgroundRefreshStatus.available
 
     private let reconciler = Reconciler()
     private var observer: NSObjectProtocol?
@@ -73,6 +79,7 @@ final class AppModel: ObservableObject {
         configured = Configs.exists
         loadFailure = configured ? Configs.loadFailure() : nil
         entries = Configs.entries()
+        refreshStatus = UIApplication.shared.backgroundRefreshStatus
         reconciler.request()
     }
 

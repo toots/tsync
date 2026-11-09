@@ -27,6 +27,16 @@ struct SettingsView: View {
                         Button("Remove", role: .destructive) { removing = entry }
                     }
                 }
+                switch model.refreshStatus {
+                case .denied:
+                    Text("Background refresh is off for tsync: Files shows changes from other devices when you open tsync. Turn it on in Settings, General, Background App Refresh.")
+                        .font(.footnote).foregroundStyle(.orange)
+                case .restricted:
+                    Text("Background refresh is not available on this iPhone: Files shows changes from other devices when you open tsync.")
+                        .font(.footnote).foregroundStyle(.orange)
+                default:
+                    EmptyView()
+                }
                 Button("Add a domain") { adding = true }
                 ForEach(model.passFailures, id: \.self) { Text($0).foregroundStyle(.red) }
                 if !message.isEmpty { Text(message).foregroundStyle(.red) }
