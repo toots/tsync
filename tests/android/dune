@@ -76,6 +76,26 @@
   (diff feed_test.expected feed_test.output)))
 
 (executable
+ (name pull_page_test)
+ (modules pull_page_test)
+ (libraries lazy_harness tsync_android threads.posix unix yojson))
+
+(rule
+ (with-stdout-to
+  pull_page_test.output
+  (run ./pull_page_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff pull_page_test.expected pull_page_test.output)))
+
+(rule
+ (alias runtest-android-serial)
+ (action
+  (diff pull_page_test.expected pull_page_test.output)))
+
+(executable
  (name bridge_test)
  (modules bridge_test)
  (foreign_stubs

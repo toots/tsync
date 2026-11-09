@@ -79,7 +79,7 @@ let read_entry t n =
 
 let batch = 32
 
-let read_entries t from =
+let read_entries ?max t from =
   let rec sequential = function
     | [] -> []
     | key :: rest -> (
@@ -95,7 +95,12 @@ let read_entries t from =
       | _ -> `More acc
   in
   let rec go from acc =
-    let numbers = List.init batch (fun i -> from + i) in
+    let wanted =
+      match max with
+        | Some m -> Int.min batch (m - List.length acc)
+        | None -> batch
+    in
+    let numbers = List.init wanted (fun i -> from + i) in
     let keys = List.map (Key.log_entry t.domain) numbers in
     let bodies =
       match t.store.get_many with
@@ -104,7 +109,8 @@ let read_entries t from =
     in
     match take acc numbers bodies with
       | `Done acc -> List.rev acc
-      | `More acc -> go (from + batch) acc
+      | `More acc when Some (List.length acc) = max -> List.rev acc
+      | `More acc -> go (from + wanted) acc
   in
   go from []
 
