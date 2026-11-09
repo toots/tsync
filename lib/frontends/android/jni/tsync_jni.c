@@ -245,7 +245,7 @@ Java_org_feverdreamtv_tsync_bridge_Native_nativeInit(JNIEnv *env, jclass class,
     caml_startup(argv);
     tsync_bridge_started();
     caml_release_runtime_system();
-    tsync_bridge_init(trust_store_path, transfer_root_path);
+    tsync_bridge_init(trust_store_path, transfer_root_path, 0, 0, 0);
     free(home_path);
     free(trust_store_path);
     free(transfer_root_path);

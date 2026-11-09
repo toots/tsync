@@ -13,6 +13,11 @@ exception Timeout
 
 val is_cancelled : exn -> bool
 
+(** A host's bounds (android §4.1 item 7): the domains running fibers in
+    parallel, and the [`Threaded] fibers in flight at once. Before the first
+    fiber, which starts the scheduler; raises [Invalid_argument] after it. *)
+val configure : ?workers:int -> ?max_blocking:int -> unit -> unit
+
 (** Monotonic seconds with an arbitrary origin. *)
 val now : unit -> float
 
