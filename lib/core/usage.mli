@@ -27,7 +27,15 @@ val trim : unit -> unit
     domain while it compacts. *)
 val release : unit -> unit
 
-(** {!release} when the heap grew by more than [by] bytes (default 64 MiB) since
-    the last one, else {!trim}: for work that never ends, such as a daemon's
-    background copies. *)
+(** The growth {!release_if_grown} and {!compact_if_grown} allow by default: 64
+    MiB unless the host set it (android §4.1 item 7). *)
+val set_release_growth : int -> unit
+
+(** {!release} when the heap grew by more than [by] bytes since the last one,
+    else {!trim}: for work that never ends, such as a daemon's background
+    copies. *)
 val release_if_grown : ?by:int -> unit -> unit
+
+(** {!release} when the heap grew past the release growth, else nothing: cheap
+    enough to follow every request. *)
+val compact_if_grown : unit -> unit
