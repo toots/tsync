@@ -15,14 +15,7 @@ module Make (C : Engine_ctx.S) = struct
       | Whole { body; _ } ->
           Remote.Lazy
             (fun () ->
-              Fs.with_fd
-                (Fs.openfile (Staged.whole_path staged body) [O_RDONLY])
-                (fun fd ->
-                  let buf = Bigstring.create len in
-                  let n =
-                    Fs.pread_full fd buf ~boff:0 ~len ~off:(i * e.chunk_size)
-                  in
-                  Bigstring.sub buf ~off:0 ~len:n))
+              Staged.read_whole staged body ~off:(i * e.chunk_size) ~len)
       | Slots slots -> (
           match if i < Array.length slots then slots.(i) else Staged.Zero with
             | Staged.Inherit -> (

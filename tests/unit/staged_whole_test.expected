@@ -1,0 +1,5 @@
+inside: off 4096 len 8192 -> 8192 bytes, first 80, last 239
+unaligned: off 1000 len 10 -> 10 bytes, first 247, last 5
+clipped at the end: off 96000 len 8192 -> 4000 bytes, first 118, last 101
+past the end: off 100000 len 8192 -> 0 bytes, first -1, last -1
+empty: off 0 len 0 -> 0 bytes, first -1, last -1

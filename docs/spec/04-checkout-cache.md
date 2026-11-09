@@ -220,7 +220,9 @@ SHOULD accept more (the extra ones are ignored) or fewer (the missing ones mean 
   only as long as the writes that reached it; within the edit's size, bytes past its end read as
   zeros.
 - **Whole body** `staged/whole/<body id>`: a complete file handed over by a frontend. It is never
-  modified in place: any byte-level edit first splits it into group bodies (§4.3).
+  modified in place: any byte-level edit first splits it into group bodies (§4.3). A reader SHOULD
+  read it through a read-only mapping: the digests adoption computes and the chunks an upload sends
+  are then views of the file, never copies.
 - A staged body is authoritative data; it is written by *in-place data* and made durable at
   sync and close ([durable-queue](algorithms/durable-queue.md) §3.2).
 
