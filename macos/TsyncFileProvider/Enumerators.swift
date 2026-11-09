@@ -157,12 +157,6 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
     }
 }
 
-#if os(macOS)
-func workingSetEnumerator(_ owner: Owner) -> NSFileProviderEnumerator {
-    WorkingSetEnumerator(owner: owner)
-}
-#endif
-
 /// The trash is not implemented (§6.4).
 final class TrashEnumerator: NSObject, NSFileProviderEnumerator {
     func invalidate() {}
