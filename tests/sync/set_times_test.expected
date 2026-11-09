@@ -1,0 +1,10 @@
+a peer holds the mtime set: true
+the creation time is kept: true
+no chunk was written: true
+a peer holds a later creation time set: true
+a time handed back within a microsecond changes nothing: true
+times set on an open file are not fed before its close: true
+its close feeds it once: true
+times set on an open file reach a peer with its content: true
+a folder: invalid
+pending: A 0, B 0

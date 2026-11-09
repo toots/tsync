@@ -289,7 +289,8 @@ skipped there is never enumerated again.
   example `.rtfd`, `.logicx`, `.band`) takes that type, any other directory is a folder; a symlink is
   a symbolic link; a file takes the declared type of its filename extension, else generic data.
 - `documentSize` = size, exactly the bytes a fetch delivers (a mismatch makes the system upload the
-  file again after every download); `contentModificationDate` = mtime, absent when mtime ≤ 0.
+  file again after every download); `contentModificationDate` = mtime, absent when mtime ≤ 0;
+  `creationDate` = created, likewise ([02 §2.6](../02-remote-model.md#26-file-manifest-binary-tsyncm04)).
 - `isUploaded` = the row's `isUploaded`; `symlinkTargetPath` = its target.
 - `contentPolicy` = download lazily, set on the root and inherited.
 - **Writability is the owner's.** A row carries `readOnly: true` when the item cannot be written
@@ -349,7 +350,7 @@ item or an error. A creation or modification never completes with neither.
 | fetch partial contents | `stat`; with strict versioning and a contentVersion other than the requested one → version-no-longer-available. Range = `aligned` (§6.8) against the stat's size; empty → version-no-longer-available (a length of 0 is invalid to the owner, and an unknown error is retried forever). `fetch_range(ref, dest, offset, length)`. A reply item whose contentVersion differs from the stat's (the content changed in between, so the range may be misaligned) → version-no-longer-available, and the system asks again. Complete with the served range and the reply's `item`. |
 | create item | Read-only item or domain → cannot-synchronize. Directory iff the type is folder, or the type conforms to directory and no contents are offered (a flat file named like a package is offered contents). Directory → `mkdir`; symlink → `symlink` (target required); contents → stage (§6.6) and `write(parentRef, name)`; else `create`. Every creation is `exclusive:true` except a may-already-exist replay (below). |
 | create item, may already exist | A reimport replays every on-disk item. Directory → `mkdir` without `exclusive` (it answers an existing folder as is). Otherwise `stat(parentRef, name)`: `not_found` → create as above; present and no contents offered → return it; present with contents → stage and `write(ref, base: its contentId)`, which the owner answers without uploading when the content is identical. Only `not_found` means absent; any other error propagates. |
-| modify item | Read-only → cannot-synchronize. Moved (filename or parent changed): `rename(ref, parentRef, name, noreplace:true)`; a rename onto the item's own current place is a no-op answered with the item, so a modification retried after its write failed converges. Then contents changed: stage and `write(ref, base)`, where `base` is the contentVersion of the base version the system gave. Return the last reply's `item`. Neither: return a fresh `stat`. |
+| modify item | Read-only → cannot-synchronize. Moved (filename or parent changed): `rename(ref, parentRef, name, noreplace:true)`; a rename onto the item's own current place is a no-op answered with the item, so a modification retried after its write failed converges. Then contents changed: stage and `write(ref, base)`, where `base` is the contentVersion of the base version the system gave. Otherwise, `contentModificationDate` or `creationDate` changed on a file: `set_times(ref, mtimeNs, createdNs?)` with the template's dates, `createdNs` only when `creationDate` changed. Return the last reply's `item`. Neither: return a fresh `stat`. |
 | delete item | Read-only → cannot-synchronize. A directory without the recursive flag: `list_dir(limit: 1)`; non-empty → directory-not-empty. Then `rmdir` or `delete`; `not_found` → success. |
 | custom actions | §6.7. |
 
@@ -370,7 +371,10 @@ framework expects from a modification on a stale base.
 The system unlinks the contents URL it handed over once the callback completes. The extension clones
 the URL (copying when cloning is impossible) to a new UUID name in its staging directory, sends that
 path as `staging`, and removes its name afterwards whatever the outcome. It does not hard-link: a
-second link on the system's file makes the item unevictable. The owner validates the path (§4.4) and
+second link on the system's file makes the item unevictable. The clone takes the item template's
+`contentModificationDate` and `creationDate` where it has them, since the owner records the staged
+file's times as the item's and the system's file carries its own: a Finder copy thus keeps its
+original's dates ([02 §2.6](../02-remote-model.md#26-file-manifest-binary-tsyncm04)). The owner validates the path (§4.4) and
 adopts the file by rename before replying, so the callback completes once the content is the owner's
 and the upload and the commit continue behind it. The item is reported uploaded through
 `isUploaded`, which turns true when its content is committed and not when its chunks are uploaded

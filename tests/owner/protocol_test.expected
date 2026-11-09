@@ -14,6 +14,8 @@ download_progress request reads back, reply reads back
 create            request reads back, reply reads back
 write             request reads back, reply reads back
 write             request reads back, reply reads back
+set_times         request reads back, reply reads back
+set_times         request reads back, reply reads back
 mkdir             request reads back, reply reads back
 mkdir             request reads back, reply reads back
 symlink           request reads back, reply reads back

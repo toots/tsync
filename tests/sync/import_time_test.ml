@@ -47,12 +47,14 @@ let client name : (module Engine.S) =
   end in
   (module Engine.Make (C))
 
-let mtime (module E : Engine.S) name =
+let times (module E : Engine.S) name =
   match
     List.find_opt (fun (e : E.entry) -> e.name = name) (E.list_children "")
   with
-    | Some e -> e.st.times.mtime
-    | None -> -1
+    | Some e -> e.st.times
+    | None -> { Fs.mtime = -1; created = -1 }
+
+let mtime e name = (times e name).mtime
 
 let () =
   Fs.rm_rf root;
@@ -77,5 +79,9 @@ let () =
       ignore (B.resync ());
       p "A holds the new time: %b\n" (mtime a "old.txt" = written);
       p "B holds the new time: %b\n" (mtime b "old.txt" = written);
+      (* Linux sets no creation time, so there the source keeps its own birth
+         time, which the import must carry rather than the mtime. *)
+      p "B holds the source's creation time: %b\n"
+        ((times b "old.txt").created = (Fs.times path).created);
       p "pending: A %d, B %d\n" (A.activity ()).pending (B.activity ()).pending);
   Test_support.finish root

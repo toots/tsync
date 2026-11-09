@@ -81,7 +81,7 @@ owner process (one domain)
   arrives before the domain's upload queue exists and local recovery has run.
 - **Bridging.** A callback that touches the domain submits a closure to the scheduler and blocks its
   worker until the result is back ([07 §3.7](../07-daemon-cli.md)). A slow read blocks only its own
-  request. Callbacks that touch no domain state (`statfs`, `chmod`, `chown`, `utimens`, `flush`)
+  request. Callbacks that touch no domain state (`statfs`, `chmod`, `chown`, `flush`)
   answer on the worker.
 - **Interrupts.** When the kernel interrupts a pending request (the calling process got a signal, or
   is being frozen), the mount MUST answer it with EINTR promptly; the work the request started (a
@@ -120,7 +120,8 @@ whose basename starts with `.fuse_hidden` is a **hidden name** (§4.10) and neve
 | `rmdir` | remove the folder **only if it is empty** (no file, folder or staged entry beneath it), as one step under the owner's metadata serialisation ([04 §4.5](../04-checkout-cache.md#45-namespace-operations)) | ENOTEMPTY otherwise |
 | `rename(src, dst, flags)` | §4.2.1 | |
 | `statfs` | §4.5 | |
-| `utimens`, `chmod`, `chown` | succeed and change nothing (failing them broke `rsync`, whose temp-file `fchmod` reported "mkstemp failed") | |
+| `utimens` | on a file, `set_times(key, mtime)` with the requested mtime (`UTIME_NOW` → now; `UTIME_OMIT` → nothing is sent); the access time is ignored; on a folder or symlink, succeed and change nothing | as `set_times` |
+| `chmod`, `chown` | succeed and change nothing (failing them broke `rsync`, whose temp-file `fchmod` reported "mkstemp failed") | |
 | `link` | unsupported | EPERM |
 | xattr calls | unsupported | EOPNOTSUPP |
 | `fallocate` | unsupported | EOPNOTSUPP |
@@ -146,13 +147,13 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
 
 `getattr` answers from the mirror only, never from a store.
 
-| kind | mode | nlink | size | mtime | ctime, atime |
+| kind | mode | nlink | size | mtime | ctime, atime | creation time |
 |---|---|---|---|---|---|
-| directory | `S_IFDIR` `dirMode` | 2 | 0 | the time its set of children last changed on this client ([04](../04-checkout-cache.md)) | = mtime |
-| staged file | `S_IFREG` `fileMode` | 1 | staged size | staged mtime | = mtime |
-| file with no staged edit | `S_IFREG` `fileMode` | 1 | manifest size | manifest mtime | = mtime |
-| symlink | `S_IFLNK 0777` | 1 | length of the target | manifest mtime | = mtime |
-| retained (hidden) file | `S_IFREG` `fileMode` | 0 | retained size | retained mtime | = mtime |
+| directory | `S_IFDIR` `dirMode` | 2 | 0 | the time its set of children last changed on this client ([04](../04-checkout-cache.md)) | = mtime | none |
+| staged file | `S_IFREG` `fileMode` | 1 | staged size | staged mtime | = mtime | staged created |
+| file with no staged edit | `S_IFREG` `fileMode` | 1 | manifest size | manifest mtime | = mtime | manifest created |
+| symlink | `S_IFLNK 0777` | 1 | length of the target | manifest mtime | = mtime | manifest created |
+| retained (hidden) file | `S_IFREG` `fileMode` | 0 | retained size | retained mtime | = mtime | retained created |
 
 - Every time is stable between changes: a directory's mtime moves when a child is added, removed or
   renamed on this client (locally or by an arrival), never on a mere look.
@@ -160,7 +161,10 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
   ownership are presentation only: the store keeps neither, `chmod` and `chown` change nothing, and
   every client may present the same domain with its own.
 - A read-only domain clears the write bits.
-- `utimens` is a no-op, so a file's mtime is its last staged write or its manifest's.
+- The creation time SHOULD be answered to a `statx` request, as its birth time, where the kernel
+  sends one (Linux 6.6 and later) and the FUSE library can answer it; a plain `getattr` reply has no
+  field for it. No call can set it ([02 §2.6](../02-remote-model.md#26-file-manifest-binary-tsyncm04)).
+- `utimens` publishes a change of the mtime alone (§4.2), so `touch` and `cp -p` reach the domain.
 
 ### 4.4 Read-only and multi-user access
 

@@ -1,3 +1,4 @@
 A holds the new time: true
 B holds the new time: true
+B holds the source's creation time: true
 pending: A 0, B 0

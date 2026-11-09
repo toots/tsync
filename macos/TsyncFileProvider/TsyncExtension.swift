@@ -178,6 +178,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
     /// still pending, so the system never overwrites it from the reply.
     private static let stored: NSFileProviderItemFields = [.contents, .filename, .parentItemIdentifier]
 
+    /// A file's dates, stored when a request carried them (02 §2.6); a
+    /// folder's and a symlink's never are.
+    private static let dates: NSFileProviderItemFields = [.contentModificationDate, .creationDate]
+
+    private static func storedFields(dates sent: Bool) -> NSFileProviderItemFields {
+        sent ? stored.union(dates) : stored
+    }
+
+    private static func ns(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1e9).rounded())
+    }
+
     func createItem(
         basedOn itemTemplate: NSFileProviderItem, fields: NSFileProviderItemFields, contents url: URL?,
         options: NSFileProviderCreateItemOptions = [], request: NSFileProviderRequest,
@@ -193,7 +205,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         let type = itemTemplate.contentType ?? .data
         let isDirectory = type == .folder || (type.conforms(to: .directory) && url == nil)
         let mayExist = options.contains(.mayAlreadyExist)
-        let pending = fields.subtracting(Self.stored)
+        let pending = fields.subtracting(
+            Self.storedFields(dates: !isDirectory && type != .symbolicLink && url != nil))
         return task(onCancel: { done((nil, [], Errors.map(OwnerFailure.cancelled, .mutation))) }) {
             [owner, manager] c, _ in
             do {
@@ -205,7 +218,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                 } else if mayExist, let existing = try Self.existing(owner, place, c) {
                     if let url = url {
                         row = try Self.write(
-                            owner, manager, url, ["ref": existing.ref], base: existing.contentId, c)
+                            owner, manager, url, ["ref": existing.ref], base: existing.contentId,
+                            dates: itemTemplate, c)
                     } else {
                         row = existing
                     }
@@ -221,7 +235,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                 } else if let url = url {
                     var request = place
                     request["exclusive"] = true
-                    row = try Self.write(owner, manager, url, request, base: nil, c)
+                    row = try Self.write(owner, manager, url, request, base: nil, dates: itemTemplate, c)
                 } else {
                     var request = place
                     request["exclusive"] = true
@@ -263,7 +277,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
             "noreplace": true,
         ]
         let base = String(data: version.contentVersion, encoding: .utf8)
-        let pending = changedFields.subtracting(Self.stored)
+        let isFile = !ref.hasPrefix("d:") && item.contentType != .symbolicLink
+        let rewritten = isFile && changedFields.contains(.contents) && newContents != nil
+        let modified = item.contentModificationDate ?? nil
+        let retimed =
+            isFile && !rewritten && !changedFields.isDisjoint(with: Self.dates) && modified != nil
+        let pending = changedFields.subtracting(Self.storedFields(dates: rewritten || retimed))
         return task(onCancel: { done((nil, [], Errors.map(OwnerFailure.cancelled, .mutation))) }) {
             [owner, manager] c, _ in
             do {
@@ -272,7 +291,13 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                     row = try Owner.row(owner.call("rename", place, cancellation: c))
                 }
                 if changedFields.contains(.contents), let url = newContents {
-                    row = try Self.write(owner, manager, url, ["ref": ref], base: base, c)
+                    row = try Self.write(owner, manager, url, ["ref": ref], base: base, dates: item, c)
+                } else if retimed, let modified = modified {
+                    var request: [String: Any] = ["ref": ref, "mtimeNs": Self.ns(modified)]
+                    if changedFields.contains(.creationDate), let created = item.creationDate ?? nil {
+                        request["createdNs"] = Self.ns(created)
+                    }
+                    row = try Owner.row(owner.call("set_times", request, cancellation: c))
                 }
                 let result = try row
                     ?? Owner.row(owner.call("stat", ["ref": ref], cancellation: c), nested: false)
@@ -329,7 +354,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
     /// link: a second link on the system's file makes the item unevictable.
     private static func write(
         _ owner: Owner, _ manager: NSFileProviderManager?, _ url: URL, _ target: [String: Any],
-        base: String?, _ c: Cancellation
+        base: String?, dates template: NSFileProviderItem, _ c: Cancellation
     ) throws -> Row {
         guard let temp = try manager?.temporaryDirectoryURL() else {
             throw OwnerFailure.transport("no temporary directory for the domain")
@@ -341,6 +366,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         if clonefile(url.path, file.path, 0) != 0 {
             try FileManager.default.copyItem(at: url, to: file)
         }
+        // The owner takes the staged file's times as the item's (08 §3.3): the
+        // template's, as the system's copy of the contents carries its own.
+        var attributes: [FileAttributeKey: Any] = [:]
+        if let modified = template.contentModificationDate ?? nil { attributes[.modificationDate] = modified }
+        if let created = template.creationDate ?? nil { attributes[.creationDate] = created }
+        if !attributes.isEmpty { try FileManager.default.setAttributes(attributes, ofItemAtPath: file.path) }
         var request = target
         request["staging"] = file.path
         if let base = base, base != "-" { request["base"] = base }

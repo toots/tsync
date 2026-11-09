@@ -105,6 +105,10 @@ module type S = sig
     unit ->
     string
 
+  (** A change of a file's times alone (08 §3.3): [created] absent keeps the
+      file's. Invalid on a folder or a symlink. *)
+  val set_times : string -> mtime:int -> ?created:int -> unit -> unit
+
   (** [aside(key)] (conflict-resolution §5): the conflicted-copy name beside the
       key that nothing holds yet. *)
   val aside_name : string -> is_dir:bool -> string
