@@ -245,6 +245,11 @@ unit, a system template instance, a launch agent), and a command that guesses it
 one or none. Restarting is the service manager's command above; nothing signals processes found by
 name. User documentation gives the command for each kind of install.
 
+`$TSYNC_MEMTRACE_DIR`, when set and the build includes the memtrace library, makes every tsync
+process write a memtrace allocation trace to `<dir>/tsync-<pid>.ctf`, with the process's command line
+as the trace's context. `$TSYNC_MEMTRACE_RATE` is the sampling rate, between 0 and 1, default
+`1e-5`. A process that cannot open its trace logs a warning and runs untraced.
+
 `$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
 ownership of the data dir and of every directory holding a socket, lock or flag:
 [security-model.md §7.1](algorithms/security-model.md#71-socket-directory-and-files).

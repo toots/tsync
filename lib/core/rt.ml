@@ -87,11 +87,12 @@ let start_lock = Mutex.create ()
 let ensure_started () =
   if not (Duppy.started scheduler) then
     Mutex.protect start_lock (fun () ->
-        if not (Duppy.started scheduler) then
+        if not (Duppy.started scheduler) then (
+          Memtrace_hook.start ();
           Duppy.start
             ~pool:
               (`Domains (max 2 (min 8 (Domain.recommended_domain_count ()))))
-            ~max_blocking:256 scheduler)
+            ~max_blocking:256 scheduler))
 
 let now = Duppy.time
 

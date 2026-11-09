@@ -37,7 +37,19 @@
 
 (library
  (name tsync_core)
- (libraries mem_usage unix threads.posix duppy yojson digestif base64)
+ (libraries
+  mem_usage
+  unix
+  threads.posix
+  duppy
+  yojson
+  digestif
+  base64
+  (select
+   memtrace_hook.ml
+   from
+   (memtrace -> memtrace_hook.enabled.ml)
+   (-> memtrace_hook.disabled.ml)))
  (foreign_stubs
   (language c)
   (include_dirs ../../vendor/xxhash)
