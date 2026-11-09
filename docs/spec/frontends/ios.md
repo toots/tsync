@@ -48,14 +48,18 @@ So:
 
 ### 3.1 Identifiers
 
-| Item | Identifier |
+| Item | Build setting |
 |---|---|
-| App | `org.feverdreamtv.tsync.phone` |
-| File Provider extension | `org.feverdreamtv.tsync.phone.fileprovider` |
-| App Group | `group.org.feverdreamtv.tsync` |
+| Signing team | `TSYNC_TEAM_ID` |
+| App | `TSYNC_APP_ID` |
+| File Provider extension | `$(TSYNC_APP_ID).fileprovider` |
+| App Group | `TSYNC_APP_GROUP` |
 | Domain | [file-provider.md §3.3](file-provider.md#33-domain-identifier)'s identifier of its display name |
 
-These are persistent: changing one orphans an installation's domains.
+The source holds no value for them: a build is given them by its environment (the CI's secrets, or
+the shell of a local build), and fails at its start, naming each one missing. Each process reads the
+App Group from its bundle's Info.plist. They are persistent for an installation: changing one orphans
+its domains.
 
 ### 3.2 Paths
 
@@ -124,8 +128,83 @@ whole change feed of [file-provider.md](file-provider.md) §6.5, over the feed a
   ([ios-app.md §3](ios-app.md#3-registration-and-signals)).
 
 A refresh pass runs only while the system lets the extension run: one cut short by suspension is
-taken up by the next signal. Nothing refreshes while neither the Files app nor the tsync app is in
-use (§9).
+taken up by the next signal. While neither the Files app nor the tsync app is in use, a push from
+the domain's server signals (§5.3), else the app's background runs do (§5.2).
+
+### 5.2 In the background
+
+The app asks the system for a background app refresh run (`BGAppRefreshTask`) no earlier than
+`background_refresh_interval` from now: at launch, each time it comes to the foreground, and at the
+end of each run. A run signals the working set of every configured domain and ends at once. The
+refresh pass is the extension's, started by the change enumeration the signal brings, so a run needs
+neither the core nor a service, and is far inside the time the system gives it.
+
+- When the system grants a run is its own: it weighs how the app is used, the battery, and the user's
+  Background App Refresh switch. A run it skips costs freshness, never correctness.
+- A run selects no folders. One pass brings every held folder to the head for one read of the log
+  ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)), so there is no subset to
+  choose and no stamp a run could renew.
+- Runs are asked for whether or not a domain's server pushes: a push lost or a server without push
+  leaves the runs to catch up.
+- Each run appends `app: background refresh` to the footprint log (§7).
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `background_refresh_interval` | 15 min | the earliest next run asked for; the system may run later, never earlier |
+
+### 5.3 Pushes
+
+*Draft for review: the token's owner is settled by a device probe before this section is final, and
+the server part then moves to the page that owns the listener.*
+
+A server holding a push key tells phones when a domain changed. The system turns a file provider push
+naming a domain into a signal of that domain's working set (§5.1): the extension's refresh pass
+follows, with neither app running.
+
+**Who can push.** Apple delivers a push to the app only when it is signed with a key of the team that
+signs the app. A server pushes only when its operator gives it such a key: the publisher's own server
+for the published app, or any operator for an app they build and sign under their own identifiers
+(§3.1). A server without a key does not push, and its phones rely on the background runs of §5.2.
+The key signs pushes to every app of its team, so it is given to no other server.
+
+**The phone.**
+- At each domain boot, and whenever the system hands it a new token, the extension registers for
+  file provider pushes and sends the domain's server a `push_register` request: the token, its
+  environment (`development` for builds signed for development, else `production`), and the domain's
+  File Provider identifier.
+- A server without a key answers `unsupported`; the extension does not ask that server again in this
+  process. A failed registration is logged and retried at the next boot.
+- **Open:** whether the extension can obtain the token, or only the app can (a forum report has the
+  app's registration invalidated at once). A device probe decides; if only the app can, the app
+  writes the token to the group and the extension sends it.
+
+**The server** (the http-proxy listener).
+- A listener option `push`: `{"key": path, "keyId", "teamId", "topic"}`, where `key` is the team's
+  APNs signing key (a `.p8` file, read at start, its mode no wider than the owner's) and `topic` is
+  `<app identifier>.pushkit.fileprovider`. Absent, every `push_register` is answered `unsupported`.
+- Registrations are kept per domain and per client, durably in the server's data directory: the
+  token, environment, File Provider identifier and when it was last registered. A new registration
+  of a client replaces its old one. A registration is dropped when APNs answers that the token is
+  gone, and when not renewed for `push_registration_max_age`.
+- When the listener wins the create of a log entry for a domain, it pushes to every registration of
+  that domain except the entry author's. Pushes to one registration are coalesced: at most one per
+  `push_coalesce`, and always one after the last change.
+- A push is an HTTP/2 POST to APNs (`api.push.apple.com`, or `api.sandbox.push.apple.com` for the
+  `development` environment) at `/3/device/<token>`, with push type `fileprovider`, the topic, and
+  a bearer token signed with ES256 by the key, renewed every `push_auth_renewal`. Its body is
+  `{"container-identifier":"NSFileProviderWorkingSetContainerItemIdentifier","domain":"<File
+  Provider identifier>"}`. One connection to each APNs host is kept open while pushes flow.
+- Pushes go through libcurl (HTTP/2 negotiated by ALPN), not the core's HTTP/1.1 client. libcurl is
+  a build switch beside the TLS implementations: a build without it answers every `push_register`
+  `unsupported` and refuses a config that sets `push`, naming the missing feature. A build asked for
+  push fails when libcurl or its HTTP/2 support is missing. A failed push is logged; a push is never
+  retried past the next change's.
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `push_coalesce` | 10 s | the shortest interval between two pushes to one registration |
+| `push_registration_max_age` | 60 days | a registration not renewed for this long is dropped |
+| `push_auth_renewal` | 30 min | between 20 and 60 min, APNs's bounds for a bearer token |
 
 ## 6. The app
 
@@ -164,6 +243,7 @@ On the iPhone 14, with every enumerator callback logged:
 addition:
 
 - No file lock is held in the App Group container.
+- A build missing any identifier of §3.1 fails before compiling, naming each one missing.
 - A thousand callbacks, each on a new thread, leave the extension's footprint where one thread's
   would.
 - The self-test passes with the extension below its memory limit on a device.
@@ -177,6 +257,14 @@ addition:
   stay below the memory limit.
 - On a device: a peer's change to a folder the Files app already shows appears there after the
   tsync app is brought to the foreground, without the folder being opened again.
+- A server with `push` set sends one push to each other registered client of a domain within
+  `push_coalesce` of a change, and none to the change's author; one without answers
+  `push_register` with `unsupported`.
+- On a device, with neither app in use, a peer's change to a folder the Files app already shows
+  appears there within seconds through a server that pushes.
+- On a device with Background App Refresh on, a background run shows in the footprint log as
+  `app: background refresh` followed by change enumerations, with the tsync app not in use; a peer's
+  change made before it shows in the Files app without either app being opened.
 
 ## 9. Not yet specified
 
@@ -184,11 +272,10 @@ Each becomes a section above before its code.
 
 1. A service the extension vends (`NSFileProviderServiceSource`) for the app and other extensions,
    one connection per domain, with deadlines, and the transfer root for its callers.
-2. Refresh passes in the background, when the system lets the app run.
-3. The keystore (the keychain, after first unlock, this device only), the vault, passwords, passkeys
+2. The keystore (the keychain, after first unlock, this device only), the vault, passwords, passkeys
    and one-time codes (iOS 18), the credential provider and share extensions.
-4. Camera backup with PhotoKit's change tracking.
-5. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
+3. Camera backup with PhotoKit's change tracking.
+4. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
-6. Open on a device: the extension's limit on the oldest supported device; whether one process
+5. Open on a device: the extension's limit on the oldest supported device; whether one process
    serves every domain.
