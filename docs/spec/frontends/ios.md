@@ -170,8 +170,8 @@ The key signs pushes to every app of its team, so it is given to no other server
   ([08 §4](../08-frontends.md)): the token, its
   environment (`development` for builds signed for development, else `production`), and the domain's
   File Provider identifier.
-- A server without a key answers `unsupported`; the extension does not ask that server again in this
-  process. A failed registration is logged and retried at the next boot.
+- A server without a key answers `{pushes:false}`; the extension does not ask that server again in
+  this process. A failed registration is logged and retried at the next boot.
 - The extension obtains the token itself: on a device (iOS 18.1), the app and the extension each
   registering got the same token and neither saw it invalidated. The app does not register.
 
@@ -230,8 +230,8 @@ addition:
 - On a device: a peer's change to a folder the Files app already shows appears there after the
   tsync app is brought to the foreground, without the folder being opened again.
 - A server with the `push_*` options set sends one push to each other registered client of a domain within
-  `push_coalesce` of a change, and none to the change's author; one without answers
-  `push_register` with `unsupported`.
+  `push_coalesce` of a change, and none to the change's author; through one without, the
+  extension's `push_register` answers `{pushes:false}`.
 - On a device, with neither app in use, a peer's change to a folder the Files app already shows
   appears there within seconds through a server that pushes.
 - On a device with Background App Refresh on, a background run shows in the footprint log as

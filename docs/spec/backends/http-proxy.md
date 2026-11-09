@@ -356,7 +356,7 @@ There is no version negotiation. The **core** every server answers is: the objec
 | `/max-concurrency`, `/verified`, `/share-url` answers | 404 | no opinion (§8.4); `verified` reads `false` |
 | Conditional create (`if_absent`) | `/verified` answers 404: a server that answers `/verified` honours `if_absent` | refuses `put_if_absent` locally, never sends it (§8.1) |
 | `/domains` | 404 | setup tools report that the server needs updating |
-| `/push-register` | 404 | the host's `push_register` answers `unsupported` |
+| `/push-register` | 404 | the host's `push_register` answers `{pushes:false}` |
 | `/get-multi`, `/children-multi` | 404 with a non-empty body on a served domain | single reads; folders listed singly (§8.3) |
 | Watch parameters | the answer lacks `x-tsync-watched` | sleeps `watch_floor` (§7) |
 | Range parameters | the answer is longer than asked | CORRUPT, never served as the range |
