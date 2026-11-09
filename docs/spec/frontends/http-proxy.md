@@ -52,7 +52,7 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `ssl_certificate`, `ssl_certificate_key` | paths | blank = plaintext | listener | same uniqueness; both or neither |
 | limit options of [security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener) | sizes, durations, counts | as listed there | listener | same uniqueness; positive |
 | `sites_root`, `sites_url` | path, URL | blank = none | listener | same uniqueness; both or neither. A directory this server publishes site shares into, and the base URL the operator's own static file server serves it at, with listings off and a folder answered by its index page (§A9.9). `sites_url` is `https://`, or `http://` on a loopback host, with no query or fragment; one trailing `/` is trimmed |
-| `push` | `{"key": path, "keyId", "teamId", "topic"}` | unset | listener | same uniqueness. Turns pushes on (§A4.7): `key` the team's APNs signing key (a `.p8` file), `keyId` its identifier, `teamId` the Apple team, `topic` `<app identifier>.pushkit.fileprovider`. Startup fails, naming the option, when the key does not read as a P-256 private key, when the file's mode is wider than the owner's, or when the build cannot push (`build-info` says `push: none`) |
+| `push_key`, `push_key_id`, `push_team_id`, `push_topic` | path, strings | blank = no pushes | listener | same uniqueness; all four or none. Turn pushes on (§A4.7): the team's APNs signing key (a `.p8` file), its identifier, the Apple team, and `<app identifier>.pushkit.fileprovider`. Startup fails, naming the option, when the key does not read as a P-256 private key, when its file's mode is wider than the owner's, or when the build cannot push (`build-info` says `push: none`) |
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
 | `shares` | bool, or a backend name | false | per domain | never inherited. `true`: serve `/s/` for this domain. A name: the domain's links are that member's (§A4.6), and `/s/` is not served for it. The name MUST be the domain's main or one of its replicas, whose capabilities give a `share_url`: never a backfill, which is not guaranteed to be in sync, nor an archive, which is never written. Otherwise startup fails naming the option |
 | `readOnly` | bool | false | per domain | never inherited |
@@ -128,7 +128,7 @@ Given the operation's first key or prefix `k`:
 | max-concurrency | none | the listener's bound (§A5), else 404 |
 | share-url | none | `shares` is `self` → `{"self":true}`; a member `M` → `M.capabilities(prefix).share_url` → `{"url":u}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
 | verified | none | `{"verified": B.capabilities(prefix).verified}` |
-| push-register | none | §A4.7; 404 without `push` |
+| push-register | none | §A4.7; 404 without the `push_*` options |
 
 **Garbage collection.** Every write into the log, the manifest area or the version area (put, conditional put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). A remote client creates a log entry with a claim, so its commit is gated here like a local one. During a run, chunk reads (get, range, head, checksum, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 
@@ -146,7 +146,7 @@ A domain whose links are served by a share endpoint beside one of its copies (a 
 
 ### A4.7 Pushes
 
-With `push` set, the listener tells the iOS clients of a domain when another client changed it
+With the `push_*` options set, the listener tells the iOS clients of a domain when another client changed it
 ([ios.md §5.3](ios.md#53-pushes)).
 
 - **Registrations** are the listener's own state, kept in its data directory, one file per domain,
@@ -450,7 +450,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - Nothing the listener does writes local domain state: serving a share, a put or a watch leaves the mirror, chunk cache, staged tree and sync state untouched; deferred work lands in the owner's inbox.
 - GC: during a run, a chunk only in the space being collected is readable through the listener, and a log entry or a manifest written through it naming that chunk promotes it; a log entry or a manifest naming a chunk the main lacks is refused 409 `missing_chunks` with the key.
 - Status: every status endpoint answers 401 unless signed; control-socket `stats` equals `/api/v1/stats` for a secret opening every domain; the text report snapshot; secrets masked; `/stats` refuses unsigned and wrong secrets and counts them; a secret opening one domain sees only that domain; totals states (not asked, counting, estimate, exact, served stale, refreshing, error); `/domains` unsigned 401, wrong 401, signed lists the domain with `readOnly`.
-- Pushes: without `push`, `/push-register` answers 404; with it, a registration survives a restart; a won log entry by one client pushes once to every other registered client of the domain and not to its author; ten entries won within `push_coalesce` push once at the interval's end; a 410 drops the registration; an expired registration is dropped; against a stub APNs, the request carries the headers, body and a JWT that verifies with the key's public half; a `push` with a key readable by others, or on a build without push, fails startup naming the option.
+- Pushes: without the `push_*` options, `/push-register` answers 404; with it, a registration survives a restart; a won log entry by one client pushes once to every other registered client of the domain and not to its author; ten entries won within `push_coalesce` push once at the interval's end; a 410 drops the registration; an expired registration is dropped; against a stub APNs, the request carries the headers, body and a JWT that verifies with the key's public half; a `push_key` readable by others, or on a build without push, fails startup naming the option.
 - Control socket: bad JSON, non-object JSON, unknown action, empty action → `invalid`; `stop` answers `{"ok":true}`, requests stop once, and leaves the connection open.
 
 ---
