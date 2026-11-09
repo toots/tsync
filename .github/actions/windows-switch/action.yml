@@ -1,0 +1,30 @@
+name: Windows switch
+description: The OCaml compiler and tsync's opam dependencies on a Windows runner, from cache when possible.
+
+runs:
+  using: composite
+  steps:
+    - uses: ocaml/setup-ocaml@v3
+      with:
+        # 5.5.2 is not on opam.ocaml.org yet; "5.5" again once it is.
+        ocaml-compiler: "5.5.1"
+
+    # A stale switch is still a head start: opam_deps.sh upgrades it.
+    - name: Restore the opam switch
+      id: opam-switch
+      uses: actions/cache/restore@v4
+      with:
+        path: _opam
+        key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+        restore-keys: opam-test-windows-
+
+    - name: OCaml libraries
+      shell: bash
+      run: ./scripts/opam_deps.sh tsync tsync-tls
+
+    - name: Save the opam switch
+      if: steps.opam-switch.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: _opam
+        key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
