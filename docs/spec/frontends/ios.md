@@ -114,7 +114,7 @@ working set alone, and asks the working set only when signalled (§7.1). So the 
 whole change feed of [file-provider.md](file-provider.md) §6.5, over the feed a pulled tree keeps
 ([android.md §6](android.md#6-the-handler-on-a-pulled-tree)):
 
-- **Items**: `list_all`, the held folders' contents and nothing else.
+- **Items**: `list_all`, what the mirror holds.
 - **Changes**: `refresh`, then `changes_since`. The changes answered are those already applied; what
   the refresh pass brings is announced by its notices, and the system asks again.
 - **Signals**: the extension signals the working set of a domain after each `changed` and
@@ -169,7 +169,7 @@ addition:
 - The self-test passes with the extension below its memory limit on a device.
 - On a desktop, through `tsync android request`: after a peer commits into a held folder, a
   `refresh` followed by `changes_since` names the change; `list_all` makes no store request and
-  lists no item of a folder not held; `refresh` while a pass runs starts none.
+  lists files this client wrote in a folder it created; `refresh` while a pass runs starts none.
 - With 5,000 held folders and a peer's commits into a few of them, a refresh pass makes as many log
   reads as the new entries fill pages, not one per folder, and merges only the folders concerned.
 - A pull of a folder 10,000 entries behind holds no more than one page of entries at a time.
