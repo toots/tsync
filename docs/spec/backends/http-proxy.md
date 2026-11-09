@@ -199,6 +199,14 @@ Only `GET` matches these paths.
 | `GET\|HEAD /s/<token>[/<sub>]` | Public share links when some route on the listener serves shares, else 404. Semantics in [the frontend](../frontends/http-proxy.md); capability rules in [security §6](../algorithms/security-model.md#6-share-capabilities). |
 | `GET\|HEAD /join/<token>[?json=1]`, `/join/<token>/preview` | A setup link's page, or its sealed payload with `json`, or its card image ([setup-link §7](../algorithms/setup-link.md#7-the-page)). A capability: a server without it answers 404. |
 
+### 5.6 Push registration
+
+| Request | Answer |
+|---|---|
+| `POST /push-register?prefix=P` | Body `{"client":c,"token":t,"environment":e,"domain":f}`: the registering client's uuid, its APNs token in lowercase hex, `development` or `production`, and its File Provider domain identifier. 200 `{}` once the registration is durable. 404 when the listener does not push ([frontend §A4.7](../frontends/http-proxy.md#a47-pushes)). A body that does not parse, a field missing or of another shape → 400. |
+
+It is not refused on a read-only route: a registration changes no domain content.
+
 A client composes a share URL as `<its configured url>/s/<token>` when the server answered `{"self":true}` (behind TLS termination the server cannot know its public URL), or `<url>/<token>` from `{"url":…}`.
 
 Share **manifests** are written through the object API at `tsync/shares/<token>`, confined per [security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener).
@@ -350,6 +358,7 @@ There is no version negotiation. The **core** every server answers is: the objec
 | `/max-concurrency`, `/verified`, `/share-url` answers | 404 | no opinion (§8.4); `verified` reads `false` |
 | Conditional create (`if_absent`) | `/verified` answers 404: a server that answers `/verified` honours `if_absent` | refuses `put_if_absent` locally, never sends it (§8.1) |
 | `/domains` | 404 | setup tools report that the server needs updating |
+| `/push-register` | 404 | the host's `push_register` answers `unsupported` |
 | `/get-multi`, `/children-multi` | 404 with a non-empty body on a served domain | single reads; folders listed singly (§8.3) |
 | Watch parameters | the answer lacks `x-tsync-watched` | sleeps `watch_floor` (§7) |
 | Range parameters | the answer is longer than asked | CORRUPT, never served as the range |
