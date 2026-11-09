@@ -234,3 +234,18 @@
  (alias runtest)
  (action
   (diff cache_states_test.expected cache_states_test.output)))
+
+(executable
+ (name staged_whole_test)
+ (modules staged_whole_test)
+ (libraries tsync_core tsync_checkout unix))
+
+(rule
+ (with-stdout-to
+  staged_whole_test.output
+  (run ./staged_whole_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff staged_whole_test.expected staged_whole_test.output)))
