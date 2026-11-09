@@ -61,6 +61,13 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
 - tmpfs pages a process maps count as `RssShmem`, not `RssFile`: a test of mapped memory on `/tmp`
   must read `VmRSS`.
 
+## M.2b Streamed HTTP bodies
+
+- **Uploads already stream** when the body is a mapping: `Client.request` writes a bigstring in 64 KiB slices, paced, and a view of a mapping is a bigstring. A chunk cut from a staged body, which changes in place, is mapped from a copy-on-write snapshot ([01 §12](../01-core.md#12-reading-data-that-may-change-under-the-reader)), or read with `pread` into a pooled buffer where no snapshot can be made.
+- **Downloads go to a file.** An endpoint made with `Client.endpoint ?spill` writes a 2xx body of `spill_min` (256 KiB) or more, or of unannounced length, to an unlinked temporary file in that directory as it arrives (`Codec.stream_body`), and answers its mapping as `response.body`; smaller and error bodies stay in memory. Each attempt opens its own file, so a redial starts over. The store contract allows a mapped body ([06 §3.1](../06-backends.md#31-general-rules)), so no caller changes, and callers verify chunk digests as they do today. The directory is not the driver's to know: `Domain.create_store` passes `<cache_root>/spill` to `Driver.create ?spill`, which the S3, GCS and http-proxy drivers hand to their endpoints. A temporary is named after its process, so the sweep at endpoint creation removes those a crash left. Windows keeps bodies in memory: an open file cannot be unlinked there.
+- **Small replies stay in memory**: markers, manifests, log entries, listings, token mints and `well_known` answers are held whole under the verb's `max_body`.
+- **The folder index** ([02 §2.10](../02-remote-model.md#210-folder-index-binary-tsyncidx1)), up to 64 MiB, arrives as a mapping. `Folder_index.decode` answers views into it (`Bigstring.sub`) keyed by stored key with their entity tags, and a body becomes a string only when the walker classifies it; the mapping is dropped when the walk ends. `encode` sums the field lengths first and writes into one bigstring of that size, which `put` sends as is. The heap then holds the decoded children only, never a copy of the index.
+
 ## M.3 Measuring: what each number means
 
 `Tsync_core.Usage.sample` is what every process reports in its `stats` process block, and what

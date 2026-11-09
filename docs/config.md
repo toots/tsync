@@ -167,8 +167,10 @@ The **cache** holds downloaded content and can be lost: it is fetched again. The
 
 ## TLS
 
-tsync can use OpenSSL or a TLS implementation written in OCaml. The packages include both and use OpenSSL, which is faster.
+By default tsync uses the system's TLS, `"tls": "system"`: Apple's on macOS, which trusts what the Keychain trusts, and OpenSSL with the system's certificates on Linux and Windows. The packages also carry OpenSSL everywhere and a TLS implementation written in OCaml.
 
-Switch to the other one with `"tls": "native"` in the config, or `tsync start --tls native`. That is worth trying against a service OpenSSL has trouble with; Backblaze B2 has been one.
+Switch with `"tls": "openssl"` or `"tls": "native"` in the config, or `tsync start --tls native`. That is worth trying against a service one implementation has trouble with; Backblaze B2 has been one for OpenSSL.
+
+On macOS, a server whose certificate comes from your own authority (`ca_certificate`) must still meet Apple's rules: a certificate issued after 1 July 2019 is valid for 825 days at most and lists server authentication in its extended key usage. Otherwise Apple refuses it; `"tls": "openssl"` accepts it.
 
 A source build has whichever you installed: the opam package `tsync-ssl` brings OpenSSL and `tsync-tls` the native one. `tsync build-info` lists them.
