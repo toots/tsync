@@ -334,14 +334,11 @@ let utimens t path _atime mtime _fi =
     | None -> ()
     | Some _ when is_hidden rel -> ()
     | Some mtime ->
+        check_mutation t;
         let (module E : Tsync_sync.Engine.S) = t.engine in
         call (fun () ->
-            match E.kind rel with
-              | `File -> (
-                  check_mutation t;
-                  try E.set_times rel ~mtime ()
-                  with Fail.E { kind = Invalid; _ } -> ())
-              | `Dir | `Absent -> ())
+            try E.set_times rel ~mtime ()
+            with Fail.E { kind = Invalid; _ } -> ())
 
 let release t _ (fi : Fuse.file_info) =
   match

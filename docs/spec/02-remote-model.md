@@ -244,7 +244,9 @@ Out of a domain:
 a manifest of the same bytes hold the same times when their `mtime`s differ by at most
 `EXPORT_MTIME_SLACK` ([05](05-ops-config.md) §8), since a filesystem keeps times only as finely as it
 can, and their `created`s too where the platform can set one; elsewhere `created` is not compared.
-Where only the times differ, a copy MUST set the times and leave the bytes.
+Where only the times differ, a copy MUST set the times and leave the bytes. A time a frontend hands back
+within a microsecond of the one the file holds is that one: a platform date may be a double (a macOS
+`Date` keeps about a tenth of a microsecond at today's epoch), and reading it back is no change.
 
 Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000500000000`, created
 `1759000000000000000`, chunk size 8 MiB;

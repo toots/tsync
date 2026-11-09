@@ -423,16 +423,30 @@ module Make (C : Engine_ctx.S) = struct
 
   (* 02 §2.6: a file carried over the one at [path] never moves its creation
      time later. *)
+  let held_times path =
+    match Staged.read staged path with
+      | `Edit e -> Some e.times
+      | `Absent | `Unparseable -> (
+          match Mirror.file mirror path with
+            | `File m -> Some (Manifest.times m)
+            | `Dir | `Absent | `Corrupt -> None)
+
   let carried path (t : Fs.times) =
-    let held =
-      match Staged.read staged path with
-        | `Edit e -> Some e.times
-        | `Absent | `Unparseable -> (
-            match Mirror.file mirror path with
-              | `File m -> Some (Manifest.times m)
-              | `Dir | `Absent | `Corrupt -> None)
-    in
-    match held with Some held -> Fs.carried_over ~held t | None -> t
+    match held_times path with
+      | Some held -> Fs.carried_over ~held t
+      | None -> t
+
+  (* 02 §2.6: a time a frontend hands back within a microsecond of the held one
+     is the held one, as a macOS date is a double. *)
+  let handed_back path (t : Fs.times) =
+    match held_times path with
+      | Some (held : Fs.times) ->
+          let same a b = if abs (a - b) < 1_000 then b else a in
+          {
+            Fs.mtime = same t.mtime held.mtime;
+            created = same t.created held.created;
+          }
+      | None -> t
 
   let stat_of_manifest (m : Manifest.t) =
     {
@@ -1278,8 +1292,11 @@ module Make (C : Engine_ctx.S) = struct
           Staged.write staged path e;
           bump path;
           settle path;
-          post_put path;
-          feed_put path e.size
+          (* An edit still open for writing is published by its close, once its
+             bodies are durable (publication §4.1). *)
+          if not (Mutex.protect dirty_m (fun () -> Hashtbl.mem dirty path)) then (
+            post_put path;
+            feed_put path e.size)
       | _ -> settle path
 
   (* 08 §3.3 [set_times]: the times as given, a later creation time included;
@@ -1300,7 +1317,8 @@ module Make (C : Engine_ctx.S) = struct
         let created =
           Option.fold created ~none:held.created ~some:(Fs.creation ~mtime)
         in
-        changing path @@ fun () -> retime path ~before { Fs.mtime; created })
+        changing path @@ fun () ->
+        retime path ~before (handed_back path { Fs.mtime; created }))
 
   (* 04 §4.3 [write_whole]: the handed-over file is adopted by rename, never
      copied when on the same filesystem. An edit of a version this client no
@@ -1342,13 +1360,14 @@ module Make (C : Engine_ctx.S) = struct
         let size = Int64.to_int st.st_size and chunk_size = R.chunk_size () in
         let times =
           let t = Fs.times dst in
-          carried path
-            {
-              t with
-              created =
-                Option.fold created ~none:t.created
-                  ~some:(Fs.creation ~mtime:t.mtime);
-            }
+          handed_back path
+            (carried path
+               {
+                 t with
+                 created =
+                   Option.fold created ~none:t.created
+                     ~some:(Fs.creation ~mtime:t.mtime);
+               })
         in
         let h1 = digest_of_body ~size ~cs:chunk_size id in
         if h1 <> None && h1 = current then (

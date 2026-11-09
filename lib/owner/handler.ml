@@ -1185,7 +1185,6 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Set_times r ->
         mutate (fun () ->
             let path = target t r.item in
-            if E.kind path <> `File then invalid "set_times names a file";
             E.set_times path ~mtime:r.mtime ?created:r.created ();
             keys_changed t [path];
             row_or_unnamed t path)

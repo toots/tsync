@@ -178,12 +178,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
     /// still pending, so the system never overwrites it from the reply.
     private static let stored: NSFileProviderItemFields = [.contents, .filename, .parentItemIdentifier]
 
-    /// A file's dates, which the owner stores too (02 §2.6); a folder's and a
-    /// symlink's are not.
+    /// A file's dates, stored when a request carried them (02 §2.6); a
+    /// folder's and a symlink's never are.
     private static let dates: NSFileProviderItemFields = [.contentModificationDate, .creationDate]
 
-    private static func storedFields(isFile: Bool) -> NSFileProviderItemFields {
-        isFile ? stored.union(dates) : stored
+    private static func storedFields(dates sent: Bool) -> NSFileProviderItemFields {
+        sent ? stored.union(dates) : stored
     }
 
     private static func ns(_ date: Date) -> Int64 {
@@ -206,7 +206,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         let isDirectory = type == .folder || (type.conforms(to: .directory) && url == nil)
         let mayExist = options.contains(.mayAlreadyExist)
         let pending = fields.subtracting(
-            Self.storedFields(isFile: !isDirectory && type != .symbolicLink))
+            Self.storedFields(dates: !isDirectory && type != .symbolicLink && url != nil))
         return task(onCancel: { done((nil, [], Errors.map(OwnerFailure.cancelled, .mutation))) }) {
             [owner, manager] c, _ in
             do {
@@ -278,7 +278,11 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         ]
         let base = String(data: version.contentVersion, encoding: .utf8)
         let isFile = !ref.hasPrefix("d:") && item.contentType != .symbolicLink
-        let pending = changedFields.subtracting(Self.storedFields(isFile: isFile))
+        let rewritten = isFile && changedFields.contains(.contents) && newContents != nil
+        let modified = item.contentModificationDate ?? nil
+        let retimed =
+            isFile && !rewritten && !changedFields.isDisjoint(with: Self.dates) && modified != nil
+        let pending = changedFields.subtracting(Self.storedFields(dates: rewritten || retimed))
         return task(onCancel: { done((nil, [], Errors.map(OwnerFailure.cancelled, .mutation))) }) {
             [owner, manager] c, _ in
             do {
@@ -288,9 +292,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                 }
                 if changedFields.contains(.contents), let url = newContents {
                     row = try Self.write(owner, manager, url, ["ref": ref], base: base, dates: item, c)
-                } else if isFile, !changedFields.isDisjoint(with: Self.dates),
-                    let modified = item.contentModificationDate ?? nil
-                {
+                } else if retimed, let modified = modified {
                     var request: [String: Any] = ["ref": ref, "mtimeNs": Self.ns(modified)]
                     if changedFields.contains(.creationDate), let created = item.creationDate ?? nil {
                         request["createdNs"] = Self.ns(created)

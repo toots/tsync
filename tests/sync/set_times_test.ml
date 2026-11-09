@@ -62,6 +62,17 @@ let chunks () =
     (List.fold_left Filename.concat root ["store"; "tsync"; "docs"; "chunks"]);
   !n
 
+(* The puts of [path] the change feed holds after [cursor]. *)
+let puts (module E : Engine.S) cursor path =
+  match E.changes_since cursor ~limit:1000 with
+    | `Stale -> -1
+    | `Page (_, _, ops) ->
+        List.length
+          (List.filter
+             (fun (o : Applied.op) ->
+               match o.op with Op.Put { path = q; _ } -> q = path | _ -> false)
+             ops)
+
 let () =
   Fs.rm_rf root;
   let src = Filename.concat root "src" in
@@ -94,6 +105,24 @@ let () =
       ignore (B.resync ());
       p "a peer holds a later creation time set: %b\n"
         ((times b "f.txt").created = created);
+      A.set_times "f.txt" ~mtime:(mtime + 500) ();
+      A.drain ~grace:10. ();
+      ignore (B.resync ());
+      p "a time handed back within a microsecond changes nothing: %b\n"
+        ((times b "f.txt").mtime = mtime);
+      let opened = mtime + 1_000_000_000 in
+      let cursor = A.cursor () in
+      A.write "f.txt" ~off:0 (Bigstring.of_string "CONTENT");
+      A.set_times "f.txt" ~mtime:opened ();
+      p "times set on an open file are not fed before its close: %b\n"
+        (puts a cursor "f.txt" = 0);
+      A.close "f.txt";
+      p "its close feeds it once: %b\n" (puts a cursor "f.txt" = 1);
+      A.drain ~grace:10. ();
+      ignore (B.resync ());
+      p "times set on an open file reach a peer with its content: %b\n"
+        ((times b "f.txt").mtime = opened
+        && (B.stat "f.txt").size = String.length "CONTENT");
       (match A.set_times "dir" ~mtime () with
         | () -> p "a folder: accepted\n"
         | exception Fail.E { kind = Invalid; _ } -> p "a folder: invalid\n");
