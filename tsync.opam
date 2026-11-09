@@ -28,7 +28,7 @@ depends: [
   "yojson"
   # The vault keystore's headers; libdbus itself is loaded at run time.
   "conf-dbus" {os = "linux"}
-  "memtrace"
+  "memtrace" {>= "v0.18~preview"}
   "odoc" {with-doc}
   # One TLS implementation is required. Native comes first: it builds
   # anywhere, where OpenSSL is faster but wants a system libssl. With both,
@@ -36,8 +36,10 @@ depends: [
   ("tsync-tls" | "tsync-ssl")
 ]
 # duppy is released from liquidsoap's repository; until a release, a commit of its main.
+# memtrace before v0.18 is not safe with several domains; until a release, a commit of its main.
 pin-depends: [
   ["duppy.2.5.0" "git+https://github.com/savonet/liquidsoap.git#1b4268f0b67a51c8b6bac59cc5b90aaf9156a7a6"]
+  ["memtrace.v0.18~preview.133.03" "git+https://github.com/janestreet/memtrace.git#13589746e0b3dabc6efe0122548fa090f4bf8bc6"]
 ]
 # Each rebuilds tsync when it appears, which links its library in. The TLS
 # libraries stand for their packages, which may not appear in both lists.

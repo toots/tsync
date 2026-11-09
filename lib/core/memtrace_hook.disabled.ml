@@ -1,1 +1,2 @@
 let start () = ()
+let stop () = ()
