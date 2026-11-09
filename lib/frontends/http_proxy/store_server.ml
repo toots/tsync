@@ -30,6 +30,7 @@ type t = {
   traffic : (string, traffic) Hashtbl.t;  (** per route name *)
   total : traffic;  (** every answer, shares included *)
   in_flight : int Atomic.t;
+  epoch : string;  (** uplink-governor A10: drawn at start *)
 }
 
 and traffic = { read : int Atomic.t; written : int Atomic.t }
@@ -104,6 +105,7 @@ let create ?max_concurrent ?listener routes =
        h);
     total = { read = Atomic.make 0; written = Atomic.make 0 };
     in_flight = Atomic.make 0;
+    epoch = Ids.hex (Ids.urandom 8);
     traffic =
       (let h = Hashtbl.create 4 in
        List.iter
@@ -1166,82 +1168,108 @@ let serve_setup t (r : Server.request) params rest =
     (Option.bind (Key.share token) (fun k ->
          List.find_map (fun route -> held route k) t.routes))
 
+let route (r : Server.request) =
+  let after prefix =
+    let n = String.length prefix in
+    if String.starts_with ~prefix r.path then
+      Some (String.sub r.path n (String.length r.path - n))
+    else None
+  in
+  match (after "/s/", after "/join/") with
+    | Some rest, _ -> `Share rest
+    | None, Some rest -> `Setup rest
+    | None, None -> `Api
+
 (* The wire's processing order (backends/http-proxy §6.1). *)
-let handle t (r : Server.request) read_body =
+let answer_request t (r : Server.request) read_body route =
   Atomic.incr t.in_flight;
   Fun.protect ~finally:(fun () -> Atomic.decr t.in_flight) @@ fun () ->
   try
-    if String.starts_with ~prefix:"/s/" r.path then
-      serve_share t r
-        (Option.value ~default:[] (W.parse_query r.query))
-        (String.sub r.path 3 (String.length r.path - 3))
-    else if String.starts_with ~prefix:"/join/" r.path then
-      serve_setup t r
-        (Option.value ~default:[] (W.parse_query r.query))
-        (String.sub r.path 6 (String.length r.path - 6))
-    else (
-      let params =
-        match W.parse_query r.query with Some p -> p | None -> bad_request t
-      in
-      match listener_endpoint t r params with
-        | response -> response
-        | exception Not_found ->
-            let op = parse_op t r params in
-            count t (tally op);
-            let limit = body_limit t op in
-            (match r.body_length with
-              | `Length n when n > limit && limit > 0 ->
-                  count t "tooLarge";
-                  answer (text 413 "too large")
-              | `Length n when n > 0 && limit = 0 -> bad_request t
-              | _ -> ());
-            if not (fresh r) then unauthorized t;
-            let names = key_names op in
-            let candidates body names =
-              match names with
-                | first :: _ when in_share_space first ->
-                    share_candidates t op body names
-                | _ -> Option.to_list (route_for t names)
-            in
-            let authorised body names =
-              match
-                List.find_opt
-                  (fun route -> verifies r params body route.secret)
-                  (candidates body names)
-              with
-                | None -> unauthorized t
-                | Some route -> route
-            in
-            (* The body is read and its signature checked before a data slot
+    match route with
+      | `Share rest ->
+          serve_share t r
+            (Option.value ~default:[] (W.parse_query r.query))
+            rest
+      | `Setup rest ->
+          serve_setup t r
+            (Option.value ~default:[] (W.parse_query r.query))
+            rest
+      | `Api -> (
+          let params =
+            match W.parse_query r.query with
+              | Some p -> p
+              | None -> bad_request t
+          in
+          match listener_endpoint t r params with
+            | response -> response
+            | exception Not_found ->
+                let op = parse_op t r params in
+                count t (tally op);
+                let limit = body_limit t op in
+                (match r.body_length with
+                  | `Length n when n > limit && limit > 0 ->
+                      count t "tooLarge";
+                      answer (text 413 "too large")
+                  | `Length n when n > 0 && limit = 0 -> bad_request t
+                  | _ -> ());
+                if not (fresh r) then unauthorized t;
+                let names = key_names op in
+                let candidates body names =
+                  match names with
+                    | first :: _ when in_share_space first ->
+                        share_candidates t op body names
+                    | _ -> Option.to_list (route_for t names)
+                in
+                let authorised body names =
+                  match
+                    List.find_opt
+                      (fun route -> verifies r params body route.secret)
+                      (candidates body names)
+                  with
+                    | None -> unauthorized t
+                    | Some route -> route
+                in
+                (* The body is read and its signature checked before a data slot
                is taken, so an unsigned body cannot hold one while it drips. *)
-            let route, body, names =
-              match op with
-                | Get_multi | Children_multi | Delete_multi ->
-                    let body = read_within t r read_body limit in
-                    let names = bulk_names t body in
-                    (authorised body names, body, names)
-                | _ ->
-                    (match names with
-                      | first :: _ when in_share_space first -> ()
-                      | _ -> if route_for t names = None then unauthorized t);
-                    let body = read_within t r read_body limit in
-                    (authorised body names, body, names)
-            in
-            let route =
-              match names with
-                | first :: _ when in_share_space first ->
-                    { route with store = share_store route }
-                | _ -> route
-            in
-            let go () =
-              let partial =
-                Codec.header r.headers W.partial_header = Some "1"
-              in
-              try counted t route body (execute ~partial t route op body)
-              with Fail.E f -> store_failure t f
-            in
-            if is_data op then admitted t go else go ())
+                let route, body, names =
+                  match op with
+                    | Get_multi | Children_multi | Delete_multi ->
+                        let body = read_within t r read_body limit in
+                        let names = bulk_names t body in
+                        (authorised body names, body, names)
+                    | _ ->
+                        (match names with
+                          | first :: _ when in_share_space first -> ()
+                          | _ -> if route_for t names = None then unauthorized t);
+                        let body = read_within t r read_body limit in
+                        (authorised body names, body, names)
+                in
+                let route =
+                  match names with
+                    | first :: _ when in_share_space first ->
+                        { route with store = share_store route }
+                    | _ -> route
+                in
+                let go () =
+                  let partial =
+                    Codec.header r.headers W.partial_header = Some "1"
+                  in
+                  try counted t route body (execute ~partial t route op body)
+                  with Fail.E f -> store_failure t f
+                in
+                if is_data op then admitted t go else go ())
   with Answer response -> response
+
+let stamped t (r : Server.request) =
+  (W.receipt_header, W.receipt ~epoch:t.epoch r.received)
+
+(* wire §2: every API answer, refusals included, carries its receipt stamp. *)
+let handle t (r : Server.request) read_body =
+  let route = route r in
+  let response = answer_request t r read_body route in
+  match route with
+    | `Share _ | `Setup _ -> response
+    | `Api -> { response with headers = stamped t r :: response.headers }
 
 (* replication §4.9: a share written to a copy directly waits for the main. *)
 let guarded composite (m : Composite.member) =

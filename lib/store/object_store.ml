@@ -155,6 +155,7 @@ let make ~name ~admission ?share_url v =
               down r;
               r));
       head_opt = (fun k -> ladder "head" (fun () -> v.head_opt k));
+      probe = None;
       (* object-store-common §2.2: the service's checksum costs a metadata
          request; the body moves only when it keeps none of that algorithm. *)
       compute_checksum =

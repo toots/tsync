@@ -133,6 +133,7 @@ type folder = {
 }
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
+type stamp = { epoch : string; at : float; sent : float }
 
 type t = {
   name : string;
@@ -142,6 +143,7 @@ type t = {
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> entry option;
+  probe : (Key.t -> stamp option) option;
   compute_checksum : Key.t -> string -> Checksum.t option;
   delete : Key.t -> bool;
   delete_multi : Key.t list -> unit;

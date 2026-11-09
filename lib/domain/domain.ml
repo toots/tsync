@@ -17,7 +17,13 @@ type t = {
 
 (* uplink-governor §8: a metadata read of the domain cursor exists on every
    written store and costs almost nothing. *)
-let probe d (store : Store.t) = ignore (store.head_opt (Key.cursor d))
+let probe d (store : Store.t) =
+  let k = Key.cursor d in
+  match store.probe with
+    | Some probe -> probe k
+    | None ->
+        ignore (store.head_opt k);
+        None
 
 (* 05 §3.2: parsing registered the type, so the driver is linked. *)
 let create_store config d (b : Config.backend) =

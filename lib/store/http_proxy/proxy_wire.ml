@@ -234,6 +234,16 @@ let read_body c =
 
 let read_text c = Bigstring.to_string (bytes c (u32 c))
 let partial_header = "x-tsync-partial"
+let receipt_header = "x-tsync-received"
+let receipt ~epoch at = Printf.sprintf "%s:%.0f" epoch (at *. 1e6)
+
+let receipt_of_string v =
+  match String.split_on_char ':' v with
+    | [epoch; us]
+      when epoch <> "" && us <> ""
+           && String.for_all (function '0' .. '9' -> true | _ -> false) us ->
+        Some (epoch, float_of_string us /. 1e6)
+    | _ -> None
 
 (* §8.3: a server that honours [partial_header] may answer a prefix of the
    keys, at least one. *)

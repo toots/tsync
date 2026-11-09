@@ -218,7 +218,8 @@ let () =
       timeouts = 1;
       waiting = 3;
       held_back = true;
-      probes = [("gcs", 0.0412)];
+      probes = [("gcs", 0.0412); ("nas", 0.055)];
+      one_way = [("nas", { epoch = "9f2c41d07a3be851"; delay = 81234.56725 })];
     }
   in
   show
@@ -230,12 +231,19 @@ let () =
       | Some r ->
           List.iter
             (fun (l, (x : Lease.report)) ->
-              p "  pid %d flat %b %s: inFlight %d heldBack %b probes [%s]" r.pid
-                r.flat l x.in_flight x.held_back
+              p
+                "  pid %d flat %b %s: inFlight %d heldBack %b probes [%s] \
+                 oneWay [%s]"
+                r.pid r.flat l x.in_flight x.held_back
                 (String.concat ", "
                    (List.map
                       (fun (s, d) -> Printf.sprintf "%S %.4f" s d)
-                      x.probes)))
+                      x.probes))
+                (String.concat ", "
+                   (List.map
+                      (fun (s, (o : Lease.one_way)) ->
+                        Printf.sprintf "%S %s %.4f" s o.epoch o.delay)
+                      x.one_way)))
             r.links
   in
   read

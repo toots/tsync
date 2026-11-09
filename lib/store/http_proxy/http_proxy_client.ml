@@ -327,6 +327,17 @@ let head_opt t k =
     | { status = 404; _ } -> None
     | r -> failure t ~op:"head" r
 
+let stamp (r : answer) =
+  Option.bind
+    (Tsync_http.Codec.header r.headers W.receipt_header)
+    W.receipt_of_string
+  |> Option.map (fun (epoch, at) -> { Store.epoch; at; sent = r.sent })
+
+let probe t k =
+  match call t "head" ~meth:"HEAD" (obj k) with
+    | r when success r.status || r.status = 404 -> stamp r
+    | r -> failure t ~op:"head" r
+
 (* §8.2: hashed where the bytes are, on the server; downloaded and hashed here
    only against a server without the endpoint. *)
 let compute_checksum t k algo =
@@ -507,6 +518,7 @@ let create ~domain ~admission ~name fields =
       get_opt = get_opt t;
       get_range = get_range t;
       head_opt = head_opt t;
+      probe = Some (probe t);
       compute_checksum = compute_checksum t;
       delete = delete t;
       delete_multi = delete_multi t;

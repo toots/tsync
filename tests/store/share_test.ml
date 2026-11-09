@@ -129,6 +129,7 @@ let routes () =
                 @ match accept with Some a -> [("accept", a)] | None -> []);
               peer = "";
               body_length = `Length 0;
+              received = 0.;
             }
             ~token ~sub params
         in
@@ -222,6 +223,7 @@ let routes () =
                headers = [];
                peer = "";
                body_length = `Length 0;
+               received = 0.;
              }
              ~token:"d1" ~sub:"download" [])
       in

@@ -36,6 +36,7 @@ One driver instance serves one domain; the domain's prefix is fixed at construct
 - **Stall timeout** `stall_timeout` (300 s): a request whose body upload or answer goes that long without a byte moving is abandoned as TRANSIENT/LINK. It is not a latency budget; a slow but moving transfer never trips it.
 - Request headers: `x-tsync-timestamp`, `x-tsync-signature`, `host`, `content-length`. Clients MUST send `content-length` (never a chunked request body) so a server can refuse an oversized body before reading it.
 - Answers may use `content-length` or chunked encoding. A client MUST accept both.
+- **Receipt stamp.** Every answer to a signed request (§5.1–§5.4) carries `x-tsync-received: <epoch>:<µs>`. `µs`, decimal digits, is the server's monotonic clock in microseconds when it finished reading the request head. `epoch`, 16 lowercase hex digits drawn at random when the server starts, names that clock's origin ([uplink-governor A10](../algorithms/uplink-governor.md#2-system-model-and-assumptions)). It is not signed: it steers only upload pacing.
 - A reverse proxy in front of a server MUST allow ≥ 35 s without response bytes (watch long-poll), MUST pass `x-tsync-*` headers unaltered, and MUST forward the query unaltered.
 
 ---
@@ -290,6 +291,7 @@ On the first `put_if_unchanged` or `compute_checksum`, the instance learns one m
 | `get key` | `GET /o/<k>` | body; ABSENT on 404 |
 | `get_opt key` | `GET /o/<k>` | `Some body`; `None` on 404 with empty body |
 | `get_range key off len` | `GET /o/<k>?offset=off&length=len` | body, **checked**: more than `len` bytes is CORRUPT (a server that ignored the range); `None` on 404. `len = 0` answers empty without a request. |
+| `probe key` | `HEAD /o/<k>` | the stamp of `x-tsync-received` with the time this client wrote the request head, on its monotonic clock; none when the header is absent or malformed. Fails as `head_opt` does. |
 | `head_opt key` | `HEAD /o/<k>` | entry with `size`, `last_modified`, `etag` from `x-tsync-etag` and `checksum` from `x-tsync-checksum` when present; `None` on 404. A missing or malformed size or time header is CORRUPT. |
 | `put_if_unchanged key data expected` | `PUT /o/<k>?if_match=<expected.etag>`, or `?if_none_match=1` for `none` (only when supported, §8.1) | 200 → `Written`; 412 → `Changed`. An `expected` without an etag fails REFUSED without a request. |
 | `compute_checksum key algo` | `GET /checksum/<k>?algo=<algo>` (only when supported, §8.1; else `get` and hash) | the parsed answer, which MUST name `algo` (CORRUPT otherwise); `None` on 404 |
@@ -355,6 +357,7 @@ There is no version negotiation. The **core** every server answers is: the objec
 | `checksum` in listings, `x-tsync-checksum` on HEAD | field or header absent | no checksum |
 | `/checksum`, conditional replace (`if_match`, `if_none_match`) | `/checksum` answers 404 with a body (§8.1) | `compute_checksum` downloads and hashes; `put_if_unchanged` is refused locally, never sent |
 | `x-tsync-kind` on 409 | header absent | REFUSED/`other` |
+| `x-tsync-received` | header absent or malformed | `probe` answers none: the governor reads the round trip only |
 | 204 on DELETE of nothing | a 200 | reads as "removed" |
 | 409 for permanent failures | a 500 | retried by the ladder before failing |
 | 401 for an unserved domain | a 404 with a non-empty body | REFUSED (§6.3, §8.1). A HEAD, which has no body, relies on the binding memo, refreshed whenever the capability memo is. |

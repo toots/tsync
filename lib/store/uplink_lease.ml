@@ -1,3 +1,5 @@
+type one_way = { epoch : string; delay : float }
+
 type report = {
   in_flight : int;
   completed : float;
@@ -5,6 +7,7 @@ type report = {
   waiting : int;
   held_back : bool;
   probes : (string * float) list;
+  one_way : (string * one_way) list;
 }
 
 let idle =
@@ -15,6 +18,7 @@ let idle =
     waiting = 0;
     held_back = false;
     probes = [];
+    one_way = [];
   }
 
 let wants r = r.waiting > 0 || r.held_back
@@ -72,7 +76,23 @@ let report_to_json r : Yojson.Safe.t =
         ("probeMs", `Float (least *. 1000.));
         ( "probesMs",
           `Assoc (List.map (fun (s, d) -> (s, `Float (d *. 1000.))) r.probes) );
-      ])
+      ]
+      @
+      if r.one_way = [] then []
+      else
+        [
+          ( "oneWayMs",
+            `Assoc
+              (List.map
+                 (fun (s, o) ->
+                   ( s,
+                     `Assoc
+                       [
+                         ("epoch", `String o.epoch);
+                         ("ms", `Float (o.delay *. 1000.));
+                       ] ))
+                 r.one_way) );
+        ])
 
 let request_to_json r : Yojson.Safe.t =
   `Assoc
@@ -102,6 +122,18 @@ let report_of_json j =
       | _ -> (
           match num "probeMs" j with Some d -> [("", d /. 1000.)] | None -> [])
   in
+  let one_way =
+    match field "oneWayMs" j with
+      | Some (`Assoc l) ->
+          List.filter_map
+            (fun (s, o) ->
+              match (field "epoch" o, num "ms" o) with
+                | Some (`String epoch), Some ms ->
+                    Some (s, { epoch; delay = ms /. 1000. })
+                | _ -> None)
+            l
+      | _ -> []
+  in
   {
     in_flight;
     completed = Option.value ~default:0. (num "completed" j);
@@ -110,6 +142,7 @@ let report_of_json j =
     held_back =
       (match field "heldBack" j with Some (`Bool b) -> b | _ -> in_flight > 0);
     probes;
+    one_way;
   }
 
 let request_of_json j =

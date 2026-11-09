@@ -23,11 +23,14 @@ let backoff_hold = 10.
 let restore_fraction = 0.5
 let state_max_age = 86400.
 
+type path_name = [ `Round_trip of string | `One_way of string * string ]
+
 type path = {
   mutable cells : (int * float) list;
       (** cell index, least delay, newest first *)
   mutable eff : float;
   mutable eff_changed : float;
+  votes_from : float;
 }
 
 type t = {
@@ -40,8 +43,8 @@ type t = {
   mutable never_saturated : bool;
   mutable capacity : float option;
   mutable queueing : float;
-  mutable samples : (string * float) list;
-  paths : (string, path) Hashtbl.t;
+  mutable samples : (path_name * float) list;
+  paths : (path_name, path) Hashtbl.t;
   mutable done_cells : (int * float) list;  (** second, bytes; newest first *)
 }
 
@@ -113,6 +116,55 @@ let timed_out t ~now =
   enter t Backing_off ~now;
   t.rate <- clamp t.s (t.rate *. decrease_floor)
 
+let fresh ~now ~succeeds d =
+  {
+    cells = [];
+    eff = d;
+    eff_changed = now;
+    votes_from = (if succeeds then now +. base_window else now);
+  }
+
+(* §4.4 Epochs: a store's new epoch replaces its earlier one-way path. *)
+let path t ~now name d =
+  match Hashtbl.find_opt t.paths name with
+    | Some p -> p
+    | None ->
+        let succeeds =
+          match name with
+            | `Round_trip _ -> false
+            | `One_way (s, _) ->
+                let earlier =
+                  Hashtbl.fold
+                    (fun n _ acc ->
+                      match n with
+                        | `One_way (s', _) when s' = s -> n :: acc
+                        | _ -> acc)
+                    t.paths []
+                in
+                List.iter (Hashtbl.remove t.paths) earlier;
+                earlier <> []
+        in
+        let p = fresh ~now ~succeeds d in
+        Hashtbl.replace t.paths name p;
+        p
+
+let longest_round_trip samples s =
+  List.fold_left
+    (fun acc (n, d) ->
+      match n with `Round_trip s' when s' = s -> Float.max acc d | _ -> acc)
+    neg_infinity samples
+  |> fun r -> if r = neg_infinity then probe_timeout else r
+
+(* §4.4 Clock steps: a forward queue cannot exceed the round trip carrying it. *)
+let unstepped t samples ~now name d =
+  let p = path t ~now name d in
+  match name with
+    | `One_way (s, _) when d -. p.eff > longest_round_trip samples s ->
+        let p = fresh ~now ~succeeds:true d in
+        Hashtbl.replace t.paths name p;
+        p
+    | _ -> p
+
 (* §4.4: per path, a sliding minimum over BASE_WINDOW whose effective value
    follows a lower minimum at once and rises by at most the target per window. *)
 let filter t ~now ~busy =
@@ -121,14 +173,7 @@ let filter t ~now ~busy =
     | samples ->
         let cell = int_of_float (now /. base_cell) in
         let above (name, d) =
-          let p =
-            match Hashtbl.find_opt t.paths name with
-              | Some p -> p
-              | None ->
-                  let p = { cells = []; eff = d; eff_changed = now } in
-                  Hashtbl.replace t.paths name p;
-                  p
-          in
+          let p = unstepped t samples ~now name d in
           let cells =
             match p.cells with
               | (c, m) :: rest when c = cell -> (c, Float.min m d) :: rest
@@ -149,12 +194,13 @@ let filter t ~now ~busy =
             if eff > p.eff then (
               p.eff <- eff;
               p.eff_changed <- now));
-          Float.max 0. (d -. p.eff)
+          if now >= p.votes_from then Float.max 0. (d -. p.eff) else infinity
         in
         let current =
           List.fold_left (fun acc s -> Float.min acc (above s)) infinity samples
         in
-        t.queueing <- (0.5 *. t.queueing) +. (0.5 *. current)
+        if current < infinity then
+          t.queueing <- (0.5 *. t.queueing) +. (0.5 *. current)
 
 let tick t ~now ~limited ~busy =
   filter t ~now ~busy;
@@ -219,6 +265,9 @@ let limit t =
 
 let base_delay t =
   Hashtbl.fold
-    (fun _ p acc ->
-      Some (match acc with Some b -> Float.min b p.eff | None -> p.eff))
+    (fun name p acc ->
+      match name with
+        | `One_way _ -> acc
+        | `Round_trip _ ->
+            Some (match acc with Some b -> Float.min b p.eff | None -> p.eff))
     t.paths None

@@ -79,7 +79,12 @@ end
 
 type settings = { enabled : bool; law : Law.settings }
 type waiter = { bytes : int; wake : (unit, exn) result Rt.Promise.t }
-type probe = { store : string; run : unit -> unit; health : Health.t }
+
+type probe = {
+  store : string;
+  run : unit -> Store.stamp option;
+  health : Health.t;
+}
 
 type lessee = {
   mutable report : Lease.report;
@@ -289,7 +294,7 @@ let line_of ~chunk = if chunk then Chunk else First
 let room g line b =
   Queue.is_empty (queue g line) && unblocked g line && ready g line b
 
-let own_report g ~timeouts ~probes =
+let own_report g ~timeouts ~probes:(probes, one_way) =
   let r =
     {
       Lease.in_flight = Budget.in_flight g.budget;
@@ -298,6 +303,7 @@ let own_report g ~timeouts ~probes =
       waiting = waiting_in g;
       held_back = g.held_back;
       probes;
+      one_way;
     }
   in
   g.completed_since <- 0.;
@@ -335,21 +341,41 @@ let timeouts_since g =
   g.last_timeouts <- total;
   max 0 fresh
 
-(* An unanswered probe reads as PROBE_TIMEOUT; other failures drop the sample. *)
+(* Round trips and one-way delays, as a report carries them.
+
+   An unanswered probe reads as PROBE_TIMEOUT; other failures drop the sample. *)
 let probe_round g =
   let probes =
     Mutex.protect g.m (fun () ->
         List.filter (fun p -> not (Health.is_held p.health)) g.probes)
   in
-  List.filter_map Fun.id
-    (Rt.map_concurrently
-       (fun p ->
-         let t0 = Rt.now () in
-         match Rt.with_timeout Law.probe_timeout p.run with
-           | () -> Some (p.store, Rt.now () -. t0)
-           | exception Rt.Timeout -> Some (p.store, Law.probe_timeout)
-           | exception e when not (Rt.is_cancelled e) -> None)
-       probes)
+  let samples =
+    List.filter_map Fun.id
+      (Rt.map_concurrently
+         (fun p ->
+           let t0 = Rt.now () in
+           match Rt.with_timeout Law.probe_timeout p.run with
+             | stamp -> Some (p.store, Rt.now () -. t0, stamp)
+             | exception Rt.Timeout -> Some (p.store, Law.probe_timeout, None)
+             | exception e when not (Rt.is_cancelled e) -> None)
+         probes)
+  in
+  ( List.map (fun (s, d, _) -> (s, d)) samples,
+    List.filter_map
+      (fun (s, _, stamp) ->
+        Option.map
+          (fun (st : Store.stamp) ->
+            (s, { Lease.epoch = st.epoch; delay = st.at -. st.sent }))
+          stamp)
+      samples )
+
+(* Under [g.m]: §4.5, one baseline per path across processes. *)
+let observe g ~probes:(probes, one_way) =
+  List.iter (fun (s, d) -> Law.observe_delay g.law (`Round_trip s) d) probes;
+  List.iter
+    (fun (s, (o : Lease.one_way)) ->
+      Law.observe_delay g.law (`One_way (s, o.epoch)) o.delay)
+    one_way
 
 let pump_and_arm g =
   Mutex.protect g.m (fun () ->
@@ -380,9 +406,9 @@ let step g ~owner =
         in
         (own_timeouts, busy))
   in
-  let samples = if busy then probe_round g else [] in
+  let samples = if busy then probe_round g else ([], []) in
   Mutex.protect g.m (fun () ->
-      List.iter (fun (s, d) -> Law.observe_delay g.law s d) samples;
+      observe g ~probes:samples;
       let mine = own_report g ~timeouts:own_timeouts ~probes:samples in
       let limited =
         Lease.wants mine
@@ -401,7 +427,7 @@ let lessee_report g =
     Mutex.protect g.m (fun () ->
         (timeouts_since g, Budget.in_flight g.budget > 0))
   in
-  let samples = if busy then probe_round g else [] in
+  let samples = if busy then probe_round g else ([], []) in
   Mutex.protect g.m (fun () -> own_report g ~timeouts ~probes:samples)
 
 let set_mode m =
@@ -576,9 +602,7 @@ let renewal (req : Lease.request) =
                 | Open -> None
                 | Governed g ->
                     Mutex.protect g.m (fun () ->
-                        List.iter
-                          (fun (s, d) -> Law.observe_delay g.law s d)
-                          r.probes;
+                        observe g ~probes:(r.probes, r.one_way);
                         g.lessee_completed <- g.lessee_completed +. r.completed;
                         g.lessee_timeouts <- g.lessee_timeouts + r.timeouts;
                         (match Hashtbl.find_opt g.lessees req.pid with

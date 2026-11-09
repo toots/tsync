@@ -1,0 +1,8 @@
+== a server that stamps
+  stamped, absent key included: true
+  one epoch across answers: true
+  epoch is 16 hex digits: true
+  received after it was written, on one machine's clock: true
+  later probes read later: true
+== a server without the stamp
+  probe answers none: true

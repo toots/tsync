@@ -20,6 +20,7 @@ type request = {
   headers : Codec.headers;
   peer : string;
   body_length : [ `Length of int | `Chunked | `Eof ];
+  received : float;  (** {!Tsync_core.Rt.now} once the head was read *)
 }
 
 type body =

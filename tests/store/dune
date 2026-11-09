@@ -351,3 +351,31 @@
   (<> %{os_type} Win32))
  (action
   (diff setup_link_test.expected setup_link_test.output)))
+
+(executable
+ (name proxy_stamp_test)
+ (modules proxy_stamp_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_http
+  tsync_http_proxy_client
+  tsync_http_proxy
+  unix))
+
+; The proxy serves a local store, and Windows holds neither (cloud-files §2).
+
+(rule
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   proxy_stamp_test.output
+   (run ./proxy_stamp_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (diff proxy_stamp_test.expected proxy_stamp_test.output)))

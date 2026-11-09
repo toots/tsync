@@ -69,6 +69,16 @@ val encode_bodies : Bigstring.t option list -> Bigstring.t
     keys only and asks again for the rest (§8.3). *)
 val partial_header : string
 
+(** The receipt stamp of §2, [<epoch>:<µs>], on every answer to a signed
+    request. *)
+val receipt_header : string
+
+(** [at] in seconds on the server's monotonic clock. *)
+val receipt : epoch:string -> float -> string
+
+(** The epoch and the time in seconds; [None] for any other shape. *)
+val receipt_of_string : string -> (string * float) option
+
 (** The bodies of the first keys asked, in order: at least one, at most [count].
     CORRUPT for none, or for more. *)
 val decode_bodies : count:int -> Bigstring.t -> Bigstring.t option list

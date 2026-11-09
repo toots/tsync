@@ -87,7 +87,7 @@ At start the server builds one route per served domain:
 The order is the wire's ([§6.1](../backends/http-proxy.md#61-processing-order)). Server-side detail:
 
 1. Share and status-page paths are dispatched first, without authentication.
-2. Request line and headers are read under the header limits and timeout.
+2. Request line and headers are read under the header limits and timeout. The answer's receipt stamp ([wire §2](../backends/http-proxy.md#2-transport)) is read on the clock as the head completes.
 3. The operation is parsed from method, path, query and declared body length. Every key and prefix is checked against the grammar here.
 4. The route is selected (§A4.3), the timestamp checked, and, for data operations, an admission slot taken (§A5) **before** the body is read.
 5. The body is read within its size limit and the listener-wide body-memory reservation, then the signature is verified and every named key confined to the route.

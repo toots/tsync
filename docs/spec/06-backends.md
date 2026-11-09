@@ -115,6 +115,7 @@ A checksum identifies a body's content, so that two stores' copies of an object 
 | `watch(k, last_seen)` | unit (§3.7) | returns like any other | — |
 | `get_many`, `list_many` | optional (§3.8) | | |
 | `bucket_functions` | bool, a declaration (§3.8) | | |
+| `probe(k)` | optional: a metadata read of `k` for the uplink governor (§6), answering the far end's receipt stamp `{epoch, at}` with the time `sent` the request was written, both on monotonic clocks, or `none` when that answer carried no stamp | as for a present key | — |
 | `capabilities(prefix)` | caps (§2.3) for the domain the prefix identifies | | |
 | `fast_read` | whether reading a whole chunk costs about what a range does | | |
 | `local_path` | a directory granting in-process code filesystem access to the store's tree, or none | | |
@@ -285,6 +286,7 @@ Rules:
 - **Paced chunks.** A chunk body MUST be written in slices, each after its `pace` returns, of at most the size the governor sets ([algorithms/uplink-governor.md §4.1](algorithms/uplink-governor.md#41-admission)). A driver whose transport cannot write a body in slices cannot carry a link. Bodies that are not chunks are written whole.
 - **Modes.** A write is issued in one of two modes. `wait` acquires. `best_effort` uses `try_acquire` for every attempt, and when admission is refused the operation fails CANCELLED ("not admitted") without sending. Best-effort writes are for work that another mechanism redoes, such as chunk forwards to copies.
 - **Atomicity.** `try_acquire` takes the admission in the same step as it checks it. There is no separate check that a later acquire has to honour.
+- **Probe.** The governor's probe is the store's `probe` of the domain cursor ([algorithms/uplink-governor.md](algorithms/uplink-governor.md) A4), or a `head_opt` of it, without a stamp, on a store that does not declare `probe`. Only a store whose far end runs tsync declares it; an object store and a composite do not.
 - **Reads are never gated.** A user is waiting on them.
 - **Stall timeouts.** A remote driver's stall timeout MUST be at least the governor's STALL_TIMEOUT: the in-flight window is sized so that a body queued behind a full window still crosses within it.
 - **Traffic counters.** Each store with a link counts body bytes of every attempt in each direction, per store and per process. A `put_if_absent` that returns `Held` counts the holder's body read back as download. Counting happens at the store, not in the content layer, because GC, mirror and repair talk to stores directly.

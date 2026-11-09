@@ -24,7 +24,7 @@ val link : string -> settings -> t
 val attach :
   t ->
   store:string ->
-  probe:(unit -> unit) ->
+  probe:(unit -> Store.stamp option) ->
   health:Tsync_core.Health.t ->
   unit
 
