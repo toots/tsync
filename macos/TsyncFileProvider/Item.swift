@@ -60,9 +60,16 @@ final class Item: NSObject, NSFileProviderItem {
             contentVersion: row.contentVersion, metadataVersion: row.contentVersion)
     }
 
-    /// Set on the root, inherited by everything below.
+    /// Set on the root, inherited by everything below. iOS has no plain lazy
+    /// policy; its lazy one also evicts a file its remote changes, which the
+    /// next read fetches again.
     var contentPolicy: NSFileProviderContentPolicy {
-        row.ref == "root" ? .downloadLazily : .inherited
+        guard row.ref == "root" else { return .inherited }
+        #if os(macOS)
+        return .downloadLazily
+        #else
+        return .downloadLazilyAndEvictOnRemoteUpdate
+        #endif
     }
 
     /// §6.4. No trashing: trash is not implemented.

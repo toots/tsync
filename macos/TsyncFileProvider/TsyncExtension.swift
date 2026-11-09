@@ -1,12 +1,14 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import FileProvider
 import UniformTypeIdentifiers
 
 /// The File Provider callbacks (§6.5): each one asks the owner and translates.
 /// No rule is decided here, and nothing is kept between callbacks.
-final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileProviderCustomAction,
-    NSFileProviderPartialContentFetching
-{
+final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileProviderCustomAction {
     let domain: NSFileProviderDomain
     let owner: Owner
 
@@ -54,7 +56,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         for containerItemIdentifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest
     ) throws -> NSFileProviderEnumerator {
         switch containerItemIdentifier {
-        case .workingSet: return WorkingSetEnumerator(owner: owner)
+        case .workingSet: return workingSetEnumerator(owner)
         case .trashContainer: return TrashEnumerator()
         default: return DirectoryEnumerator(owner: owner, ref: ItemRef.ref(containerItemIdentifier))
         }
@@ -110,65 +112,6 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                 progress.completedUnitCount = got
             }
             Thread.sleep(forTimeInterval: progressPollInterval)
-        }
-    }
-
-    func fetchPartialContents(
-        for itemIdentifier: NSFileProviderItemIdentifier, version requestedVersion: NSFileProviderItemVersion,
-        request: NSFileProviderRequest, minimalRange requestedRange: NSRange, aligningTo alignment: Int,
-        options: NSFileProviderFetchContentsOptions,
-        completionHandler: @escaping (
-            URL?, NSFileProviderItem?, NSRange, NSFileProviderMaterializationFlags, Error?
-        ) -> Void
-    ) -> Progress {
-        let done = Once { (result: (URL?, NSFileProviderItem?, NSRange, Error?)) in
-            completionHandler(result.0, result.1, result.2, [], result.3)
-        }
-        let none = NSRange(location: 0, length: 0)
-        let gone = Errors.provider(
-            .versionNoLongerAvailable, OwnerFailure.transport("the version changed"))
-        let ref = ItemRef.ref(itemIdentifier)
-        return task(onCancel: { done((nil, nil, none, Errors.map(OwnerFailure.cancelled, .read))) }) { [owner, manager] c, _ in
-            var dest: URL?
-            do {
-                let stat = try Owner.row(
-                    owner.call("stat", ["ref": ref], cancellation: c), nested: false)
-                if options.contains(.strictVersioning)
-                    && stat.contentVersion != requestedVersion.contentVersion
-                {
-                    return done((nil, nil, none, gone))
-                }
-                let range = alignedRange(
-                    requestedRange, alignment: alignment, documentSize: stat.size)
-                // An empty range is invalid to the owner, and an unknown error
-                // would be retried forever.
-                if range.length == 0 {
-                    return done((nil, nil, none, gone))
-                }
-                guard let temp = try manager?.temporaryDirectoryURL() else {
-                    throw OwnerFailure.transport("no temporary directory for the domain")
-                }
-                let url = temp.appendingPathComponent(UUID().uuidString)
-                dest = url
-                let reply = try owner.bulk(
-                    "fetch_range",
-                    [
-                        "ref": ref, "dest": url.path, "offset": range.start,
-                        "length": range.length,
-                    ], cancellation: c)
-                let row = try Owner.row(reply)
-                // The content changed in between: the range may be misaligned.
-                if row.contentVersion != stat.contentVersion {
-                    try? FileManager.default.removeItem(at: url)
-                    return done((nil, nil, none, gone))
-                }
-                let offset = (reply["offset"] as? NSNumber)?.intValue ?? Int(range.start)
-                let length = (reply["length"] as? NSNumber)?.intValue ?? Int(range.length)
-                done((url, Item(row), NSRange(location: offset, length: length), nil))
-            } catch {
-                if let dest = dest { try? FileManager.default.removeItem(at: dest) }
-                done((nil, nil, none, Errors.map(error, .read, missing: itemIdentifier)))
-            }
         }
     }
 
@@ -373,8 +316,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
                         throw OwnerFailure.transport("the owner's reply has no url")
                     }
                     DispatchQueue.main.sync {
+                        #if os(macOS)
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
+                        #else
+                        UIPasteboard.general.string = url
+                        #endif
                     }
                     done(nil)
                 } catch {
@@ -431,6 +378,70 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         if let failure = failure { throw failure }
     }
 }
+
+#if os(macOS)
+/// Ranged reads exist on macOS only.
+extension TsyncExtension: NSFileProviderPartialContentFetching {
+    func fetchPartialContents(
+        for itemIdentifier: NSFileProviderItemIdentifier, version requestedVersion: NSFileProviderItemVersion,
+        request: NSFileProviderRequest, minimalRange requestedRange: NSRange, aligningTo alignment: Int,
+        options: NSFileProviderFetchContentsOptions,
+        completionHandler: @escaping (
+            URL?, NSFileProviderItem?, NSRange, NSFileProviderMaterializationFlags, Error?
+        ) -> Void
+    ) -> Progress {
+        let done = Once { (result: (URL?, NSFileProviderItem?, NSRange, Error?)) in
+            completionHandler(result.0, result.1, result.2, [], result.3)
+        }
+        let none = NSRange(location: 0, length: 0)
+        let gone = Errors.provider(
+            .versionNoLongerAvailable, OwnerFailure.transport("the version changed"))
+        let ref = ItemRef.ref(itemIdentifier)
+        return task(onCancel: { done((nil, nil, none, Errors.map(OwnerFailure.cancelled, .read))) }) { [owner, manager] c, _ in
+            var dest: URL?
+            do {
+                let stat = try Owner.row(
+                    owner.call("stat", ["ref": ref], cancellation: c), nested: false)
+                if options.contains(.strictVersioning)
+                    && stat.contentVersion != requestedVersion.contentVersion
+                {
+                    return done((nil, nil, none, gone))
+                }
+                let range = alignedRange(
+                    requestedRange, alignment: alignment, documentSize: stat.size)
+                // An empty range is invalid to the owner, and an unknown error
+                // would be retried forever.
+                if range.length == 0 {
+                    return done((nil, nil, none, gone))
+                }
+                guard let temp = try manager?.temporaryDirectoryURL() else {
+                    throw OwnerFailure.transport("no temporary directory for the domain")
+                }
+                let url = temp.appendingPathComponent(UUID().uuidString)
+                dest = url
+                let reply = try owner.bulk(
+                    "fetch_range",
+                    [
+                        "ref": ref, "dest": url.path, "offset": range.start,
+                        "length": range.length,
+                    ], cancellation: c)
+                let row = try Owner.row(reply)
+                // The content changed in between: the range may be misaligned.
+                if row.contentVersion != stat.contentVersion {
+                    try? FileManager.default.removeItem(at: url)
+                    return done((nil, nil, none, gone))
+                }
+                let offset = (reply["offset"] as? NSNumber)?.intValue ?? Int(range.start)
+                let length = (reply["length"] as? NSNumber)?.intValue ?? Int(range.length)
+                done((url, Item(row), NSRange(location: offset, length: length), nil))
+            } catch {
+                if let dest = dest { try? FileManager.default.removeItem(at: dest) }
+                done((nil, nil, none, Errors.map(error, .read, missing: itemIdentifier)))
+            }
+        }
+    }
+}
+#endif
 
 /// Completes a callback exactly once, whichever of the work and the
 /// cancellation gets there first (§6.5).
