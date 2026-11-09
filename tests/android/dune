@@ -119,3 +119,24 @@
  (alias runtest-android)
  (action
   (diff config_file_test.expected config_file_test.output)))
+
+; Bridge calls each from a new thread that ends.
+
+(executable
+ (name thread_exit_test)
+ (modules thread_exit_test)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names thread_exit_stubs))
+ (libraries tsync_core tsync_catalog tsync_android_bridge threads.posix))
+
+(rule
+ (with-stdout-to
+  thread_exit_test.output
+  (run ./thread_exit_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff thread_exit_test.expected thread_exit_test.output)))
