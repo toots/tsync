@@ -3,13 +3,16 @@ system, another name: refused/other
 system, an unknown root: refused/other
 system, the system store for a private root: refused/other
 system, an expired certificate: refused/other
+system, a silent peer: transient/link within the setup bound: true
 openssl, its own root: accepted
 openssl, another name: refused/other
 openssl, an unknown root: refused/other
 openssl, the system store for a private root: refused/other
 openssl, an expired certificate: refused/other
+openssl, a silent peer: transient/link within the setup bound: true
 native, its own root: accepted
 native, another name: refused/other
 native, an unknown root: refused/other
 native, the system store for a private root: refused/other
 native, an expired certificate: refused/other
+native, a silent peer: transient/link within the setup bound: true

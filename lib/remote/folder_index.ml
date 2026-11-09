@@ -50,9 +50,9 @@ let decode b =
     let field pos =
       if pos + 4 > n then None
       else (
+        let byte i = Char.code (Bigarray.Array1.get b (pos + i)) in
         let len =
-          Int32.to_int
-            (String.get_int32_be (Bigstring.to_string ~off:pos ~len:4 b) 0)
+          (byte 0 lsl 24) lor (byte 1 lsl 16) lor (byte 2 lsl 8) lor byte 3
         in
         if len < 0 || len > n - pos - 4 then None
         else Some (Bigstring.sub b ~off:(pos + 4) ~len, pos + 4 + len))
