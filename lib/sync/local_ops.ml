@@ -428,17 +428,16 @@ module Make (C : Engine_ctx.S) = struct
   (* The digest an upload of the body with chunk size [cs] yields. *)
   let digest_of_body ~size ~cs body =
     try
-      let fd = Fs.openfile (Staged.whole_path staged body) [O_RDONLY] in
-      Fs.with_fd fd (fun fd ->
-          let n = Chunking.manifest_count ~size ~cs in
-          let buf = Bigstring.create cs in
-          let keys =
-            List.init n (fun i ->
-                let len = if size = 0 then 0 else Chunking.length ~size ~cs i in
-                let got = Fs.pread_full fd buf ~boff:0 ~len ~off:(i * cs) in
-                Chunk_key.of_bigstring ~len:got buf)
-          in
-          Some (fst (Manifest.digest_of ~size ~cs keys)))
+      let n = Chunking.manifest_count ~size ~cs in
+      let keys =
+        List.init n (fun i ->
+            let len = if size = 0 then 0 else Chunking.length ~size ~cs i in
+            let chunk = Staged.read_whole staged body ~off:(i * cs) ~len in
+            let key = Chunk_key.of_bigstring chunk in
+            Fs.drop_mapped_pages chunk;
+            key)
+      in
+      Some (fst (Manifest.digest_of ~size ~cs keys))
     with _ -> None
 
   (* 04 §2.5: recorded at adoption; computed only for a manifest without it. *)
@@ -558,12 +557,10 @@ module Make (C : Engine_ctx.S) = struct
     else (
       match e.content with
         | Whole { body = b; _ } ->
-            let fd = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
-            Fs.with_fd fd (fun fd ->
-                let buf = Bigstring.create len in
-                let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-                if n < len then Fail.corrupt "%s: its staged body is short" path;
-                buf)
+            let buf = Staged.read_whole staged b ~off ~len in
+            if Bigstring.length buf < len then
+              Fail.corrupt "%s: its staged body is short" path;
+            buf
         | Slots slots ->
             let cs = e.chunk_size in
             let count = Array.length slots in

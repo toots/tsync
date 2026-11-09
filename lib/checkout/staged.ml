@@ -312,6 +312,19 @@ let body_size t id =
 let body_links t id =
   match Fs.lstat_opt (body_path t id) with Some st -> st.st_nlink | None -> 0
 
+(* 04 §2.6: a whole body is never modified in place, so it is mapped (P6),
+   except on a network mount, which could fault a mapped page. *)
+let read_whole t id ~off ~len =
+  let path = whole_path t id in
+  Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
+      let size = (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
+      let len = max 0 (min len (Int64.to_int size - off)) in
+      if Fs.is_network_fs path then (
+        let buf = Bigstring.create len in
+        let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
+        Bigstring.sub buf ~off:0 ~len:n)
+      else Fs.map_range fd ~off ~len)
+
 (* A staged slot whose body does not exist is CORRUPT; bytes past a body's end
    within the edit's size are zeros (a staged body is sparse). *)
 let read_body t id ~off ~len =
