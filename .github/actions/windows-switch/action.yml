@@ -8,14 +8,24 @@ runs:
       with:
         ocaml-compiler: "5.5"
 
+    # The cache keys name the compiler setup-ocaml resolved, so a new release
+    # of it starts a fresh switch instead of reusing one built on the last.
+    - name: The compiler version
+      id: ocaml
+      shell: bash
+      run: |
+          vnum=$(opam exec -- ocaml -vnum | tr -d '\r')
+          test -n "$vnum"
+          echo "vnum=$vnum" >> "$GITHUB_OUTPUT"
+
     # A stale switch is still a head start: opam_deps.sh upgrades it.
     - name: Restore the opam switch
       id: opam-switch
       uses: actions/cache/restore@v4
       with:
         path: _opam
-        key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
-        restore-keys: opam-test-windows-
+        key: opam-test-windows-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+        restore-keys: opam-test-windows-${{ steps.ocaml.outputs.vnum }}-
 
     - name: OCaml libraries
       shell: bash
@@ -26,4 +36,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: _opam
-        key: opam-test-windows-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+        key: opam-test-windows-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}

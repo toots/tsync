@@ -30,6 +30,16 @@ jobs:
         with:
           ocaml-compiler: "5.5"
 
+      # The cache keys name the compiler setup-ocaml resolved, so a new release
+      # of it starts a fresh switch instead of reusing one built on the last.
+      - name: The compiler version
+        id: ocaml
+        shell: bash
+        run: |
+            vnum=$(opam exec -- ocaml -vnum | tr -d '\r')
+            test -n "$vnum"
+            echo "vnum=$vnum" >> "$GITHUB_OUTPUT"
+
       # 10 §4.1: setup-ocaml caches the compiler only; the switch is cached
       # here and saved right after the install, so a failed job neither loses
       # it nor saves a half-built one.
@@ -38,7 +48,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
+          key: opam-test-linux-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
 
       - name: OCaml libraries
         env:
@@ -50,7 +60,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
+          key: opam-test-linux-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
 
       - name: Build
         run: opam exec -- dune build
@@ -97,12 +107,22 @@ jobs:
         with:
           ocaml-compiler: "5.5"
 
+      # The cache keys name the compiler setup-ocaml resolved, so a new release
+      # of it starts a fresh switch instead of reusing one built on the last.
+      - name: The compiler version
+        id: ocaml
+        shell: bash
+        run: |
+            vnum=$(opam exec -- ocaml -vnum | tr -d '\r')
+            test -n "$vnum"
+            echo "vnum=$vnum" >> "$GITHUB_OUTPUT"
+
       - name: Restore the opam switch
         id: opam-switch
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+          key: opam-test-android-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
 
       - name: OCaml libraries
         run: ./scripts/opam_deps.sh tsync tsync-tls
@@ -112,7 +132,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+          key: opam-test-android-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
 
       - name: Build
         run: opam exec -- dune build
@@ -164,12 +184,22 @@ jobs:
         with:
           ocaml-compiler: "5.5"
 
+      # The cache keys name the compiler setup-ocaml resolved, so a new release
+      # of it starts a fresh switch instead of reusing one built on the last.
+      - name: The compiler version
+        id: ocaml
+        shell: bash
+        run: |
+            vnum=$(opam exec -- ocaml -vnum | tr -d '\r')
+            test -n "$vnum"
+            echo "vnum=$vnum" >> "$GITHUB_OUTPUT"
+
       - name: Restore the opam switch
         id: opam-switch
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-test-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+          key: opam-test-macos-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
 
       - name: OCaml libraries
         run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl
@@ -179,7 +209,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-test-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+          key: opam-test-macos-${{ steps.ocaml.outputs.vnum }}-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
 
       - name: Build
         run: opam exec -- dune build
