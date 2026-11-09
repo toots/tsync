@@ -4,7 +4,12 @@ import Foundation
 /// Changing any of them orphans existing installations.
 enum Tsync {
     static let appBundleID = "org.feverdreamtv.tsync"
+    #if os(iOS)
+    /// ios.md §3.1: a build setting, in each bundle's Info.plist.
+    static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TsyncAppGroup") as? String ?? ""
+    #else
     static let appGroup = "group.org.feverdreamtv.tsync"
+    #endif
     static let serviceLabel = "org.feverdreamtv.tsync.daemon"
 
     /// The identifier scheme this build registers domains under (§9.1 step 6).
