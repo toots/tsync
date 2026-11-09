@@ -526,6 +526,17 @@ module Make (C : Engine_ctx.S) = struct
       (fun e -> path <> "" || not (Names.is_reserved e.name))
       (List.sort (fun a b -> compare a.name b.name) (from_mirror @ staged_only))
 
+  let child_names path =
+    let staged_only =
+      List.filter_map
+        (fun (p, _) ->
+          if Names.parent_of p = path then Some (Names.leaf_of p) else None)
+        (Staged.edits_under staged path)
+    in
+    List.filter
+      (fun n -> path <> "" || not (Names.is_reserved n))
+      (List.sort_uniq String.compare (Mirror.names mirror path @ staged_only))
+
   let rec list_tree path =
     List.concat_map
       (fun e ->

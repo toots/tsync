@@ -421,6 +421,18 @@ let list t rel =
                 | _ -> None))
           names
 
+let names t rel =
+  let dir = path t rel in
+  match Fs.readdir_opt dir with
+    | None -> []
+    | Some locals ->
+        List.filter_map
+          (fun local ->
+            if Names.is_internal_local local || Names.is_temp_name local then
+              None
+            else real_name dir local)
+          locals
+
 let dir_mtime t rel =
   match Fs.lstat_opt (path t rel) with Some st -> st.st_mtime | None -> 0.
 
