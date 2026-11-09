@@ -97,6 +97,10 @@ type t = {
           {!watch_interval}; the argument is the token last seen *)
   get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
+  push_register : (string -> bool) option;
+      (** http-proxy wire §5.6: sends a registration's JSON body; [false] when
+          the server does not push. [None] for a store that is no tsync server.
+      *)
   bucket_functions : bool;
       (** requests put under [tsync/gc-jobs/] and [tsync/verify-jobs/] may be
           consumed by a bucket-side function; whether one is deployed is the

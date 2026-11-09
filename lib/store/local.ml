@@ -415,6 +415,7 @@ let create ?(verify_writes = true) ~name root =
       watch;
       get_many = None;
       list_many = None;
+      push_register = None;
       bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
       fast_read = mappable;
