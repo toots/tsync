@@ -70,7 +70,7 @@ enum SelfTest {
     }
 
     /// `devicectl` reads the app's own container but not the App Group's.
-    private static func copyLogsToDocuments() {
+    static func copyLogsToDocuments() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         for source in [log, Footprint.log] {
             let copy = documents.appendingPathComponent(source.lastPathComponent)
