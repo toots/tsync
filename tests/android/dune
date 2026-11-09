@@ -104,3 +104,18 @@
  (alias runtest-android)
  (action
   (diff cli_test.expected cli_test.output)))
+
+(executable
+ (name config_file_test)
+ (modules config_file_test)
+ (libraries tsync_core tsync_catalog tsync_android unix))
+
+(rule
+ (with-stdout-to
+  config_file_test.output
+  (run ./config_file_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff config_file_test.expected config_file_test.output)))

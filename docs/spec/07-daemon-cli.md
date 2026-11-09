@@ -245,7 +245,10 @@ unit, a system template instance, a launch agent), and a command that guesses it
 one or none. Restarting is the service manager's command above; nothing signals processes found by
 name. User documentation gives the command for each kind of install.
 
-`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
+`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file.
+`$TSYNC_CONFIG_FILE`, when set to an absolute path, names the config file in place of the row
+above; an embedding host whose config is shared with another process outside its home (the iOS File
+Provider extension) sets it before the core starts. Modes and
 ownership of the data dir and of every directory holding a socket, lock or flag:
 [security-model.md §7.1](algorithms/security-model.md#71-socket-directory-and-files).
 
