@@ -270,6 +270,19 @@ let pread_path p ~off ~len =
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
             Some (Bigstring.sub buf ~off:0 ~len:n))
 
+(* 01 §5: a whole body is replaced only by rename, so its bytes are read as a
+   mapping, except on a network mount where a mapping can fault. *)
+let map_whole p ~off ~len =
+  if Fs.is_network_fs p then pread_path p ~off ~len
+  else (
+    match Fs.open_nofollow p with
+      | None -> None
+      | Some fd ->
+          Fs.with_fd fd (fun fd ->
+              let size = (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
+              let len = max 0 (min len (Int64.to_int size - off)) in
+              Some (Fs.map_range fd ~off ~len)))
+
 let all_held g s =
   List.for_all
     (fun x -> x.len = 0 || Hashtbl.find_opt s.held x.index = Some (0, x.len))
@@ -349,7 +362,7 @@ let touch t gkey =
    slow store; a body replaced under a reader is refetched once. *)
 let read_piece t (g : group) (x : member) ~coff ~len =
   let from_body () =
-    match pread_path (whole_path t g.gkey) ~off:(x.off + coff) ~len with
+    match map_whole (whole_path t g.gkey) ~off:(x.off + coff) ~len with
       | Some s when Bigstring.length s = len ->
           touch t g.gkey;
           Some s
@@ -381,7 +394,7 @@ let read_piece t (g : group) (x : member) ~coff ~len =
    machine in a new publication. *)
 let verified_member t g (x : member) =
   ensure_whole t g;
-  match pread_path (whole_path t g.gkey) ~off:x.off ~len:x.len with
+  match map_whole (whole_path t g.gkey) ~off:x.off ~len:x.len with
     | Some s when Bigstring.length s = x.len -> s
     | _ -> Fail.corrupt "cache body %s is short" g.gkey
 
