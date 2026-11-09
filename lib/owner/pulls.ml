@@ -5,10 +5,16 @@ type params = {
   pull_freshness : float;
   view_max_age : float;
   pull_patience : float;
+  pull_page : int;
 }
 
 let default =
-  { pull_freshness = 5.; view_max_age = 10. *. 86400.; pull_patience = 2. }
+  {
+    pull_freshness = 5.;
+    view_max_age = 10. *. 86400.;
+    pull_patience = 2.;
+    pull_page = 256;
+  }
 
 type t = {
   params : params;
@@ -66,7 +72,7 @@ let start t dir =
   let done_ = Rt.Promise.create () in
   Rt.spawn ~name:"pull" (fun () ->
       let outcome =
-        match E.pull dir with
+        match E.pull ~page:t.params.pull_page dir with
           | differs ->
               let owed =
                 Mutex.protect t.m (fun () ->
@@ -165,7 +171,7 @@ let before_open t path =
   Rt.spawn ~name:"refresh" (fun () ->
       ignore
         (Rt.Promise.try_resolve_result done_
-           (match E.refresh_file path with
+           (match E.refresh_file ~page:t.params.pull_page path with
              | () ->
                  succeeded t;
                  Ok ()

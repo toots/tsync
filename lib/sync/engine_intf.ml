@@ -255,8 +255,9 @@ module type S = sig
   (** The lazy tree (04 §3.5, publication §4.11): an arrival for one folder;
       whether its children changed. UNPREPARED for a folder with no id here; a
       failed pull changes nothing. Concurrent pulls of one folder share one
-      read. *)
-  val pull : string -> bool
+      read. The log is read and merged [page] entries at a time (android §8
+      [pull_page], 256 by default). *)
+  val pull : ?page:int -> string -> bool
 
   (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
   val pulled_at : string -> float option
@@ -273,7 +274,7 @@ module type S = sig
 
   (** Pulls the file's folder, so the file is at its current version (android
       §3.2 rule 3). *)
-  val refresh_file : string -> unit
+  val refresh_file : ?page:int -> string -> unit
 
   val mirror : Mirror.t
 end

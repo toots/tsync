@@ -5,6 +5,7 @@ type params = {
   pull_freshness : float;
   view_max_age : float;
   pull_patience : float;
+  pull_page : int;
 }
 
 (** android §8. *)
