@@ -154,8 +154,7 @@ neither the core nor a service, and is far inside the time the system gives it.
 
 ### 5.3 Pushes
 
-*Draft for review: the token's owner is settled by a device probe before this section is final, and
-the server part then moves to the page that owns the listener.*
+*The server part moves to the page that owns the listener when it is implemented.*
 
 A server holding a push key tells phones when a domain changed. The system turns a file provider push
 naming a domain into a signal of that domain's working set (§5.1): the extension's refresh pass
@@ -174,9 +173,8 @@ The key signs pushes to every app of its team, so it is given to no other server
   File Provider identifier.
 - A server without a key answers `unsupported`; the extension does not ask that server again in this
   process. A failed registration is logged and retried at the next boot.
-- **Open:** whether the extension can obtain the token, or only the app can (a forum report has the
-  app's registration invalidated at once). A device probe decides; if only the app can, the app
-  writes the token to the group and the extension sends it.
+- The extension obtains the token itself: on a device (iOS 18.1), the app and the extension each
+  registering got the same token and neither saw it invalidated. The app does not register.
 
 **The server** (the http-proxy listener).
 - A listener option `push`: `{"key": path, "keyId", "teamId", "topic"}`, where `key` is the team's
