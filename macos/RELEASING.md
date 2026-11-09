@@ -62,7 +62,7 @@ local cache and config.
 
 ## Building locally
 
-Needs [opam](https://opam.ocaml.org/) with OCaml ≥ 5.5 and tsync's dependencies
+Needs [opam](https://opam.ocaml.org/) with OCaml ≥ 5.5.1 and tsync's dependencies
 (`build.sh` uses the current switch; set `OPAMSWITCH` to pick another), Xcode, and:
 
 ```bash
