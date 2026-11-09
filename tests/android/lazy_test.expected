@@ -44,9 +44,6 @@
   resume                             ok
   notices                            {changed root}
 == refused on a pulled tree
-  changes_since                      invalid (docs keeps a pulled tree, which has no changes_since)
-  list_all                           invalid (docs keeps a pulled tree, which has no list_all)
-  cursor                             invalid (docs keeps a pulled tree, which has no cursor)
   full_resync                        invalid (docs keeps a pulled tree, which has no full_resync)
   sync                               invalid (docs keeps a pulled tree, which has no sync)
   subscribe                          invalid (docs keeps a pulled tree, which has no subscribe)
