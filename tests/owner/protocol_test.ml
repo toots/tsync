@@ -149,6 +149,15 @@ let cases =
           },
         { size = 24; times = row.times; item = row; aside = None } );
     Case
+      ( Set_times
+          {
+            item = Ref row.ref_;
+            mtime = 1_400_000_000_000_000_001;
+            created = Some 1_300_000_000_000_000_001;
+          },
+        row );
+    Case (Set_times { item = Rel "big.txt"; mtime = 7; created = None }, row);
+    Case
       ( Mkdir { at; exclusive = false; aside = true },
         { item = dir; aside = Some { dir with name = "d (conflicted copy)" } }
       );

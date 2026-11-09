@@ -276,6 +276,12 @@ type _ request =
       await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
+  | Set_times : {
+      item : target;
+      mtime : int;
+      created : int option;
+    }
+      -> row request
   | Mkdir : {
       at : destination;
       exclusive : bool;
@@ -403,6 +409,7 @@ let action : type a. a request -> string = function
   | Download_progress _ -> "download_progress"
   | Create _ -> "create"
   | Write _ -> "write"
+  | Set_times _ -> "set_times"
   | Mkdir _ -> "mkdir"
   | Symlink _ -> "symlink"
   | Rename _ -> "rename"
@@ -450,8 +457,8 @@ let action : type a. a request -> string = function
   | Extension e -> e.action
 
 let mutates : type a. a request -> bool = function
-  | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
-  | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
+  | Create _ | Write _ | Set_times _ | Mkdir _ | Symlink _ | Rename _ | Delete _
+  | Rmdir _ | Revert _ | Vault_init _ | Vault_passphrase _ | Vault_delete _
   | Vault_appearance _ | Vault_rekey _ | Vault_import _ | Vault_backup_key
   | Totp_add _ | Totp_rename _ | Totp_remove _ | Totp_import _ ->
       true
@@ -644,6 +651,10 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ opt "base" (fun b -> `String b) r.base
       @ (if r.aside then [("aside", `Bool true)] else [])
       @ if r.await then [("await", `Bool true)] else []
+  | Set_times r ->
+      target_fields r.item
+      @ [("mtimeNs", `Int r.mtime)]
+      @ opt "createdNs" (fun c -> `Int c) r.created
   | Mkdir r ->
       destination_fields r.at
       @ [("exclusive", `Bool r.exclusive)]
@@ -726,6 +737,17 @@ let decode j =
                exclusive = flag j "exclusive";
                aside = flag j "aside";
                await = flag j "await";
+             })
+    | "set_times" ->
+        Request
+          (Set_times
+             {
+               item = target_of j;
+               mtime =
+                 (match int j "mtimeNs" with
+                   | Some n -> n
+                   | None -> Fail.invalid "mtimeNs is required");
+               created = int j "createdNs";
              })
     | "mkdir" ->
         Request
@@ -1247,6 +1269,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
               reply.appearance)
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
+    | Set_times _ -> ok (item reply)
     | Mkdir _ -> ok (placed_fields reply)
     | Symlink _ -> ok (item reply)
     | Rename _ -> ok (placed_fields reply)
@@ -1583,6 +1606,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Rmdir _ -> ()
     | Stat _ -> row_of_fields j
     | Create _ -> item ()
+    | Set_times _ -> item ()
     | Mkdir _ -> { item = item (); aside = aside () }
     | Symlink _ -> item ()
     | Rename _ -> { item = item (); aside = aside () }

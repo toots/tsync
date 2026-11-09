@@ -319,6 +319,30 @@ let truncate t path size fi =
         E.truncate rel (Int64.to_int size);
         match handle with Some h -> h.modified <- true | None -> E.close rel))
 
+(* fuse §4.2: a file's mtime is published as a change of times alone; the
+   access time is not kept, and a folder or a symlink has no time to set. *)
+let utimens t path _atime mtime _fi =
+  let rel = rel path in
+  let ns =
+    match mtime with
+      | Fuse.Omit -> None
+      | Now -> Some (Fs.now ())
+      | Time { tv_sec; tv_nsec } ->
+          Some ((Int64.to_int tv_sec * 1_000_000_000) + tv_nsec)
+  in
+  match ns with
+    | None -> ()
+    | Some _ when is_hidden rel -> ()
+    | Some mtime ->
+        let (module E : Tsync_sync.Engine.S) = t.engine in
+        call (fun () ->
+            match E.kind rel with
+              | `File -> (
+                  check_mutation t;
+                  try E.set_times rel ~mtime ()
+                  with Fail.E { kind = Invalid; _ } -> ())
+              | `Dir | `Absent -> ())
+
 let release t _ (fi : Fuse.file_info) =
   match
     locked t (fun () ->
@@ -444,7 +468,7 @@ let operations t =
     chmod = (fun _ _ _ -> ());
     chown = (fun _ _ _ _ -> ());
     truncate = truncate t;
-    utimens = (fun _ _ _ _ -> ());
+    utimens = utimens t;
     fopen = fopen t;
     read = read t;
     write = write t;

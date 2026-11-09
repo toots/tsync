@@ -1257,6 +1257,51 @@ module Make (C : Engine_ctx.S) = struct
           Fs.unlink_quiet tmp;
           raise e
 
+  (* 02 §2.6: the key's content with other times, a change of times alone;
+     under the key's lock, inside its change. *)
+  let retime path ~before (times : Fs.times) =
+    match (before, Mirror.file mirror path) with
+      | None, `File m when Manifest.times m <> times ->
+          let m = Manifest.with_times m times in
+          bump path;
+          Mirror.write_file ~own:true mirror path m;
+          settle path;
+          post_put path;
+          feed_put path m.size
+      | Some (e : Staged.edit), _ when e.times <> times ->
+          let state : Staged.state =
+            match e.state with
+              | Uploaded m -> Uploaded (Manifest.with_times m times)
+              | Owed -> Owed
+          in
+          let e = { e with times; state } in
+          Staged.write staged path e;
+          bump path;
+          settle path;
+          post_put path;
+          feed_put path e.size
+      | _ -> settle path
+
+  (* 08 §3.3 [set_times]: the times as given, a later creation time included;
+     an absent [created] keeps the file's. *)
+  let set_times path ~mtime ?created () =
+    check_writable ();
+    with_key path (fun () ->
+        let before = Staged.edit staged path in
+        let held =
+          match (before, Mirror.file mirror path) with
+            | Some e, _ -> e.times
+            | None, `File m when not (Manifest.is_link m) -> Manifest.times m
+            | None, `File _ -> Fail.raise_ Fail.Invalid "%s is a symlink" path
+            | None, `Dir -> Fail.raise_ Fail.Invalid "%s is a folder" path
+            | None, (`Absent | `Corrupt) ->
+                Fail.raise_ Fail.Absent "%s does not exist" path
+        in
+        let created =
+          Option.fold created ~none:held.created ~some:(Fs.creation ~mtime)
+        in
+        changing path @@ fun () -> retime path ~before { Fs.mtime; created })
+
   (* 04 §4.3 [write_whole]: the handed-over file is adopted by rename, never
      copied when on the same filesystem. An edit of a version this client no
      longer holds is staged aside as a new file (conflict-resolution §4.9). *)
@@ -1308,27 +1353,7 @@ module Make (C : Engine_ctx.S) = struct
         let h1 = digest_of_body ~size ~cs:chunk_size id in
         if h1 <> None && h1 = current then (
           release_body id;
-          match (before, Mirror.file mirror path) with
-            | None, `File m when Manifest.times m <> times ->
-                let m = Manifest.with_times m times in
-                bump path;
-                Mirror.write_file ~own:true mirror path m;
-                settle path;
-                post_put path;
-                feed_put path m.size
-            | Some e, _ when e.times <> times ->
-                let state : Staged.state =
-                  match e.state with
-                    | Uploaded m -> Uploaded (Manifest.with_times m times)
-                    | Owed -> Owed
-                in
-                let e = { e with times; state } in
-                Staged.write staged path e;
-                bump path;
-                settle path;
-                post_put path;
-                feed_put path e.size
-            | _ -> settle path)
+          retime path ~before times)
         else (
           let e =
             {

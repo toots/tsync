@@ -289,6 +289,12 @@ type _ request =
       await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
+  | Set_times : {
+      item : target;  (** a file *)
+      mtime : int;
+      created : int option;  (** absent: the file's is kept *)
+    }
+      -> row request
   | Mkdir : {
       at : destination;
       exclusive : bool;
