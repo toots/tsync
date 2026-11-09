@@ -211,9 +211,9 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
 
 ## 8. Where the workflows depart
 
-- The Windows job (§3.1 item 6) runs in its own workflow, `test-windows`, whose `x86-64` job is a
-  required check for merging, as the gate is, but which triggers no release: releases wait for
-  `test` alone. `release-windows` does not exist yet.
+- The Windows job (§3.1 item 6) runs in its own workflow, `test-windows`, whose `x86-64` and
+  `tests` jobs are required checks for merging, as the gate is, but which triggers no release:
+  releases wait for `test` alone. `release-windows` does not exist yet.
 
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.

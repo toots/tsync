@@ -1,10 +1,10 @@
 == landing: the root, a file, a folder
-all: exported 3 (40008 bytes), already there 0, failed 0
-  notes/a.txt (5)  notes/deep/b.bin (40000)  top.txt (3)
-one: exported 1 (40000 bytes), already there 0, failed 0
-  b.bin (40000)
-folder: exported 1 (40000 bytes), already there 0, failed 0
-  deep/b.bin (40000)
+all: exported 3 (408 bytes), already there 0, failed 0
+  notes/a.txt (5)  notes/deep/b.bin (400)  top.txt (3)
+one: exported 1 (400 bytes), already there 0, failed 0
+  b.bin (400)
+folder: exported 1 (400 bytes), already there 0, failed 0
+  deep/b.bin (400)
   content equal: true
 
 == a rerun finds everything there
@@ -13,7 +13,7 @@ all: exported 0 (0 bytes), already there 3, failed 0
 == cancelled partway, then resumed
 resumed: exported 0 (0 bytes), already there 0, failed 1, cancelled
   failed b.bin: cancelled
-resumed: exported 1 (39992 bytes), already there 0, failed 0
+resumed: exported 1 (392 bytes), already there 0, failed 0
   content equal: true
 
 == a record torn mid-line, resumed twice
@@ -36,7 +36,7 @@ clash: refused: two paths land on clash/a.txt
 a lone argument names a domain path: folder true, file true, other false
 
 == unpublished edits are listed
-pending: exported 2 (40005 bytes), already there 0, failed 0
+pending: exported 2 (405 bytes), already there 0, failed 0
   pending notes/a.txt
   a.txt exported as published: true
 

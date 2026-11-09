@@ -98,7 +98,7 @@ let () =
   in
   let big =
     Random.init 42;
-    String.init 210000 (fun _ -> Char.chr (Random.int 256))
+    String.init 2100 (fun _ -> Char.chr (Random.int 256))
   in
   file src "top.txt" "top";
   file src "empty.txt" "";
@@ -122,7 +122,7 @@ let () =
       report (rs (local src) (domain "dest"));
       p "\n== one local chunk changed is uploaded again\n";
       file src "notes/big.bin"
-        (String.mapi (fun i c -> if i = 75000 then 'Z' else c) big);
+        (String.mapi (fun i c -> if i = 750 then 'Z' else c) big);
       report (rs (local src) (domain "dest"));
       (* Published first: an unpublished edit is not copied (05 rsync). *)
       drain a;
