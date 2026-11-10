@@ -58,3 +58,9 @@
 (package
  (name tsync-android)
  (allow_empty))
+
+; tsync-ios likewise, for the iOS app's core.
+
+(package
+ (name tsync-ios)
+ (allow_empty))
