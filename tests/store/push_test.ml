@@ -253,8 +253,10 @@ let () =
                    | _ -> jwt))
         | None -> p "no push to %s\n" (token (List.hd others)));
       p "\n== ten changes within the interval\n";
+      (* Straight to the listener's push, so that all ten fall in one
+         interval however long a commit takes. *)
       for _ = 1 to 10 do
-        commit author
+        Push.changed push d ~author
       done;
       Rt.sleep 0.8;
       p "pushed to: %s\n" (tokens (take ()));
