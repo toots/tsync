@@ -82,12 +82,13 @@ enum SelfTest {
             else { continue }
             let scoped = root.startAccessingSecurityScopedResource()
             defer { if scoped { root.stopAccessingSecurityScopedResource() } }
+            Footprint.append("app: walk of \(domain.displayName) starts")
             var pending = [root]
             var folders = 0
             while let folder = pending.popLast() {
                 let children = await listed(folder)
                 folders += 1
-                if folders % 500 == 0 { Footprint.append("app: walked \(folders) folders of \(domain.displayName)") }
+                if folders % 100 == 0 { Footprint.append("app: walked \(folders) folders of \(domain.displayName)") }
                 pending += children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
             }
             Footprint.append("app: walked \(folders) folders of \(domain.displayName)")
@@ -97,15 +98,22 @@ enum SelfTest {
 
     /// A folder the extension is still pulling answers "retry" until it has it.
     private static func listed(_ folder: URL) async -> [URL] {
-        for _ in 0..<60 {
+        let started = Date()
+        let waited = { Int(Date().timeIntervalSince(started)) }
+        for attempt in 0..<60 {
             do {
-                return try FileManager.default.contentsOfDirectory(
+                let children = try FileManager.default.contentsOfDirectory(
                     at: folder, includingPropertiesForKeys: [.isDirectoryKey])
+                if attempt > 0 {
+                    Footprint.append("app: walk listed \(folder.lastPathComponent) after \(waited()) s: \(children.count) items")
+                }
+                return children
             } catch {
+                if attempt == 0 { Footprint.append("app: walk waits on \(folder.lastPathComponent): \(error.localizedDescription)") }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
-        Footprint.append("app: walk skipped \(folder.lastPathComponent)")
+        Footprint.append("app: walk skipped \(folder.lastPathComponent) after \(waited()) s")
         return []
     }
 
