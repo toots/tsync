@@ -80,7 +80,9 @@ the framework's domain-change notification.
 - **Diagnostics**: the extension's footprint log ([ios.md §7](ios.md#7-memory-and-observed-behaviour))
   with Refresh and Clear; **Add a local test domain** (a domain whose store is a directory in the App
   Group, for trying the extension without a server); **Run self-test**, the test that
-  [ios.md §8](ios.md#8-conformance) runs on a device. It is in every build: the log costs the
+  [ios.md §8](ios.md#8-conformance) runs on a device; **Walk every domain**, which lists every folder
+  of every domain through the file system, so that the extension pulls and then holds them all, for
+  ios.md §8's check of a refresh pass over thousands of held folders. It is in every build: the log costs the
   extension one system call and one append per request (ios.md §7), and the rest runs only when
   asked.
 
