@@ -26,6 +26,11 @@ Until a config exists, the app shows only Setup (§4). A config that does not lo
 the core's message, as on Android. Otherwise the app has one screen, Settings (§5), from which Setup
 is reached by **Add a domain**.
 
+The app is named **tsync** on the Home Screen and in Files. Its icon is `assets/tsync-app.svg` drawn
+square, one opaque 1024-pixel image whose corners the system rounds; `ios/app/make-icon.sh` renders
+it and the image is committed, so a build needs no rasteriser. Files shows the same icon beside each
+domain in its sidebar.
+
 ## 3. Registration and signals
 
 **Registration** reconciles the framework's domains with the config, at every launch, on every

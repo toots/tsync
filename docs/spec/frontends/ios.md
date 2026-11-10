@@ -64,6 +64,7 @@ So:
 | App | `TSYNC_APP_ID` |
 | File Provider extension | `$(TSYNC_APP_ID).fileprovider` |
 | App Group | `TSYNC_APP_GROUP` |
+| Push environment | `TSYNC_APS_ENVIRONMENT`: `development` for a build installed from a Mac, `production` for a TestFlight or App Store build ([10 §5.6](../10-delivery.md#56-ios-signing-and-testflight)) |
 | Domain | [file-provider.md §3.3](file-provider.md#33-domain-identifier)'s identifier of its display name |
 
 The source holds no value for them: a build is given them by its environment (the CI's secrets, or
