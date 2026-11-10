@@ -89,7 +89,10 @@ enum SelfTest {
                 let children = await listed(folder)
                 folders += 1
                 if folders % 100 == 0 { Footprint.append("app: walked \(folders) folders of \(domain.displayName)") }
-                pending += children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                pending += children.filter {
+                    $0.lastPathComponent != ".Trash"
+                        && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                }
             }
             Footprint.append("app: walked \(folders) folders of \(domain.displayName)")
         }
