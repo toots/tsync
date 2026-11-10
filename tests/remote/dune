@@ -68,3 +68,18 @@
  (alias runtest)
  (action
   (diff projection_test.expected projection_test.output)))
+
+(executable
+ (name wide_folder_test)
+ (modules wide_folder_test)
+ (libraries tsync_core tsync_store tsync_remote unix))
+
+(rule
+ (with-stdout-to
+  wide_folder_test.output
+  (run ./wide_folder_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wide_folder_test.expected wide_folder_test.output)))
