@@ -1,0 +1,235 @@
+name: release-ios
+
+# Builds and checks the iOS app on every pull request and push to rewrite,
+# publishing nothing (10 §1). On main it runs after the gate, `test`, passes,
+# and uploads to TestFlight (10 §5.6). workflow_run fires only from the default
+# branch's copy of this file.
+on:
+  push:
+    branches: [rewrite]
+  pull_request:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    # 10 §2: only a gate run for a push to this repository releases.
+    if: >-
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # 10 §5.6: each upload outranks the one before.
+      BUILD_NUMBER: ${{ github.run_number }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
+      # 10 §4.1: conf-ios records the device target whenever it is installed.
+      ARCH: arm64
+      SUBARCH: arm64
+      PLATFORM: iPhoneOS
+      VER: "16.0"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Tools and the device SDK
+        id: sdk
+        run: |
+          brew install xcodegen
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "SDK=$sdk" >> "$GITHUB_ENV"
+          # A restored conf-ios names the SDK it was installed against.
+          echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
+
+      # The cross compiler is built from, and for, this compiler version.
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5.2"
+
+      # .github/opam carries duppy-ios, which the cross repository does not have.
+      - name: The cross-compilation repositories
+        run: |
+          opam repository add ios git+https://github.com/toots/opam-cross-ios.git#tsync
+          opam repository add tsync-cross "$GITHUB_WORKSPACE/.github/opam"
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-ios-cross-${{ hashFiles('tsync-ios.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}-${{ steps.sdk.outputs.sdk }}
+
+      - name: The cross switch
+        run: ./scripts/opam_deps.sh tsync-ios
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-ios-cross-${{ hashFiles('tsync-ios.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}-${{ steps.sdk.outputs.sdk }}
+
+      # 10 §5.6: the device core only. LC_BUILD_VERSION platform 2 is iOS; the
+      # simulator is 7.
+      - name: Cross-build the core
+        run: |
+          opam exec -- dune build --profile release -x ios _build/default.ios/ios/core/libtsyncios.exe.o
+          mkdir -p ios/app/core/iphoneos
+          cp _build/default.ios/ios/core/libtsyncios.exe.o ios/app/core/iphoneos/libtsyncios.o
+          otool -l ios/app/core/iphoneos/libtsyncios.o > "$RUNNER_TEMP/load-commands"
+          grep -A2 LC_BUILD_VERSION "$RUNNER_TEMP/load-commands" > "$RUNNER_TEMP/build-version"
+          grep -qx ' *platform 2' "$RUNNER_TEMP/build-version"
+
+      # 10 §5.6: only a published build is signed. A fork receives no secrets; a
+      # run that should have them fails naming each missing one.
+      - name: Signing secrets
+        id: secrets
+        env:
+          IOS_ASC_KEY_P8: ${{ secrets.IOS_ASC_KEY_P8 }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
+          IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
+        run: |
+          if [ "$PUBLISH" != true ]; then
+            echo "::notice::signing not run: only a published build is signed (10 §5.6)"
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          missing=
+          for v in IOS_ASC_KEY_P8 IOS_ASC_KEY_ID IOS_ASC_ISSUER_ID IOS_TEAM_ID IOS_APP_ID IOS_APP_GROUP; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release-ios needs these repository secrets:$missing"
+            echo "::error::scripts/setup_ios_signing.sh sets them; ios/RELEASING.md says how to make the key"
+            exit 1
+          fi
+          echo "sign=true" >> "$GITHUB_OUTPUT"
+
+      # ios.md §3.1: no identifier has a default in the code, so an unsigned
+      # build names placeholders.
+      - name: Identifiers
+        env:
+          SIGN: ${{ steps.secrets.outputs.sign }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
+          IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
+        run: |
+          if [ "$SIGN" != true ]; then
+            IOS_TEAM_ID='' IOS_APP_ID=org.example.tsync IOS_APP_GROUP=group.org.example.tsync
+          fi
+          {
+            echo "TSYNC_TEAM_ID=$IOS_TEAM_ID"
+            echo "TSYNC_APP_ID=$IOS_APP_ID"
+            echo "TSYNC_APP_GROUP=$IOS_APP_GROUP"
+            echo "TSYNC_APS_ENVIRONMENT=production"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate the project
+        working-directory: ios/app
+        run: xcodegen generate
+
+      # Cloud signing still signs the archive with a development certificate
+      # Xcode creates; a throwaway default keychain holds it without a prompt.
+      - name: The API key and a keychain
+        if: steps.secrets.outputs.sign == 'true'
+        env:
+          IOS_ASC_KEY_P8: ${{ secrets.IOS_ASC_KEY_P8 }}
+        run: |
+          echo "$IOS_ASC_KEY_P8" | base64 -d > "$RUNNER_TEMP/asc_key.p8"
+          keychain="$RUNNER_TEMP/build.keychain"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security default-keychain -s "$keychain"
+          # shellcheck disable=SC2046 # one argument per existing keychain
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+      - name: Archive
+        working-directory: ios/app
+        env:
+          SIGN: ${{ steps.secrets.outputs.sign }}
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+        run: |
+          if [ "$SIGN" = true ]; then
+            signing=(-allowProvisioningUpdates
+                     -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8"
+                     -authenticationKeyID "$IOS_ASC_KEY_ID"
+                     -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID")
+          else
+            signing=(CODE_SIGNING_ALLOWED=NO)
+          fi
+          xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration Release \
+            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/tsync.xcarchive" \
+            "${signing[@]}" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            TSYNC_COMMIT="${SHA:0:12}" archive
+
+      - name: Export for App Store Connect
+        if: steps.secrets.outputs.sign == 'true'
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+        run: |
+          for destination in export upload; do
+            plutil -create xml1 "$RUNNER_TEMP/$destination.plist"
+            plutil -insert method -string app-store-connect "$RUNNER_TEMP/$destination.plist"
+            plutil -insert signingStyle -string automatic "$RUNNER_TEMP/$destination.plist"
+            plutil -insert teamID -string "$TSYNC_TEAM_ID" "$RUNNER_TEMP/$destination.plist"
+            plutil -insert destination -string "$destination" "$RUNNER_TEMP/$destination.plist"
+          done
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/tsync.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath dist \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$IOS_ASC_KEY_ID" -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID"
+          test -f dist/tsync.ipa
+
+      # 10 §5: on the exported package when there is one, else on the archive.
+      - name: Check the app
+        env:
+          SIGN: ${{ steps.secrets.outputs.sign }}
+        run: |
+          if [ "$SIGN" = true ]; then
+            unzip -q dist/tsync.ipa -d "$RUNNER_TEMP/ipa"
+            ios/app/check-release.sh "$RUNNER_TEMP/ipa/Payload/tsync.app" signed
+          else
+            ios/app/check-release.sh "$RUNNER_TEMP/tsync.xcarchive/Products/Applications/tsync.app" unsigned
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.secrets.outputs.sign == 'true'
+        with:
+          name: tsync-ipa
+          path: dist/tsync.ipa
+
+      # 10 §5.6: fails unless App Store Connect accepts the build.
+      - name: Upload to TestFlight
+        if: steps.secrets.outputs.sign == 'true'
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/tsync.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/upload.plist" -exportPath "$RUNNER_TEMP/upload" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$IOS_ASC_KEY_ID" -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID"
