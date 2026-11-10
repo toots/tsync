@@ -22,19 +22,36 @@ struct Owner {
         var request = fields
         request["action"] = action
         let line = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
-        guard let text = Core.text("request", domain: domain, line) else {
+        let started = Date()
+        let text = Core.text("request", domain: domain, line)
+        let label = logLabel(action, fields, since: started)
+        guard let text else {
             throw OwnerFailure.transport("the core is not started")
         }
         guard
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
             let reply = object as? [String: Any]
         else {
-            Footprint.record(action + " (no JSON reply)")
+            Footprint.record(label + " (no JSON reply)")
             throw OwnerFailure.transport("the core's reply is not a JSON object")
         }
         let failed = reply["ok"] as? Bool == false
-        Footprint.record(failed ? "\(action) failed: \(reply["code"] ?? "?") \(reply["error"] ?? "")" : action)
+        Footprint.record(
+            failed ? "\(label) failed: \(reply["code"] ?? "?") \(reply["error"] ?? "")" : label + rows(reply))
         return try OwnerFailure.checked(reply)
+    }
+
+    /// ios.md §7: the domain, the action, the item it names and how long it took.
+    private func logLabel(_ action: String, _ fields: [String: Any], since started: Date) -> String {
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        let ref = (fields["ref"] as? String).map { " \($0)" } ?? ""
+        return "\(domain) \(action)\(ref) \(ms) ms"
+    }
+
+    private func rows(_ reply: [String: Any]) -> String {
+        guard let list = (reply["items"] ?? reply["ops"]) as? [Any] else { return "" }
+        let more = reply["next"] != nil || reply["more"] as? Bool == true
+        return ": \(list.count) rows" + (more ? ", more" : "")
     }
 
     /// A direct call has no connection to watch, so a bulk request is an
