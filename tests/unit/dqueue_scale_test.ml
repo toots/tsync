@@ -7,6 +7,11 @@ let records = 50_000
    leaves room for a CI runner several times slower. *)
 let bound = 10.
 
+let timed f =
+  let t0 = Unix.gettimeofday () in
+  f ();
+  Unix.gettimeofday () -. t0
+
 let kind =
   {
     Dqueue.decode = (fun b -> Some b);
@@ -24,6 +29,19 @@ let dir =
 
 let id i = Printf.sprintf "%020d-%08d-%d" (1794176842225094 + i) i 1
 
+(* Adoption opens, lock-probes and reads every record, which takes 1 to 20 s on
+   a loaded macOS runner: [start] is bounded by that same work done directly. *)
+let read_directly sub ids =
+  let d = Filename.concat dir sub in
+  timed (fun () ->
+      List.iter
+        (fun id ->
+          let path = Filename.concat d id in
+          Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
+              if Fs.flock ~block:false fd then Fs.funlock fd);
+          ignore (Fs.read_file_opt path))
+        ids)
+
 (* Plain writes: the queue only reads them back, and fsyncing 50k records
    would time the disk. *)
 let write_records sub body =
@@ -34,11 +52,6 @@ let write_records sub body =
         (Filename.concat d (id i))
         (fun oc -> output_string oc (body i));
       id i)
-
-let timed f =
-  let t0 = Unix.gettimeofday () in
-  f ();
-  Unix.gettimeofday () -. t0
 
 let ran = ref []
 let ran_m = Mutex.create ()
@@ -65,10 +78,15 @@ let open_queue sub ~ordered =
   Dqueue.create ~name:sub ~ordered kind
     (Dqueue.Records.open_ (Filename.concat dir sub))
 
-let report q ~start ~rescan =
-  p "pending: %d; start under %.0fs: %b; second rescan under %.0fs: %b\n"
-    (Dqueue.pending q) bound (start < bound) bound (rescan < bound);
-  Printf.eprintf "start %.3fs, rescan %.3fs\n%!" start rescan
+let report q ~direct ~start ~rescan =
+  p
+    "pending: %d; start within 3x reading the records directly: %b; second \
+     rescan under %.0fs: %b\n"
+    (Dqueue.pending q)
+    (start < (3. *. direct) +. 1.)
+    bound (rescan < bound);
+  Printf.eprintf "direct %.3fs, start %.3fs, rescan %.3fs\n%!" direct start
+    rescan
 
 let () =
   Fs.rm_rf dir;
@@ -76,19 +94,21 @@ let () =
       p "== ordered: %d records adopted from disk run in id order\n" records;
       let ids = write_records "ordered" (Printf.sprintf "k%d") in
       let q = open_queue "ordered" ~ordered:true in
+      let direct = read_directly "ordered" ids in
       let start = timed (fun () -> Dqueue.start ~paused:true q run) in
       let rescan = timed (fun () -> Dqueue.rescan q) in
-      report q ~start ~rescan;
+      report q ~direct ~start ~rescan;
       let order = drain q in
       p "ran: %d; in id order: %b; pending after: %d\n" (List.length order)
         (order = ids) (Dqueue.pending q);
       p "\n== keyed: %d distinct keys, then %d posts on one key coalesce\n"
         records records;
-      ignore (write_records "keyed" (Printf.sprintf "k%d.x"));
+      let ids = write_records "keyed" (Printf.sprintf "k%d.x") in
       let q = open_queue "keyed" ~ordered:false in
+      let direct = read_directly "keyed" ids in
       let start = timed (fun () -> Dqueue.start ~paused:true q run) in
       let rescan = timed (fun () -> Dqueue.rescan q) in
-      report q ~start ~rescan;
+      report q ~direct ~start ~rescan;
       let last = ref "" in
       for i = 1 to records do
         last := Dqueue.post q (Printf.sprintf "rep.%d" i)
