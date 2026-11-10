@@ -108,6 +108,8 @@ that changes a domain runs in the owner (§2.5), bulk publishers included
   socket or to name the holder in a refusal.
 - The lock is released only at process exit, or by a one-shot command after its drain (§3.5).
 - A process started as an owner that finds the lock held exits with status `OWNER_HELD` (§3.3).
+- On iOS the holder record alone is the lock, since the system kills a suspended process that holds
+  a kernel lock ([ios.md §2](frontends/ios.md#2-processes-and-ownership)).
 
 ### 2.4 Which process owns which domain
 

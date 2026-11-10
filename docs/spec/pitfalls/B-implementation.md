@@ -448,6 +448,16 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — With Background App Refresh off for the app, `BGTaskScheduler.submit` does not throw its documented error: it fails an assertion and aborts the process. The app asked at launch, so it crashed at every launch while the switch was off.
 - **Check** — The app asks for a run only while `backgroundRefreshStatus` is `available`. With the switch off, the app launches and Settings says refresh is off.
 - **Seen** — ios.md §5.2's background runs, on an iPhone 14 with iOS 18.1.1.
+
+### B-8.21 A lifetime file lock on iOS, outside the shared container
+- **Pitfall** — The File Provider extension held each domain's ownership lock (`flock`) for its life, in its own container, on the belief that iOS kills a suspended process only for locks in a shared App Group container. RunningBoard kills it for any lock ("suspended with locked system files … not in allowed directories: (null)", `0xdead10cc`): every time the extension went idle it was killed rather than suspended, twenty times in three hours, and each next use paid a cold boot. Crash-stop recovery hid it.
+- **Check** — An idle extension holds no file lock. The system log (`log collect --device-udid`) shows no `0xdead10cc` for the extension, and crash reports show no RUNNINGBOARD kill.
+- **Seen** — ios-app, on an iPhone 14 with iOS 18.1.1, found while checking memory with 5,000 held folders.
+
+### B-8.22 SwiftUI's background task registering twice
+- **Pitfall** — `.backgroundTask(.appRefresh(id))` registers the task's handler with `BGTaskScheduler` when SwiftUI builds the scene, and again when it rebuilds it after the app returns from the background; the second registration fails an assertion and aborts the app.
+- **Check** — The handler is registered once per process, as the app starts. Leaving the app in the background for a while and bringing it back does not crash it.
+- **Seen** — ios.md §5.2's background runs, on an iPhone 14 with iOS 18.1.1.
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store

@@ -19,13 +19,14 @@ This page is a delta. What it does not restate is owned by:
 iOS has no daemon and no app that stays running. The process the system starts whenever a domain
 is in use is the **File Provider extension**; it runs while a system call is pending and is
 suspended or killed when idle. It is killed past about 20 MB of dirty memory. A process that holds
-a file lock in a shared App Group container while suspended is killed too.
+a file lock while suspended is killed too, wherever the file is: the extension's own container is
+no exception (pitfall B-8.21).
 
 So:
 
 1. **The File Provider extension owns** every domain it serves (§2).
-2. **No lock and no domain state in the App Group**: each process keeps its core's home in its own
-   container; the group holds only what two processes read (§3).
+2. **No file lock while idle, and no domain state in the App Group**: each process keeps its core's
+   home in its own container; the group holds only what two processes read (§3).
 3. **The tree is lazy**, as on Android: no background cycle, freshness from pulls
    ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)).
 4. **The core runs bounded** (§4), and every callback arrives on a thread of its own.
@@ -37,11 +38,20 @@ So:
 | File Provider extension | the system, on any use of a domain | yes, each domain at the first callback naming it | every callback, by direct calls ([android.md §5](android.md#5-the-bridge)) |
 | App | the user | never | `check_config` with a candidate and `setup_link`, which take no lock and write nothing |
 
-- Ownership follows [android.md §2](android.md#2-ownership-and-process-model): the ownership lock,
-  held for the life of the process; no stop and no drain; process death is a crash-stop and the
-  next boot recovers. The lock is in the extension's own container (§3).
-- Whether the system runs one extension process for every domain or several is its choice. Any
-  number of booted domains per process is supported.
+- Ownership follows [android.md §2](android.md#2-ownership-and-process-model): held for the life of
+  the process; no stop and no drain; process death is a crash-stop and the next boot recovers.
+- The system runs one extension process per domain: on a device, each process it killed held one
+  domain, and two idle domains' processes ended in the same second. Any number of booted domains per
+  process is still supported.
+- **The ownership record is the lock.** The owner takes no kernel lock: it writes
+  [07 §2.3](../07-daemon-cli.md#23-the-ownership-lock)'s holder record into the domain's lock file,
+  in the extension's own container (§3). A boot that finds a record naming another process that is
+  alive (`kill(pid, 0)` succeeds or is refused) is refused as another holder's; a record naming a
+  dead process, or none, is replaced. Two processes booting one domain at the same instant are not
+  told apart: the system's one process per domain is what excludes them.
+- Every other file lock the core takes is held only while a callback runs: a write awaits its upload
+  ([android.md §5](android.md#5-the-bridge)), and the chunk store's locks are a local store's
+  collection's.
 - The app never calls `boot`, `request` or `status`.
 
 ## 3. Host layout
@@ -67,7 +77,7 @@ its domains.
 |---|---|---|
 | Config | `<group>/config.json` | the app only, atomically, mode 0600, after every new domain passes `check_config` |
 | Home of a process's core | `<the process's own container>/Library/Application Support/tsync/` | that process's core |
-| Ownership locks, data, cache | under the home, in the core's Apple layout | the owner |
+| Ownership records, data, cache | under the home, in the core's Apple layout | the owner |
 | Transfer root | the process's temporary directory, which in the extension is the File Provider's temporary directory | the framework and the owner |
 | Footprint log | `<group>/footprint.log` | the extension (§7) |
 
@@ -214,7 +224,10 @@ On the iPhone 14, with every enumerator callback logged:
 [android.md §9](android.md#9-conformance) applies, except the command group and the handle API. In
 addition:
 
-- No file lock is held in the App Group container.
+- No file lock is held by an idle extension: after an hour of use on a device, the system log shows
+  no termination of the extension for locked files (`0xdead10cc`).
+- A boot of a domain whose ownership record names a live process is refused; one naming a dead
+  process boots.
 - A build missing any identifier of §3.1 fails before compiling, naming each one missing.
 - A thousand callbacks, each on a new thread, leave the extension's footprint where one thread's
   would.
@@ -249,5 +262,4 @@ Each becomes a section above before its code.
 3. Camera backup with PhotoKit's change tracking.
 4. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
-5. Open on a device: the extension's limit on the oldest supported device; whether one process
-   serves every domain.
+5. Open on a device: the extension's limit on the oldest supported device.
