@@ -1,5 +1,6 @@
 import FileProvider
 import Foundation
+import os
 
 /// Launched with `-selftest`: drives the local test domain through file
 /// coordination, so every step reaches the File Provider extension as the
@@ -72,7 +73,15 @@ enum SelfTest {
     /// ios-app.md §5 Diagnostics: every folder listed through the file
     /// system, so that the extension pulls each one; progress goes to the
     /// footprint log.
+    private static let walking = OSAllocatedUnfairLock(initialState: false)
+
     static func walk() async {
+        let started = walking.withLock { busy in
+            defer { busy = true }
+            return !busy
+        }
+        guard started else { return }
+        defer { walking.withLock { $0 = false } }
         let domains = await withCheckedContinuation { done in
             NSFileProviderManager.getDomainsWithCompletionHandler { domains, _ in done.resume(returning: domains) }
         }
@@ -123,7 +132,7 @@ enum SelfTest {
     /// `devicectl` reads the app's own container but not the App Group's.
     static func copyLogsToDocuments() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        for source in [log, Footprint.log] {
+        for source in [log, Footprint.oldLog, Footprint.log] {
             let copy = documents.appendingPathComponent(source.lastPathComponent)
             try? FileManager.default.removeItem(at: copy)
             try? FileManager.default.copyItem(at: source, to: copy)

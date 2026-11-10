@@ -18,7 +18,11 @@ struct Owner {
         if cancellation.isCancelled { throw OwnerFailure.cancelled }
         try boot()
         // ios.md §5.1: what the pass brings is announced by its notices.
-        if action == "changes_since" { _ = Core.text("request", domain: domain, #"{"action":"refresh"}"#) }
+        if action == "changes_since" {
+            let started = Date()
+            _ = Core.text("request", domain: domain, #"{"action":"refresh"}"#)
+            Footprint.record(logLabel("refresh", [:], since: started))
+        }
         var request = fields
         request["action"] = action
         let line = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
