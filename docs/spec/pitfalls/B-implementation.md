@@ -59,9 +59,9 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Wrappers re-raise two-path syscall errors naming the operand at fault.
 - **Seen** — PR #94.
 
-### B-1.12 `syncfs` is not a barrier on macOS
+### B-1.12 `sync()` is not a barrier
 - **Pitfall** — macOS has no `syncfs(2)`; the stub falls back to `sync()`, which only schedules the flush. A bulk pass that wrote without a fsync per file and then relied on one `syncfs` before a durable record (the file-id backfill's completion record) could lose or tear files behind a record that survives the crash: the backfill never ran again, and the files without an id never appeared in Finder. A position written after a `syncfs` at the end of a full walk has the directory half of this exposure.
-- **Check** — Writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record. No code treats `syncfs` as a barrier on a platform where it is `sync()`.
+- **Check** — `Fs.syncfs` is a barrier wherever a bulk pass relies on it: `syncfs(2)` on Linux and Android, `fsync_volume_np` with `SYNC_VOLUME_FULLSYNC | SYNC_VOLUME_WAIT` on macOS and iOS, which returns once the volume is flushed. Where it is none (Windows), writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record.
 - **Seen** — c2d525c8, rewrite.
 
 ## 2. Store API semantics: S3, GCS, S3-compatibles, http-proxy [store]
@@ -463,6 +463,12 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — Listing a folder read its children's bodies in batches, then each child folder's anchor (data-model §6.2) with a read of its own, in turn. A folder of 5,000 folders cost 5,000 round trips: about twenty minutes over a tunnel, longer than any callback keeps an iOS extension running, so the pull never finished there.
 - **Check** — A listing's reads are batches whatever the number of child folders: `tests/remote/wide_folder_test` lists 3,000 folders with no single read.
 - **Seen** — ios.md §8's 5,000-folder check, on an iPhone 14 through a test server behind a tunnel.
+
+### B-8.24 A bulk pass flushing every write
+- **Pitfall** — With `syncfs` no barrier on Apple platforms (B-1.12), an arrival's mirror writes each flushed their data, and each new directory its parent: four flushes per folder. The first pull of a folder of 5,000 folders took minutes on a Mac and never finished on an iPhone, where the extension runs only while a callback is pending; the pulls after it waited on that one.
+- **Check** — An arrival flushes once, at its barrier, whatever its size: the first pull of 5,000 folders ends within one request deadline.
+- **Seen** — ios.md §8's 5,000-folder check, on an iPhone 14; reproduced on a Mac with the Android harness.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
