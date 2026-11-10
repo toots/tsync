@@ -469,6 +469,8 @@ let resolve_parent p =
           (try Unix.realpath parent with Unix.Unix_error _ -> parent)
           leaf
 
+let syncfs_is_barrier = not Sys.win32
+
 let syncfs dir =
   if not Sys.win32 then
     Option.iter
