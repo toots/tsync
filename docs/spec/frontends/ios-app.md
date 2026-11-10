@@ -83,12 +83,13 @@ the framework's domain-change notification.
 - **Add a domain** opens Setup.
 - **About**: the app's version and the commit it was built from.
 - **Diagnostics**: the extension's footprint log ([ios.md §7](ios.md#7-memory-and-observed-behaviour))
-  with Refresh and Clear; **Add a local test domain** (a domain whose store is a directory in the App
+  with Refresh, which also copies it and its previous half (`footprint.old.log`) to the app's
+  Documents for `devicectl`, and Clear; **Add a local test domain** (a domain whose store is a directory in the App
   Group, for trying the extension without a server); **Run self-test**, the test that
   [ios.md §8](ios.md#8-conformance) runs on a device; **Walk every domain**, which lists every folder
   of every domain through the file system, so that the extension pulls and then holds them all, for
   ios.md §8's check of a refresh pass over thousands of held folders. It leaves out the system's `.Trash`, which the extension does not serve, and runs while
-  the app is in front. The walk logs its start, every
+  the app is in front. One walk runs at a time: a tap during one is ignored. The walk logs its start, every
   100 folders, each folder it waits on and how long, each it skips, and its end. It is in every build: the log costs the
   extension one system call and one append per request (ios.md §7), and the rest runs only when
   asked.
