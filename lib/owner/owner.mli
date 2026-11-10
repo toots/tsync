@@ -24,6 +24,10 @@ val acquire :
 
 val release : lock -> unit
 
+(** ios §2: from now on {!acquire} keeps the holder record alone, without a
+    kernel lock. Before the first acquisition. *)
+val use_records : unit -> unit
+
 (** The record in a domain's lock file; advisory, the lock may be free. *)
 val holder : Domain_name.t -> holder option
 
