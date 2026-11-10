@@ -200,7 +200,8 @@ The extension appends one line per core request to the footprint log: the domain
 of a listing (`items`) or of a change read (`ops`) with `more` when more follow, the process's
 `phys_footprint` after it, and the kernel's record of its peak since the process started
 (`ledger_phys_footprint_peak`). Nothing samples in between, so the log costs one system call and one
-append per request. At 1 MiB the log is renamed to `footprint.old.log`, replacing the previous one,
+append per request. It also appends a line for each push, each notice it signals a working set for,
+and the signal's error when the system refuses it. At 1 MiB the log is renamed to `footprint.old.log`, replacing the previous one,
 and a new log begins. The app shows the log.
 
 Measured in the iOS 26.5 simulator, one self-test per build, the test domain's local store:
