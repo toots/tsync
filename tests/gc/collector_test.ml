@@ -127,8 +127,17 @@ let () =
               cursor
         | Halted r -> "halted: " ^ r
       in
-      let run ?budget ?verify ?keep ?cancelled () =
-        match Collector.run ?budget ?verify ?keep ?cancelled c with
+      (* Unless [held], a busy lock is the test's own settles, which a slow
+         runner can catch holding it a moment, so it is waited out. *)
+      let run ?budget ?verify ?keep ?cancelled ?(held = false) () =
+        let rec attempt tries =
+          match Collector.run ?budget ?verify ?keep ?cancelled c with
+            | Error Busy when (not held) && tries > 0 ->
+                Rt.sleep 0.1;
+                attempt (tries - 1)
+            | result -> result
+        in
+        match attempt 100 with
           | Ok [st] ->
               p "run: %s; promoted %d, reclaimed %d (%d bytes)%s\n"
                 (outcome st.outcome) st.chunks_promoted st.chunks_reclaimed
@@ -324,7 +333,7 @@ let () =
       Unix.close from_holder;
       p "another process: %s\n"
         (input_line (Unix.in_channel_of_descr holder_out));
-      ignore (run ());
+      ignore (run ~held:true ());
       Unix.close holder_in;
       ignore (Unix.waitpid [] pid);
       p "after it exits: ";
@@ -332,7 +341,7 @@ let () =
       let () =
         match
           Chunk_spaces.with_run_lock (Chunk_spaces.create main_root) d
-            (fun () -> run ())
+            (fun () -> run ~held:true ())
         with
           | Ok _ -> ()
           | Error `Busy -> p "the test could not take the lock\n"
