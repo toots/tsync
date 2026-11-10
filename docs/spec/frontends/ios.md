@@ -194,7 +194,9 @@ the listener's `push_*` options, and a build without libcurl cannot.
 
 ## 7. Memory and observed behaviour
 
-The extension appends one line per core request to the footprint log: the action, the process's
+The extension appends one line per core request to the footprint log: the domain, the action, the
+`ref` it names, how long it took in milliseconds, its failure code and message if it failed, the rows
+of a listing (`items`) or of a change read (`ops`) with `more` when more follow, the process's
 `phys_footprint` after it, and the kernel's record of its peak since the process started
 (`ledger_phys_footprint_peak`). Nothing samples in between, so the log costs one system call and one
 append per request. At 1 MiB the log is renamed to `footprint.old.log`, replacing the previous one,

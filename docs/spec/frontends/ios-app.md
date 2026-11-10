@@ -82,7 +82,8 @@ the framework's domain-change notification.
   Group, for trying the extension without a server); **Run self-test**, the test that
   [ios.md §8](ios.md#8-conformance) runs on a device; **Walk every domain**, which lists every folder
   of every domain through the file system, so that the extension pulls and then holds them all, for
-  ios.md §8's check of a refresh pass over thousands of held folders. It is in every build: the log costs the
+  ios.md §8's check of a refresh pass over thousands of held folders. The walk logs its start, every
+  100 folders, each folder it waits on and how long, each it skips, and its end. It is in every build: the log costs the
   extension one system call and one append per request (ios.md §7), and the rest runs only when
   asked.
 
