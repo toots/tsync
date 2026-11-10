@@ -313,6 +313,12 @@ type _ request =
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
+  | Push_register : {
+      token : string;
+      environment : string;
+      fp_domain : string;  (** the File Provider domain identifier *)
+    }
+      -> bool request  (** ios §5.3: whether the domain's server pushes *)
   | Sync : { full : bool } -> resynced request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)
@@ -422,6 +428,7 @@ let action : type a. a request -> string = function
   | Revert _ -> "revert"
   | Full_resync -> "full_resync"
   | Refresh -> "refresh"
+  | Push_register _ -> "push_register"
   | Sync _ -> "sync"
   | Share _ -> "share"
   | Share_revoke _ -> "share_revoke"
@@ -576,6 +583,12 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Vault_status pull -> pull_fields pull
   | Totp_export p | Vault_init p -> [("passphrase", `String p)]
   | Extension e -> e.args
+  | Push_register r ->
+      [
+        ("token", `String r.token);
+        ("environment", `String r.environment);
+        ("fileProviderDomain", `String r.fp_domain);
+      ]
   | Vault_unlock r ->
       ("passphrase", `String r.passphrase)
       :: opt "secretKey" (fun k -> `String k) r.secret_key
@@ -797,6 +810,14 @@ let decode j =
         Request (Revert { item = target_of j; version })
     | "full_resync" -> Request Full_resync
     | "refresh" -> Request Refresh
+    | "push_register" ->
+        Request
+          (Push_register
+             {
+               token = required j "token";
+               environment = required j "environment";
+               fp_domain = required j "fileProviderDomain";
+             })
     | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
     | "share" ->
         Request
@@ -1122,6 +1143,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Totp_remove _ ->
         ok []
     | Extension _ -> ok reply
+    | Push_register _ -> ok [("pushes", `Bool reply)]
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Totp_add _ -> ok [("id", `String reply)]
     | Totp_code _ ->
@@ -1605,6 +1627,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         }
     | Full_resync -> ()
     | Refresh -> ()
+    | Push_register _ -> flag j "pushes"
     | Revert _ -> ()
     | Poll -> ()
     | Wake -> ()

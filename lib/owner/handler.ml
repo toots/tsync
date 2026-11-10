@@ -1097,6 +1097,20 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | None ->
               invalid "%s keeps a full tree, which has no refresh"
                 (domain_name t))
+    | Push_register r -> (
+        match (Tsync_domain.Domain.store t.domain).push_register with
+          | None -> false
+          | Some register ->
+              register
+                (Yojson.Safe.to_string
+                   (`Assoc
+                      [
+                        ( "client",
+                          `String (Tsync_domain.Domain.client_uuid t.domain) );
+                        ("token", `String r.token);
+                        ("environment", `String r.environment);
+                        ("domain", `String r.fp_domain);
+                      ])))
     | Cursor -> E.cursor ()
     | Changes_since r -> changes t ~anchor:r.anchor ~limit:r.limit
     | Sync r ->

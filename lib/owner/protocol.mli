@@ -326,6 +326,12 @@ type _ request =
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
+  | Push_register : {
+      token : string;
+      environment : string;
+      fp_domain : string;  (** the File Provider domain identifier *)
+    }
+      -> bool request  (** ios §5.3: whether the domain's server pushes *)
   | Sync : { full : bool } -> resynced request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)
