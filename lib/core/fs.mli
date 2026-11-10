@@ -238,3 +238,6 @@ val resolve_parent : string -> string
 (** Flushes the filesystem holding [dir], when it exists: many replaced files
     made durable at once. *)
 val syncfs : string -> unit
+
+(** Whether {!syncfs} returns once the files written before it are durable. *)
+val syncfs_is_barrier : bool

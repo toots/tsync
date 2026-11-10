@@ -65,11 +65,12 @@ let own_marker dir leaf =
 let fid_marker dir leaf =
   Filename.concat dir (".tsync-fid-" ^ Xxh.hex16 (Xxh.string leaf))
 
-(* A non-durable write still fsyncs its data, so it is never torn; only its
-   directory entry waits for the caller's flush (pitfall B-1.12: syncfs is no barrier
-   on macOS). *)
+(* A non-durable write waits for the caller's syncfs. Where that is no barrier,
+   it fsyncs its data, so it is never torn (pitfall B-1.12). *)
 let write ?(durable = true) p data =
-  if durable then Fs.durable_replace p data else Fs.replace p data
+  if durable then Fs.durable_replace p data
+  else if Fs.syncfs_is_barrier then Fs.replace_unsynced p data
+  else Fs.replace p data
 
 (* Skip the write when the file already holds these bytes, so a directory's
    mtime moves only when its set of children changes. *)
@@ -133,7 +134,10 @@ let check_handle t rel =
           Fail.raise_ Fail.Exists "%s: its local name is held by %S" rel other
       | _ -> ())
 
-let ensure_dirs t rel =
+(* Without [durable], a new directory waits for the caller's syncfs where that
+   is a barrier. *)
+let ensure_dirs ?(durable = true) t rel =
+  let durable = durable || not Fs.syncfs_is_barrier in
   let rec go rel =
     if rel <> "" then (
       go (Names.parent_of rel);
@@ -143,9 +147,10 @@ let ensure_dirs t rel =
         | Some _ -> Fail.raise_ Fail.Exists "%s is a file" rel
         | None ->
             check_handle t rel;
-            Fs.mkdir_p p;
+            Fs.mkdir_p ~durable p;
             let leaf = Names.leaf_of rel in
-            if Names.escape leaf <> leaf then write (name_marker p) leaf)
+            if Names.escape leaf <> leaf then
+              write ~durable (name_marker p) leaf)
   in
   Fs.mkdir_p t.manifests;
   go rel
@@ -221,7 +226,7 @@ let move_fid_subtree t ~src ~dst =
 (* Every write stamps the recorded name, and replaces the entry whole; a path
    keeps its file id across replacements. *)
 let write_file ?durable ?(own = false) t rel (m : Manifest.t) =
-  ensure_dirs t (Names.parent_of rel);
+  ensure_dirs ?durable t (Names.parent_of rel);
   check_handle t rel;
   let m = Manifest.rename m (Names.leaf_of rel) in
   if not own then clear_own t rel;
@@ -263,7 +268,7 @@ let write_removed ?durable t rel id =
    the removed-id record, and the reverse entry with the leaf of [rel]. *)
 let replace_folder ?durable t rel id =
   if rel <> "" then (
-    ensure_dirs t rel;
+    ensure_dirs ?durable t rel;
     let p = path t rel in
     let leaf = Names.leaf_of rel in
     if Names.escape leaf <> leaf then
