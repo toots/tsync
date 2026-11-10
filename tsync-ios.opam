@@ -1,0 +1,35 @@
+opam-version: "2.0"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+dev-repo: "git+https://github.com/toots/tsync.git"
+synopsis: "What cross-building the tsync core for iOS needs"
+description: """
+Installs nothing: its dependencies are the cross switch of the iOS app's
+core (spec 10 §4.1), from the tsync branch of https://github.com/toots/opam-cross-ios.
+Build with `dune build -x ios`."""
+depends: [
+  "dune" {>= "3.17"}
+  "ocaml-ios"
+  # dune runs the preprocessor in the native context.
+  "ppx_deriving_yojson"
+  "base64-ios"
+  "ca-certs-ios"
+  "digestif-ios"
+  "domain-name-ios"
+  # From .github/opam until the cross repository has it.
+  "duppy-ios"
+  "eqaf-ios"
+  "mem_usage-ios"
+  "mirage-crypto-ec-ios"
+  "mirage-crypto-pk-ios"
+  "mirage-crypto-rng-ios"
+  "ppx_deriving_yojson-ios"
+  "ptime-ios"
+  "re-ios"
+  "tls-ios"
+  "x509-ios"
+  "yojson-ios"
+]
