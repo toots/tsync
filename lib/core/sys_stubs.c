@@ -1321,12 +1321,13 @@ CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLreturn(Val_unit);
 }
 
-/* No syncfs here: sync flushes every filesystem. */
+/* No syncfs here, and sync() only schedules the flush (pitfall B-1.12). */
 CAMLprim value tsync_syncfs(value fd) {
   CAMLparam1(fd);
   caml_release_runtime_system();
-  sync();
+  int r = fsync_volume_np(Int_val(fd), SYNC_VOLUME_FULLSYNC | SYNC_VOLUME_WAIT), e = errno;
   caml_acquire_runtime_system();
+  if (r < 0) { errno = e; uerror("fsync_volume_np", Nothing); }
   CAMLreturn(Val_unit);
 }
 

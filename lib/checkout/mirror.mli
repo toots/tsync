@@ -28,7 +28,7 @@ val kind : t -> string -> [ `Dir | `File | `Absent ]
 val folder_id : t -> string -> Folder_id.t option
 
 (** Create the missing folders of a path, escaped, with name markers. *)
-val ensure_dirs : t -> string -> unit
+val ensure_dirs : ?durable:bool -> t -> string -> unit
 
 (** Replace a file entry with a manifest recording the path's leaf. [own] says
     this client stored it (the own marker, 04 §2.3). [durable] defaults to true.
