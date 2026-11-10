@@ -19,6 +19,8 @@ if (( $#missing )); then
   exit 1
 fi
 export TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP
+# ios.md §3.1: a build installed from a Mac pushes through the sandbox.
+export TSYNC_APS_ENVIRONMENT=development
 
 # A test server for Diagnostics, from a file kept out of the repository: two
 # lines, the server's URL then its secret.

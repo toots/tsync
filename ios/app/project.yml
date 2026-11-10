@@ -40,6 +40,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}
         PRODUCT_NAME: tsync
         CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         # The commit About shows: run-device.sh passes TSYNC_COMMIT.
         INFOPLIST_FILE: App/Info.plist
@@ -75,6 +76,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}.fileprovider
         CODE_SIGN_ENTITLEMENTS: FileProvider/FileProvider.entitlements
+        # ios.md §3.1: development from a Mac, production for TestFlight.
+        TSYNC_APS_ENVIRONMENT: ${TSYNC_APS_ENVIRONMENT}
         INFOPLIST_FILE: FileProvider/Info.plist
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
