@@ -56,7 +56,10 @@ struct Owner {
         if !sentence.isEmpty {
             throw OwnerFailure.refused(code: "internal", message: sentence, item: nil)
         }
-        if Notices.firstBoot(domain) { Notices.signal(domain) }
+        if Notices.firstBoot(domain) {
+            Notices.signal(domain)
+            Pushes.booted(domain)
+        }
     }
 }
 
