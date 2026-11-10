@@ -7,3 +7,6 @@ let () =
       log_write
         (match level with Debug -> 0 | Info -> 1 | Warn -> 2 | Err -> 3)
         message)
+
+(* ios §2: the system kills a suspended extension that holds a file lock. *)
+let () = Tsync_owner.Owner.use_records ()

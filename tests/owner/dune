@@ -422,3 +422,25 @@
  (alias runtest)
  (action
   (diff list_pages_test.expected list_pages_test.output)))
+
+(executable
+ (name ownership_record_test)
+ (modules ownership_record_test)
+ (libraries tsync_core tsync_config tsync_owner unix))
+
+; It plants a holder that is a live child process, a sleep.
+
+(rule
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   ownership_record_test.output
+   (run ./ownership_record_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (diff ownership_record_test.expected ownership_record_test.output)))
