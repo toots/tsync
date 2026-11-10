@@ -69,6 +69,46 @@ enum SelfTest {
         copyLogsToDocuments()
     }
 
+    /// ios-app.md §5 Diagnostics: every folder listed through the file
+    /// system, so that the extension pulls each one; progress goes to the
+    /// footprint log.
+    static func walk() async {
+        let domains = await withCheckedContinuation { done in
+            NSFileProviderManager.getDomainsWithCompletionHandler { domains, _ in done.resume(returning: domains) }
+        }
+        for domain in domains {
+            guard let manager = NSFileProviderManager(for: domain),
+                let root = try? await manager.getUserVisibleURL(for: .rootContainer)
+            else { continue }
+            let scoped = root.startAccessingSecurityScopedResource()
+            defer { if scoped { root.stopAccessingSecurityScopedResource() } }
+            var pending = [root]
+            var folders = 0
+            while let folder = pending.popLast() {
+                let children = await listed(folder)
+                folders += 1
+                if folders % 500 == 0 { Footprint.append("app: walked \(folders) folders of \(domain.displayName)") }
+                pending += children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            }
+            Footprint.append("app: walked \(folders) folders of \(domain.displayName)")
+        }
+        copyLogsToDocuments()
+    }
+
+    /// A folder the extension is still pulling answers "retry" until it has it.
+    private static func listed(_ folder: URL) async -> [URL] {
+        for _ in 0..<60 {
+            do {
+                return try FileManager.default.contentsOfDirectory(
+                    at: folder, includingPropertiesForKeys: [.isDirectoryKey])
+            } catch {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+        Footprint.append("app: walk skipped \(folder.lastPathComponent)")
+        return []
+    }
+
     /// `devicectl` reads the app's own container but not the App Group's.
     static func copyLogsToDocuments() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

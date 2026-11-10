@@ -57,6 +57,7 @@ struct SettingsView: View {
                     }
                 }
                 Button("Run self-test") { Task.detached { await SelfTest.run() } }
+                Button("Walk every domain") { Task.detached { await SelfTest.walk() } }
                 Button("Refresh the memory log") { readFootprint() }
                 Button("Clear the memory log", role: .destructive) {
                     try? FileManager.default.removeItem(at: Footprint.log)
