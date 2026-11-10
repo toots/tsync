@@ -26,6 +26,7 @@ enum Notices {
                     let event = notice["event"] as? String, let domain = notice["domain"] as? String,
                     event == "changed" || event == "recovered"
                 else { continue }
+                Footprint.append("\(domain) notice \(event)")
                 signal(domain)
             }
         }
@@ -41,8 +42,13 @@ enum Notices {
     /// The system coalesces signals, so each notice signals.
     static func signal(_ domain: String) {
         NSFileProviderManager.getDomainsWithCompletionHandler { domains, _ in
-            guard let found = domains.first(where: { $0.displayName == domain }) else { return }
-            NSFileProviderManager(for: found)?.signalEnumerator(for: .workingSet) { _ in }
+            guard let found = domains.first(where: { $0.displayName == domain }) else {
+                Footprint.append("\(domain) signal: no such domain")
+                return
+            }
+            NSFileProviderManager(for: found)?.signalEnumerator(for: .workingSet) { error in
+                if let error { Footprint.append("\(domain) signal failed: \(error)") }
+            }
         }
     }
 }
