@@ -30,11 +30,38 @@ module Make (C : Context.S) = struct
   let get k = Option.map Bigstring.to_string (store.get_opt k)
   let anchor id = Option.bind (get (Key.anchor d id)) Folder.decode_anchor
 
-  let placed id ~parent ~name =
+  let placed_by (anchor : Folder_id.t -> Folder.anchor option) id ~parent ~name
+      =
     match anchor id with
       | None -> `Unanchored
       | Some a when Folder_id.equal a.parent parent && a.aname = name -> `Here
       | Some a -> `Elsewhere a
+
+  let placed = placed_by anchor
+
+  (* The anchors of a listing's folders, read as one batch: a folder of
+     thousands of folders is otherwise as many round trips. *)
+  let anchors_of bodies =
+    let ids =
+      List.filter_map
+        (function
+          | Some b -> (
+              match Folder.classify_marker (Bigstring.to_string b) with
+                | `Marker (m : Folder.marker) -> Some m.id
+                | _ -> None)
+          | None -> None)
+        bodies
+    in
+    let read = Hashtbl.create (List.length ids) in
+    List.iter
+      (fun (k, b) ->
+        Hashtbl.replace read (Key.to_string k)
+          (Option.bind b (fun b -> Folder.decode_anchor (Bigstring.to_string b))))
+      (Store.read_keys store (List.map (Key.anchor d) ids));
+    fun id ->
+      match Hashtbl.find_opt read (Key.to_string (Key.anchor d id)) with
+        | Some a -> a
+        | None -> anchor id
 
   (* data-model §6.2: a marker is filed iff its folder's anchor names its
      slot; a marker whose folder has no anchor is disowned. *)
@@ -59,6 +86,7 @@ module Make (C : Context.S) = struct
             None
     in
     let failure = ref None in
+    let anchor = anchors_of bodies in
     let out =
       List.filter_map
         (fun ((e : Store.entry), body) ->
@@ -92,7 +120,7 @@ module Make (C : Context.S) = struct
                               None
                           | Fail_on_unusable -> None
                       in
-                      match placed m.id ~parent:id ~name:m.name with
+                      match placed_by anchor m.id ~parent:id ~name:m.name with
                         | `Elsewhere a -> disowned (Some a)
                         | `Unanchored -> disowned None
                         | `Here ->
