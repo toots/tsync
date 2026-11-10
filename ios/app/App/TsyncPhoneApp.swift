@@ -7,12 +7,12 @@ struct TsyncPhoneApp: App {
 
     init() {
         Core.start(bounded: false)
+        BackgroundRefresh.register()
         if CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
     }
 
     var body: some Scene {
         WindowGroup { RootView().environmentObject(model) }
-            .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) { await BackgroundRefresh.run() }
     }
 }
 

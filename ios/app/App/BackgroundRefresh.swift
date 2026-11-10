@@ -7,6 +7,19 @@ enum BackgroundRefresh {
     static let identifier = (Bundle.main.bundleIdentifier ?? "") + ".refresh"
     static let interval: TimeInterval = 15 * 60
 
+    /// Once, as the app starts: SwiftUI's `.backgroundTask` registers again
+    /// when it rebuilds the scene, and a second registration aborts the app.
+    static func register() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
+            let run = Task { await BackgroundRefresh.run() }
+            task.expirationHandler = { run.cancel() }
+            Task {
+                await run.value
+                task.setTaskCompleted(success: true)
+            }
+        }
+    }
+
     /// Submitting aborts the app when the user has turned refresh off.
     @MainActor static func schedule() {
         guard UIApplication.shared.backgroundRefreshStatus == .available else { return }
