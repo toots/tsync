@@ -7,6 +7,12 @@ type created = { url : string; expires : float }
 (** [SHARE_DEFAULT_EXPIRY]: 7 days. *)
 val default_expiry : float
 
+(** Asks a site share's link once, so its share server publishes it before the
+    first visitor (05 §4.11); any failure is logged at debug level. The owner
+    runs it in the background after creating one, a run that took ownership
+    itself before it exits. *)
+val publish : string -> unit
+
 module Make (_ : Tsync_remote.Context.S) : sig
   (** [rel] is a domain path ([""] the whole domain); [expires] seconds from
       now. ABSENT when nothing is at [rel] or a folder is empty; REFUSED when no
@@ -22,10 +28,6 @@ module Make (_ : Tsync_remote.Context.S) : sig
     ?site:bool ->
     string ->
     created
-
-  (** Asks a site share's link once, so its share server publishes it; any
-      failure is logged at debug level. *)
-  val publish : string -> unit
 
   (** A token or a link; whether a share of this domain was there. Another
       domain's share is left alone. For a site share the link is asked after the

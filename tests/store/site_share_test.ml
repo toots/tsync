@@ -199,7 +199,7 @@ let () =
       create 'a' "site";
       show_site 'a';
       p "== the first visit publishes, then redirects (§A9.9)";
-      Share.publish (url ^ "/s/" ^ token 'a');
+      Tsync_gc.Share.publish (url ^ "/s/" ^ token 'a');
       show_site 'a';
       p "record written: %b"
         (C.store.get_opt (Option.get (Key.share_site (token 'a'))) <> None);
@@ -278,7 +278,7 @@ let () =
       p "record left: %b"
         (C.store.get_opt (Option.get (Key.share_site (token 'a'))) <> None);
       create '9' "site";
-      Share.publish (url ^ "/s/" ^ token '9');
+      Tsync_gc.Share.publish (url ^ "/s/" ^ token '9');
       Server.close server;
       p "== revoking with the server gone leaves the site and says so";
       (match Share.revoke (token '9') with

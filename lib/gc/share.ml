@@ -19,6 +19,15 @@ let ask link =
 
 let index_pages = ["index.html"; "index.htm"]
 
+(* 05 §4.11: asked once after a site share is created, so its copy is
+   published before the first visitor. *)
+let publish link =
+  match ask link with
+    | Ok 302 -> ()
+    | Ok status ->
+        Log.debug "share: publishing a site: the link answered %d" status
+    | Error why -> Log.debug "share: publishing a site: %s" why
+
 (* security §6.1: what a creator writes, generated or chosen. *)
 let creatable t =
   let n = String.length t in
@@ -200,15 +209,6 @@ module Make (C : Context.S) = struct
           in
           (match !unpublished with f :: _ -> raise (Fail.E f) | [] -> ());
           found
-
-  (* 05 §4.11: asked once after a site share is created, so its copy is
-     published before the first visitor. *)
-  let publish link =
-    match ask link with
-      | Ok 302 -> ()
-      | Ok status ->
-          Log.debug "share: publishing a site: the link answered %d" status
-      | Error why -> Log.debug "share: publishing a site: %s" why
 
   let field f k =
     match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None

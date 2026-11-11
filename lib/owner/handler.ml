@@ -1043,7 +1043,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             ?member:(Tsync_config.Config.share_member_name t.domain.domain)
             (target t r.item)
         in
-        if r.site then t.background (fun () -> S.publish c.url);
+        if r.site then t.background (fun () -> Tsync_gc.Share.publish c.url);
         (* 05 §4.11: the link is answered before any image is made. *)
         t.background (fun () ->
             match S.preview c.url with

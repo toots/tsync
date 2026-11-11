@@ -453,6 +453,7 @@ let share path site expires token preview revoke clear name verbose =
             (* 07 §5.6: an owner makes the image in the background; a run that
                took ownership itself makes it before it exits. *)
             if not (Tsync_owner.Owner.served dom.name) then (
+              if site then Tsync_gc.Share.publish r.url;
               match ask (Tsync_owner.Protocol.Share_preview r.url) with
                 | `Made -> ()
                 | `Not_made why -> Log.debug "share preview: %s" why
