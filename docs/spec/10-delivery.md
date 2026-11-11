@@ -205,7 +205,7 @@ build outranks the one before.
 
 The core is cross-built for the device only (`ios-device`, [ios.md §3](frontends/ios.md#3-host-layout)), from the cross repository's integration branch and this repository's `.github/opam`. The app is archived with automatic signing against the App Store Connect API key, which lets Xcode create the distribution certificate and the profiles in the cloud: no certificate or profile is exported or stored. The identifiers of [ios.md §3.1](frontends/ios.md#31-identifiers) come from secrets, and `TSYNC_APS_ENVIRONMENT` is `production`. `CFBundleVersion` is the workflow's run number, so each upload outranks the one before.
 
-A build that §2 publishes is uploaded to TestFlight for the internal testers, who need no review; the job fails unless App Store Connect accepts the upload. Every other build, and every build without the secrets (a fork), archives the app unsigned, runs the checks above except the signature's, and reports the signing half "not run".
+A build that §2 publishes is uploaded to TestFlight for the internal testers, who need no review, and so is every push to the `testflight` branch of this repository, which puts a branch on the testers' phones before it reaches `main`, without waiting on `test`; the job fails unless App Store Connect accepts the upload. Every other build, and every build without the secrets (a fork), archives the app unsigned, runs the checks above except the signature's, and reports the signing half "not run".
 
 ## 6. Secrets
 
@@ -233,7 +233,7 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
   `tests` jobs are required checks for merging, as the gate is, but which triggers no release:
   releases wait for `test` alone. `release-windows` does not exist yet.
 
-- `release-ios` has never run: neither the cross build on a runner nor an upload has been seen.
+- `release-ios` has run only unsigned, on pull requests: no signed archive or upload has been seen.
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.
 - No check drives a real FUSE mount (§3.1 item 1): the end-to-end FUSE test of `main` was not
