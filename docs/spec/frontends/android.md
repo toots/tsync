@@ -284,12 +284,9 @@ The host calls the core from threads it owns (binder threads, descriptor callbac
 threads). The core MUST accept calls from threads it did not create, MUST block only the calling
 thread, and MUST apply the per-domain serialisation of
 [08 §3.5](../08-frontends.md#35-rules-the-handler-enforces) whatever thread a call arrives on. Every
-piece of state a call touches, the handle table included, is touched only on the scheduler. A host
-MAY make each call from a new thread that then ends, as the iOS File Provider does for every
-callback, and the ended threads MUST NOT keep the core's memory. A thread stays registered with the
-runtime from its first call until it ends, except on Darwin, where a thread-exit destructor runs
-after the runtime's thread-local state is gone: there a call registers its thread and unregisters
-it before returning.
+piece of state a call touches, the handle table included, is touched only on the scheduler. A call
+leaves nothing of the core on its thread once it returns: a host MAY make each call from a new
+thread that then ends, as the iOS File Provider does for every callback.
 
 ## 5. The bridge
 
