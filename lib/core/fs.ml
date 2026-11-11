@@ -427,6 +427,15 @@ let map_range fd ~off ~len =
            Unix.map_file fd ~pos:(Int64.of_int off) Bigarray.char
              Bigarray.c_layout false [| len |]))
 
+let read_range ~map fd ~off ~len =
+  let size = (sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
+  let len = max 0 (min len (Int64.to_int size - off)) in
+  if map then map_range fd ~off ~len
+  else (
+    let buf = Bigstring.create len in
+    let n = pread_full fd buf ~boff:0 ~len ~off in
+    Bigstring.sub buf ~off:0 ~len:n)
+
 let read_fd_bigstring fd =
   let size = fd_size fd in
   let b = Bigstring.create size in

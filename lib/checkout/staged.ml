@@ -322,15 +322,11 @@ let body_links t id =
    Windows, where a live mapping would keep its release from unlinking it. *)
 let whole t id ~mapped ~off ~len =
   let path = whole_path t id in
-  Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
-      let size = (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
-      let len = max 0 (min len (Int64.to_int size - off)) in
-      if mapped && (not Sys.win32) && not (Fs.is_network_fs path) then
-        Fs.map_range fd ~off ~len
-      else (
-        let buf = Bigstring.create len in
-        let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-        Bigstring.sub buf ~off:0 ~len:n))
+  Fs.with_fd
+    (Fs.openfile path [O_RDONLY])
+    (Fs.read_range
+       ~map:(mapped && (not Sys.win32) && not (Fs.is_network_fs path))
+       ~off ~len)
 
 let read_whole t id ~off ~len = whole t id ~mapped:false ~off ~len
 let map_whole t id ~off ~len = whole t id ~mapped:true ~off ~len
