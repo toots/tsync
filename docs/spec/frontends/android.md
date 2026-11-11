@@ -240,8 +240,8 @@ Before the core initialises:
    Linux with no XDG overrides.
 2. **Trust store**, optional: the path of a PEM bundle of certificate authorities. The core's TLS
    client uses it for every connection ([security-model.md §9](../algorithms/security-model.md#9-tls)).
-   Boot fails, naming the trust store, when the file is missing or holds no certificate. A host
-   giving none has connections verified against the system's store, which only a platform TLS
+   Boot fails, naming the trust store, when the file is missing or holds no certificate; an empty
+   path is a path, and fails so. A host gives none by passing no path at all, and has connections verified against the system's store, which only a platform TLS
    implementation reads ([security-model.md §9.2](../algorithms/security-model.md#92-implementation-per-host)); iOS gives none.
 3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`.
 4. **A notice sink** (§4.2).
