@@ -118,6 +118,9 @@ let () =
       put ~age:30. (Option.get (Key.share_preview "aa01")) "jpeg";
       put ~age:30. (Option.get (Key.share_preview "aa02")) "jpeg";
       put (Option.get (Key.share_preview "aa09")) "jpeg";
+      put (Option.get (Key.share_site "aa01")) "";
+      put (Option.get (Key.share_site "aa02")) "";
+      put (Option.get (Key.share_site "aa08")) "";
       let share_read = ref false in
       let watched =
         {

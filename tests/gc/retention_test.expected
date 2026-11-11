@@ -1,5 +1,5 @@
 == expire, dry run (cutoff 10 days ago)
-versions 2, log 2, shares 6
+versions 2, log 2, shares 8
   delete version of 40 days ago in 0000000000a1-1/h
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago
@@ -9,7 +9,9 @@ versions 2, log 2, shares 6
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
   delete tsync/shares/cache/aa01.jpg
+  delete tsync/shares/cache/aa01.site
   delete tsync/shares/cache/0123-4567.data
+  delete tsync/shares/cache/aa08.site
   delete tsync/shares/cache/aa09.jpg
   delete tsync/shares/aa05
   unparseable share left: tsync/shares/aa04
@@ -23,7 +25,7 @@ cancelled: true
 stopped: cancelled
 
 == expire, applied
-versions 2, log 2, shares 6
+versions 2, log 2, shares 8
   delete version of 40 days ago in 0000000000a1-1/h
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago
@@ -33,7 +35,9 @@ versions 2, log 2, shares 6
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
   delete tsync/shares/cache/aa01.jpg
+  delete tsync/shares/cache/aa01.site
   delete tsync/shares/cache/0123-4567.data
+  delete tsync/shares/cache/aa08.site
   delete tsync/shares/cache/aa09.jpg
   delete tsync/shares/aa05
   unparseable share left: tsync/shares/aa04
@@ -59,3 +63,4 @@ left on the store:
   tsync/shares/aa03
   tsync/shares/aa04
   tsync/shares/cache/aa02.jpg
+  tsync/shares/cache/aa02.site

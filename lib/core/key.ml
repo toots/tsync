@@ -75,8 +75,22 @@ let artifact_token ~suffix k =
     Option.map (fun _ -> token) (share token))
   else None
 
-let preview_token = artifact_token ~suffix:".jpg"
-let site_token = artifact_token ~suffix:".site"
+let token_artifact k =
+  match artifact_token ~suffix:".jpg" k with
+    | Some token -> Some (`Preview, token)
+    | None ->
+        Option.map
+          (fun token -> (`Site, token))
+          (artifact_token ~suffix:".site" k)
+
+let share_artifacts token =
+  match share token with
+    | None -> []
+    | Some _ ->
+        List.map
+          (fun suffix -> share_cache ^ token ^ suffix)
+          [".data"; ".jpg"; ".site"]
+
 let shard_prefix d sss = chunks d ^ sss ^ "/"
 let chunk d k = chunks d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
 

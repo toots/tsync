@@ -193,15 +193,9 @@ module Make (C : Context.S) = struct
                             | exception Fail.E f ->
                                 unpublished := f :: !unpublished)
                         (site_expiry b);
-                      ignore
-                        (m.store.delete (Option.get (Key.share_site token)));
-                      ignore
-                        (m.store.delete
-                           (Key.v
-                              (Key.prefix_to_string Key.share_cache
-                              ^ token ^ ".data")));
-                      ignore
-                        (m.store.delete (Option.get (Key.share_preview token)));
+                      List.iter
+                        (fun k -> ignore (m.store.delete k))
+                        (Key.share_artifacts token);
                       true
                   | _ -> found)
               false

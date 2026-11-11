@@ -402,12 +402,7 @@ let token_artifact_candidates t op ~writable manifest =
     | Delete _ when not (held_anywhere t manifest) -> t.routes
     | _ -> owning t manifest
 
-let artifact_token name =
-  match Key.preview_token name with
-    | Some token -> Some (`Preview, token)
-    | None -> Option.map (fun token -> (`Site, token)) (Key.site_token name)
-
-let token_named name = is_manifest_name name || artifact_token name <> None
+let token_named name = is_manifest_name name || Key.token_artifact name <> None
 
 (* The routes that may serve a share-space operation, before any signature. *)
 let share_candidates t op body names =
@@ -417,8 +412,8 @@ let share_candidates t op body names =
       | (Get_multi | Children_multi | Delete_multi | Copy _), _
         when List.exists token_named names ->
           []
-      | _, [name] when artifact_token name <> None ->
-          let kind, token = Option.get (artifact_token name) in
+      | _, [name] when Key.token_artifact name <> None ->
+          let kind, token = Option.get (Key.token_artifact name) in
           token_artifact_candidates t op
             ~writable:(kind = `Preview && Share_preview.valid body)
             (Key.to_string (Option.get (Key.share token)))
