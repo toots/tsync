@@ -1,6 +1,5 @@
-(* android §4.3: a call leaves nothing of the core on its thread, so calls
-   each from a new thread that ends keep the process's memory flat. On Darwin
-   each ended thread once kept about 50 KB. *)
+(* android §4.3: calls each from a new thread that ends keep the process's
+   memory flat. *)
 
 external calls_on_ended_threads : int -> int
   = "tsync_test_calls_on_ended_threads"
