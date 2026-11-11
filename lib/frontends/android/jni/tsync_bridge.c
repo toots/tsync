@@ -113,8 +113,13 @@ void tsync_bridge_init(const char *trust_store, const char *transfer_root,
                        long workers, long may_block, long release_growth) {
   int unregister = enter_ocaml();
   CAMLparam0();
+  CAMLlocal1(_path);
   CAMLlocalN(_arguments, 5);
-  _arguments[0] = caml_copy_string(trust_store);
+  _arguments[0] = Val_none;
+  if (trust_store != NULL) {
+    _path = caml_copy_string(trust_store);
+    _arguments[0] = caml_alloc_some(_path);
+  }
   _arguments[1] = caml_copy_string(transfer_root);
   _arguments[2] = Val_long(workers);
   _arguments[3] = Val_long(may_block);
