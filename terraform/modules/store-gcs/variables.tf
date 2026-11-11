@@ -37,6 +37,18 @@ variable "custom_domain" {
   description = "Vanity domain for share links (e.g. share.example.org). null = raw function URL. Requires the parent domain to be verified for the deploying account; see domain.tf."
 }
 
+variable "sites_bucket" {
+  type        = string
+  default     = null
+  description = "Bucket the share function publishes site shares into, created here with public object reads and no listing. Needs sites_domain. Null = site shares are served as folders."
+}
+
+variable "sites_domain" {
+  type        = string
+  default     = null
+  description = "Host name site shares are served at, by a second domain mapping onto the share function; it must differ from custom_domain. Its parent domain must be verified, as for custom_domain."
+}
+
 variable "archive_domains" {
   type = map(object({
     after_days    = number

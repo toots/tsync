@@ -60,7 +60,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync import --map FILE [DIR] [--force-rehash]` | Upload the files a map lists, each at its own domain path: one `LOCAL_PATH<TAB>DOMAIN_PATH[<TAB>MTIME_NS<TAB>CREATED_NS]` per line, relative local paths from DIR |
 | `tsync rsync SRC DST [--move] [-n]` | Copy or move between a local path and a domain, or within one |
 | `tsync export [PATH…] DIR [--source NAME] [-j N]` | Write files from the stores to a directory |
-| `tsync share [PATH] [--expires DUR] [--token HEX]` | Print a public link |
+| `tsync share [PATH] [--site] [--expires DUR] [--token HEX]` | Print a public link; `--site` opens a folder's pages as a website ([site shares](sharing.md#site-shares)) |
 | `tsync share --revoke TOKEN\|URL` | Stop a link |
 | `tsync share --clear-cache` | Delete prepared share downloads |
 | `tsync versions [PATH]` | List a file's versions, or every deleted file |

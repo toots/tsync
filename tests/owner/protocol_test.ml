@@ -233,7 +233,13 @@ let cases =
     Case (Job { job = Void_entry { n = 7 }; narrate = false }, 1);
     Case (Job { job = Gc_copies Probe; narrate = false }, 0);
     Case
-      ( Share { item = Rel "docs/a.txt"; expires = Some 3600.; token = None },
+      ( Share
+          {
+            item = Rel "docs/a.txt";
+            expires = Some 3600.;
+            token = None;
+            site = false;
+          },
         { url = "https://s.example/d/0123"; expires = 1790000000. } );
     Case
       ( Share
@@ -241,6 +247,7 @@ let cases =
             item = Ref "i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384";
             expires = None;
             token = Some (String.make 32 'a');
+            site = true;
           },
         { url = "https://s.example/d/aaaa"; expires = 1790000000. } );
     Case (Share_revoke "https://s.example/d/0123", true);

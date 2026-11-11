@@ -5,6 +5,10 @@
 
 open Tsync_config
 
+(** Where site shares are published, and the base URL, without a trailing [/],
+    the operator's static file server serves that directory at (§A9.9). *)
+type sites = { root : string; url : string }
+
 type listener = {
   port : int;
   binds : string list;  (** addresses; loopback only without TLS unless named *)
@@ -15,6 +19,7 @@ type listener = {
   max_body_memory : int;
   max_share_responses : int;
   max_zip_members : int;
+  sites : sites option;
   limits : Tsync_http.Server.limits;
 }
 

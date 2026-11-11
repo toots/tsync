@@ -730,6 +730,12 @@ Token, expiry, overwrite and revocation rules are
   the chosen member directly, not through the composite (shares sit outside every domain root, so a
   read-only domain can share), never overwriting an existing one. Every share has a finite expiry,
   `SHARE_DEFAULT_EXPIRY` unless the caller chooses another. Returns `<share URL>/<token>`.
+- **`create(rel, expires, token?, site)`** with `site`: a folder share only, else `Share_not_found`,
+  whose folder has an index page ([http-proxy §A9.9](frontends/http-proxy.md#a99-site-shares)), else
+  `Share_not_found "<rel> has no index.html"`, since the link opens there. A host that created a site share MUST then ask the
+  link once (a `GET` of `<share URL>/<token>` that follows no redirect), as background work that never
+  delays nor fails the creation, so the share server publishes the site before its first visitor
+  ([http-proxy §A9.9](frontends/http-proxy.md#a99-site-shares)); a failure is logged at debug level.
 - **`preview(token | url)`**: a separate operation, so `create` returns the link without waiting on a
   decoder. For a file share of an image, a video or an audio file, a host with a thumbnailer makes
   the preview image ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) through the
@@ -737,7 +743,12 @@ Token, expiry, overwrite and revocation rules are
   the manifest is gone by then; otherwise, and for any other share, it does nothing and says why. A host that created a share it can preview MUST start
   `preview` once `create` has returned, as background work that never delays nor fails the
   creation, one at a time per domain; a failure is logged at debug level. An absent or expired share → `Share_not_found`.
-- **`revoke(token | url)`**: delete the manifest, then its token-keyed artifacts.
+- **`revoke(token | url)`**: delete the manifest; for a site share, then ask the link once, so the
+  share server removes the published site
+  ([security §6.5](algorithms/security-model.md#65-published-sites)); then delete its token-keyed
+  artifacts. A link that answers anything but 404 or 410, or cannot be reached, leaves the share
+  revoked and the operation REFUSED: `"the link is revoked, but its published site stays readable
+  until <expiry + SHARE_SITE_GRACE>"`.
 - **`clear_cache()`**: delete every object under the share cache, and every object of the share
   space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD
   accept objects there that are neither share manifests nor under the share cache (meaning: cached
@@ -896,6 +907,9 @@ Token, expiry, overwrite and revocation rules are
   chosen; a named member is used, and a named member without a share URL is refused; a given token that
   exists is refused; revoke removes the link; `clear_cache` removes only cached artifacts, counts
   correctly, and is idempotent.
+- **Site share**: `site: true` in the manifest; refused for a file and for a folder with neither
+  `index.html` nor `index.htm`; the link is asked once after creation; revoke asks the link after deleting the
+  manifest, and is refused, the manifest gone, when the link answers otherwise than 404 or 410.
 
 ---
 
@@ -908,5 +922,6 @@ Token, expiry, overwrite and revocation rules are
 | state-read walk parallelism | CLI `-j`, default 32 | |
 | `VERIFY_POLL` / `VERIFY_STALL_POLLS` | 3 s / 5 | |
 | `SHARE_DEFAULT_EXPIRY` | 7 days | [security-model.md §6.2](algorithms/security-model.md#62-lifetime) |
+| `SHARE_SITE_GRACE` | 2 days | longest a published site outlives its share's expiry ([security-model.md §6.5](algorithms/security-model.md#65-published-sites)) |
 | `SHARE_PREVIEW_MAX_BYTES` / `SHARE_PREVIEW_SIZE` / `SHARE_PREVIEW_MIN_SIDE` / `SHARE_PREVIEW_TIMEOUT` | 300 KiB / 800 px / 300 px / 20 s | preview image: size cap, exact longest side, least shortest side (a card's least width), time to make one ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) |
 | default chunk / cache chunk size | 8 MiB / 16 MiB | range: [01 §3.5](01-core.md#35-chunk-size) |

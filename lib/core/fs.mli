@@ -170,6 +170,10 @@ val link : string -> string -> unit
 (** A fresh temporary name in [dir]. *)
 val temp_in : string -> string
 
+(** Runs [write] on a new temporary in [dir], then fsyncs it; the temporary is
+    removed when [write] raises. *)
+val write_temp_with : ?perm:int -> string -> (Unix.file_descr -> unit) -> string
+
 (** Write [data] to a new temporary in [dir] and fsync it. *)
 val write_temp : ?perm:int -> string -> string -> string
 

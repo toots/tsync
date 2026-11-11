@@ -56,6 +56,31 @@ output "custom_domain_dns_records" {
   )
 }
 
+output "sites_domain" {
+  description = "The host name site shares are served at, or null."
+  value       = local.sites_enabled == 1 ? var.sites_domain : null
+}
+
+output "sites_domain_dns_records" {
+  description = "DNS records to publish for the sites domain (name/type/value)."
+  value = local.sites_enabled == 0 ? [] : concat(
+    [
+      for option in aws_acm_certificate.sites[0].domain_validation_options : {
+        name  = option.resource_record_name
+        type  = option.resource_record_type
+        value = option.resource_record_value
+      }
+    ],
+    [
+      for target in aws_apigatewayv2_domain_name.sites[*].domain_name_configuration[0].target_domain_name : {
+        name  = var.sites_domain
+        type  = "CNAME"
+        value = target
+      }
+    ],
+  )
+}
+
 output "access_key_id" {
   description = "s3 backend `accessKeyId`."
   value       = aws_iam_access_key.client.id

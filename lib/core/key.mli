@@ -77,8 +77,17 @@ val share : string -> t option
 (** [tsync/shares/cache/<token>.jpg], the share's preview image (02 §2.14). *)
 val share_preview : string -> t option
 
-(** The token a preview image's key names, for any key or name. *)
-val preview_token : string -> string option
+(** [tsync/shares/cache/<token>.site], the record of a site share published
+    whole (02 §2.14). *)
+val share_site : string -> t option
+
+(** A preview image or a site record, for any key or name, with the token it
+    names: the cache artifacts that follow their manifest (security §6.4). *)
+val token_artifact : string -> ([ `Preview | `Site ] * string) option
+
+(** Every artifact keyed by [token]: its download, preview image and site
+    record, which go with the share. *)
+val share_artifacts : string -> t list
 
 val shard_prefix : Domain_name.t -> string -> prefix
 val chunk : Domain_name.t -> Chunk_key.t -> t

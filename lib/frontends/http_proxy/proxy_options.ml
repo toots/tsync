@@ -1,5 +1,7 @@
 open Tsync_config
 
+type sites = { root : string; url : string }
+
 type listener = {
   port : int;
   binds : string list;
@@ -10,6 +12,7 @@ type listener = {
   max_body_memory : int;
   max_share_responses : int;
   max_zip_members : int;
+  sites : sites option;
   limits : Tsync_http.Server.limits;
 }
 
@@ -71,6 +74,12 @@ let positive name = function
   | Some n when n <= 0 -> invalid "http-proxy: %s must be positive" name
   | v -> v
 
+let sites_url u =
+  if String.contains u '?' || String.contains u '#' then
+    invalid "http-proxy: sites_url takes no query or fragment";
+  if String.ends_with ~suffix:"/" u then String.sub u 0 (String.length u - 1)
+  else u
+
 let resolve (config : Config.t) =
   let bound =
     List.filter_map
@@ -118,6 +127,11 @@ let resolve (config : Config.t) =
         max_body_memory = size "max_body_memory" (1024 * mib);
         max_share_responses = size "max_share_responses" 64;
         max_zip_members = size "max_zip_members" 100_000;
+        sites =
+          (match (str (lv "sites_root"), str (lv "sites_url")) with
+            | Some root, Some url -> Some { root; url = sites_url url }
+            | None, None -> None
+            | _ -> invalid "http-proxy: sites_root and sites_url go together");
         limits =
           {
             d with

@@ -73,6 +73,13 @@ listed: false
 named in a batch read: refused/denied
 another domain deletes it: refused/denied
 deleted once the manifest is gone: true, then again: false
+== site records (security §6.4)
+the manifest's domain writes one: refused/denied
+the manifest's domain reads it: true
+another domain reads it: refused/denied
+listed: false
+named in a batch read: refused/denied
+deleted once the manifest is gone: true
 == shares on a member (§A4.6)
 share url: https://cloud.example
 a link before the member holds its file: refused/other: proxy-m put: HTTP 409: f.mkv is not on cloud yet

@@ -128,6 +128,18 @@ variable "custom_domain" {
   EOT
 }
 
+variable "sites_bucket" {
+  type        = string
+  default     = null
+  description = "Bucket the share function publishes site shares into, created here with public object reads and no listing. Needs sites_domain. Null = site shares are served as folders."
+}
+
+variable "sites_domain" {
+  type        = string
+  default     = null
+  description = "Host name site shares are served at by the share function, through the same API as custom_domain; it must differ from it. DNS is published by hand, as for custom_domain."
+}
+
 variable "share_memory_mb" {
   type        = number
   default     = 2048

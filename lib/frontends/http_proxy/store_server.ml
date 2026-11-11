@@ -393,15 +393,16 @@ let held_anywhere t name =
         | None -> false)
     t.routes
 
-(* security §6.4: a preview image follows the manifest its token names. *)
-let preview_candidates t op body manifest =
+(* security §6.4: a preview image or a site record follows the manifest its
+   token names; only a share server writes a site record. *)
+let token_artifact_candidates t op ~writable manifest =
   match op with
     | Put _ | Claim _ | Put_if_unchanged _ ->
-        if Share_preview.valid body then owning t manifest else []
+        if writable then owning t manifest else []
     | Delete _ when not (held_anywhere t manifest) -> t.routes
     | _ -> owning t manifest
 
-let token_named name = is_manifest_name name || Key.preview_token name <> None
+let token_named name = is_manifest_name name || Key.token_artifact name <> None
 
 (* The routes that may serve a share-space operation, before any signature. *)
 let share_candidates t op body names =
@@ -411,10 +412,11 @@ let share_candidates t op body names =
       | (Get_multi | Children_multi | Delete_multi | Copy _), _
         when List.exists token_named names ->
           []
-      | _, [name] when Key.preview_token name <> None ->
-          preview_candidates t op body
-            (Key.to_string
-               (Option.get (Key.share (Option.get (Key.preview_token name)))))
+      | _, [name] when Key.token_artifact name <> None ->
+          let kind, token = Option.get (Key.token_artifact name) in
+          token_artifact_candidates t op
+            ~writable:(kind = `Preview && Share_preview.valid body)
+            (Key.to_string (Option.get (Key.share token)))
       | (Put _ | Claim _ | Put_if_unchanged _), [name]
         when is_manifest_name name -> (
           match Share_server.manifest_domain (Bigstring.to_string body) with
@@ -1074,15 +1076,50 @@ let self_url (l : Proxy_options.listener) =
 let listener_tls t =
   match t.listener with Some l -> l.tls <> None | None -> false
 
+let sharing t =
+  List.filter_map
+    (fun route ->
+      match route.share with `Self s -> Some s | `Off | `Member _ -> None)
+    t.routes
+
+let sites t = Option.bind t.listener (fun l -> l.sites)
+
+(* §A9.9: one route's answer is not enough, since the token may be another
+   domain's whose store cannot be read now. *)
+let remove_site_if_gone t (sites : Proxy_options.sites) token =
+  match
+    let sharing = sharing t in
+    if
+      sharing <> []
+      && Fs.is_dir (Share_server.site_dir sites token)
+      && List.for_all
+           (fun s -> Share_server.share_state s token = `Gone)
+           sharing
+    then (
+      Log.info "share: removing the published site of a share that is gone";
+      Share_server.remove_site sites token)
+  with
+    | () -> ()
+    | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
+        Log.err "share: removing a published site: %s" (Printexc.to_string e)
+
+let sweep_sites t =
+  Option.iter
+    (fun (sites : Proxy_options.sites) ->
+      match Fs.readdir_opt sites.root with
+        | names ->
+            List.iter
+              (fun name ->
+                if Key.share name <> None then remove_site_if_gone t sites name)
+              (Option.value ~default:[] names)
+        | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
+            Log.err "share: sweeping %s: %s" sites.root (Printexc.to_string e))
+    (sites t)
+
 (* §A9.1: with several share-serving routes, the one whose domain the token's
    manifest names answers, else the first, so its refusal is the answer. *)
 let serve_share t (r : Server.request) params rest =
-  let sharing =
-    List.filter_map
-      (fun route ->
-        match route.share with `Self s -> Some s | `Off | `Member _ -> None)
-      t.routes
-  in
+  let sharing = sharing t in
   if sharing = [] then (
     count t "notFound";
     answer (text 404 "not found"));
@@ -1116,9 +1153,15 @@ let serve_share t (r : Server.request) params rest =
   match
     Share_server.handle
       ?self:(Option.map self_url t.listener)
-      share ~tls:(listener_tls t) ~max_zip_members r ~token ~sub params
+      ?sites:(sites t) share ~tls:(listener_tls t) ~max_zip_members r ~token
+      ~sub params
     |> count_bytes [t.total] ~written:0
   with
+    | { status = 404 | 410; _ } as response when sites t <> None ->
+        Fun.protect
+          ~finally:(fun () -> Rt.Semaphore.release t.share_slots)
+          (fun () -> remove_site_if_gone t (Option.get (sites t)) token);
+        response
     | { body = Stream s; _ } as response ->
         {
           response with
@@ -1483,9 +1526,14 @@ let run config =
                 listener.port
                 (if tls = None then "" else " (TLS)");
               (* A burst's heap goes back to the system, as an owner's does:
-                 the server runs beside one on a small host. *)
+                 the server runs beside one on a small host. Sites are swept
+                 hourly, well within SHARE_SITE_GRACE (§A9.9). *)
+              let next_sweep = ref 0. in
               (try
                  while true do
+                   if Unix.gettimeofday () >= !next_sweep then (
+                     sweep_sites t;
+                     next_sweep := Unix.gettimeofday () +. 3600.);
                    Stop.sleep 60.;
                    Usage.release_if_grown ()
                  done

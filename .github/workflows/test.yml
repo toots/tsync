@@ -265,7 +265,7 @@ jobs:
       - name: Python libraries
         run: pip install boto3 moto pytest xxhash
       - name: Share handler and chunk verifier (S3)
-        run: pytest lambda/test_handler.py lambda/test_verify.py lambda/test_manifest_layout.py
+        run: pytest lambda/test_handler.py lambda/test_site.py lambda/test_verify.py lambda/test_manifest_layout.py
       - name: Keys agree with the OCaml implementation
         run: pytest lambda/test_chunk_key.py lambda/test_gc_job_key.py
 
@@ -291,7 +291,7 @@ jobs:
       - name: Store and chunk verifier (GCS)
         env:
           STORAGE_EMULATOR_HOST: http://localhost:4443
-        run: pytest lambda/test_store_gcs.py lambda/test_verify_gcs.py
+        run: pytest lambda/test_store_gcs.py lambda/test_store_gcs_site.py lambda/test_verify_gcs.py
 
   # 10 §3.1 item 5: opam's default resolution of tsync's TLS alternative, and a
   # build with one implementation: what `opam install tsync` gives a user. It

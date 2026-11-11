@@ -42,6 +42,7 @@ let of_context (module C : Context.S) =
 type share = {
   target : [ `File of Key.t | `Dir of Folder_id.t ];
   filename : string;
+  site : bool;
 }
 
 exception Refused of Server.response
@@ -81,13 +82,21 @@ let target_of domain f =
 let filename_of f =
   match List.assoc_opt "filename" f with Some (`String s) -> s | _ -> "share"
 
+(* 02 §2.14: [site] is [true], on a folder share only. *)
+let site_of target f =
+  match (List.assoc_opt "site" f, target) with
+    | None, _ -> Ok false
+    | Some (`Bool true), `Dir _ -> Ok true
+    | _ -> Error "corrupt share manifest"
+
 let manifest_share body =
   match (parse_manifest body, manifest_domain body) with
     | Some f, Some d ->
         Result.to_option
-          (Result.map
-             (fun target -> { target; filename = filename_of f })
-             (target_of d f))
+          (Result.bind (target_of d f) (fun target ->
+               Result.map
+                 (fun site -> { target; filename = filename_of f; site })
+                 (site_of target f)))
     | _ -> None
 
 (* 02 §2.14, security §6.3: an invalid manifest is 502, another domain's is
@@ -129,10 +138,20 @@ let load t token =
   let target =
     match target_of domain f with Ok t -> t | Error m -> refuse 502 m
   in
-  { target; filename = filename_of f }
+  let site =
+    match site_of target f with Ok s -> s | Error m -> refuse 502 m
+  in
+  { target; filename = filename_of f; site }
 
 let claims t token =
   match load t token with _ -> true | exception Refused _ -> false
+
+(* §A9.9: only an answer that the share is absent or expired says it is gone. *)
+let share_state t token =
+  match load t token with
+    | _ -> `Live
+    | exception Refused { status = 404 | 410; _ } -> `Gone
+    | exception (Refused _ | Fail.E _ | Unix.Unix_error _) -> `Unknown
 
 let mime = Mime.of_name
 
@@ -409,6 +428,13 @@ let preview_fetchers =
 
 (* §A9.3: a navigation lists [text/html], [*/*] and no header do not; a
    link-preview fetcher gets the page whatever it accepts. *)
+let preview_fetcher (r : Server.request) =
+  match Codec.header r.headers "user-agent" with
+    | None -> false
+    | Some agent ->
+        let agent = String.lowercase_ascii agent in
+        List.exists (Text.contains agent) preview_fetchers
+
 let wants_html (r : Server.request) =
   let navigation =
     match Codec.header r.headers "accept" with
@@ -421,13 +447,7 @@ let wants_html (r : Server.request) =
               = "text/html")
             (String.split_on_char ',' accept)
   in
-  navigation
-  ||
-    match Codec.header r.headers "user-agent" with
-    | None -> false
-    | Some agent ->
-        let agent = String.lowercase_ascii agent in
-        List.exists (Text.contains agent) preview_fetchers
+  navigation || preview_fetcher r
 
 let manifest_at t key =
   match t.store.get_opt key with
@@ -565,6 +585,120 @@ let zip_response t ~max_members id filename =
           Zip.finish z);
   }
 
+let site_dir (sites : Proxy_options.sites) token =
+  Filename.concat sites.root token
+
+let site_record token = Option.get (Key.share_site token)
+
+(* §A9.9: the record says some server published the share whole, the copy that
+   this one did. *)
+let published t sites token =
+  Fs.is_dir (site_dir sites token)
+  && t.store.get_opt (site_record token) <> None
+
+let remove_site sites token =
+  if Key.share token <> None then Fs.rm_rf (site_dir sites token)
+
+(* §A9.9: written aside and renamed, so the static server never serves a file
+   half written; a file of the same size and time is kept, which resumes a
+   publication without keeping another share's stale file. *)
+let publish_file t path (m : Manifest.t) =
+  let mtime = Fs.seconds m.mtime in
+  match Fs.stat_opt path with
+    | Some st
+      when st.st_kind = S_REG
+           && st.st_size = Int64.of_int m.size
+           && Float.abs (st.st_mtime -. mtime) < 1. ->
+        ()
+    | st ->
+        (* A folder of the same name, from an earlier share of this token. *)
+        if
+          Option.map (fun (s : Unix.LargeFile.stats) -> s.st_kind) st
+          = Some S_DIR
+        then Fs.rm_rf path;
+        let tmp =
+          Fs.write_temp_with ~perm:0o644 (Filename.dirname path) (fun fd ->
+              (* Windows has no modes to give, and no fchmod. *)
+              if not Sys.win32 then Unix.fchmod fd 0o644;
+              let off = ref 0 in
+              stream t m ~off:0 ~len:m.size (fun b ->
+                  let len = Bigstring.length b in
+                  Fs.pwrite_all fd b ~boff:0 ~len ~off:!off;
+                  off := !off + len))
+        in
+        Fun.protect ~finally:(fun () -> Fs.unlink_quiet tmp) @@ fun () ->
+        Unix.utimes tmp mtime mtime;
+        Fs.unix_rename tmp path
+
+(* Anything in a published folder that the shared folder no longer has is
+   removed, so the copy is the folder and nothing else. *)
+let publish t sites token id =
+  let rec walk dir id =
+    if Fs.exists dir && not (Fs.is_dir dir) then Fs.unlink_quiet dir;
+    Fs.mkdir_p ~durable:false dir;
+    Unix.chmod dir 0o755;
+    let kept =
+      List.filter_map
+        (fun (e : Tree.entry) ->
+          match e.body with
+            | Dir m ->
+                walk (Filename.concat dir m.name) m.id;
+                Some m.name
+            | File m when m.link = None ->
+                publish_file t (Filename.concat dir m.name) m;
+                Some m.name
+            | File _ -> None)
+        (List.sort
+           (fun a b -> compare (entry_name a) (entry_name b))
+           (t.children id))
+    in
+    List.iter
+      (fun name ->
+        if not (List.mem name kept) then Fs.rm_rf (Filename.concat dir name))
+      (Fs.readdir dir)
+  in
+  match walk (site_dir sites token) id with
+    | () -> (
+        match share_state t token with
+          | `Live -> t.store.put (site_record token) Bigstring.empty
+          | `Gone ->
+              (* A revocation removed the copy while this one was written. *)
+              remove_site sites token;
+              refuse 404 "not found"
+          | `Unknown -> refuse 502 "site not published")
+    | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
+        Log.err "share: site not published: %s" (Printexc.to_string e);
+        refuse 502 "site not published"
+
+(* One publication per token at a time; the locks of tokens published
+   accumulate until the server restarts, a few words each. *)
+let publishing = Hashtbl.create 16
+let publishing_lock = Mutex.create ()
+
+let token_lock token =
+  Mutex.protect publishing_lock (fun () ->
+      match Hashtbl.find_opt publishing token with
+        | Some l -> l
+        | None ->
+            let l = Rt.Fmutex.create () in
+            Hashtbl.replace publishing token l;
+            l)
+
+let site_response t (sites : Proxy_options.sites) ~token id =
+  if not (published t sites token) then
+    Rt.Fmutex.with_lock (token_lock token) (fun () ->
+        if not (published t sites token) then publish t sites token id);
+  {
+    Server.status = 302;
+    headers =
+      [
+        ("location", sites.url ^ "/" ^ token ^ "/");
+        ("cache-control", "no-store");
+        ("referrer-policy", "no-referrer");
+      ];
+    body = Empty;
+  }
+
 let image_response ~content_type body =
   {
     Server.status = 200;
@@ -632,8 +766,8 @@ let preview ~self ~token t share =
     | None ->
         image_response ~content_type:"image/png" (String (Lazy.force card))
 
-let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
-    =
+let handle ?self ?sites ~tls ~max_zip_members ~token ~sub t (r : Server.request)
+    params =
   try
     let share = load t token in
     let param k = List.assoc_opt k params in
@@ -658,9 +792,12 @@ let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
           if param "json" = Some "1" then
             file_json t ~url:("/s/" ^ token ^ "/f") ~name:share.filename m
           else file_response t r ~name:share.filename ~inline:true m
-      | `Dir id, "" ->
+      | `Dir id, "" -> (
           live_folder t id;
-          share_page share
+          match sites with
+            | Some sites when share.site && not (preview_fetcher r) ->
+                site_response t sites ~token id
+            | _ -> share_page share)
       | `Dir id, "download" ->
           live_folder t id;
           zip_response t ~max_members:max_zip_members id share.filename

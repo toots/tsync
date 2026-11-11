@@ -7,17 +7,32 @@ type created = { url : string; expires : float }
 (** [SHARE_DEFAULT_EXPIRY]: 7 days. *)
 val default_expiry : float
 
+(** Asks a site share's link once, so its share server publishes it before the
+    first visitor (05 §4.11); any failure is logged at debug level. The owner
+    runs it in the background after creating one, a run that took ownership
+    itself before it exits. *)
+val publish : string -> unit
+
 module Make (_ : Tsync_remote.Context.S) : sig
   (** [rel] is a domain path ([""] the whole domain); [expires] seconds from
       now. ABSENT when nothing is at [rel] or a folder is empty; REFUSED when no
       member serves share links or the object is not on the chosen one yet;
       EXISTS when [token] holds another share. [member] is the one to make it
-      on, from {!Tsync_config.Config.share_member_name}. *)
+      on, from {!Tsync_config.Config.share_member_name}. [site]: a site share of
+      a folder with an index page (http-proxy §A9.9); ABSENT for a file or a
+      folder without one. *)
   val create :
-    ?expires:float -> ?token:string -> ?member:string -> string -> created
+    ?expires:float ->
+    ?token:string ->
+    ?member:string ->
+    ?site:bool ->
+    string ->
+    created
 
   (** A token or a link; whether a share of this domain was there. Another
-      domain's share is left alone. *)
+      domain's share is left alone. For a site share the link is asked after the
+      manifest is deleted, so its share server removes the published copy;
+      REFUSED, the share revoked, when it did not answer 404 or 410. *)
   val revoke : string -> bool
 
   (** A token or a link: makes the share's preview image through the link and

@@ -43,6 +43,11 @@ Resource names are fixed ([11 §15](../11-infrastructure.md#15-compatibility)). 
 A created bucket is in the store's location, with uniform bucket-level access and public access
 prevention enforced. The provider has no setting to deny plain HTTP.
 
+A sites bucket ([11 §7](../11-infrastructure.md#7-share-function)) is in the store's location, with
+uniform bucket-level access, public access prevention `inherited`, and `allUsers` granted
+`roles/storage.legacyObjectReader`, which reads an object and does not list. An organisation policy
+enforcing public access prevention makes applying fail.
+
 One-per-bucket documents ([11 §4](../11-infrastructure.md#4-bucket)): none on an adopted bucket.
 The lifecycle is part of the bucket itself, so it is managed on a created bucket and never touched
 on an adopted one (§9). Notifications and permission grants are added beside what exists.
@@ -88,6 +93,7 @@ on an adopted one (§9). Notifications and permission grants are added beside wh
   |---|---|---|
   | `B` | `roles/storage.objectViewer` | none |
   | `B` | `roles/storage.objectUser` | starts with `tsync/shares/cache/` |
+  | the sites bucket | `roles/storage.objectUser` | none |
   | itself | `roles/iam.serviceAccountTokenCreator` | |
 
   Assembly composes through temporary objects under the cache, hence the delete. The last grant
@@ -95,7 +101,14 @@ on an adopted one (§9). Notifications and permission grants are added beside wh
 - **Function** `tsync-share-<N>` in the store's function region: entry point `gcp_handler` in
   `handler.py`, the limits of [11 §7](../11-infrastructure.md#7-share-function), running as the
   share service account, environment `BUCKET=B`, `PRESIGN_TTL=<seconds>`, `MAX_BYTES=<bytes>`,
-  `STORE=gcs`.
+  `STORE=gcs`, and `SITES_BUCKET=<name>` and `SITES_DOMAIN=<host>` with a sites bucket.
+- **Publishing.** A compose takes its sources from its own bucket, so a file is composed in `B` under
+  the cache, as for a download, then copied to the sites bucket by a rewrite. Each object is written
+  with its type, `Cache-Control: no-cache`, its manifest's modification time as the `tsync-mtime`
+  metadata, and `customTime` set to the share's expiry. The bucket's
+  own endpoint is `https://<sites bucket>.storage.googleapis.com`. Its CORS allows `GET` and `HEAD`
+  from `https://<sites domain>`.
+- **Sweep:** the lifecycle rule of §9 on the sites bucket; the function runs none.
 - **Endpoint:** `roles/run.invoker` for `allUsers` on the function's Cloud Run service; the
   function's own URL.
 - The scratch space is the function's memory, shared with the function itself. SHARE_MAX_BYTES
@@ -111,6 +124,9 @@ it. Domain mapping exists only in some regions.
 Records to publish: those the mapping reports, a CNAME for a subdomain, A and AAAA records for an
 apex. They are reported once the mapping has them, which MAY take a second read of the outputs.
 
+A sites domain is a second domain mapping, to the same service. The function tells the two apart
+by the request's `Host`.
+
 ## 9. Lifecycle
 
 On a created bucket, always, as rules of the bucket:
@@ -124,6 +140,10 @@ On a created bucket, always, as rules of the bucket:
 - At most 99 archived domains: a bucket takes 100 rules.
 - There are no operator rules: a rule added by hand to a created bucket is removed by the next
   apply.
+
+On a sites bucket, always: the abort rule above, and a delete once `daysSinceCustomTime` is 0, which
+removes each published object within SHARE_SITE_GRACE of its share's expiry: the condition counts
+whole days, and the provider applies a met condition within a day.
 
 On an adopted bucket the lifecycle is the operator's
 ([11 §9](../11-infrastructure.md#9-lifecycle)). Archived domains named for one are refused. Rules to
@@ -143,6 +163,7 @@ Beyond [11 §10](../11-infrastructure.md#10-store-options):
 - `stores[N]`: `type = "gcs"`, `bucket`, and `shareUrl`, null without a share function.
 - `store_secrets[N]`: `serviceAccountKey`, the key's JSON text.
 - `custom_domain_dns[N].records`: the records the domain mapping reports.
+- `sites_domain_dns[N].records`: the records the sites domain's mapping reports.
 
 ## 12. Operator state
 

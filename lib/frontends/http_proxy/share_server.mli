@@ -17,15 +17,29 @@ val manifest_domain : string -> Domain_name.t option
 type share = {
   target : [ `File of Key.t | `Dir of Folder_id.t ];
   filename : string;
+  site : bool;
 }
 
 (** What the manifest body shares, when it parses as a valid one. *)
 val manifest_share : string -> share option
 
+(** Whether [token] holds a live share of this domain, a definite absence
+    (absent, another domain's or expired), or no answer (§A9.9). *)
+val share_state : t -> string -> [ `Live | `Gone | `Unknown ]
+
+(** Deletes [<root>/<token>/] for a valid token; the caller has found its share
+    gone on every route. *)
+val remove_site : Proxy_options.sites -> string -> unit
+
+val site_dir : Proxy_options.sites -> string -> string
+
 (** [self] is where a thumbnailer reaches this listener's own share links; [tls]
-    picks the scheme of the page's absolute URLs when no proxy names one. *)
+    picks the scheme of the page's absolute URLs when no proxy names one.
+    [sites]: a folder share marked [site] is published there and answered by a
+    redirect to it (§A9.9). *)
 val handle :
   ?self:string ->
+  ?sites:Proxy_options.sites ->
   tls:bool ->
   max_zip_members:int ->
   token:string ->

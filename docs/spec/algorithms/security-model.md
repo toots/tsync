@@ -151,7 +151,7 @@ The share operation surface is in [05-ops-config §4.11](../05-ops-config.md#411
 - A manifest whose expiry is missing, non-numeric or in the past is expired (410). An expiry in fractional seconds: readers SHOULD accept it (meaning that instant); writers MUST write whole seconds.
 - **Revocation**: deleting the manifest revokes the link at once for every server. A server-issued redirect to a presigned URL (cloud function) MUST expire within `share_presign_ttl` (5 min) and never after the share.
 - Expired manifests and their cached artifacts are removed by retention ([gc.md §4.3](gc.md#43-shares)).
-- A folder share grants the folder **as it is at each request**, later additions included, until expiry, revocation or removal of the folder ([data-model/backend §2.18](../data-model/backend.md#218-share)).
+- A folder share grants the folder **as it is at each request**, later additions included, until expiry, revocation or removal of the folder ([data-model/backend §2.18](../data-model/backend.md#218-share)), except a site share, which grants the folder as published (§6.5).
 
 ### 6.3 A share never leaves its domain
 
@@ -166,12 +166,28 @@ The share space `tsync/shares/` belongs to no domain, so its keys are confined b
 - **Write** (`PUT` of `tsync/shares/<token>`): the server MUST parse the body as a share manifest and accept it only if §6.3 holds for the route's domain and any manifest already at the key names the same domain. Otherwise 401.
 - **Read and delete** of a manifest key: allowed only if the stored manifest names the route's domain; otherwise answered as a failed signature. Deleting an absent manifest is success (204).
 - Cache artifacts live under `tsync/shares/cache/`. A share-space key that is neither `tsync/shares/<token>` nor under `cache/`: readers SHOULD accept it (meaning a cache artifact); writers MUST NOT produce it.
-- **Listing** the share space through a listener MUST return only cache artifacts, never manifest keys nor preview images (`cache/<token>.jpg`): a listing of tokens would hand out every domain's links.
+- **Listing** the share space through a listener MUST return only cache artifacts, never manifest keys, preview images (`cache/<token>.jpg`) nor site records (`cache/<token>.site`): a listing of tokens would hand out every domain's links.
 - **Cache artifacts** are rebuildable from the chunks; any route MAY list, read or delete them, except preview images.
-- **Preview images** are named by their token, so they follow the manifest: a read or a write is allowed only if the manifest at that token names the route's domain, a write only of a valid preview image ([http-proxy §A9.8](../frontends/http-proxy.md#a98-preview-image)), checked before it is stored; a delete also when the manifest is absent, since revocation deletes the manifest first. Otherwise answered as a failed signature.
+- **Preview images** are named by their token, so they follow the manifest: a read or a write is allowed only if the manifest at that token names the route's domain, a write only of a valid preview image ([http-proxy §A9.8](../frontends/http-proxy.md#a98-preview-image)), checked before it is stored; a delete also when the manifest is absent, since revocation deletes the manifest first. Otherwise answered as a failed signature. **Site records** follow the manifest the same way, except that no write of one is allowed: only a share server writes it, to its own store.
 - Bulk operations MUST NOT name manifest keys; a bulk list containing one is refused whole (401).
 
 A domain writer with direct store credentials can still write any share manifest in a bucket shared by several domains; such writers are mutually trusted (§3.1).
+
+### 6.5 Published sites
+
+A site share ([02 §2.14](../02-remote-model.md#214-share-manifest-json-and-share-artifacts)) is served as a copy of its folder, published by the share server under its **sites root**: a place served as plain files at a public base URL, the **sites URL** ([http-proxy §A9.9](../frontends/http-proxy.md#a99-site-shares)).
+
+- **Origin.** The sites URL MUST be an origin of its own, answering published sites and nothing else: no share page, status page, store route or other service of the deployment answers on its scheme, host and port. A published page runs its own scripts, so on a shared origin it could read the status page, another share's page, or act on a listener with its viewer's browser. A share server that answers the sites URL itself (a share function) MUST load the share before answering each request there, so a revoked site's pages stop at once.
+- **The token is the only credential.** A published file is readable only at a path holding its token: `<sites URL>/<token>/<path>`, and, for a sites bucket, the same path on the bucket's own endpoint, an origin that likewise answers published sites alone. The sites root MUST NOT be listable, and holds nothing but published sites. A sites root cannot always add a `Referrer-Policy`; a browser's default policy sends another origin only the sites origin, never the path that holds the token.
+- **One origin for every site.** All the sites published at one sites URL share its origin, so one site's scripts can reach another's storage, and its pages given the token. Such sites are written by the domain writers of the stores behind it, who are mutually trusted (§3.1). An origin per site would need a host name per token.
+- **What is published.** Every file of the folder, as resolved by §6.3, at its path below the folder. Symlinks and the reserved name `.tsync-ext` are not published.
+- **Freshness.** Every published file carries `Cache-Control: no-cache`, so a cache in front of the sites root revalidates and a removed site stops being served.
+- **Removal.** A published site whose share is absent or expired MUST be removed from the sites root:
+  - at once, by the share server, when it is asked for the token and finds no live share; revocation asks it ([05 §4.11](../05-ops-config.md#411-share));
+  - otherwise within `SHARE_SITE_GRACE` of the share's expiry, by a sweep of the sites root.
+
+  Until it is removed, a published site stays readable by whoever kept its URL: revocation is immediate only once the share server is reached.
+- Only the share server writes the sites root. A creator needs no right over it.
 
 ---
 
@@ -325,6 +341,7 @@ Applies to every page and header a listener or share function serves.
 - **Text and attributes.** Values placed in HTML text or attributes MUST escape `&`, `<`, `>`, `"` and `'`.
 - **Single-pass templating.** Placeholders are replaced in one pass over the template; a substituted value is never scanned for placeholders.
 - **Served file bytes** (a shared file shown inline or downloaded) MUST carry `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`, so an HTML or SVG file cannot run script on the listener's origin, where the status page lives.
+- **Published sites** (§6.5) are the one exception: their files carry no `Content-Security-Policy`, since they are served on an origin of their own.
 - **Headers.** `Content-Disposition` file names use an ASCII fallback with control bytes, bytes above 126, `"` and `\` replaced, plus an RFC 5987 UTF-8 form. No header value is built from unescaped user data.
 - Every HTML page carries `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` (a share URL is a credential and must not leak through `Referer`). The status page also carries `Content-Security-Policy: frame-ancestors 'none'`.
 

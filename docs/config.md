@@ -148,6 +148,7 @@ Changing `syncRoot` moves the domain at the next start. The old folder is releas
 | `max_body_memory` | 1 GiB | Memory for request bodies, all requests together |
 | `max_share_responses` | 64 | Share downloads at once |
 | `max_zip_members` | 100000 | Largest folder a zip download takes |
+| `sites_root`, `sites_url` | none | Where site shares are published (absolute path), and the `https://` address your own web server serves that folder at, on a host name of its own. Both or neither. See [site shares](sharing.md#site-shares). |
 | `idle_timeout`, `header_timeout`, `keepalive_timeout` | | Seconds |
 
 **`android`** is what the Android app writes in its own config. `tsync start` refuses a config that names it.

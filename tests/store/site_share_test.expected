@@ -1,0 +1,73 @@
+== creating a site share (05 §4.11)
+create plain --site: plain has no index.html
+create site/index.html --site: site/index.html: only a folder can be shared as a site
+create linked --site: linked has no index.html
+create site --site: done
+  site a: absent
+== the first visit publishes, then redirects (§A9.9)
+  site a/img/
+  site a/img/a.gif 13 bytes
+  site a/index.html 35 bytes
+  site a/style.css 6 bytes
+  site a/été 1.htm 12 bytes
+files 644, folders 755: true
+record written: true
+byte-exact: true
+GET a [text/html] -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+GET a [WhatsApp/2.24] -> 200 location - cache-control private content-type text/html; charset=utf-8
+== a published site is not published again
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/
+  site a/index.html 35 bytes
+  site a/style.css 6 bytes
+  site a/été 1.htm 12 bytes
+== a publication cut short resumes; the copy is the folder alone
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/
+  site a/img/a.gif 13 bytes
+  site a/index.html 35 bytes
+  site a/style.css 6 bytes
+  site a/été 1.htm 12 bytes
+same size and time kept: true, same size at another time rewritten: true
+== an entry of the other kind is replaced
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/
+  site a/img/a.gif 13 bytes
+  site a/index.html 35 bytes
+  site a/style.css 6 bytes
+  site a/été 1.htm 12 bytes
+== a copy missing from the sites root is published again
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/
+  site a/img/a.gif 13 bytes
+  site a/index.html 35 bytes
+  site a/style.css 6 bytes
+  site a/été 1.htm 12 bytes
+== a folder share that is not a site
+create site: done
+GET b [text/html] -> 200 location - cache-control private content-type text/html; charset=utf-8
+  site b: absent
+== manifests a reader refuses (02 §2.14)
+GET c -> 502 location - cache-control - content-type text/plain; charset=utf-8
+GET e -> 502 location - cache-control - content-type text/plain; charset=utf-8
+== a share that is gone has its site removed (security §6.5)
+GET f -> 404 location - cache-control - content-type text/plain; charset=utf-8
+  site f: absent
+GET 7 -> 410 location - cache-control - content-type text/plain; charset=utf-8
+  site 7: absent
+== a share that cannot be read keeps its site
+GET 8 -> 502 location - cache-control - content-type text/plain; charset=utf-8
+  site 8/index.html 3 bytes
+== revoking asks the link, which removes the site
+revoke a: done
+  site a: absent
+record left: false
+create site --site: done
+== revoking with the server gone leaves the site and says so
+revoke 9: refused/other, says until when true
+manifest left: false
+  site 9/img/
+  site 9/img/a.gif 13 bytes
+  site 9/index.html 35 bytes
+  site 9/style.css 6 bytes
+  site 9/été 1.htm 12 bytes

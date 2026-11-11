@@ -17,7 +17,7 @@ which identity, permissions, limits and trigger.
 | Term | Meaning |
 |---|---|
 | **deployment** | One applied configuration: any number of stores, on any mix of providers, plus what they share. |
-| **store** | One bucket and everything attached to it: a client identity, the verify function and its trigger, optionally the share function and its endpoint, lifecycle rules. |
+| **store** | One bucket and everything attached to it: a client identity, the verify function and its trigger, optionally the share function and its endpoint, and with it a sites bucket, lifecycle rules. |
 | **store name** `N` | The operator's short name for a store, unique in its deployment whatever the provider. It builds resource names and keys the outputs; it is not a tsync domain name. |
 | **created / adopted** | A created bucket is made and owned by the deployment. An adopted bucket existed before and is named by the operator. |
 | **function package** | One archive of the function source, shared by every store, every provider and both functions. |
@@ -117,13 +117,14 @@ A store has one unless the operator declines it (§10). Its behaviour is
   | On | Rights |
   |---|---|
   | every object | read |
-  | `tsync/shares/cache/` | create; delete where assembly needs temporary objects |
+  | `tsync/shares/cache/` | create; delete where assembly needs temporary objects, and a site record with its copy |
   | the bucket | list |
+  | the sites bucket, when there is one | read, create, overwrite, delete, list |
   | itself | sign download URLs, where the provider signs through an API |
   | its own logs | write |
 
   It MUST NOT be able to write a share manifest (`tsync/shares/<token>`), a chunk, or anything else
-  outside the cache.
+  outside the cache and the sites bucket.
 - **Limits.** Timeout SHARE_TIMEOUT, memory SHARE_MEMORY, and one size ceiling SHARE_MAX_BYTES
   above which a file or a folder is refused. A folder archive is built in the function's scratch
   space before it is uploaded, so the ceiling MUST leave the headroom the provider file states; a
@@ -131,7 +132,23 @@ A store has one unless the operator declines it (§10). Its behaviour is
   could become.
 - **Environment.** The bucket's name, the presigned-URL lifetime
   ([security §6](algorithms/security-model.md#6-share-capabilities): `share_presign_ttl`),
-  SHARE_MAX_BYTES, and the provider where the package needs telling.
+  SHARE_MAX_BYTES, the sites bucket's name when there is one, and the provider where the package
+  needs telling.
+- **Sites bucket.** Optional, per store with a share function and a sites domain (§8): a second
+  bucket, always created, that the function publishes site shares into and serves at the sites
+  domain ([security §6.5](algorithms/security-model.md#65-published-sites)).
+  - Anyone MAY read an object by its name; nobody but the share identity MAY list the bucket or
+    write to it. Public read is granted on objects only, never on the listing.
+  - Plain-HTTP requests are denied where the provider can deny them.
+  - It allows `GET` and `HEAD` from the sites domain's origin, so a published page's scripts can
+    fetch the files the function redirects them to.
+  - Its name MUST NOT contain `.`, so that its own HTTPS endpoint, with the name as the host's first
+    label, matches the provider's certificate, and that endpoint is an origin no other bucket
+    shares.
+  - It holds nothing but published sites. Destroying a deployment MUST NOT delete it while it holds
+    objects.
+  - The sweep of [http-proxy §A9.9](frontends/http-proxy.md#a99-site-shares) is the provider
+    file's, within SHARE_SITE_GRACE ([05 §8](05-ops-config.md#8-parameters)).
 - **Cross-origin reads.** The bucket allows `GET` and `HEAD` from any origin, exposing `Content-Range`, `Content-Length`, `Content-Type` and `Accept-Ranges`: the share page's HLS player fetches segments by script through the function's redirects, and a redirect to another origin sends `Origin: null`. A presigned URL still gates every read. It is declared with a bucket the deployment creates, so applying never removes it; on an adopted bucket the operator sets it.
 - A store without a share function reports no share URL, and a tsync backend on it carries no
   `shareUrl`.
@@ -145,11 +162,14 @@ for one on a store without a share function is refused before anything is applie
 - **DNS is never managed.** Any DNS host works; the deployment reports the records to publish
   (§11) and the operator publishes them.
 - A store without one has no certificate, no extra endpoint and nothing to publish.
+- A **sites domain** is a second one, on the same share function, for the store's sites bucket (§7).
+  It follows every rule above, MUST differ from the share URL's host, and is required with a sites
+  bucket and refused without one.
 
 ## 9. Lifecycle
 
 - **Abandoned uploads.** Incomplete multipart uploads are aborted ABORT_INCOMPLETE after they
-  began, bucket-wide.
+  began, bucket-wide, in the sites bucket too.
 - **Archival** is off by default and per tsync domain: an **archived domain** has the objects under
   `tsync/<domain>/chunks/` moved to a colder storage class `after_days` after creation. Nothing else
   is ever transitioned: the log (`log/`), the takeovers (`log-takeover/`), `tree-head` and `cursor`
@@ -179,7 +199,9 @@ for one on a store without a share function is refused before anything is applie
 | bucket name | required | |
 | create the bucket | yes | no = adopt (§4) |
 | share function | yes | no = verify function and client identity only (§7) |
+| sites bucket | none | the bucket's name; none = site shares are served as folder shares (§7) |
 | vanity domain | none | §8 |
+| sites domain | none | §8; with a sites bucket only, which requires it |
 | archived domains | none | map: domain → `after_days`, storage class (§9) |
 | presigned-URL lifetime | `share_presign_ttl` | §7 |
 | share size ceiling | SHARE_MAX_BYTES | §7 |
@@ -201,6 +223,7 @@ be translated.
 | `stores` | store name → `type` (`s3` or `gcs`), and every non-secret field of that driver's backend that the deployment decides: `bucket`, `shareUrl` (null without a share function), and the provider's own (provider file). |
 | `store_secrets` (sensitive) | store name → the secret fields of that driver's backend. |
 | `custom_domain_dns` | store name with a vanity domain → `domain`, and `records`: a list of `name`, `type`, `value` to publish. |
+| `sites_domain_dns` | store name with a sites domain → the same shape. |
 
 - Merging a store's `stores` and `store_secrets` entries, minus `type`, gives a complete backend
   entry but for `name`, `role` and `link`.
@@ -278,6 +301,7 @@ What the live-store tier ([10 §3.3](10-delivery.md#33-live-stores)) triggers.
 | SHARE_TIMEOUT | 900 s | One archive build |
 | SHARE_MEMORY | 2048 MB | |
 | SHARE_MAX_BYTES | provider file | Fits the scratch space, with headroom |
+| SITE_PAGE_MAX_BYTES | 4 MiB | Largest page the function answers whole on the sites domain; within every provider's response cap once encoded |
 | ABORT_INCOMPLETE | 1 day | |
 | STATE_VERSION_RETENTION | 90 days | |
 
@@ -298,7 +322,9 @@ Not specified, and not required of a deployment:
 
 - The configuration validates and plans with `terraform` and with `tofu`, with stores on one
   provider only and no credentials for the other.
-- Planning refuses: a duplicate store name; a vanity domain without a share function; a share
+- Planning refuses: a duplicate store name; a vanity domain without a share function; a sites
+  bucket without a share function or a sites domain, or named with a `.`; a sites domain without a
+  sites bucket, or equal to the vanity domain; a share
   ceiling above what the provider file allows; an archived domain named `shares` or holding `/`; a storage
   class that needs a restore; an operator rule expiring a prefix that covers `tsync/gc-jobs/`.
 - The package holds no test file after the test suite ran in the source directory.
@@ -307,6 +333,10 @@ Not specified, and not required of a deployment:
   the share URL answers 404 to an unknown token; the client identity is refused on another bucket;
   the verify identity is refused creating a chunk; the share identity is refused creating
   `tsync/shares/<token>`.
+- On a sites bucket just applied: an anonymous read of an object the share identity wrote answers
+  its bytes, an anonymous listing is refused, an anonymous write is refused, and the client
+  identity is refused on it; the sites domain answers 404 to an unknown token and to a share route
+  of a live one.
 - A verify invocation that fails is seen once in the function's log.
 - Planning over an existing deployment shows no replacement of the resources of §15.
 - With `tofu` and `terraform` both installed, `TSYNC_TF` decides which one every script runs; a

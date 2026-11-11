@@ -35,6 +35,7 @@ by adding entries to the `stores` (S3) or `gcs_stores` (GCS) map.
 - [Wiring a store into tsync](#wiring-a-store-into-tsync)
 - [Share links](#share-links)
   - [A vanity domain for share links](#a-vanity-domain-for-share-links)
+  - [Site shares](#site-shares)
 - [Cold storage (`archive_domains`)](#cold-storage-archive_domains)
   - [Why you have to name the domains](#why-you-have-to-name-the-domains)
   - [What it costs](#what-it-costs)
@@ -186,6 +187,7 @@ clouds, under the same names:
 | `create_bucket` | `true` | false = use a bucket that already exists |
 | `share` | `true` | false = no share endpoint: credentials and integrity check only |
 | `custom_domain` | none | vanity host for share links |
+| `sites_bucket`, `sites_domain` | none | a public bucket and a host name for [site shares](#site-shares); both or neither |
 | `archive_domains` | `{}` | per-domain cold storage |
 | `presign_ttl` | `300` | lifetime (s) of a signed download URL |
 | `max_share_bytes` | 8 GiB on S3, 1 GiB on GCS | largest file or folder a link serves |
@@ -350,6 +352,32 @@ gcloud beta run domain-mappings describe --domain=share.example.org --region=<re
 ```
 
 On Cloudflare, set the records to **DNS only** (grey cloud).
+
+### Site shares
+
+`tsync share --site` shares a folder holding a website so that its pages open in the browser ([site shares](../docs/sharing.md#site-shares)). On a bucket, the share function copies the folder into a second, public bucket on the first visit, and serves its pages on a host name of its own, which must differ from `custom_domain`: the pages run their own scripts there.
+
+```hcl
+stores = {
+  files = {
+    bucket       = "my-tsync-files"
+    sites_bucket = "my-tsync-sites"      # created here; no dots in the name
+    sites_domain = "sites.example.org"
+  }
+}
+```
+
+The sites bucket lets anyone read an object by its name, and nobody list it: the share's token in each path is the only credential. Only the share function writes it. A copy goes when its share does: revoking asks the link, which removes it, and what outlives an expired share is swept, hourly by a schedule on AWS, by a lifecycle rule on the objects' `customTime` on GCS.
+
+The sites domain is set up like `custom_domain`, on the same API Gateway (AWS) or as a second domain mapping (GCS):
+
+```
+tofu output -json sites_domain_dns   # { "files": { domain, records } }
+```
+
+On AWS an account-level S3 public access block on policies makes the sites bucket unreadable; lift it for the account, or leave `sites_bucket` unset. On GCS, an organisation policy enforcing public access prevention makes the apply fail.
+
+Leaving both unset changes nothing: site shares are then shown as ordinary folders.
 
 ---
 
@@ -672,10 +700,10 @@ Test them locally from the repo root:
 ```
 python3 -m venv .venv && . .venv/bin/activate
 pip install boto3 moto pytest
-pytest lambda/test_handler.py
+pytest lambda/test_handler.py lambda/test_site.py
 ```
 
-The GCS-side tests (`test_store_gcs.py`, `test_verify_gcs.py`) additionally need
+The GCS-side tests (`test_store_gcs.py`, `test_store_gcs_site.py`, `test_verify_gcs.py`) additionally need
 `google-cloud-storage`.
 
 ---

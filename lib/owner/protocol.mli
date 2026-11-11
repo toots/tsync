@@ -330,6 +330,7 @@ type _ request =
       item : target;  (** the domain root when the request names nothing *)
       expires : float option;  (** seconds from now *)
       token : string option;
+      site : bool;  (** a site share (http-proxy §A9.9) *)
     }
       -> shared request
   | Share_revoke : string -> bool request  (** whether a share was there *)

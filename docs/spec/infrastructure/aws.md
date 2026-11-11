@@ -36,6 +36,12 @@ A created bucket has:
 - a bucket policy denying every S3 action, to every principal, on the bucket and its objects, when
   `aws:SecureTransport` is false.
 
+A sites bucket ([11 §7](../11-infrastructure.md#7-share-function)) has the public-access blocks on
+ACLs on (`BlockPublicAcls`, `IgnorePublicAcls`) and those on policies off, and a bucket policy that
+allows `s3:GetObject` on its objects to every principal, grants nothing on the bucket itself (no
+listing), and denies every S3 action when `aws:SecureTransport` is false. An account-level public
+access block on policies makes it unreadable: the operator lifts it, or declines the sites bucket.
+
 One-per-bucket documents ([11 §4](../11-infrastructure.md#4-bucket)): the **lifecycle
 configuration** (§9) and the **notification configuration** (§6). Both are taken over by default on
 created and adopted buckets alike; each can be declined (§10).
@@ -86,14 +92,25 @@ created and adopted buckets alike; each can be declined (§10).
   | On | Actions |
   |---|---|
   | every object of `B` | `s3:GetObject` |
-  | `tsync/shares/cache/*` | `s3:PutObject`, `s3:AbortMultipartUpload` |
+  | `tsync/shares/cache/*` | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` |
   | `B` | `s3:ListBucket` |
+  | every object of the sites bucket | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` |
+  | the sites bucket | `s3:ListBucket` |
 
-  Assembly is server-side copy and multipart upload, which need no delete. URLs are signed with the
-  role's own credentials.
+  Assembly is server-side copy and multipart upload, which need no delete; the delete is for a site
+  record, which goes with its copy. URLs are signed with the role's own credentials.
 - **Function** `tsync-share-<N>`: Lambda, handler `handler.handler`, the limits of
   [11 §7](../11-infrastructure.md#7-share-function), ephemeral storage SHARE_SCRATCH, environment
-  `BUCKET=B`, `PRESIGN_TTL=<seconds>`, `MAX_BYTES=<bytes>`.
+  `BUCKET=B`, `PRESIGN_TTL=<seconds>`, `MAX_BYTES=<bytes>`, and `SITES_BUCKET=<name>` and
+  `SITES_DOMAIN=<host>` with a sites bucket.
+- **Publishing.** A file is assembled in `B` under the cache, as for a download, then copied into the
+  sites bucket by a managed server-side copy, multipart above 5 GB, with its type,
+  `Cache-Control: no-cache` and its manifest's modification time as the `tsync-mtime` metadata. The
+  bucket's own endpoint is `https://<sites bucket>.s3.<region>.amazonaws.com`. Its CORS
+  configuration allows `GET` and `HEAD` from `https://<sites domain>`.
+- **Sweep:** an EventBridge Scheduler schedule `tsync-site-sweep-<N>`, `rate(1 hour)`, invoking the
+  function directly with the input `{"sweep":true}`, through a role allowed only
+  `lambda:InvokeFunction` on it. A request through the function URL never carries that input.
 - **Endpoint:** a function URL with authentication type `NONE`, and two resource permissions for
   every principal: `lambda:InvokeFunctionUrl` conditioned on that authentication type, and
   `lambda:InvokeFunction` conditioned on the call coming through the function URL.
@@ -117,6 +134,10 @@ regional target. Applying waits for the certificate to be issued, so the operato
 certificate alone first, publishes its validation record, then applies the rest. The function URL
 stays public beside the domain.
 
+A sites domain is a second regional custom domain on the same API, with its own certificate, mapped
+to the same stage; with no vanity domain, steps 2 and 3 exist for it alone. The function tells the
+two apart by the event's `requestContext.domainName`. Its records are published the same way.
+
 ## 9. Lifecycle
 
 The store's rules are the bucket's whole lifecycle configuration:
@@ -136,6 +157,7 @@ The store's rules are the bucket's whole lifecycle configuration:
 - At most 1000 rules.
 - When the operator declines the lifecycle configuration it is neither read nor changed, and the
   abort rule is theirs to add.
+- A sites bucket's lifecycle configuration is the abort rule alone.
 
 ## 10. Store options
 
@@ -157,6 +179,7 @@ Beyond [11 §10](../11-infrastructure.md#10-store-options):
 - `store_secrets[N]`: `secretAccessKey`.
 - `custom_domain_dns[N].records`: the validation record, and the CNAME from the domain to its
   target once the custom domain exists.
+- `sites_domain_dns[N].records`: the same, for the sites domain.
 
 ## 12. Operator state
 

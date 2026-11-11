@@ -435,7 +435,7 @@ let mirror_cmd =
        destination."
     Term.(const mirror $ source $ skip_chunks $ path $ domain_arg $ verbose)
 
-let share path expires token preview revoke clear name verbose =
+let share path site expires token preview revoke clear name verbose =
   set_verbose verbose;
   early @@ fun () ->
   let name, paths = paths_in_domain ?name (Option.to_list path) in
@@ -451,6 +451,8 @@ let share path expires token preview revoke clear name verbose =
               "--preview, --revoke, --clear-cache and a path go one at a time"
         | Some _, true, _ | Some _, _, Some _ | _, true, Some _ ->
             fail "--revoke, --clear-cache and a path go one at a time"
+        | _ when site && (preview <> None || revoke <> None || clear) ->
+            fail "--site makes a link; it goes with a path alone"
         | None, false, None when preview <> None -> (
             match
               ask (Tsync_owner.Protocol.Share_preview (Option.get preview))
@@ -477,13 +479,15 @@ let share path expires token preview revoke clear name verbose =
             let rel = Option.value ~default:"" (List.nth_opt paths 0) in
             let r =
               ask
-                (Tsync_owner.Protocol.Share { item = Rel rel; expires; token })
+                (Tsync_owner.Protocol.Share
+                   { item = Rel rel; expires; token; site })
             in
             say "%s" r.url;
             prerr_endline ("expires " ^ Narrate.date r.expires);
             (* 07 §5.6: an owner makes the image in the background; a run that
                took ownership itself makes it before it exits. *)
             if not (Tsync_owner.Owner.served dom.name) then (
+              if site then Tsync_gc.Share.publish r.url;
               match ask (Tsync_owner.Protocol.Share_preview r.url) with
                 | `Made -> ()
                 | `Not_made why -> Log.debug "share preview: %s" why
@@ -497,6 +501,13 @@ let share_cmd =
       & pos 0 (some string) None
       & info [] ~docv:"PATH"
           ~doc:"The file or folder to share; the whole domain when none.")
+  and site =
+    Arg.(
+      value & flag
+      & info ["site"]
+          ~doc:
+            "Share a folder as a static site: its pages open in the browser, \
+             starting at its index.html.")
   and expires =
     Arg.(
       value
@@ -530,7 +541,7 @@ let share_cmd =
   cmd "share"
     ~doc:"Create a public, expiring link to a file or folder (URL on stdout)."
     Term.(
-      const share $ path $ expires $ token $ preview $ revoke $ clear
+      const share $ path $ site $ expires $ token $ preview $ revoke $ clear
       $ domain_arg $ verbose)
 
 (* 07 §5.6 [versions]: a read command, from the store; [--revert] goes through
