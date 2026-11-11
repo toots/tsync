@@ -27,6 +27,8 @@ let () =
   Fs.mkdir_p (Filename.concat root "home");
   Fs.mkdir_p (Filename.dirname shared);
   Unix.putenv "HOME" (Filename.concat root "home");
+  (* A runner may set it, and it outranks the home. *)
+  Unix.putenv "XDG_CONFIG_HOME" "";
   Out_channel.with_open_bin shared (fun oc -> output_string oc config);
   Unix.chmod shared 0o600;
   check "under home only";
