@@ -250,6 +250,10 @@ val map_fd : Unix.file_descr -> bigstring
     them. *)
 val map_range : Unix.file_descr -> off:int -> len:int -> bigstring
 
+(** Up to [len] bytes from [off], clamped to the file's size: a view of a
+    mapping with [~map], else a copy read by position. *)
+val read_range : map:bool -> Unix.file_descr -> off:int -> len:int -> bigstring
+
 (** After a body read with {!map_fd} has been used: its pages leave this
     process's resident set, a later read paging them back in from the file. A
     body that is not a mapping is left alone. The collector unmaps a mapping
