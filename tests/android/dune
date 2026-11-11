@@ -220,3 +220,12 @@
  (alias runtest-android)
  (action
   (diff thread_exit_test.expected thread_exit_test.output)))
+
+; The ended-thread leak was Darwin's: the macOS job runs it too.
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} macosx))
+ (action
+  (diff thread_exit_test.expected thread_exit_test.output)))
