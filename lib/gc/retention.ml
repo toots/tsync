@@ -64,7 +64,11 @@ module Make (C : Context.S) = struct
                 if artifact e then
                   if e.last_modified < cutoff then [e.key] else []
                 else (
-                  match Key.preview_token (Key.to_string e.key) with
+                  match
+                    match Key.preview_token (Key.to_string e.key) with
+                      | Some token -> Some token
+                      | None -> Key.site_token (Key.to_string e.key)
+                  with
                     | Some token ->
                         if Hashtbl.mem listed (Option.get (Key.share token))
                         then []
@@ -87,6 +91,7 @@ module Make (C : Context.S) = struct
                                              Key.leaf a.key = token ^ ".data"
                                              && a.last_modified >= cutoff
                                              || Key.leaf a.key = token ^ ".jpg"
+                                             || Key.leaf a.key = token ^ ".site"
                                            then Some a.key
                                            else None)
                                          listing

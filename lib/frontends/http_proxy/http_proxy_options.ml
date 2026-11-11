@@ -31,6 +31,10 @@ let fields =
       f "max_connections" "Connections" Int;
       f "max_share_responses" "Concurrent share responses" Int;
       f "max_zip_members" "ZIP members" Int;
+      f ~check:absolute_path ~blank:"none: site shares are served as folders"
+        "sites_root" "Site shares directory" Path;
+      f ~check:http_url ~blank:"none; required with a directory" "sites_url"
+        "Site shares URL" String;
     ]
 
 let () =

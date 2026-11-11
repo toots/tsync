@@ -62,16 +62,21 @@ let share token =
 let share_preview token =
   Option.map (fun _ -> share_cache ^ token ^ ".jpg") (share token)
 
-let preview_token k =
-  if under share_cache k && String.ends_with ~suffix:".jpg" k then (
+let share_site token =
+  Option.map (fun _ -> share_cache ^ token ^ ".site") (share token)
+
+let artifact_token ~suffix k =
+  if under share_cache k && String.ends_with ~suffix k then (
     let token =
       String.sub k
         (String.length share_cache)
-        (String.length k - String.length share_cache - 4)
+        (String.length k - String.length share_cache - String.length suffix)
     in
     Option.map (fun _ -> token) (share token))
   else None
 
+let preview_token = artifact_token ~suffix:".jpg"
+let site_token = artifact_token ~suffix:".site"
 let shard_prefix d sss = chunks d ^ sss ^ "/"
 let chunk d k = chunks d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
 

@@ -209,6 +209,24 @@ let () =
       let first = s.delete image in
       let again = s.delete image in
       p "deleted once the manifest is gone: %b, then again: %b\n" first again;
+      p "== site records (security §6.4)\n";
+      let record = Option.get (Key.share_site token) in
+      Contract.put s manifest
+        {|{"v":1,"domain":"d","type":"dir","folderId":".tsync-root","site":true}|};
+      p "the manifest's domain writes one: %s\n"
+        (kind (fun () -> Contract.put s record ""));
+      (local "d").put record Bigstring.empty;
+      p "the manifest's domain reads it: %b\n" (Contract.get s record = Some "");
+      p "another domain reads it: %s\n"
+        (kind (fun () -> Contract.get ro record));
+      p "listed: %b\n"
+        (List.exists
+           (fun (e : Store.entry) -> Key.equal e.key record)
+           (s.list_prefix Key.shares));
+      p "named in a batch read: %s\n"
+        (kind (fun () -> (Option.get s.get_many) [record]));
+      ignore (s.delete manifest);
+      p "deleted once the manifest is gone: %b\n" (s.delete record);
       p "== shares on a member (§A4.6)\n";
       let m = client ~secret:m_secret "m" and dm = Domain_name.v "m" in
       p "share url: %s\n"

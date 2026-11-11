@@ -39,6 +39,27 @@ The function, and everything it needs, comes from the [Terraform config](../terr
 
 `tsync share` answers "Sharing is not available" when neither is set up.
 
+## Site shares
+
+A folder that holds a website, such as an old family site of HTML pages with its pictures and sounds, can be shared so that its pages open in the browser, scripts and links included:
+
+```bash
+tsync share --site family/old-website
+```
+
+The folder needs an `index.html` or `index.htm`: the link opens it. On the first visit the server copies the folder, as it is then, to a folder of plain files that your own web server publishes on a host name of its own, and the link sends the visitor there. Changes made to the folder afterwards are not in the copy: share it again for a new link. A link-preview card still shows, as for any folder.
+
+This needs a tsync server with `"shares": true`, and two options on its `http-proxy` frontend:
+
+```json
+{ "type": "http-proxy", "shares": true, "sites_root": "/srv/tsync-sites",
+  "sites_url": "https://sites.example.org", … }
+```
+
+Serve `/srv/tsync-sites` at that address with any web server, with directory listings off and `index.html` then `index.htm` as index pages; nginx: `root /srv/tsync-sites; index index.html index.htm; autoindex off; add_header Cache-Control no-cache;`. The host name must serve nothing else: the shared pages run their own scripts there. A server without these options shows a site share as an ordinary folder.
+
+Revoking the link removes the copy. Should the server be unreachable when you revoke, `tsync share --revoke` says so, and the copy goes within two days of the link's expiry.
+
 ## Get files out
 
 ```bash

@@ -317,6 +317,7 @@ type _ request =
       item : target;  (** the domain root when the request names nothing *)
       expires : float option;
       token : string option;
+      site : bool;  (** a site share (http-proxy §A9.9) *)
     }
       -> shared request
   | Share_revoke : string -> bool request
@@ -681,6 +682,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       target_fields r.item
       @ opt "expires" (fun e -> `Float e) r.expires
       @ opt "token" (fun t -> `String t) r.token
+      @ if r.site then [("site", `Bool true)] else []
   | Share_revoke s | Share_preview s -> [("arg", `String s)]
   | Job r -> [("job", Jobs.to_yojson r.job); ("narrate", `Bool r.narrate)]
   | Cancel id -> [("job", `Int id)]
@@ -803,6 +805,7 @@ let decode j =
                    | None -> Rel (Option.value ~default:"" (str j "rel")));
                expires = number j "expires";
                token = str j "token";
+               site = flag j "site";
              })
     | "share_revoke" -> Request (Share_revoke (required j "arg"))
     | "share_preview" -> Request (Share_preview (required j "arg"))

@@ -731,8 +731,8 @@ Token, expiry, overwrite and revocation rules are
   share server removes the published site
   ([security §6.5](algorithms/security-model.md#65-published-sites)); then delete its token-keyed
   artifacts. A link that answers anything but 404 or 410, or cannot be reached, leaves the share
-  revoked and the operation failed: `Share_site_left "<sites URL> is still published until <expiry
-  + SHARE_SITE_GRACE>"`.
+  revoked and the operation REFUSED: `"the link is revoked, but its published site stays readable
+  until <expiry + SHARE_SITE_GRACE>"`.
 - **`clear_cache()`**: delete every object under the share cache, and every object of the share
   space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD
   accept objects there that are neither share manifests nor under the share cache (meaning: cached
@@ -893,7 +893,7 @@ Token, expiry, overwrite and revocation rules are
   correctly, and is idempotent.
 - **Site share**: `site: true` in the manifest; refused for a file and for a folder with neither
   `index.html` nor `index.htm`; the link is asked once after creation; revoke asks the link after deleting the
-  manifest, and fails with `Share_site_left` when the link answers otherwise than 404 or 410.
+  manifest, and is refused, the manifest gone, when the link answers otherwise than 404 or 410.
 
 ---
 

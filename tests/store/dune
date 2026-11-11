@@ -172,6 +172,30 @@
   (diff share_test.expected share_test.output)))
 
 (executable
+ (name site_share_test)
+ (modules site_share_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_http
+  tsync_http_proxy
+  tsync_gc
+  unix
+  threads.posix
+  yojson))
+
+(rule
+ (with-stdout-to
+  site_share_test.output
+  (run ./site_share_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff site_share_test.expected site_share_test.output)))
+
+(executable
  (name spaces_test)
  (modules spaces_test)
  (libraries test_support contract tsync_core tsync_store unix))

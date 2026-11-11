@@ -80,6 +80,13 @@ val share_preview : string -> t option
 (** The token a preview image's key names, for any key or name. *)
 val preview_token : string -> string option
 
+(** [tsync/shares/cache/<token>.site], the record of a site share published
+    whole (02 §2.14). *)
+val share_site : string -> t option
+
+(** The token a site record's key names, for any key or name. *)
+val site_token : string -> string option
+
 val shard_prefix : Domain_name.t -> string -> prefix
 val chunk : Domain_name.t -> Chunk_key.t -> t
 val chunk_from : Domain_name.t -> Chunk_key.t -> t

@@ -5,6 +5,19 @@ open Tsync_remote
 type created = { url : string; expires : float }
 
 let default_expiry = 7. *. 86400.
+let site_grace = 2. *. 86400.
+
+(* 05 §4.11: one GET that follows no redirect; its status, or the failure. *)
+let ask link =
+  match
+    Tsync_http.Client.request ~stall:30.
+      (Tsync_http.Client.endpoint ~max_connections:1 link)
+      ~meth:"GET" ""
+  with
+    | r -> Ok r.status
+    | exception Fail.E f -> Error f.reason
+
+let index_pages = ["index.html"; "index.htm"]
 
 (* security §6.1: what a creator writes, generated or chosen. *)
 let creatable t =
@@ -24,7 +37,7 @@ module Make (C : Context.S) = struct
 
   let segs p = if p = "" then [] else String.split_on_char '/' p
 
-  let body ~expires ~target ~filename =
+  let body ~expires ~target ~filename ~site =
     Yojson.Safe.to_string
       (`Assoc
          ([
@@ -33,9 +46,19 @@ module Make (C : Context.S) = struct
             ("domain", `String name);
           ]
          @ target
-         @ [("filename", `String filename)]))
+         @ [("filename", `String filename)]
+         @ if site then [("site", `Bool true)] else []))
 
-  let create ?(expires = default_expiry) ?token ?member rel =
+  (* http-proxy §A9.9: the link opens the folder's index page. *)
+  let has_index id =
+    List.exists
+      (fun (e : Tree.entry) ->
+        match e.body with
+          | File m -> List.mem m.name index_pages
+          | Dir _ -> false)
+      (T.children id)
+
+  let create ?(expires = default_expiry) ?token ?member ?(site = false) rel =
     if not (expires > 0. && Float.is_finite expires) then
       Fail.raise_ Fail.Invalid "a share's lifetime must be finite and positive";
     let m, url = chosen ?member () in
@@ -43,6 +66,9 @@ module Make (C : Context.S) = struct
       match T.find Folder_id.root (segs rel) with
         | `Missing ->
             Fail.raise_ Fail.Absent "%s: no such file or folder in %s" rel name
+        | `File _ when site ->
+            Fail.raise_ Fail.Absent "%s: only a folder can be shared as a site"
+              rel
         | `File manifest ->
             let parent =
               match T.find Folder_id.root (segs (Names.parent_of rel)) with
@@ -57,6 +83,9 @@ module Make (C : Context.S) = struct
             if T.children id = [] then
               Fail.raise_ Fail.Absent "%s: an empty folder has nothing to share"
                 rel;
+            if site && not (has_index id) then
+              Fail.raise_ Fail.Absent "%s has no index.html"
+                (if rel = "" then "/" else rel);
             ( [
                 ("type", `String "dir");
                 ("folderId", `String (Folder_id.to_string id));
@@ -69,7 +98,7 @@ module Make (C : Context.S) = struct
         (if rel = "" then "/" else rel)
         m.name;
     let expires = Float.round (Unix.gettimeofday () +. expires) in
-    let manifest = body ~expires ~target ~filename in
+    let manifest = body ~expires ~target ~filename ~site in
     let token =
       match token with
         | None ->
@@ -104,28 +133,82 @@ module Make (C : Context.S) = struct
       | `Assoc f -> List.assoc_opt "domain" f = Some (`String name)
       | _ | (exception Yojson.Json_error _) -> false
 
+  let site_expiry body =
+    match Yojson.Safe.from_string (Bigstring.to_string body) with
+      | `Assoc f when List.assoc_opt "site" f = Some (`Bool true) -> (
+          match List.assoc_opt "expires" f with
+            | Some (`Int n) -> Some (float_of_int n)
+            | Some (`Float x) -> Some x
+            | _ -> Some 0.)
+      | _ | (exception Yojson.Json_error _) -> None
+
+  (* security §6.5: the share server removes the published copy once it finds
+     the share gone, which only asking the link tells it. *)
+  let unpublish (m : Composite.member) token expires =
+    let link =
+      Option.map
+        (fun url ->
+          (if String.ends_with ~suffix:"/" url then url else url ^ "/") ^ token)
+        (m.store.capabilities Key.shares).share_url
+    in
+    match Option.map ask link with
+      | Some (Ok (404 | 410)) -> ()
+      | answer ->
+          Log.info "share: unpublishing a site: %s"
+            (match answer with
+              | Some (Ok status) -> Printf.sprintf "the link answered %d" status
+              | Some (Error why) -> why
+              | None -> m.name ^ " serves no share links");
+          Fail.raise_ Fail.Refused
+            "the link is revoked, but its published site stays readable until \
+             %s"
+            (Narrate.date (expires +. site_grace))
+
   let revoke s =
     let token = token_of s in
     match Key.share token with
       | None -> Fail.raise_ Fail.Invalid "%s is not a share token or link" s
       | Some key ->
-          List.fold_left
-            (fun found (m : Composite.member) ->
-              match m.store.get_opt key with
-                | Some b when names_domain b ->
-                    Composite.guard C.composite m "revoke a share";
-                    ignore (m.store.delete key);
-                    ignore
-                      (m.store.delete
-                         (Key.v
-                            (Key.prefix_to_string Key.share_cache
-                            ^ token ^ ".data")));
-                    ignore
-                      (m.store.delete (Option.get (Key.share_preview token)));
-                    true
-                | _ -> found)
-            false
-            (Composite.members C.composite)
+          let unpublished = ref [] in
+          let found =
+            List.fold_left
+              (fun found (m : Composite.member) ->
+                match m.store.get_opt key with
+                  | Some b when names_domain b ->
+                      Composite.guard C.composite m "revoke a share";
+                      ignore (m.store.delete key);
+                      Option.iter
+                        (fun expires ->
+                          match unpublish m token expires with
+                            | () -> ()
+                            | exception Fail.E f ->
+                                unpublished := f :: !unpublished)
+                        (site_expiry b);
+                      ignore
+                        (m.store.delete (Option.get (Key.share_site token)));
+                      ignore
+                        (m.store.delete
+                           (Key.v
+                              (Key.prefix_to_string Key.share_cache
+                              ^ token ^ ".data")));
+                      ignore
+                        (m.store.delete (Option.get (Key.share_preview token)));
+                      true
+                  | _ -> found)
+              false
+              (Composite.members C.composite)
+          in
+          (match !unpublished with f :: _ -> raise (Fail.E f) | [] -> ());
+          found
+
+  (* 05 §4.11: asked once after a site share is created, so its copy is
+     published before the first visitor. *)
+  let publish link =
+    match ask link with
+      | Ok 302 -> ()
+      | Ok status ->
+          Log.debug "share: publishing a site: the link answered %d" status
+      | Error why -> Log.debug "share: publishing a site: %s" why
 
   let field f k =
     match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None

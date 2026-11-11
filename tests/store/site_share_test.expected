@@ -1,0 +1,57 @@
+== creating a site share (05 §4.11)
+create plain --site: plain has no index.html
+create site/index.html --site: site/index.html: only a folder can be shared as a site
+create site --site: done
+  site a: absent
+== the first visit publishes, then redirects (§A9.9)
+  site a/img/ 755
+  site a/img/a.gif 13 bytes 644
+  site a/index.html 35 bytes 644
+  site a/style.css 6 bytes 644
+  site a/été 1.htm 12 bytes 644
+record written: true
+byte-exact: true
+GET a [text/html] -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+GET a [WhatsApp/2.24] -> 200 location - cache-control private content-type text/html; charset=utf-8
+== a published site is not published again
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/ 755
+  site a/index.html 35 bytes 644
+  site a/style.css 6 bytes 644
+  site a/été 1.htm 12 bytes 644
+== a publication cut short resumes, keeping the files already there
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/ 755
+  site a/img/a.gif 13 bytes 644
+  site a/index.html 35 bytes 644
+  site a/style.css 6 bytes 644
+  site a/été 1.htm 12 bytes 644
+index.html kept: true
+== a folder share that is not a site
+create site: done
+GET b [text/html] -> 200 location - cache-control private content-type text/html; charset=utf-8
+  site b: absent
+== manifests a reader refuses (02 §2.14)
+GET c -> 502 location - cache-control - content-type text/plain; charset=utf-8
+GET e -> 502 location - cache-control - content-type text/plain; charset=utf-8
+== a share that is gone has its site removed (security §6.5)
+GET f -> 404 location - cache-control - content-type text/plain; charset=utf-8
+  site f: absent
+GET 7 -> 410 location - cache-control - content-type text/plain; charset=utf-8
+  site 7: absent
+== a share that cannot be read keeps its site
+GET 8 -> 502 location - cache-control - content-type text/plain; charset=utf-8
+  site 8/index.html 3 bytes 644
+== revoking asks the link, which removes the site
+revoke a: done
+  site a: absent
+record left: false
+create site --site: done
+== revoking with the server gone leaves the site and says so
+revoke 9: refused/other, says until when true
+manifest left: false
+  site 9/img/ 755
+  site 9/img/a.gif 13 bytes 644
+  site 9/index.html 35 bytes 644
+  site 9/style.css 6 bytes 644
+  site 9/été 1.htm 12 bytes 644
