@@ -618,7 +618,8 @@ let publish_file t path (m : Manifest.t) =
         then Fs.rm_rf path;
         let tmp =
           Fs.write_temp_with ~perm:0o644 (Filename.dirname path) (fun fd ->
-              Unix.fchmod fd 0o644;
+              (* Windows has no modes to give, and no fchmod. *)
+              if not Sys.win32 then Unix.fchmod fd 0o644;
               let off = ref 0 in
               stream t m ~off:0 ~len:m.size (fun b ->
                   let len = Bigstring.length b in

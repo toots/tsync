@@ -19,20 +19,28 @@ let root =
 let sites_root = Filename.concat root "sites"
 let token c = String.make 32 c
 
-let rec tree dir rel =
+let rec walk dir rel =
   List.concat_map
     (fun name ->
       let path = Filename.concat dir name and rel = rel ^ "/" ^ name in
       let st = Unix.stat path in
-      match st.st_kind with
-        | S_DIR ->
-            Printf.sprintf "%s/ %o" rel (st.st_perm land 0o777) :: tree path rel
-        | _ ->
-            [
-              Printf.sprintf "%s %d bytes %o" rel st.st_size
-                (st.st_perm land 0o777);
-            ])
+      (rel, st) :: (if st.st_kind = S_DIR then walk path rel else []))
     (List.sort compare (Option.value ~default:[] (Fs.readdir_opt dir)))
+
+let tree dir rel =
+  List.map
+    (fun (rel, (st : Unix.stats)) ->
+      if st.st_kind = S_DIR then rel ^ "/"
+      else Printf.sprintf "%s %d bytes" rel st.st_size)
+    (walk dir rel)
+
+(* A static server running as another user reads them; Windows has no modes. *)
+let readable_modes dir =
+  Sys.win32
+  || List.for_all
+       (fun (_, (st : Unix.stats)) ->
+         st.st_perm land 0o777 = if st.st_kind = S_DIR then 0o755 else 0o644)
+       (walk dir "")
 
 let show_site c =
   match tree (Filename.concat sites_root (token c)) "" with
@@ -208,6 +216,8 @@ let () =
       p "== the first visit publishes, then redirects (§A9.9)";
       Tsync_gc.Share.publish (url ^ "/s/" ^ token 'a');
       show_site 'a';
+      p "files 644, folders 755: %b"
+        (readable_modes (Filename.concat sites_root (token 'a')));
       p "record written: %b"
         (C.store.get_opt (Option.get (Key.share_site (token 'a'))) <> None);
       let published rel =
