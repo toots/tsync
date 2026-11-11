@@ -67,7 +67,7 @@ module Make (C : Context.S) = struct
     List.exists
       (fun (e : Tree.entry) ->
         match e.body with
-          | File m -> List.mem m.name index_pages
+          | File m -> m.link = None && List.mem m.name index_pages
           | Dir _ -> false)
       (T.children id)
 

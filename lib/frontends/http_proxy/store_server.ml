@@ -1104,10 +1104,14 @@ let remove_site_if_gone t (sites : Proxy_options.sites) token =
 let sweep_sites t =
   Option.iter
     (fun (sites : Proxy_options.sites) ->
-      List.iter
-        (fun name ->
-          if Key.share name <> None then remove_site_if_gone t sites name)
-        (Option.value ~default:[] (Fs.readdir_opt sites.root)))
+      match Fs.readdir_opt sites.root with
+        | names ->
+            List.iter
+              (fun name ->
+                if Key.share name <> None then remove_site_if_gone t sites name)
+              (Option.value ~default:[] names)
+        | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
+            Log.err "share: sweeping %s: %s" sites.root (Printexc.to_string e))
     (sites t)
 
 (* §A9.1: with several share-serving routes, the one whose domain the token's
@@ -1152,8 +1156,9 @@ let serve_share t (r : Server.request) params rest =
     |> count_bytes [t.total] ~written:0
   with
     | { status = 404 | 410; _ } as response when sites t <> None ->
-        Rt.Semaphore.release t.share_slots;
-        remove_site_if_gone t (Option.get (sites t)) token;
+        Fun.protect
+          ~finally:(fun () -> Rt.Semaphore.release t.share_slots)
+          (fun () -> remove_site_if_gone t (Option.get (sites t)) token);
         response
     | { body = Stream s; _ } as response ->
         {
@@ -1519,8 +1524,8 @@ let run config =
                 listener.port
                 (if tls = None then "" else " (TLS)");
               (* A burst's heap goes back to the system, as an owner's does:
-                 the server runs beside one on a small host. *)
-              (* §A9.9: hourly, well within SHARE_SITE_GRACE. *)
+                 the server runs beside one on a small host. Sites are swept
+                 hourly, well within SHARE_SITE_GRACE (§A9.9). *)
               let next_sweep = ref 0. in
               (try
                  while true do

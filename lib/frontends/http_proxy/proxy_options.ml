@@ -75,15 +75,10 @@ let positive name = function
   | v -> v
 
 let sites_url u =
-  let u =
-    if String.ends_with ~suffix:"/" u then String.sub u 0 (String.length u - 1)
-    else u
-  in
-  match Tsync_core.Field_spec.http_url u with
-    | Some why -> invalid "http-proxy: sites_url: %s" why
-    | None when String.contains u '?' || String.contains u '#' ->
-        invalid "http-proxy: sites_url takes no query or fragment"
-    | None -> u
+  if String.contains u '?' || String.contains u '#' then
+    invalid "http-proxy: sites_url takes no query or fragment";
+  if String.ends_with ~suffix:"/" u then String.sub u 0 (String.length u - 1)
+  else u
 
 let resolve (config : Config.t) =
   let bound =
@@ -134,10 +129,7 @@ let resolve (config : Config.t) =
         max_zip_members = size "max_zip_members" 100_000;
         sites =
           (match (str (lv "sites_root"), str (lv "sites_url")) with
-            | Some root, Some url ->
-                if Filename.is_relative root then
-                  invalid "http-proxy: sites_root must be an absolute path";
-                Some { root; url = sites_url url }
+            | Some root, Some url -> Some { root; url = sites_url url }
             | None, None -> None
             | _ -> invalid "http-proxy: sites_root and sites_url go together");
         limits =

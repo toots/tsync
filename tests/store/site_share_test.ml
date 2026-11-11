@@ -196,6 +196,13 @@ let () =
       p "== creating a site share (05 §4.11)";
       create 'a' "plain";
       create 'a' "site/index.html";
+      let linked = folder Folder_id.root "linked" "0000000000a4-1" in
+      R.put_manifest
+        (Key.child d linked "index.html")
+        (Manifest.symlink ~name:"index.html"
+           ~times:{ Fs.mtime = 0; created = 0 }
+           "elsewhere.html");
+      create 'a' "linked";
       create 'a' "site";
       show_site 'a';
       p "== the first visit publishes, then redirects (§A9.9)";
@@ -218,14 +225,30 @@ let () =
         (Filename.concat (Filename.concat sites_root (token 'a')) "img/a.gif");
       get 'a';
       show_site 'a';
-      p "== a publication cut short resumes, keeping the files already there";
+      p "== a publication cut short resumes; the copy is the folder alone";
       ignore (C.store.delete (Option.get (Key.share_site (token 'a'))));
-      Out_channel.with_open_bin
-        (Filename.concat (Filename.concat sites_root (token 'a')) "index.html")
-        (fun oc -> output_string oc (String.make (String.length index) 'x'));
+      let in_copy rel =
+        Filename.concat (Filename.concat sites_root (token 'a')) rel
+      in
+      let write rel content ~mtime =
+        Out_channel.with_open_bin (in_copy rel) (fun oc ->
+            output_string oc content);
+        Option.iter (fun t -> Unix.utimes (in_copy rel) t t) mtime
+      in
+      let same_size_as s = String.make (String.length s) 'x' in
+      write "index.html" (same_size_as index)
+        ~mtime:(Some (Fs.seconds 1_000_000_000));
+      write "style.css" (same_size_as "body{}") ~mtime:None;
+      write "old.html" "a stale page" ~mtime:None;
       get 'a';
       show_site 'a';
-      p "index.html kept: %b" (published "index.html" <> index);
+      p "same size and time kept: %b, same size at another time rewritten: %b"
+        (published "index.html" <> index)
+        (published "style.css" = "body{}");
+      p "== a copy missing from the sites root is published again";
+      Fs.rm_rf (Filename.concat sites_root (token 'a'));
+      get 'a';
+      show_site 'a';
       p "== a folder share that is not a site";
       create ~site:false 'b' "site";
       get ~headers:[("accept", "text/html")] 'b';

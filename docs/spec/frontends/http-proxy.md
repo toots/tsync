@@ -322,15 +322,16 @@ A share server with a **sites root** serves a site share ([02 §2.14](../02-remo
 
 **Static serving.** `<sites URL>/<token>/<path>` answers the published file at `<path>`. A path ending in `/`, the token's own included, answers the folder's **index page**: its child `index.html`, else `index.htm`, names matched exactly; a folder without one → 404. A folder's path without its trailing `/` → 301 to it with one, so the index page's relative links resolve inside the folder. Nothing is listed.
 
-**`""`.** A link-preview fetcher (§A9.3) is answered the share page in folder mode, for its card. Any other request: when the site record (`tsync/shares/cache/<token>.site`) is absent from the store, publish first; then answer 302 to `<sites URL>/<token>/`, with `cache-control: no-store` and `referrer-policy: no-referrer`. Every other folder route answers as for any folder share.
+**`""`.** A link-preview fetcher (§A9.3) is answered the share page in folder mode, for its card. Any other request: when the site record (`tsync/shares/cache/<token>.site`) is absent from the store, or `<token>/` from this server's sites root (the record says a server published the share whole, not that this one did), publish first; then answer 302 to `<sites URL>/<token>/`, with `cache-control: no-store` and `referrer-policy: no-referrer`. Every other folder route answers as for any folder share.
 
 **Publishing** writes each file of the folder, resolved as by path resolution (§A9.3), depth-first and children sorted bytewise, to `<token>/<path>` under the sites root:
 
 - Bytes as §A9.4, each chunk checked against its key; a chunk that is missing or fails its key fails the publication.
 - In a bucket, each object is given `cache-control: no-cache` and the type of §A9.5, except `.js` and `.mjs` → `text/javascript; charset=utf-8` and `.css` → `text/css; charset=utf-8`: the mime table types them `text/plain` for the share page's previews, under which a browser runs neither. In a directory, the operator's server gives both headers.
-- A file already present at its path with the manifest's size is skipped, so a publication cut short by a time limit resumes where it stopped on the next request.
-- The site record is written last, once every file is published. A failure answers 502 `site not published`, is logged, and leaves no site record.
-- A publication runs to its end even when the request that started it is abandoned (a gateway that gives up first). Two publications of one token write the same files, and MAY run at once.
+- Each file carries its manifest's modification time. A file already at its path with the manifest's size and that time, to the second, is kept, so a publication cut short by a time limit resumes where it stopped on the next request.
+- Anything under `<token>/` that the folder does not hold is removed, so the copy is the folder and nothing else, whatever an earlier share of the same token left there.
+- The site record is written last, once every file is published. A failure answers 502 `site not published`, is logged, and leaves no site record. A publication that ends with its share gone (a revocation removed the copy while it was being written) removes the copy and answers 404.
+- A publication runs to its end even when the request that started it is abandoned (a gateway that gives up first). Two publications of one token write the same files, and MAY run at once; a server MAY run one at a time, a request waiting for it reading the record again once its turn comes.
 
 **Removal.** A server with a sites root removes `<token>/` from it:
 

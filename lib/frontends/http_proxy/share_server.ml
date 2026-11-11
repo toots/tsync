@@ -588,49 +588,86 @@ let zip_response t ~max_members id filename =
 let site_dir (sites : Proxy_options.sites) token =
   Filename.concat sites.root token
 
-(* §A9.9: written beside its name and renamed, so the static server never
-   serves a file half written, and a file already there whole is kept. *)
-let publish_file t path (m : Manifest.t) =
-  match Fs.stat_opt path with
-    | Some st when st.st_kind = S_REG && st.st_size = Int64.of_int m.size -> ()
-    | _ ->
-        let part =
-          Filename.concat (Filename.dirname path)
-            ("." ^ Ids.token () ^ ".tsync-part")
-        in
-        Fun.protect ~finally:(fun () -> Fs.unlink_quiet part) @@ fun () ->
-        Fs.with_fd
-          (Fs.openfile part [O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC])
-          (fun fd ->
-            Unix.fchmod fd 0o644;
-            stream t m ~off:0 ~len:m.size (fun b ->
-                ignore (Unix.write_bigarray fd b 0 (Bigstring.length b))));
-        Fs.unix_rename part path
+let site_record token = Option.get (Key.share_site token)
 
+(* §A9.9: the record says some server published the share whole, the copy that
+   this one did. *)
+let published t sites token =
+  Fs.is_dir (site_dir sites token)
+  && t.store.get_opt (site_record token) <> None
+
+let remove_site sites token =
+  if Key.share token <> None then Fs.rm_rf (site_dir sites token)
+
+(* §A9.9: written aside and renamed, so the static server never serves a file
+   half written; a file of the same size and time is kept, which resumes a
+   publication without keeping another share's stale file. *)
+let publish_file t path (m : Manifest.t) =
+  let mtime = Fs.seconds m.mtime in
+  match Fs.stat_opt path with
+    | Some st
+      when st.st_kind = S_REG
+           && st.st_size = Int64.of_int m.size
+           && Float.abs (st.st_mtime -. mtime) < 1. ->
+        ()
+    | _ ->
+        let tmp =
+          Fs.write_temp_with ~perm:0o644 (Filename.dirname path) (fun fd ->
+              Unix.fchmod fd 0o644;
+              let off = ref 0 in
+              stream t m ~off:0 ~len:m.size (fun b ->
+                  let len = Bigstring.length b in
+                  Fs.pwrite_all fd b ~boff:0 ~len ~off:!off;
+                  off := !off + len))
+        in
+        Fun.protect ~finally:(fun () -> Fs.unlink_quiet tmp) @@ fun () ->
+        Unix.utimes tmp mtime mtime;
+        Fs.unix_rename tmp path
+
+(* Anything in a published folder that the shared folder no longer has is
+   removed, so the copy is the folder and nothing else. *)
 let publish t sites token id =
   let rec walk dir id =
     Fs.mkdir_p ~durable:false dir;
     Unix.chmod dir 0o755;
+    let kept =
+      List.filter_map
+        (fun (e : Tree.entry) ->
+          match e.body with
+            | Dir m ->
+                walk (Filename.concat dir m.name) m.id;
+                Some m.name
+            | File m when m.link = None ->
+                publish_file t (Filename.concat dir m.name) m;
+                Some m.name
+            | File _ -> None)
+        (List.sort
+           (fun a b -> compare (entry_name a) (entry_name b))
+           (t.children id))
+    in
     List.iter
-      (fun (e : Tree.entry) ->
-        match e.body with
-          | Dir m -> walk (Filename.concat dir m.name) m.id
-          | File m when m.link = None ->
-              publish_file t (Filename.concat dir m.name) m
-          | File _ -> ())
-      (List.sort
-         (fun a b -> compare (entry_name a) (entry_name b))
-         (t.children id))
+      (fun name ->
+        if not (List.mem name kept) then Fs.rm_rf (Filename.concat dir name))
+      (Fs.readdir dir)
   in
   match walk (site_dir sites token) id with
-    | () -> t.store.put (Option.get (Key.share_site token)) Bigstring.empty
+    | () when share_state t token <> `Live ->
+        (* A revocation removed the copy while this one was being written. *)
+        remove_site sites token;
+        refuse 404 "not found"
+    | () -> t.store.put (site_record token) Bigstring.empty
     | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
         Log.err "share: site not published: %s" (Printexc.to_string e);
         refuse 502 "site not published"
 
+(* ponytail: one publication at a time on this server; per token if several
+   sites are first visited at once often enough to matter. *)
+let publishing = Rt.Fmutex.create ()
+
 let site_response t (sites : Proxy_options.sites) ~token id =
-  if t.store.get_opt (Option.get (Key.share_site token)) = None then
-    publish t sites token id;
+  if not (published t sites token) then
+    Rt.Fmutex.with_lock publishing (fun () ->
+        if not (published t sites token) then publish t sites token id);
   {
     Server.status = 302;
     headers =
@@ -641,9 +678,6 @@ let site_response t (sites : Proxy_options.sites) ~token id =
       ];
     body = Empty;
   }
-
-let remove_site sites token =
-  if Key.share token <> None then Fs.rm_rf (site_dir sites token)
 
 let image_response ~content_type body =
   {
