@@ -185,23 +185,55 @@ let data_integrity_cmd =
       const data_integrity $ verify $ repair $ dry_run $ detail $ source
       $ domain_arg $ verbose)
 
-(* The owner's working directory is not ours: the source goes absolute. *)
-let import src only exclude force_rehash name verbose =
-  let src =
-    if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
-    else src
+(* The owner's working directory is not ours: the paths go absolute. *)
+let import src map only exclude force_rehash name verbose =
+  let absolute p =
+    if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
   in
-  if not (Sys.file_exists src && Sys.is_directory src) then (
-    prerr_endline ("tsync: " ^ src ^ " is not a directory");
-    2)
-  else run_job ?name verbose (Import { src; only; exclude; force_rehash })
+  let refuse msg =
+    prerr_endline ("tsync: " ^ msg);
+    2
+  in
+  match (src, map) with
+    | None, None -> refuse "DIR is required without --map"
+    | _, Some _ when only <> [] || exclude <> [] ->
+        refuse "--map takes no --only or --exclude"
+    | _, Some m when not (Sys.file_exists m) -> refuse (m ^ " does not exist")
+    | src, map ->
+        let src = absolute (Option.value src ~default:".") in
+        if not (Sys.file_exists src && Sys.is_directory src) then
+          refuse (src ^ " is not a directory")
+        else
+          run_job ?name verbose
+            (Import
+               {
+                 src;
+                 only;
+                 exclude;
+                 force_rehash;
+                 map = Option.map absolute map;
+               })
 
 let import_cmd =
   let src =
     Arg.(
-      required
+      value
       & pos 0 (some string) None
-      & info [] ~docv:"DIR" ~doc:"The directory whose content is imported.")
+      & info [] ~docv:"DIR"
+          ~doc:
+            "The directory whose content is imported; with $(b,--map), the \
+             base of its relative local paths (default: the current \
+             directory).")
+  and map_file =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["map"] ~docv:"FILE"
+          ~doc:
+            "Import the files this map lists instead, one per line: \
+             LOCAL_PATH, a tab, DOMAIN_PATH, and optionally a tab, MTIME_NS, a \
+             tab, CREATED_NS (nanoseconds since the epoch, overriding the \
+             file's own times).")
   and only =
     Arg.(
       value & opt_all string []
@@ -222,9 +254,11 @@ let import_cmd =
   cmd "import"
     ~doc:
       "Bring a local directory's content into the domain at the same relative \
-       paths (exit 1 if any file failed)."
+       paths, or the files a map lists at its paths (exit 1 if any file \
+       failed)."
     Term.(
-      const import $ src $ only $ exclude $ force_rehash $ domain_arg $ verbose)
+      const import $ src $ map_file $ only $ exclude $ force_rehash $ domain_arg
+      $ verbose)
 
 (* 07 §5.2: a side is in a domain or local. *)
 let rsync src dst move dry_run name verbose =

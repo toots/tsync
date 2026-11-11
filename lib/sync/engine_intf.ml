@@ -165,13 +165,15 @@ module type S = sig
 
   (** Bring the content of a local directory into the domain at the same
       relative paths (05 §4.3), as local operations, and return once they are
-      committed; what exists is skipped unless [force_rehash]. *)
+      committed; what exists is skipped unless [force_rehash]. With [map], the
+      entries are those of {!Import_plan.of_map}, relative paths from [src]. *)
   val import :
     ?narrate:Narrate.t ->
     ?cancelled:(unit -> bool) ->
     ?only:string list ->
     ?exclude:string list ->
     ?force_rehash:bool ->
+    ?map:string ->
     string ->
     Import_plan.report
 

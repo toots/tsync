@@ -2,7 +2,7 @@ open Tsync_core
 
 type entry =
   | Folder of string
-  | File of { rel : string; path : string; size : int }
+  | File of { rel : string; path : string; size : int; times : Fs.times option }
   | Link of { rel : string; path : string; target : string; size : int }
 
 type outcome =
@@ -113,7 +113,13 @@ let plan ?(only = []) ?(exclude = []) ~symlinks src =
                       if only = [] || selected || any only r then (
                         let pending = flush () in
                         keep_file st_size
-                          (File { rel = r; path = full; size = st_size });
+                          (File
+                             {
+                               rel = r;
+                               path = full;
+                               size = st_size;
+                               times = None;
+                             });
                         pending)
                       else pending
                   | Some { st_kind = S_LNK; _ } ->
@@ -135,4 +141,86 @@ let plan ?(only = []) ?(exclude = []) ~symlinks src =
     files = !files;
     bytes = !bytes;
     unreadable = List.rev !unreadable;
+  }
+
+let nanoseconds s =
+  if s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s then
+    int_of_string_opt s
+  else None
+
+let map_line ~base ~file n line =
+  let invalid fmt = Fail.invalid ("%s:%d: " ^^ fmt) file n in
+  let local, domain, times =
+    match String.split_on_char '\t' line with
+      | [local; domain] -> (local, domain, None)
+      | [local; domain; mtime; created] -> (
+          match (nanoseconds mtime, nanoseconds created) with
+            | Some mtime, Some created ->
+                ( local,
+                  domain,
+                  Some { Fs.mtime; created = Fs.creation ~mtime created } )
+            | _ -> invalid "times are not integers")
+      | _ -> invalid "expected 2 or 4 tab-separated fields"
+  in
+  let rel =
+    try Names.user_path domain
+    with Fail.E _ -> invalid "invalid path %S" domain
+  in
+  if rel = "" then invalid "the domain root is not a file";
+  if Names.is_reserved rel then invalid "%S is reserved" rel;
+  let path =
+    if Filename.is_relative local then Filename.concat base local else local
+  in
+  let size =
+    match Unix.LargeFile.stat path with
+      | { st_size; _ } -> Int64.to_int st_size
+      | exception Unix.Unix_error _ -> 0
+  in
+  File { rel; path; size; times }
+
+let of_map ~base file =
+  let base = absolute base in
+  let lines =
+    (try In_channel.with_open_bin file In_channel.input_lines
+     with Sys_error reason -> Fail.invalid "cannot read the map: %s" reason)
+    |> List.map (fun l ->
+        if String.ends_with ~suffix:"\r" l then
+          String.sub l 0 (String.length l - 1)
+        else l)
+    |> List.mapi (fun i l -> (i + 1, l))
+    |> List.filter (fun (_, l) -> String.trim l <> "")
+  in
+  let files = List.map (fun (n, l) -> map_line ~base ~file n l) lines in
+  let rels = Hashtbl.create 1024 and folders = Hashtbl.create 256 in
+  List.iter
+    (function
+      | File { rel; _ } ->
+          if Hashtbl.mem rels rel then
+            Fail.invalid "%s: %S is mapped twice" file rel;
+          Hashtbl.replace rels rel ();
+          let rec up p =
+            let p = Names.parent_of p in
+            if p <> "" && not (Hashtbl.mem folders p) then (
+              Hashtbl.replace folders p ();
+              up p)
+          in
+          up rel
+      | _ -> ())
+    files;
+  Hashtbl.iter
+    (fun f () ->
+      if Hashtbl.mem rels f then
+        Fail.invalid "%s: %S is mapped as a file and holds others" file f)
+    folders;
+  let folders =
+    Hashtbl.to_seq_keys folders |> List.of_seq |> List.sort String.compare
+  in
+  {
+    entries = List.map (fun f -> Folder f) folders @ files;
+    files = List.length files;
+    bytes =
+      List.fold_left
+        (fun acc -> function File { size; _ } -> acc + size | _ -> acc)
+        0 files;
+    unreadable = [];
   }

@@ -1,0 +1,24 @@
+== bad maps upload nothing
+a duplicate domain path: refused
+a file holding another: refused
+three fields: refused
+times in hex: refused
+a reserved path: refused
+domain entries: 0
+
+== a map of two folders, one time override, one missing file
+imported 2, skipped 0, failed 1
+  Archives/D/gone.txt failed: true
+B sees (override 1015218367123456700, 1015000000000000000):
+  Archives/
+  Archives/D/
+  Archives/D/deep/
+  Archives/D/deep/second.txt: the source's times true
+  Archives/D/first.txt: mtime 1015218367123456700, created 1015000000000000000
+
+== a CRLF line, a name a folder holds, a directory as a file
+imported 1, skipped 0, failed 2
+  Archives/D failed: true
+  Archives/dir failed: true
+B holds crlf.txt: true
+pending: A 0, B 0

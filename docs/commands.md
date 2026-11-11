@@ -57,6 +57,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync cache --fetch [--keep DUR] PATH…` | Make files or folders available offline |
 | `tsync cache --evict PATH…` | Make them online only |
 | `tsync import DIR [--only GLOB] [--exclude GLOB] [--force-rehash]` | Upload a directory into the domain |
+| `tsync import --map FILE [DIR] [--force-rehash]` | Upload the files a map lists, each at its own domain path: one `LOCAL_PATH<TAB>DOMAIN_PATH[<TAB>MTIME_NS<TAB>CREATED_NS]` per line, relative local paths from DIR |
 | `tsync rsync SRC DST [--move] [-n]` | Copy or move between a local path and a domain, or within one |
 | `tsync export [PATH…] DIR [--source NAME] [-j N]` | Write files from the stores to a directory |
 | `tsync share [PATH] [--expires DUR] [--token HEX]` | Print a public link |

@@ -286,6 +286,28 @@
   (diff set_times_test.expected set_times_test.output)))
 
 (executable
+ (name import_map_test)
+ (modules import_map_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  import_map_test.output
+  (run ./import_map_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff import_map_test.expected import_map_test.output)))
+
+(executable
  (name write_times_test)
  (modules write_times_test)
  (libraries

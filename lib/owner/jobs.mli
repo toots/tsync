@@ -16,6 +16,7 @@ type t =
       only : string list;
       exclude : string list;
       force_rehash : bool;
+      map : string option;
     }
   | Rsync of {
       src : string;

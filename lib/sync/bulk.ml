@@ -47,7 +47,7 @@ module Make (C : Engine_ctx.S) = struct
 
     (* The stat is of the open descriptor, and taken again once every chunk is
        read: a file renamed or rewritten meanwhile is never installed. *)
-    let upload_file ?sent run rel path =
+    let upload_file ?sent ?times run rel path =
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
           let st = Unix.fstat fd in
           let size = st.st_size and cs = R.chunk_size () in
@@ -65,8 +65,9 @@ module Make (C : Engine_ctx.S) = struct
           let m =
             try
               R.upload_chunks ?sent ~name:(Names.leaf_of rel) ~size
-                ~chunk_size:cs ~times:(Fs.ftimes fd) (fun i ->
-                  Remote.Lazy (fun () -> read i))
+                ~chunk_size:cs
+                ~times:(Option.value times ~default:(Fs.ftimes fd))
+                (fun i -> Remote.Lazy (fun () -> read i))
             with Remote.Source_changed _ -> changed ()
           in
           if not (unchanged st (Unix.fstat fd)) then changed ();

@@ -353,7 +353,8 @@ entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
    Glob syntax and matching: [01 §17](01-core.md#17-glob-patterns).
 3. `on_plan(files, bytes)`.
 4. **Folders first**: create each planned folder the local tree lacks (§4.2).
-5. **Files**: a key exists if the local tree holds it, as a mirror entry or a staged edit. An
+5. **Files**: a file whose path the local tree holds as a folder fails. A key exists if the local
+   tree holds it, as a mirror entry or a staged edit. An
    existing key is `Skipped_exists`, **even when its content differs**, unless `force_rehash` or
    the key is pending and reported as damaged ([publication.md §4.5](algorithms/publication.md#45-push)), which
    uploads the file again (re-sending chunks missing from the store) and installs its manifest
@@ -365,6 +366,21 @@ entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
 
 A rerun after a crash skips the keys the local tree holds and sends only the chunks the main lacks
 (§4.2).
+
+**With a map.** `import ~src ~map` takes its plan from a map file instead of a walk (step 2), and
+`only` and `exclude` do not apply. Each non-blank line, a trailing CR dropped, is `LOCAL_PATH TAB DOMAIN_PATH`, optionally
+followed by `TAB MTIME_NS TAB CREATED_NS`:
+- a relative `LOCAL_PATH` is taken from `src`; its content is read through links, and one that
+  cannot be read, or is not a regular file, is planned with 0 bytes and fails its entry;
+- `DOMAIN_PATH` is a user path ([01 §2.3](01-core.md#23-leaf-names-and-logical-paths)), and every folder above
+  it is planned, in sort order;
+- the times, decimal digits counting nanoseconds since the epoch, replace the file's own in its manifest, the creation time
+  floored as any from outside ([02 §2.6](02-remote-model.md#26-file-manifest-binary-tsyncm04)). They serve sources whose
+  times the platform misreads, such as FAT's zone-less clock shown as UTC.
+
+The map is refused `invalid` before anything is uploaded when a line has neither 2 nor 4 fields,
+its times are not decimal digits, the map cannot be read, its domain path is invalid, reserved or the root, a domain path appears
+twice, or a domain path is also a folder above another. Steps 4 and 5 then run as written.
 
 ### 4.4 Export
 
