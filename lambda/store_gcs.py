@@ -9,7 +9,8 @@ tier running its groups concurrently the way store_aws runs its part copies.
 import concurrent.futures
 import os
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import google.auth
 import google.auth.transport.requests
@@ -32,6 +33,8 @@ class Store:
         self.presign_ttl = int(os.environ.get("PRESIGN_TTL", "600"))
         self.client = storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)
+        self.sites_name = os.environ.get("SITES_BUCKET") or None
+        self.sites = self.client.bucket(self.sites_name) if self.sites_name else None
         # Resolved on first signature; tests against the emulator have no ADC.
         self.credentials = None
 
@@ -128,6 +131,62 @@ class Store:
             service_account_email=self.credentials.service_account_email,
             access_token=self.credentials.token,
         )
+
+    # ── The sites bucket (http-proxy §A9.9) ──────────────────────────────────
+
+    def site_head(self, key):
+        """(size, the mtime its publication recorded) of a published file, else
+        None."""
+        blob = self.sites.get_blob(key)
+        if blob is None:
+            return None
+        return blob.size, (blob.metadata or {}).get("tsync-mtime")
+
+    def site_copy(self, src_key, key, content_type, mtime, expires):
+        """Copies [src_key] of the store bucket to [key] of the sites bucket by
+        a rewrite, since a compose stays in its bucket. [customTime] is the
+        share's expiry, which the bucket's lifecycle rule deletes after."""
+        dest = self.sites.blob(key)
+        token = None
+        while True:
+            token, _, _ = dest.rewrite(self.bucket.blob(src_key), token=token)
+            if token is None:
+                break
+        dest.content_type = content_type
+        dest.cache_control = "no-cache"
+        dest.metadata = {"tsync-mtime": str(mtime)}
+        dest.custom_time = datetime.fromtimestamp(expires, tz=timezone.utc)
+        dest.patch()
+
+    def site_get(self, key):
+        try:
+            return self.sites.blob(key).download_as_bytes()
+        except NotFound:
+            raise FileNotFoundError(key)
+
+    def site_keys(self, prefix):
+        for blob in self.client.list_blobs(self.sites_name, prefix=prefix):
+            yield blob.name
+
+    def site_delete(self, keys):
+        def drop(key):
+            try:
+                self.sites.blob(key).delete()
+            except NotFound:
+                pass
+
+        self._parallel(drop, keys)
+
+    def site_tokens(self):
+        """The first segments of the sites bucket's keys."""
+        blobs = self.client.list_blobs(self.sites_name, delimiter="/")
+        list(blobs)  # the prefixes fill as the pages are read
+        return [p.rstrip("/") for p in blobs.prefixes]
+
+    def site_url(self, key):
+        """The object at the bucket's own endpoint, whose public reads never
+        expire."""
+        return "https://%s.storage.googleapis.com/%s" % (self.sites_name, quote(key))
 
     def _compose(self, keys, dest_key):
         """Compose <= COMPOSE_MAX source objects into dest_key."""

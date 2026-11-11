@@ -104,7 +104,8 @@ on an adopted one (§9). Notifications and permission grants are added beside wh
   `STORE=gcs`, and `SITES_BUCKET=<name>` and `SITES_DOMAIN=<host>` with a sites bucket.
 - **Publishing.** A compose takes its sources from its own bucket, so a file is composed in `B` under
   the cache, as for a download, then copied to the sites bucket by a rewrite. Each object is written
-  with its type, `Cache-Control: no-cache`, and `customTime` set to the share's expiry. The bucket's
+  with its type, `Cache-Control: no-cache`, its manifest's modification time as the `tsync-mtime`
+  metadata, and `customTime` set to the share's expiry. The bucket's
   own endpoint is `https://<sites bucket>.storage.googleapis.com`. Its CORS allows `GET` and `HEAD`
   from `https://<sites domain>`.
 - **Sweep:** the lifecycle rule of §9 on the sites bucket; the function runs none.

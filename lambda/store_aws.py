@@ -7,6 +7,7 @@ a single chunk is a copy_object, many chunks a concurrent multipart upload-copy.
 
 import concurrent.futures
 import os
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -31,6 +32,8 @@ class Store:
     def __init__(self):
         self.bucket = os.environ["BUCKET"]
         self.presign_ttl = int(os.environ.get("PRESIGN_TTL", "600"))
+        self.sites_bucket = os.environ.get("SITES_BUCKET") or None
+        self.region = os.environ.get("AWS_REGION", "us-east-1")
         self.s3 = boto3.client("s3")
 
     def get_bytes(self, key):
@@ -110,6 +113,68 @@ class Store:
             params["ResponseContentType"] = content_type
         return self.s3.generate_presigned_url(
             "get_object", Params=params, ExpiresIn=self.presign_ttl
+        )
+
+    # ── The sites bucket (http-proxy §A9.9) ──────────────────────────────────
+
+    def site_head(self, key):
+        """(size, the mtime its publication recorded) of a published file, else
+        None."""
+        try:
+            r = self.s3.head_object(Bucket=self.sites_bucket, Key=key)
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+                return None
+            raise
+        return r["ContentLength"], r.get("Metadata", {}).get("tsync-mtime")
+
+    def site_copy(self, src_key, key, content_type, mtime, expires):
+        """Copies [src_key] of the store bucket to [key] of the sites bucket,
+        server-side; the managed copy goes multipart above 5 GB. [expires] has
+        no use here: the sweep removes what outlives its share."""
+        self.s3.copy(
+            {"Bucket": self.bucket, "Key": src_key}, self.sites_bucket, key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "CacheControl": "no-cache",
+                "Metadata": {"tsync-mtime": str(mtime)},
+                "MetadataDirective": "REPLACE",
+            },
+        )
+
+    def site_get(self, key):
+        try:
+            return self.s3.get_object(Bucket=self.sites_bucket, Key=key)["Body"].read()
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                raise FileNotFoundError(key)
+            raise
+
+    def site_keys(self, prefix):
+        paginator = self.s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.sites_bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                yield obj["Key"]
+
+    def site_delete(self, keys):
+        for i in range(0, len(keys), 1000):
+            self.s3.delete_objects(
+                Bucket=self.sites_bucket,
+                Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]], "Quiet": True},
+            )
+
+    def site_tokens(self):
+        """The first segments of the sites bucket's keys."""
+        paginator = self.s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.sites_bucket, Delimiter="/"):
+            for p in page.get("CommonPrefixes", []):
+                yield p["Prefix"].rstrip("/")
+
+    def site_url(self, key):
+        """The object at the bucket's own endpoint, whose public reads never
+        expire."""
+        return "https://%s.s3.%s.amazonaws.com/%s" % (
+            self.sites_bucket, self.region, quote(key),
         )
 
     def assemble(self, chunk_keys, dest_key):

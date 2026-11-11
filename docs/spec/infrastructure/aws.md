@@ -103,8 +103,9 @@ created and adopted buckets alike; each can be declined (§10).
   [11 §7](../11-infrastructure.md#7-share-function), ephemeral storage SHARE_SCRATCH, environment
   `BUCKET=B`, `PRESIGN_TTL=<seconds>`, `MAX_BYTES=<bytes>`, and `SITES_BUCKET=<name>` and
   `SITES_DOMAIN=<host>` with a sites bucket.
-- **Publishing.** A file is copied from its chunks in `B` straight into the sites bucket, by a server-
-  side copy or a multipart upload of copied parts, with its type and `Cache-Control: no-cache`. The
+- **Publishing.** A file is assembled in `B` under the cache, as for a download, then copied into the
+  sites bucket by a managed server-side copy, multipart above 5 GB, with its type,
+  `Cache-Control: no-cache` and its manifest's modification time as the `tsync-mtime` metadata. The
   bucket's own endpoint is `https://<sites bucket>.s3.<region>.amazonaws.com`. Its CORS
   configuration allows `GET` and `HEAD` from `https://<sites domain>`.
 - **Sweep:** an EventBridge Scheduler schedule `tsync-site-sweep-<N>`, `rate(1 hour)`, invoking the

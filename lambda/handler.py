@@ -31,6 +31,7 @@ bite: build on Fargate.
 """
 
 import base64
+import concurrent.futures
 import html
 import json
 import os
@@ -50,6 +51,10 @@ CACHE_PREFIX = cache_prefix(SHARES_PREFIX)
 _root, _sep, _ = SHARES_PREFIX.rstrip("/").rpartition("/")
 ROOT_PREFIX = _root + "/" if _sep else ""
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(10 * 1024**3)))
+# http-proxy §A9.9: published site shares, served on a host of their own.
+SITES_BUCKET = os.environ.get("SITES_BUCKET") or None
+SITES_DOMAIN = (os.environ.get("SITES_DOMAIN") or "").lower() or None
+SITE_PAGE_MAX_BYTES = 4 * 1024 * 1024
 
 # Pick the storage backend by env; import lazily so one deployment zip runs on
 # either cloud without importing the other's SDK.
@@ -224,11 +229,15 @@ def check_size(m):
         raise too_large()
 
 
-def assemble(m, chunk_prefix, cache_key):
+def assemble(m, chunk_prefix, cache_key, ceiling=True):
     """Write a file's bytes to cache_key by server-side chunk assembly (no /tmp).
     Applies the size / count guards, then hands the ordered chunk keys to the
-    store, which stitches them (S3 multipart-copy / GCS compose)."""
-    check_size(m)
+    store, which stitches them (S3 multipart-copy / GCS compose). Without
+    [ceiling], only the store's own part count bounds it."""
+    if ceiling:
+        check_size(m)
+    elif m.count > 10000:
+        raise too_large()
     if m.count == 0:
         store.put_bytes(cache_key, b"")
         return
@@ -423,6 +432,9 @@ def load_share(token):
         raise ShareError(502, "unsupported share manifest")
     if time.time() > share.get("expires", 0):
         raise ShareError(410, "link expired")
+    # 02 §2.14: [site] is true, on a folder share only.
+    if "site" in share and (share["site"] is not True or share.get("type") != "dir"):
+        raise ShareError(502, "corrupt share manifest")
     return share
 
 
@@ -510,11 +522,11 @@ def shared_file(share, path):
     return rel, file_manifest(r[1])
 
 
-def assembled(share, m):
+def assembled(share, m, ceiling=True):
     """The cached key of a shared file's bytes, assembled on first use."""
     cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
-        assemble(m, chunk_prefix(share), cache_key)
+        assemble(m, chunk_prefix(share), cache_key, ceiling)
     return cache_key
 
 
@@ -532,10 +544,8 @@ SERVED_HEADERS = {
 }
 
 
-def serve_path(share, raw):
-    """http-proxy §A9.3 `p/<path>` (object-store-common §6): a playlist is
-    answered whole, since a player resolves its relative URIs against the URL
-    it finally read; anything else is redirected as for `f`."""
+def url_parts(raw):
+    """An encoded path's segments, each decoded after the split."""
     # unquote keeps a malformed escape as is, which the http-proxy refuses.
     if re.search(r"%(?![0-9A-Fa-f]{2})", raw):
         raise ShareError(400, "bad path")
@@ -545,7 +555,14 @@ def serve_path(share, raw):
         raise ShareError(400, "bad path")
     if any("/" in p for p in parts):
         raise ShareError(404, "file not found")
-    rel, m = shared_file(share, "/".join(parts))
+    return parts
+
+
+def serve_path(share, raw):
+    """http-proxy §A9.3 `p/<path>` (object-store-common §6): a playlist is
+    answered whole, since a player resolves its relative URIs against the URL
+    it finally read; anything else is redirected as for `f`."""
+    rel, m = shared_file(share, "/".join(url_parts(raw)))
     name = os.path.basename(rel)
     if mime_type(name) != HLS_MIME:
         return file_answer(assembled(share, m), name, m.size, False, False)
@@ -571,16 +588,19 @@ PREVIEW_FETCHERS = (
 )
 
 
+def preview_fetcher(event):
+    agent = (event.get("headers") or {}).get("user-agent", "").lower()
+    return any(f in agent for f in PREVIEW_FETCHERS)
+
+
 def wants_html(event):
     """Whether the request is a browser navigation: `text/html` listed
     explicitly, which `*/*` and a missing header are not; or a link-preview
     fetcher, which gets the page whatever it accepts."""
-    headers = event.get("headers") or {}
-    accept = headers.get("accept", "")
-    agent = headers.get("user-agent", "").lower()
+    accept = (event.get("headers") or {}).get("accept", "")
     return any(
         r.split(";")[0].strip().lower() == "text/html" for r in accept.split(",")
-    ) or any(f in agent for f in PREVIEW_FETCHERS)
+    ) or preview_fetcher(event)
 
 
 # http-proxy §A9.8: constants of 05 §8.
@@ -641,6 +661,216 @@ def image_response(body, content_type):
     }
 
 
+# ── Site shares (http-proxy §A9.9, security §6.5) ──────────────────────────
+
+# The mime table types these text/plain for the share page's previews, under
+# which a browser runs neither.
+SITE_TYPES = {
+    "js": "text/javascript; charset=utf-8",
+    "mjs": "text/javascript; charset=utf-8",
+    "css": "text/css; charset=utf-8",
+}
+INDEX_PAGES = ("index.html", "index.htm")
+RESERVED_ROOT_NAME = ".tsync-ext"
+
+
+def sites_enabled():
+    return SITES_BUCKET is not None and SITES_DOMAIN is not None
+
+
+def site_record(token):
+    return CACHE_PREFIX + token + ".site"
+
+
+def site_prefix(token):
+    return token + "/"
+
+
+def share_state(token):
+    """'live', 'gone' (absent or expired) or 'unknown' (no answer)."""
+    try:
+        load_share(token)
+        return "live"
+    except ShareError as e:
+        return "gone" if e.code in (404, 410) else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def remove_site(token):
+    keys = list(store.site_keys(site_prefix(token)))
+    if keys:
+        store.site_delete(keys)
+
+
+def load_or_remove(token):
+    """[load_share], removing the published site of a share found gone."""
+    try:
+        return load_share(token)
+    except ShareError as e:
+        if e.code in (404, 410) and sites_enabled():
+            try:
+                remove_site(token)
+            except Exception:
+                traceback.print_exc()
+        raise
+
+
+def site_files(share):
+    """(path below the folder, manifest) of every file of a folder share;
+    symlinks, unreadable manifests and the reserved root folder left out."""
+    root_share = share["folderId"] == ".tsync-root"
+
+    def walk(ns, prefix):
+        for name, key, is_dir, _ in child_objects(ns):
+            if root_share and not prefix and name == RESERVED_ROOT_NAME:
+                continue
+            if is_dir:
+                yield from walk(key, prefix + name + "/")
+                continue
+            try:
+                m = manifest.Manifest(get_bytes(key))
+            except (FileNotFoundError, manifest.Malformed):
+                continue
+            if m.symlink is None:
+                yield prefix + name, m
+
+    yield from walk(shared_folder(share), "")
+
+
+def publish_file(share, token, rel, m):
+    """Copies one file into the sites bucket, unless it is there with the
+    manifest's size and time, which resumes a publication cut short."""
+    dest = site_prefix(token) + rel
+    if store.site_head(dest) == (m.size, str(m.mtime)):
+        return dest
+    cache_key = assembled(share, m, ceiling=False)
+    name = os.path.basename(rel)
+    ctype = (
+        SITE_TYPES.get(extension(name))
+        or content_type(cache_key, name, m.size)
+        or "application/octet-stream"
+    )
+    store.site_copy(cache_key, dest, ctype, m.mtime, share["expires"])
+    return dest
+
+
+def publish_site(share, token):
+    """The whole folder, then the record: anything of the copy that the folder
+    no longer holds is removed, and a copy whose share went in the meantime is
+    removed again."""
+    try:
+        files = list(site_files(share))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+            kept = set(ex.map(lambda f: publish_file(share, token, *f), files))
+        stale = [k for k in store.site_keys(site_prefix(token)) if k not in kept]
+        if stale:
+            store.site_delete(stale)
+    except Exception:
+        traceback.print_exc()
+        raise ShareError(502, "site not published")
+    if share_state(token) != "live":
+        remove_site(token)
+        raise ShareError(404, "not found")
+    store.put_bytes(site_record(token), b"")
+
+
+def ensure_published(share, token):
+    published = object_exists(site_record(token)) and (
+        next(iter(store.site_keys(site_prefix(token))), None) is not None
+    )
+    if not published:
+        publish_site(share, token)
+
+
+def site_redirect(token):
+    return {
+        "statusCode": 302,
+        "headers": {
+            "Location": "https://%s/%s/" % (SITES_DOMAIN, token),
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+        },
+    }
+
+
+def index_key(token, rel):
+    for page in INDEX_PAGES:
+        key = site_prefix(token) + (rel + "/" if rel else "") + page
+        if store.site_head(key) is not None:
+            return key
+    return None
+
+
+def serve_site(token, raw):
+    """`<sites domain>/<token>/<path>`: a page answered whole, so it and its
+    relative links stay on the sites domain; a folder by its index page; any
+    other file by a redirect to the bucket's own endpoint."""
+    share = load_or_remove(token)
+    if share.get("site") is not True:
+        raise ShareError(404, "not found")
+    ensure_published(share, token)
+    parts = url_parts(raw)
+    if any(p in (".", "..") for p in parts):
+        raise ShareError(400, "bad path")
+    rel = "/".join(parts)
+    if raw == "" or raw.endswith("/"):
+        key = index_key(token, rel)
+    else:
+        key = site_prefix(token) + rel
+        if store.site_head(key) is None:
+            if index_key(token, rel) is not None:
+                return {"statusCode": 301, "headers": {"Location": "/%s/%s/" % (token, raw)}}
+            key = None
+    if key is None:
+        raise ShareError(404, "not found")
+    head = store.site_head(key)
+    ctype = mime_type(key) or ""
+    if ctype.startswith("text/html") and head is not None and head[0] <= SITE_PAGE_MAX_BYTES:
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": ctype,
+                "Cache-Control": "no-cache",
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
+            "body": base64.b64encode(store.site_get(key)).decode(),
+            "isBase64Encoded": True,
+        }
+    return {
+        "statusCode": 302,
+        "headers": {"Location": store.site_url(key), "Cache-Control": "no-store"},
+    }
+
+
+def sweep_sites():
+    """Removes every published site whose share is gone; a share that cannot be
+    read keeps its site."""
+    removed = 0
+    for token in list(store.site_tokens()):
+        if share_state(token) == "gone":
+            remove_site(token)
+            removed += 1
+    return removed
+
+
+def request_host(event):
+    headers = event.get("headers") or {}
+    host = (event.get("requestContext") or {}).get("domainName") or headers.get("host", "")
+    return host.split(":")[0].lower()
+
+
+def handle_sites_host(event):
+    raw = event.get("rawPath", "/")[1:]
+    token, slash, rest = raw.partition("/")
+    if not token:
+        raise ShareError(404, "not found")
+    if not slash:
+        return {"statusCode": 301, "headers": {"Location": "/%s/" % token}}
+    return serve_site(token, rest)
+
+
 def preview_response(token):
     """The stored preview image when valid, else the generic one: this function
     carries no thumbnailer."""
@@ -654,13 +884,20 @@ def preview_response(token):
 
 
 def handler(event, context):
+    # The scheduler's input: a request through the function URL is never one.
+    if event.get("sweep") is True:
+        removed = sweep_sites() if sites_enabled() else 0
+        print("sites swept: %d removed" % removed)
+        return {"removed": removed}
     try:
+        if sites_enabled() and request_host(event) == SITES_DOMAIN:
+            return handle_sites_host(event)
         parts = event.get("rawPath", "/").strip("/").split("/")
         token = parts[0] if parts else ""
         sub = parts[1] if len(parts) > 1 else ""
         if not token:
             raise ShareError(400, "missing token")
-        share = load_share(token)
+        share = load_or_remove(token)
         q = event.get("queryStringParameters") or {}
         if share.get("type") not in ("file", "dir"):
             raise ShareError(400, "unknown share type")
@@ -668,6 +905,9 @@ def handler(event, context):
         if sub == "preview":
             return preview_response(token)
         if sub == "":
+            if is_dir and share.get("site") and sites_enabled() and not preview_fetcher(event):
+                ensure_published(share, token)
+                return site_redirect(token)
             if is_dir:
                 return html_response(render_browse(share, token, event))
             if is_media(share["filename"]):
