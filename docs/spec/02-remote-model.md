@@ -413,18 +413,23 @@ any non-empty lowercase hex token of at most 64 characters (caller-supplied toke
 ```json
 {"v":1,"expires":1767225600,"domain":"Files","type":"file","key":"tsync/Files/manifests/<folder id>/<leaf hash>","filename":"report.pdf"}
 {"v":1,"expires":1767225600,"domain":"Files","type":"dir","folderId":"<folder id>","filename":"2024.zip"}
+{"v":1,"expires":1767225600,"domain":"Files","type":"dir","folderId":"<folder id>","filename":"site.zip","site":true}
 {"v":1,"expires":1767225600,"domain":"Files","type":"setup","sealed":"<base64url>"}
 ```
 
 - `expires`: seconds since the epoch. A share of the whole domain has `folderId = ".tsync-root"` and
   `filename = "<domain>.zip"`.
+- `site: true`, on a `dir` share only: the share is a **site share**, served as a published copy of
+  the folder ([security §6.5](algorithms/security-model.md#65-published-sites)).
 - **Reader**: `v` MUST be `1`; `domain` MUST be a valid domain name; for `file`, `key` MUST lie under
-  `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)); for `setup`, `sealed` follows [setup-link §4](algorithms/setup-link.md#4-sealed-manifest).
+  `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)); for `setup`, `sealed` follows [setup-link §4](algorithms/setup-link.md#4-sealed-manifest); `site`, when present, MUST be `true` on a `dir` share.
   Otherwise the share is refused. Unknown fields are ignored.
 - **Artifacts**: `tsync/shares/cache/<token>.data` (a download of that share) and
   `tsync/shares/cache/<h1>-<h2>.data` (a file by whole-file digest), and the **preview image**
   `tsync/shares/cache/<token>.jpg`: a JPEG within the sizes of http-proxy §A9.8, made from the shared
-  file ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)). Readers SHOULD
+  file ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)), and the **site record**
+  `tsync/shares/cache/<token>.site`, written by a share server once it has published that site share
+  whole ([http-proxy §A9.9](frontends/http-proxy.md#a99-site-shares)); its body is empty. Readers SHOULD
   accept a `tsync/shares/<name>.data` object directly under the share tree (meaning a share artifact,
   never a share manifest; clear-cache and expiry delete it); writers MUST NOT produce it.
 

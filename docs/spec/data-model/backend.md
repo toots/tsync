@@ -264,7 +264,8 @@ objects added, existing ones immutable).
 - **Identity** a random token. Shares are **not** scoped by domain on the store (one shared tree per
   store, so IAM rules and lifecycle rules take one literal prefix); the body names its domain.
 - **Attributes** format version, domain, expiry time, type, display filename, and a reference: for a file
-  the manifest's **stored location**, for a folder its **folder id**.
+  the manifest's **stored location**, for a folder its **folder id**. A folder share MAY be a **site
+  share**.
 - **Placement** on one member of the domain (the first readable member advertising a share endpoint),
   written directly, not through the composite. A share is not replicated: it exists only on the store
   that holds it.
@@ -276,17 +277,23 @@ objects added, existing ones immutable).
 - **Referent** a folder share follows the folder by id through moves and renames, and stops serving
   once the folder is removed. A file share follows the manifest's location: it stops serving after a
   rename or delete of the file, and follows a rename of a containing folder.
+- **Published site** a site share is served as a copy of its folder, taken by a share server the first
+  time it is asked for the share and kept until the share is gone
+  ([security-model §6.5](../algorithms/security-model.md#65-published-sites)). Later changes to the
+  folder are not in it: sharing the folder again publishes a new copy under a new token.
 
 ### 2.19 Share artifact cache
 
-- **Represents** assembled bytes a share server built: a whole file, or a folder archive; and a share's
-  preview image, made by its creator or a share server.
+- **Represents** assembled bytes a share server built: a whole file, or a folder archive; a share's
+  preview image, made by its creator or a share server; and a site share's site record, which says
+  its site is published whole.
 - **Identity** a file served by content: the whole-file digest; a download of a share, or its preview
   image: the token.
 - **Derived** entirely from chunks and manifests. A token-keyed folder archive MUST be rebuilt once older
   than `share_archive_max_age` (recommended 1 hour), so a folder share does not serve a frozen snapshot
   forever. Dropped whole by the clear-cache operation; token-keyed artifacts of deleted shares are
-  deleted with them. A preview image is not deleted by age, since only a host with a thumbnailer can
+  deleted with them. A site record dropped while its site stays published makes the next request
+  publish the site again, over the same files. A preview image is not deleted by age, since only a host with a thumbnailer can
   make it again; without it a link's preview falls back to the generic image.
 
 ### 2.20 Deferred debt (not a store object)
