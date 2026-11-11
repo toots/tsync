@@ -32,6 +32,16 @@ output "store_secrets" {
   )
 }
 
+output "sites_domain_dns" {
+  description = "Per store with a sites domain: the domain and the DNS records to publish."
+  value = {
+    for name, store in merge(module.store, module.store_gcs) : name => {
+      domain  = store.sites_domain
+      records = store.sites_domain_dns_records
+    } if store.sites_domain != null
+  }
+}
+
 output "custom_domain_dns" {
   description = "Per store with a custom domain: the domain and the DNS records to publish."
   value = {

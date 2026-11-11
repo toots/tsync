@@ -58,6 +58,8 @@ module "store" {
   iam_user_name         = each.value.iam_user_name
   deploy_share          = each.value.share
   custom_domain         = each.value.custom_domain
+  sites_bucket          = each.value.sites_bucket
+  sites_domain          = each.value.sites_domain
   manage_lifecycle      = each.value.manage_lifecycle
   archive_domains       = each.value.archive_domains
   extra_lifecycle_rules = each.value.extra_lifecycle_rules
@@ -132,6 +134,8 @@ module "store_gcs" {
   function_region = coalesce(each.value.function_region, var.gcp_function_region)
   deploy_share    = each.value.share
   custom_domain   = each.value.custom_domain
+  sites_bucket    = each.value.sites_bucket
+  sites_domain    = each.value.sites_domain
   archive_domains = each.value.archive_domains
   presign_ttl     = each.value.presign_ttl
   max_share_bytes = each.value.max_share_bytes

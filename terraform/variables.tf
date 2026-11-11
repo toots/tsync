@@ -38,6 +38,8 @@ variable "stores" {
     create_bucket = optional(bool)
     share         = optional(bool)
     custom_domain = optional(string)
+    sites_bucket  = optional(string)
+    sites_domain  = optional(string)
     archive_domains = optional(map(object({
       after_days    = number
       storage_class = optional(string) # default: GLACIER_IR
@@ -79,6 +81,8 @@ variable "gcs_stores" {
     create_bucket = optional(bool)
     share         = optional(bool)
     custom_domain = optional(string)
+    sites_bucket  = optional(string)
+    sites_domain  = optional(string)
     archive_domains = optional(map(object({
       after_days    = number
       storage_class = optional(string) # default: ARCHIVE

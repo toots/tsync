@@ -112,6 +112,22 @@ resource "aws_iam_user" "client" {
       error_message = "Store ${var.name}: custom_domain needs the share function (share = true)."
     }
     precondition {
+      condition     = var.sites_bucket == null || (var.deploy_share && var.sites_domain != null)
+      error_message = "Store ${var.name}: sites_bucket needs the share function (share = true) and a sites_domain."
+    }
+    precondition {
+      condition     = var.sites_domain == null || var.sites_bucket != null
+      error_message = "Store ${var.name}: sites_domain needs a sites_bucket."
+    }
+    precondition {
+      condition     = var.sites_bucket == null || !strcontains(coalesce(var.sites_bucket, "-"), ".")
+      error_message = "Store ${var.name}: sites_bucket must not contain a dot, or its HTTPS endpoint's certificate does not match."
+    }
+    precondition {
+      condition     = var.sites_domain == null || var.sites_domain != var.custom_domain
+      error_message = "Store ${var.name}: sites_domain must differ from custom_domain: the shared pages need an origin of their own."
+    }
+    precondition {
       condition     = var.max_share_bytes <= (var.share_scratch_mb - 1024) * 1024 * 1024
       error_message = "Store ${var.name}: max_share_bytes must leave 1 GiB of share_scratch_mb free, since a folder archive is built there."
     }
@@ -200,6 +216,20 @@ data "aws_iam_policy_document" "share" {
     actions   = ["s3:ListBucket"]
     resources = [local.bucket_arn]
   }
+  dynamic "statement" {
+    for_each = aws_s3_bucket.sites[*].arn
+    content {
+      actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
+      resources = ["${statement.value}/*"]
+    }
+  }
+  dynamic "statement" {
+    for_each = aws_s3_bucket.sites[*].arn
+    content {
+      actions   = ["s3:ListBucket"]
+      resources = [statement.value]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "share" {
@@ -231,11 +261,14 @@ resource "aws_lambda_function" "share" {
   }
 
   environment {
-    variables = {
-      BUCKET      = local.bucket_id
-      PRESIGN_TTL = tostring(var.presign_ttl)
-      MAX_BYTES   = tostring(var.max_share_bytes)
-    }
+    variables = merge(
+      {
+        BUCKET      = local.bucket_id
+        PRESIGN_TTL = tostring(var.presign_ttl)
+        MAX_BYTES   = tostring(var.max_share_bytes)
+      },
+      local.sites_enabled == 1 ? { SITES_BUCKET = var.sites_bucket, SITES_DOMAIN = var.sites_domain } : {},
+    )
   }
 }
 

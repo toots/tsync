@@ -88,6 +88,22 @@ resource "google_service_account" "client" {
       error_message = "Store ${var.name}: custom_domain needs the share function (share = true)."
     }
     precondition {
+      condition     = var.sites_bucket == null || (var.deploy_share && var.sites_domain != null)
+      error_message = "Store ${var.name}: sites_bucket needs the share function (share = true) and a sites_domain."
+    }
+    precondition {
+      condition     = var.sites_domain == null || var.sites_bucket != null
+      error_message = "Store ${var.name}: sites_domain needs a sites_bucket."
+    }
+    precondition {
+      condition     = var.sites_bucket == null || !strcontains(coalesce(var.sites_bucket, "-"), ".")
+      error_message = "Store ${var.name}: sites_bucket must not contain a dot, or its HTTPS endpoint's certificate does not match."
+    }
+    precondition {
+      condition     = var.sites_domain == null || var.sites_domain != var.custom_domain
+      error_message = "Store ${var.name}: sites_domain must differ from custom_domain: the shared pages need an origin of their own."
+    }
+    precondition {
       condition     = var.max_share_bytes <= (var.share_memory_mb - 512) * 1024 * 1024
       error_message = "Store ${var.name}: max_share_bytes must leave 512 MB of share_memory_mb free, since a folder archive is built in memory. Raise the two together."
     }
@@ -178,12 +194,15 @@ resource "google_cloudfunctions2_function" "share" {
     available_memory      = "${var.share_memory_mb}M"
     timeout_seconds       = var.timeout_seconds
     service_account_email = google_service_account.share[0].email
-    environment_variables = {
-      BUCKET      = local.bucket_name
-      PRESIGN_TTL = tostring(var.presign_ttl)
-      MAX_BYTES   = tostring(var.max_share_bytes)
-      STORE       = "gcs"
-    }
+    environment_variables = merge(
+      {
+        BUCKET      = local.bucket_name
+        PRESIGN_TTL = tostring(var.presign_ttl)
+        MAX_BYTES   = tostring(var.max_share_bytes)
+        STORE       = "gcs"
+      },
+      local.sites_enabled == 1 ? { SITES_BUCKET = var.sites_bucket, SITES_DOMAIN = var.sites_domain } : {},
+    )
   }
 }
 

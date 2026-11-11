@@ -37,6 +37,22 @@ output "custom_domain_dns_records" {
   ]
 }
 
+output "sites_domain" {
+  description = "The host name site shares are served at, or null."
+  value       = local.sites_enabled == 1 ? var.sites_domain : null
+}
+
+output "sites_domain_dns_records" {
+  description = "DNS records to publish for the sites domain (name/type/value)."
+  value = local.sites_enabled == 0 ? [] : [
+    for record in try(google_cloud_run_domain_mapping.sites[0].status[0].resource_records, []) : {
+      name  = record.name
+      type  = record.type
+      value = record.rrdata
+    }
+  ]
+}
+
 # The service-account JSON key the daemon consumes as `serviceAccountKey`.
 # private_key is base64-encoded JSON; decode before use.
 output "service_account_key" {
