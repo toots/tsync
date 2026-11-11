@@ -15,29 +15,13 @@
 
 #include "tsync_bridge.h"
 
-/* What a thread is to the runtime. The thread that started the runtime is
-   never registered. */
-static char runtime_thread, foreign_thread;
+/* The thread that started the runtime is tagged and never registered. */
+static char runtime_thread;
 static pthread_key_t thread_kind;
 static pthread_once_t thread_kind_once = PTHREAD_ONCE_INIT;
 static atomic_bool started;
 
-/* android §4.3: on Darwin a thread-exit destructor runs after the runtime's
-   thread-local state is gone, so a thread is registered for one call there. */
-#ifdef __APPLE__
-static const int per_call = 1;
-#else
-static const int per_call = 0;
-#endif
-
-static void thread_exits(void *kind) {
-  if (kind == &foreign_thread)
-    caml_c_thread_unregister();
-}
-
-static void make_thread_kind(void) {
-  pthread_key_create(&thread_kind, per_call ? NULL : thread_exits);
-}
+static void make_thread_kind(void) { pthread_key_create(&thread_kind, NULL); }
 
 void tsync_bridge_started(void) {
   pthread_once(&thread_kind_once, make_thread_kind);
@@ -53,20 +37,15 @@ CAMLprim value tsync_bridge_started_by_ocaml(value _unit) {
   return Val_unit;
 }
 
-/* Registration returns with the runtime lock released, so the acquisition is
-   not optional. Answers whether the call owes an unregistration. */
+/* Any other thread is registered for one call (android §4.3): a thread-exit
+   destructor runs after the runtime's thread-local state is gone, and an
+   unregistration there would find nothing to free. Registration returns with
+   the runtime lock released, so the acquisition is not optional. */
 static int enter_ocaml(void) {
   pthread_once(&thread_kind_once, make_thread_kind);
-  void *kind = pthread_getspecific(thread_kind);
-  int unregister = 0;
-  if (kind != &runtime_thread && (per_call || kind == NULL)) {
-    if (!caml_c_thread_register())
-      abort();
-    if (per_call)
-      unregister = 1;
-    else
-      pthread_setspecific(thread_kind, &foreign_thread);
-  }
+  int unregister = pthread_getspecific(thread_kind) != &runtime_thread;
+  if (unregister && !caml_c_thread_register())
+    abort();
   caml_acquire_runtime_system();
   return unregister;
 }

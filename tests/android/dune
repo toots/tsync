@@ -221,7 +221,7 @@
  (action
   (diff thread_exit_test.expected thread_exit_test.output)))
 
-; The ended-thread leak was Darwin's: the macOS job runs it too.
+; Darwin runs it too: the iOS File Provider ends a thread per callback.
 
 (rule
  (alias runtest)
