@@ -145,18 +145,20 @@ class Store:
     def site_copy(self, src_key, key, content_type, mtime, expires):
         """Copies [src_key] of the store bucket to [key] of the sites bucket by
         a rewrite, since a compose stays in its bucket. [customTime] is the
-        share's expiry, which the bucket's lifecycle rule deletes after."""
+        share's expiry, which the bucket's lifecycle rule deletes after.
+
+        The rewrite carries the metadata itself: a patch after it names the
+        generation it made, which a concurrent publication has replaced."""
         dest = self.sites.blob(key)
+        dest.content_type = content_type
+        dest.cache_control = "no-cache"
+        dest.metadata = {"tsync-mtime": str(mtime)}
+        dest.custom_time = datetime.fromtimestamp(expires, tz=timezone.utc)
         token = None
         while True:
             token, _, _ = dest.rewrite(self.bucket.blob(src_key), token=token)
             if token is None:
                 break
-        dest.content_type = content_type
-        dest.cache_control = "no-cache"
-        dest.metadata = {"tsync-mtime": str(mtime)}
-        dest.custom_time = datetime.fromtimestamp(expires, tz=timezone.utc)
-        dest.patch()
 
     def site_get(self, key):
         try:
