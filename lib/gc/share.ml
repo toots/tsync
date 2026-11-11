@@ -19,6 +19,10 @@ let ask link =
 
 let index_pages = ["index.html"; "index.htm"]
 
+let link share_url token =
+  (if String.ends_with ~suffix:"/" share_url then share_url else share_url ^ "/")
+  ^ token
+
 (* 05 §4.11: asked once after a site share is created, so its copy is
    published before the first visitor. *)
 let publish link =
@@ -129,8 +133,7 @@ module Make (C : Context.S) = struct
               | Held b when Bigstring.to_string b = manifest -> t
               | Held _ -> Fail.raise_ Fail.Exists "the token %s is taken" t)
     in
-    let url = if String.ends_with ~suffix:"/" url then url else url ^ "/" in
-    { url = url ^ token; expires }
+    { url = link url token; expires }
 
   let token_of s =
     match String.rindex_opt s '/' with
@@ -156,8 +159,7 @@ module Make (C : Context.S) = struct
   let unpublish (m : Composite.member) token expires =
     let link =
       Option.map
-        (fun url ->
-          (if String.ends_with ~suffix:"/" url then url else url ^ "/") ^ token)
+        (fun url -> link url token)
         (m.store.capabilities Key.shares).share_url
     in
     match Option.map ask link with
@@ -244,10 +246,7 @@ module Make (C : Context.S) = struct
                 if not (Share_preview.available ()) then
                   `Not_made "this build cannot make preview images"
                 else (
-                  let url =
-                    if String.ends_with ~suffix:"/" url then url else url ^ "/"
-                  in
-                  match Share_preview.make ~kind (url ^ token ^ "/f") with
+                  match Share_preview.make ~kind (link url token ^ "/f") with
                     | None -> `Not_made ("no image could be made of " ^ filename)
                     | Some b ->
                         Composite.guard C.composite m "store a share preview";
