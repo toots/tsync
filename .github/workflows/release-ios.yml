@@ -2,11 +2,11 @@ name: release-ios
 
 # Builds and checks the iOS app on every pull request and push to rewrite,
 # publishing nothing (10 §1). On main it runs after the gate, `test`, passes,
-# and uploads to TestFlight (10 §5.6). workflow_run fires only from the default
-# branch's copy of this file.
+# and uploads to TestFlight (10 §5.6); a push to testflight uploads too.
+# workflow_run fires only from the default branch's copy of this file.
 on:
   push:
-    branches: [rewrite]
+    branches: [rewrite, testflight]
   pull_request:
   workflow_run:
     workflows: [test]
@@ -38,7 +38,9 @@ jobs:
              && github.event.workflow_run.head_repository.full_name == github.repository
              && github.event.workflow_run.head_branch == 'main')
             || (github.event_name == 'workflow_dispatch'
-                && github.ref == 'refs/heads/main') }}
+                && github.ref == 'refs/heads/main')
+            || (github.event_name == 'push'
+                && github.ref == 'refs/heads/testflight') }}
       # 10 §4.1: conf-ios records the device target whenever it is installed.
       ARCH: arm64
       SUBARCH: arm64

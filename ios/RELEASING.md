@@ -44,7 +44,12 @@ A build installed from a Mac is `ios/app/run-device.sh`'s job, not this one.
    `IOS_TEAM_ID`, `IOS_APP_ID` and `IOS_APP_GROUP`.
 
 Then run `release-ios` from the Actions tab on `main` (`workflow_dispatch`) to
-see the first upload through.
+see the first upload through. Before a branch reaches `main`, pushing it to
+`testflight` uploads it the same way:
+
+```sh
+git push origin <branch>:testflight
+```
 
 ## Each build
 
