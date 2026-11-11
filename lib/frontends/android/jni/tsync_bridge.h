@@ -15,7 +15,7 @@ void tsync_bridge_started(void);
 char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
                         size_t *length);
 
-/* The host's trust store ("": the system's) and resource bounds (android §4.1
+/* The host's trust store (NULL: the system's) and resource bounds (android §4.1
    items 2 and 7), 0 keeping the core's default; release_growth is in bytes. */
 void tsync_bridge_init(const char *trust_store, const char *transfer_root,
                        long workers, long may_block, long release_growth);

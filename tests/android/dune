@@ -229,3 +229,22 @@
   (= %{system} macosx))
  (action
   (diff thread_exit_test.expected thread_exit_test.output)))
+
+(executable
+ (name trust_store_test)
+ (modules trust_store_test)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names trust_store_stubs))
+ (libraries tsync_core tsync_android_bridge threads.posix unix))
+
+(rule
+ (with-stdout-to
+  trust_store_test.output
+  (run ./trust_store_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff trust_store_test.expected trust_store_test.output)))

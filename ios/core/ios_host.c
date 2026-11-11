@@ -41,7 +41,7 @@ void tsync_ios_start(const char *home, const char *config_file,
     caml_startup(argv);
     tsync_bridge_started();
     caml_release_runtime_system();
-    tsync_bridge_init("", transfer_root, workers, may_block, release_growth);
+    tsync_bridge_init(NULL, transfer_root, workers, may_block, release_growth);
     runtime_started = 1;
   }
   pthread_mutex_unlock(&start_lock);
