@@ -245,6 +245,14 @@ let () =
       p "same size and time kept: %b, same size at another time rewritten: %b"
         (published "index.html" <> index)
         (published "style.css" = "body{}");
+      p "== an entry of the other kind is replaced";
+      ignore (C.store.delete (Option.get (Key.share_site (token 'a'))));
+      Fs.rm_rf (in_copy "img");
+      write "img" "a file where a folder goes" ~mtime:None;
+      Fs.rm_rf (in_copy "style.css");
+      Fs.mkdir_p (in_copy "style.css");
+      get 'a';
+      show_site 'a';
       p "== a copy missing from the sites root is published again";
       Fs.rm_rf (Filename.concat sites_root (token 'a'));
       get 'a';

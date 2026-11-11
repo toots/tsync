@@ -326,11 +326,11 @@ A share server with a **sites root** serves a site share ([02 §2.14](../02-remo
 
 **Publishing** writes each file of the folder, resolved as by path resolution (§A9.3), depth-first and children sorted bytewise, to `<token>/<path>` under the sites root:
 
-- Bytes as §A9.4, each chunk checked against its key; a chunk that is missing or fails its key fails the publication.
+- Bytes as §A9.4, each chunk checked against its key; a chunk that is missing or fails its key fails the publication. A bucket makes the copy inside the provider, from chunks its verify function checked as they were written ([object-store-common §5](../backends/object-store-common.md#5-the-verify-function)), as it does a download.
 - In a bucket, each object is given `cache-control: no-cache` and the type of §A9.5, except `.js` and `.mjs` → `text/javascript; charset=utf-8` and `.css` → `text/css; charset=utf-8`: the mime table types them `text/plain` for the share page's previews, under which a browser runs neither. In a directory, the operator's server gives both headers.
 - Each file carries its manifest's modification time. A file already at its path with the manifest's size and that time, to the second, is kept, so a publication cut short by a time limit resumes where it stopped on the next request.
 - Anything under `<token>/` that the folder does not hold is removed, so the copy is the folder and nothing else, whatever an earlier share of the same token left there.
-- The site record is written last, once every file is published. A failure answers 502 `site not published`, is logged, and leaves no site record. A publication that ends with its share gone (a revocation removed the copy while it was being written) removes the copy and answers 404.
+- The site record is written last, once every file is published. A failure answers 502 `site not published`, is logged, and leaves no site record. A publication that ends with its share gone (a revocation removed the copy while it was being written) removes the copy and answers 404; one that ends with no answer about its share answers 502 and keeps the copy, without a record.
 - A publication runs to its end even when the request that started it is abandoned (a gateway that gives up first). Two publications of one token write the same files, and MAY run at once; a server MAY run one at a time, a request waiting for it reading the record again once its turn comes.
 
 **Removal.** A server with a sites root removes `<token>/` from it:

@@ -208,8 +208,9 @@ data "aws_iam_policy_document" "share" {
     actions   = ["s3:GetObject"]
     resources = ["${local.bucket_arn}/*"]
   }
+  # Delete: the record of a published site goes with its copy.
   statement {
-    actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
+    actions   = ["s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
     resources = ["${local.bucket_arn}/${local.share_cache_prefix}*"]
   }
   statement {

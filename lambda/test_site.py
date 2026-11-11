@@ -152,6 +152,8 @@ def test_sites_domain_serves_pages_and_redirects_files(s3):
     assert folder["headers"]["Location"] == "/%s/img/" % TOKEN
     bare = h.handler(on(SITES_DOMAIN, "/" + TOKEN), None)
     assert bare["headers"]["Location"] == "/%s/" % TOKEN
+    # Only a token is echoed: `/\evil.com/` reads as `//evil.com/` to a browser.
+    assert h.handler(on(SITES_DOMAIN, "/\\evil.com"), None)["statusCode"] == 404
     gif = h.handler(on(SITES_DOMAIN, "/%s/img/a.gif" % TOKEN), None)
     assert gif["statusCode"] == 302
     url = urlparse(gif["headers"]["Location"])
@@ -218,10 +220,16 @@ def test_a_gone_share_has_its_site_removed(s3):
     s3.delete_object(Bucket=BUCKET, Key=PREFIX + TOKEN)
     assert h.handler(on(SHARE_HOST, "/" + TOKEN), None)["statusCode"] == 404
     assert published(s3) == []
-    site_share(s3, expires=1)
+    # A token never published costs one HEAD, and a copy without its record
+    # is the sweep's.
     s3.put_object(Bucket=SITES, Key=TOKEN + "/index.html", Body=INDEX)
+    assert h.handler(on(SHARE_HOST, "/" + TOKEN), None)["statusCode"] == 404
+    assert published(s3) == ["index.html"]
+    site_share(s3, expires=1)
+    put(s3, PREFIX + "cache/" + TOKEN + ".site", b"")
     assert h.handler(on(SITES_DOMAIN, "/%s/" % TOKEN), None)["statusCode"] == 410
     assert published(s3) == []
+    assert not h.object_exists(PREFIX + "cache/" + TOKEN + ".site")
 
 
 def test_the_sweep_removes_gone_sites_and_keeps_unreadable_ones(s3):
@@ -261,4 +269,15 @@ def test_a_missing_chunk_fails_the_publication(s3):
     r = h.handler(on(SHARE_HOST, "/" + TOKEN), None)
     assert r["statusCode"] == 502
     assert r["body"] == "site not published\n"
+    assert not h.object_exists(PREFIX + "cache/" + TOKEN + ".site")
+
+
+def test_a_share_that_cannot_be_read_at_the_end_keeps_its_copy(s3, monkeypatch):
+    h = load_handler()
+    site_folder(s3)
+    site_share(s3)
+    monkeypatch.setattr(h, "share_state", lambda token: "unknown")
+    r = h.handler(on(SHARE_HOST, "/" + TOKEN), None)
+    assert r["statusCode"] == 502
+    assert "index.html" in published(s3)
     assert not h.object_exists(PREFIX + "cache/" + TOKEN + ".site")

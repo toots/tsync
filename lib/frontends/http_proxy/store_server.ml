@@ -1088,11 +1088,13 @@ let sites t = Option.bind t.listener (fun l -> l.sites)
    domain's whose store cannot be read now. *)
 let remove_site_if_gone t (sites : Proxy_options.sites) token =
   match
+    let sharing = sharing t in
     if
-      Fs.is_dir (Share_server.site_dir sites token)
+      sharing <> []
+      && Fs.is_dir (Share_server.site_dir sites token)
       && List.for_all
            (fun s -> Share_server.share_state s token = `Gone)
-           (sharing t)
+           sharing
     then (
       Log.info "share: removing the published site of a share that is gone";
       Share_server.remove_site sites token)

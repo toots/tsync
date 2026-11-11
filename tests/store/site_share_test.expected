@@ -28,6 +28,13 @@ GET a -> 302 location https://sites.example/<token>/ cache-control no-store cont
   site a/style.css 6 bytes 644
   site a/été 1.htm 12 bytes 644
 same size and time kept: true, same size at another time rewritten: true
+== an entry of the other kind is replaced
+GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
+  site a/img/ 755
+  site a/img/a.gif 13 bytes 644
+  site a/index.html 35 bytes 644
+  site a/style.css 6 bytes 644
+  site a/été 1.htm 12 bytes 644
 == a copy missing from the sites root is published again
 GET a -> 302 location https://sites.example/<token>/ cache-control no-store content-type -
   site a/img/ 755

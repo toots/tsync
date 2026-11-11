@@ -123,9 +123,9 @@ def ns_base(dir_prefix):
     return dir_prefix.rstrip("/").rsplit("/", 1)[0] + "/"
 
 
-def child_object(base, key):
-    """A listed child key as (name, key, is_dir, size), else None.
-    For a subdir, key is its own namespace prefix; for a file, its manifest key."""
+def child_entry(base, key):
+    """[child_object], with the parsed manifest of a file (None for a folder)
+    last."""
     try:
         body = get_bytes(key)
     except FileNotFoundError:
@@ -138,14 +138,21 @@ def child_object(base, key):
             m = manifest.Manifest(body)
         except manifest.Malformed:
             return None
-        return (m.name, key, False, m.size)
+        return (m.name, key, False, m.size, m)
     try:
         m = json.loads(body)
     except ValueError:
         return None
     if m.get("dir"):
-        return (m.get("name", ""), base + m["id"] + "/", True, None)
+        return (m.get("name", ""), base + m["id"] + "/", True, None, None)
     return None
+
+
+def child_object(base, key):
+    """A listed child key as (name, key, is_dir, size), else None.
+    For a subdir, key is its own namespace prefix; for a file, its manifest key."""
+    e = child_entry(base, key)
+    return e[:4] if e else None
 
 
 def child_objects(ns_prefix, read=child_object):
@@ -418,10 +425,14 @@ def html_response(body):
 # ── Routing ─────────────────────────────────────────────────────────────────
 
 
-def load_share(token):
+def valid_token(token):
     # The token is the manifest's random hex id; the key lives under our own
     # prefix, so a hex-only token can never point outside it.
-    if not token or any(c not in "0123456789abcdef" for c in token):
+    return bool(token) and all(c in "0123456789abcdef" for c in token)
+
+
+def load_share(token):
+    if not valid_token(token):
         raise ShareError(400, "bad token")
     manifest_key = SHARES_PREFIX + token
     try:
@@ -698,9 +709,11 @@ def share_state(token):
 
 
 def remove_site(token):
+    """The copy, then its record, so that a record says the copy is whole."""
     keys = list(store.site_keys(site_prefix(token)))
     if keys:
         store.site_delete(keys)
+    store.delete(site_record(token))
 
 
 def load_or_remove(token):
@@ -708,9 +721,12 @@ def load_or_remove(token):
     try:
         return load_share(token)
     except ShareError as e:
+        # One HEAD for a token never published; the sweep catches a copy left
+        # without its record.
         if e.code in (404, 410) and sites_enabled():
             try:
-                remove_site(token)
+                if object_exists(site_record(token)):
+                    remove_site(token)
             except Exception:
                 traceback.print_exc()
         raise
@@ -721,21 +737,22 @@ def site_files(share):
     symlinks, unreadable manifests and the reserved root folder left out."""
     root_share = share["folderId"] == ".tsync-root"
 
-    def walk(ns, prefix):
-        for name, key, is_dir, _ in child_objects(ns):
+    def walk(ex, ns, prefix):
+        base = ns_base(ns)
+        keys = [k for k in store.list_keys(ns) if k != ns]
+        for e in ex.map(lambda k: child_entry(base, k), keys):
+            if e is None:
+                continue
+            name, key, is_dir, _, m = e
             if root_share and not prefix and name == RESERVED_ROOT_NAME:
                 continue
             if is_dir:
-                yield from walk(key, prefix + name + "/")
-                continue
-            try:
-                m = manifest.Manifest(get_bytes(key))
-            except (FileNotFoundError, manifest.Malformed):
-                continue
-            if m.symlink is None:
+                yield from walk(ex, key, prefix + name + "/")
+            elif m.symlink is None:
                 yield prefix + name, m
 
-    yield from walk(shared_folder(share), "")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+        return list(walk(ex, shared_folder(share), ""))
 
 
 def publish_file(share, token, rel, m):
@@ -769,17 +786,20 @@ def publish_site(share, token):
     except Exception:
         traceback.print_exc()
         raise ShareError(502, "site not published")
-    if share_state(token) != "live":
+    state = share_state(token)
+    if state == "gone":
+        # A revocation removed the copy while this one was written.
         remove_site(token)
         raise ShareError(404, "not found")
+    if state != "live":
+        raise ShareError(502, "site not published")
     store.put_bytes(site_record(token), b"")
 
 
 def ensure_published(share, token):
-    published = object_exists(site_record(token)) and (
-        next(iter(store.site_keys(site_prefix(token))), None) is not None
-    )
-    if not published:
+    """One sites bucket per store, and [remove_site] drops the record with the
+    copy, so the record alone says the copy is there."""
+    if not object_exists(site_record(token)):
         publish_site(share, token)
 
 
@@ -794,11 +814,13 @@ def site_redirect(token):
     }
 
 
-def index_key(token, rel):
+def index_page(token, rel):
+    """(key, head) of a folder's index page, else None."""
     for page in INDEX_PAGES:
         key = site_prefix(token) + (rel + "/" if rel else "") + page
-        if store.site_head(key) is not None:
-            return key
+        head = store.site_head(key)
+        if head is not None:
+            return key, head
     return None
 
 
@@ -815,18 +837,18 @@ def serve_site(token, raw):
         raise ShareError(400, "bad path")
     rel = "/".join(parts)
     if raw == "" or raw.endswith("/"):
-        key = index_key(token, rel)
+        found = index_page(token, rel)
     else:
         key = site_prefix(token) + rel
-        if store.site_head(key) is None:
-            if index_key(token, rel) is not None:
-                return {"statusCode": 301, "headers": {"Location": "/%s/%s/" % (token, raw)}}
-            key = None
-    if key is None:
+        head = store.site_head(key)
+        if head is None and index_page(token, rel) is not None:
+            return {"statusCode": 301, "headers": {"Location": "/%s/%s/" % (token, raw)}}
+        found = (key, head) if head is not None else None
+    if found is None:
         raise ShareError(404, "not found")
-    head = store.site_head(key)
+    key, head = found
     ctype = mime_type(key) or ""
-    if ctype.startswith("text/html") and head is not None and head[0] <= SITE_PAGE_MAX_BYTES:
+    if ctype.startswith("text/html") and head[0] <= SITE_PAGE_MAX_BYTES:
         return {
             "statusCode": 200,
             "headers": {
@@ -864,7 +886,7 @@ def request_host(event):
 def handle_sites_host(event):
     raw = event.get("rawPath", "/")[1:]
     token, slash, rest = raw.partition("/")
-    if not token:
+    if not valid_token(token):
         raise ShareError(404, "not found")
     if not slash:
         return {"statusCode": 301, "headers": {"Location": "/%s/" % token}}

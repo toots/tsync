@@ -92,13 +92,13 @@ created and adopted buckets alike; each can be declined (§10).
   | On | Actions |
   |---|---|
   | every object of `B` | `s3:GetObject` |
-  | `tsync/shares/cache/*` | `s3:PutObject`, `s3:AbortMultipartUpload` |
+  | `tsync/shares/cache/*` | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` |
   | `B` | `s3:ListBucket` |
   | every object of the sites bucket | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` |
   | the sites bucket | `s3:ListBucket` |
 
-  Assembly is server-side copy and multipart upload, which need no delete. URLs are signed with the
-  role's own credentials.
+  Assembly is server-side copy and multipart upload, which need no delete; the delete is for a site
+  record, which goes with its copy. URLs are signed with the role's own credentials.
 - **Function** `tsync-share-<N>`: Lambda, handler `handler.handler`, the limits of
   [11 §7](../11-infrastructure.md#7-share-function), ephemeral storage SHARE_SCRATCH, environment
   `BUCKET=B`, `PRESIGN_TTL=<seconds>`, `MAX_BYTES=<bytes>`, and `SITES_BUCKET=<name>` and

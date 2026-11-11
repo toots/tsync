@@ -117,7 +117,7 @@ A store has one unless the operator declines it (§10). Its behaviour is
   | On | Rights |
   |---|---|
   | every object | read |
-  | `tsync/shares/cache/` | create; delete where assembly needs temporary objects |
+  | `tsync/shares/cache/` | create; delete where assembly needs temporary objects, and a site record with its copy |
   | the bucket | list |
   | the sites bucket, when there is one | read, create, overwrite, delete, list |
   | itself | sign download URLs, where the provider signs through an API |

@@ -610,7 +610,12 @@ let publish_file t path (m : Manifest.t) =
            && st.st_size = Int64.of_int m.size
            && Float.abs (st.st_mtime -. mtime) < 1. ->
         ()
-    | _ ->
+    | st ->
+        (* A folder of the same name, from an earlier share of this token. *)
+        if
+          Option.map (fun (s : Unix.LargeFile.stats) -> s.st_kind) st
+          = Some S_DIR
+        then Fs.rm_rf path;
         let tmp =
           Fs.write_temp_with ~perm:0o644 (Filename.dirname path) (fun fd ->
               Unix.fchmod fd 0o644;
@@ -628,6 +633,7 @@ let publish_file t path (m : Manifest.t) =
    removed, so the copy is the folder and nothing else. *)
 let publish t sites token id =
   let rec walk dir id =
+    if Fs.exists dir && not (Fs.is_dir dir) then Fs.unlink_quiet dir;
     Fs.mkdir_p ~durable:false dir;
     Unix.chmod dir 0o755;
     let kept =
@@ -651,22 +657,35 @@ let publish t sites token id =
       (Fs.readdir dir)
   in
   match walk (site_dir sites token) id with
-    | () when share_state t token <> `Live ->
-        (* A revocation removed the copy while this one was being written. *)
-        remove_site sites token;
-        refuse 404 "not found"
-    | () -> t.store.put (site_record token) Bigstring.empty
+    | () -> (
+        match share_state t token with
+          | `Live -> t.store.put (site_record token) Bigstring.empty
+          | `Gone ->
+              (* A revocation removed the copy while this one was written. *)
+              remove_site sites token;
+              refuse 404 "not found"
+          | `Unknown -> refuse 502 "site not published")
     | exception ((Fail.E _ | Unix.Unix_error _) as e) ->
         Log.err "share: site not published: %s" (Printexc.to_string e);
         refuse 502 "site not published"
 
-(* ponytail: one publication at a time on this server; per token if several
-   sites are first visited at once often enough to matter. *)
-let publishing = Rt.Fmutex.create ()
+(* One publication per token at a time; the locks of tokens published
+   accumulate until the server restarts, a few words each. *)
+let publishing = Hashtbl.create 16
+let publishing_lock = Mutex.create ()
+
+let token_lock token =
+  Mutex.protect publishing_lock (fun () ->
+      match Hashtbl.find_opt publishing token with
+        | Some l -> l
+        | None ->
+            let l = Rt.Fmutex.create () in
+            Hashtbl.replace publishing token l;
+            l)
 
 let site_response t (sites : Proxy_options.sites) ~token id =
   if not (published t sites token) then
-    Rt.Fmutex.with_lock publishing (fun () ->
+    Rt.Fmutex.with_lock (token_lock token) (fun () ->
         if not (published t sites token) then publish t sites token id);
   {
     Server.status = 302;
