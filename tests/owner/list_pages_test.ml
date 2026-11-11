@@ -72,7 +72,9 @@ let () =
       Owner.one_shot ~what:"test" config dom (fun h ->
           List.iter (write h) ["a"; "b"; "c"; "d"];
           ignore (Handler.call h (Protocol.Sync { full = false }));
-          let c = Option.get (find_entry (Filename.concat root "cache") "c") in
+          let c =
+            Option.get (find_entry (Tsync_config.Paths.cache_root ()) "c")
+          in
           Out_channel.with_open_bin c (fun oc -> output_string oc "garbage");
           write h "e";
           pages h));
