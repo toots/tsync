@@ -469,7 +469,9 @@ extension TsyncExtension: NSFileProviderPartialContentFetching {
                 }
                 let offset = (reply["offset"] as? NSNumber)?.intValue ?? Int(range.start)
                 let length = (reply["length"] as? NSNumber)?.intValue ?? Int(range.length)
-                done((url, Item(row), NSRange(location: offset, length: length), nil))
+                if !done((url, Item(row), NSRange(location: offset, length: length), nil)) {
+                    try? FileManager.default.removeItem(at: url)
+                }
             } catch {
                 if let dest = dest { try? FileManager.default.removeItem(at: dest) }
                 done((nil, nil, none, Errors.map(error, .read, missing: itemIdentifier)))
