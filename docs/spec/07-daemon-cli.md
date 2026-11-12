@@ -108,6 +108,8 @@ that changes a domain runs in the owner (§2.5), bulk publishers included
   socket or to name the holder in a refusal.
 - The lock is released only at process exit, or by a one-shot command after its drain (§3.5).
 - A process started as an owner that finds the lock held exits with status `OWNER_HELD` (§3.3).
+- On iOS the holder record alone is the lock, since the system kills a suspended process that holds
+  a kernel lock ([ios.md §2](frontends/ios.md#2-processes-and-ownership)).
 
 ### 2.4 Which process owns which domain
 
@@ -252,7 +254,10 @@ context. `$TSYNC_MEMTRACE_RATE` is the sampling rate, in (0, 1], default `1e-5`;
 reported on stderr and the default used. A process that cannot open its trace reports it on stderr
 and runs untraced. memtrace before v0.18 is not safe with several domains, so v0.18 or later is required.
 
-`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
+`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file.
+`$TSYNC_CONFIG_FILE`, when set to an absolute path, names the config file in place of the row
+above; an embedding host whose config is shared with another process outside its home (the iOS File
+Provider extension) sets it before the core starts. Modes and
 ownership of the data dir and of every directory holding a socket, lock or flag:
 [security-model.md §7.1](algorithms/security-model.md#71-socket-directory-and-files).
 
@@ -658,7 +663,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `config share DOMAIN... [--url URL] [--expires DUR] \| --revoke LINK` | owner; `--revoke` none | create or revoke a setup link ([setup-link §5](algorithms/setup-link.md#5-creating-and-revoking)) |
 | `config join LINK` | none | add the domains of a setup link ([setup-link §6](algorithms/setup-link.md#6-joining)) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
-| `build-info` | none | compiled frontends and drivers, the extensions, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
+| `build-info` | none | compiled frontends and drivers, the extensions, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), whether the listener can push (`push: libcurl`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
 | `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
 
 `--source NAME` reads from one member ([05 §3.1](05-ops-config.md) `reading_from`); `-j N` sets read

@@ -15,23 +15,13 @@
 
 #include "tsync_bridge.h"
 
-/* What a thread is to the runtime. A thread the bridge registered owes an
-   unregistration when it dies: the runtime would otherwise scan a stack that
-   no longer exists. The thread that started the runtime must never be
-   registered. */
-static char runtime_thread, foreign_thread;
+/* The thread that started the runtime is tagged and never registered. */
+static char runtime_thread;
 static pthread_key_t thread_kind;
 static pthread_once_t thread_kind_once = PTHREAD_ONCE_INIT;
 static atomic_bool started;
 
-static void thread_exits(void *kind) {
-  if (kind == &foreign_thread)
-    caml_c_thread_unregister();
-}
-
-static void make_thread_kind(void) {
-  pthread_key_create(&thread_kind, thread_exits);
-}
+static void make_thread_kind(void) { pthread_key_create(&thread_kind, NULL); }
 
 void tsync_bridge_started(void) {
   pthread_once(&thread_kind_once, make_thread_kind);
@@ -47,20 +37,24 @@ CAMLprim value tsync_bridge_started_by_ocaml(value _unit) {
   return Val_unit;
 }
 
-/* Registration returns with the runtime lock released, so the acquisition
-   that follows is not optional. An unregistered thread has no runtime state
-   and would crash at its first blocking section instead of failing. */
-static void enter_ocaml(void) {
+/* Any other thread is registered for one call (android §4.3): a thread-exit
+   destructor runs after the runtime's thread-local state is gone, and an
+   unregistration there would find nothing to free. Registration returns with
+   the runtime lock released, so the acquisition is not optional. */
+static int enter_ocaml(void) {
   pthread_once(&thread_kind_once, make_thread_kind);
-  if (pthread_getspecific(thread_kind) == NULL) {
-    if (!caml_c_thread_register())
-      abort();
-    pthread_setspecific(thread_kind, &foreign_thread);
-  }
+  int unregister = pthread_getspecific(thread_kind) != &runtime_thread;
+  if (unregister && !caml_c_thread_register())
+    abort();
   caml_acquire_runtime_system();
+  return unregister;
 }
 
-static void leave_ocaml(void) { caml_release_runtime_system(); }
+static void leave_ocaml(int unregister) {
+  caml_release_runtime_system();
+  if (unregister)
+    caml_c_thread_unregister();
+}
 
 static const value *entry(const char *name) {
   char full[64];
@@ -75,7 +69,7 @@ char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
                         size_t *length) {
   if (!atomic_load(&started))
     return NULL;
-  enter_ocaml();
+  int unregister = enter_ocaml();
   CAMLparam0();
   CAMLlocal2(_arg, _result);
   char *text = NULL;
@@ -90,23 +84,28 @@ char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
     }
   }
   CAMLdrop;
-  leave_ocaml();
+  leave_ocaml(unregister);
   return text;
 }
 
 void tsync_bridge_init(const char *trust_store, const char *transfer_root,
                        long workers, long may_block, long release_growth) {
-  enter_ocaml();
+  int unregister = enter_ocaml();
   CAMLparam0();
+  CAMLlocal1(_path);
   CAMLlocalN(_arguments, 5);
-  _arguments[0] = caml_copy_string(trust_store);
+  _arguments[0] = Val_none;
+  if (trust_store != NULL) {
+    _path = caml_copy_string(trust_store);
+    _arguments[0] = caml_alloc_some(_path);
+  }
   _arguments[1] = caml_copy_string(transfer_root);
   _arguments[2] = Val_long(workers);
   _arguments[3] = Val_long(may_block);
   _arguments[4] = Val_long(release_growth);
   caml_callbackN_exn(*entry("init"), 5, _arguments);
   CAMLdrop;
-  leave_ocaml();
+  leave_ocaml(unregister);
 }
 
 static long number(value _result) {
@@ -117,7 +116,7 @@ long tsync_bridge_open(const char *domain, size_t domain_length,
                        const char *ref, size_t ref_length) {
   if (!atomic_load(&started))
     return -EIO;
-  enter_ocaml();
+  int unregister = enter_ocaml();
   CAMLparam0();
   CAMLlocal1(_arg);
   _arg = caml_alloc_string(domain_length + 1 + ref_length);
@@ -126,16 +125,16 @@ long tsync_bridge_open(const char *domain, size_t domain_length,
   memcpy((char *)Bytes_val(_arg) + domain_length + 1, ref, ref_length);
   long handle = number(caml_callback_exn(*entry("open"), _arg));
   CAMLdrop;
-  leave_ocaml();
+  leave_ocaml(unregister);
   return handle;
 }
 
 static long on_handle(const char *name, long handle) {
   if (!atomic_load(&started))
     return -EIO;
-  enter_ocaml();
+  int unregister = enter_ocaml();
   long result = number(caml_callback_exn(*entry(name), Val_long(handle)));
-  leave_ocaml();
+  leave_ocaml(unregister);
   return result;
 }
 
@@ -147,7 +146,7 @@ long tsync_bridge_close(long handle) { return on_handle("close", handle); }
 long tsync_bridge_read(long handle, long offset, long length, char *dest) {
   if (!atomic_load(&started))
     return -EIO;
-  enter_ocaml();
+  int unregister = enter_ocaml();
   CAMLparam0();
   CAMLlocal1(_buffer);
   intnat dims[1] = {length};
@@ -156,6 +155,6 @@ long tsync_bridge_read(long handle, long offset, long length, char *dest) {
   long served = number(caml_callback3_exn(*entry("read"), Val_long(handle),
                                           Val_long(offset), _buffer));
   CAMLdrop;
-  leave_ocaml();
+  leave_ocaml(unregister);
   return served;
 }

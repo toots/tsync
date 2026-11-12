@@ -25,7 +25,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 |---|---|---|---|
 | `test`, the gate (§3) | every push, every pull request, the merge queue | merging, every release | nothing |
 | `conformance` (§3.3) | manual dispatch | nothing automatically | nothing |
-| `release-deb`, `release-rpm`, `release-macos`, `release-windows`, `release-android`, `release-browser` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
+| `release-deb`, `release-rpm`, `release-macos`, `release-windows`, `release-android`, `release-ios`, `release-browser` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
 | `test-android-device` (§3.4) | manual dispatch; a pull request labelled `android-device` | nothing automatically | nothing |
 | `release-repo` | a package release publishing; manual dispatch on `main` | — | the apt and dnf repositories |
 
@@ -99,9 +99,11 @@ deliberate, never an accident of the checkout. The job fails when the reports co
   checkout, updates and upgrades the switch, and installs the named packages' dependencies. Every
   job that builds tsync calls it with its package list, the container release build included; the
   only exception is the gate's user-install job (§3.1 item 7), whose point is to not use it.
-- The Android cross switch is installed by the same script, from the cross-compilation repository
-  the workflow registers first; the package list lives in the repository (the dependencies of the
-  `tsync-android` package), not in the workflow.
+- The Android and iOS cross switches are installed by the same script, from the cross-compilation
+  repository the workflow registers first; the package list lives in the repository (the
+  dependencies of the `tsync-android` and `tsync-ios` packages), not in the workflow. The iOS
+  switch's target, the device SDK, is set by the job's environment, which `conf-ios` records
+  whenever the script installs it.
 - System libraries are installed by the job, since their package names differ per platform.
 - A job MAY restore its switch from a cache: the script's update and upgrade make a restored switch
   hold what a fresh one would. The switch is saved right after the install, so a failed job neither
@@ -112,7 +114,9 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 ### 4.2 Release builds
 
 - A desktop release ships its host's platform TLS implementation, the default, and OpenSSL where that is another one ([security-model §9.2](algorithms/security-model.md#92-implementation-per-host)); an iOS build ships only the platform one. It uses the release profile.
-- A Linux release includes the FUSE frontend, the tray, the discovery library and the Dolphin
+- A Linux release includes pushes ([http-proxy §A4.7](frontends/http-proxy.md#a47-pushes)), the
+  `tsync-push` package over the system's libcurl, and fails when that libcurl lacks HTTP/2. The
+  FUSE frontend, the tray, the discovery library and the Dolphin
   plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
   ships. A macOS release includes the File Provider app.
@@ -126,7 +130,10 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 
 ### 4.3 Optional components
 
-A build skips an optional library whose dependency is missing, without an error. Every build meant
+A build skips an optional library whose dependency is missing, without an error. The optional
+components are the OpenSSL and native TLS implementations, FUSE, the tray, share previews, and pushes
+(`tsync-push`, over the `curl` bindings and a libcurl with HTTP/2; `build-info` says `push: libcurl`,
+else `push: none`). Every build meant
 to contain a component asserts it from `tsync build-info` before it is tested or packaged.
 
 ## 5. Releases
@@ -138,6 +145,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 | `tsync.pkg` | macOS, Apple silicon | check the package signature, that Gatekeeper accepts the notarized package, and that its payload carries the native-messaging manifests of [passwords/browser §2](extensions/passwords/browser.md#2-installing), naming the app's `tsync` |
 | `tsync-setup.exe` | Windows, x86-64 | check the installer's and the identity package's signatures (§5.5), install it as a standard user, check the scheduled task, the autostart value and `tsync build-info`, register a sync root and read a file through it, then uninstall and check that no registration remains |
 | `tsync-arm64-v8a.apk` | Linux, cross-compiled | check that the package holds the core library for its ABI, aligned for 16 KB pages, and that its signer is the tsync key (§5.4) |
+| `tsync.ipa` | macOS, Apple silicon | check that the app and its extension hold the device core, carry the build's identifiers and the production push environment, that it is no development build and carries no test server ([ios-app §5](frontends/ios-app.md#5-settings)), that the app declares every orientation on iPad, which App Store Connect requires of an app that runs there, and that both are signed for App Store distribution; uploaded to TestFlight (§5.6), not to the nightly release |
 | `tsync-browser-extension.zip` | Linux | check that the manifest carries no `key` and the build's version, that no test is packed and that every script parses; uploaded to the Chrome Web Store by hand ([passwords/browser §2](extensions/passwords/browser.md#2-installing)) |
 
 ### 5.1 The nightly release
@@ -193,12 +201,22 @@ signs with a throwaway certificate, runs every check but the signer's, and repor
 "not run". The package version is the build's version with the run number as its last field, so each
 build outranks the one before.
 
+### 5.6 iOS signing and TestFlight
+
+The core is cross-built for the device only (`ios-device`, [ios.md §3](frontends/ios.md#3-host-layout)), from the cross repository's integration branch and this repository's `.github/opam`. The app is archived with automatic signing against the App Store Connect API key, which lets Xcode create the distribution certificate and the profiles in the cloud: no certificate or profile is exported or stored. The identifiers of [ios.md §3.1](frontends/ios.md#31-identifiers) come from secrets, and `TSYNC_APS_ENVIRONMENT` is `production`. `CFBundleVersion` is the workflow's run number, so each upload outranks the one before.
+
+A build that §2 publishes is uploaded to TestFlight for the internal testers, who need no review, and so is every push to the `testflight` branch of this repository, which puts a branch on the testers' phones before it reaches `main`, without waiting on `test`; the job fails unless App Store Connect accepts the upload. Every other build, and every build without the secrets (a fork), archives the app unsigned, runs the checks above except the signature's, and reports the signing half "not run".
+
 ## 6. Secrets
 
 - Every secret a workflow needs is provisioned by a script in `scripts/`: `setup_ci_secrets.sh` for
   the live stores, `setup_repo_signing.sh` for the repository key and `setup_android_signing.sh`
   for the Android keystore (created once; replacing it forces every phone to reinstall). The macOS signing secrets are
   the exception: their certificate is exported by hand, so `macos/RELEASING.md` states the steps.
+  The iOS secrets (the API key, its id and issuer, and the identifiers of
+  [ios.md §3.1](frontends/ios.md#31-identifiers)) are set by `setup_ios_signing.sh` from a key
+  file and an identifiers file the operator holds; the App Store Connect app record and the key,
+  with the Admin role cloud signing needs, are made by hand, as `ios/RELEASING.md` states.
 - A job that requires a secret fails naming each missing one and its script; a job on a fork, which
   receives no secrets, skips the steps that need them and says so.
 
@@ -215,6 +233,7 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
   `tests` jobs are required checks for merging, as the gate is, but which triggers no release:
   releases wait for `test` alone. `release-windows` does not exist yet.
 
+- `release-ios` has uploaded only from the `testflight` branch: the upload from `main`, after the gate, has not been seen.
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.
 - No check drives a real FUSE mount (§3.1 item 1): the end-to-end FUSE test of `main` was not

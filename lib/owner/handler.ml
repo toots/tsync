@@ -631,53 +631,64 @@ let changes t ~anchor ~limit : Protocol.changes =
               note_unnamed t (List.length (List.filter Option.is_none rendered));
           }
 
-(* 08 §3.7: the first page walks the mirror, sorts by path and keeps the walk;
-   later pages read the kept file from the cursor's offset. An entry whose path
-   no longer resolves is skipped: the feed reports its change. *)
+(* 08 §3.7: the first page walks the mirror and keeps the walk; later pages read
+   the kept file from the cursor's offset. An entry whose path no longer
+   resolves is skipped: the feed reports its change. *)
 let walk_file t =
   let (module E : Engine.S) = t.engine in
   Filename.concat
     (Filename.concat (Tsync_checkout.Mirror.root E.mirror) "scratch")
     ".tsync-walk"
 
-let walk_domain t =
+(* Depth first, each folder's children in bytewise order of names. *)
+let walk_domain t emit =
   let (module E : Engine.S) = t.engine in
   let skipped = ref 0 in
-  let rec walk dir container acc =
-    List.fold_left
-      (fun acc (e : E.entry) ->
+  let rec walk dir container =
+    List.iter
+      (fun (e : E.entry) ->
         let path = Names.join dir e.name in
         if e.is_dir then (
           match E.folder_id path with
-            | None ->
-                incr skipped;
-                acc
+            | None -> incr skipped
             | Some id ->
-                walk path (Folder_id.to_string id)
-                  ({
-                     Kept_walk.path;
-                     container;
-                     kind = `Dir;
-                     size = 0;
-                     mtime = 0;
-                   }
-                  :: acc))
+                emit
+                  {
+                    Kept_walk.path;
+                    container;
+                    kind = `Dir;
+                    size = 0;
+                    mtime = 0;
+                  };
+                walk path (Folder_id.to_string id))
         else
-          {
-            Kept_walk.path;
-            container;
-            kind = `File;
-            size = e.st.size;
-            mtime = e.st.times.mtime;
-          }
-          :: acc)
-      acc (E.list_children dir)
+          emit
+            {
+              Kept_walk.path;
+              container;
+              kind = `File;
+              size = e.st.size;
+              mtime = e.st.times.mtime;
+            })
+      (List.sort
+         (fun (a : E.entry) b -> String.compare a.name b.name)
+         (E.list_children dir))
   in
-  let entries = walk "" (Folder_id.to_string Folder_id.root) [] in
-  ( List.sort
-      (fun (a : Kept_walk.entry) b -> String.compare a.path b.path)
-      entries,
-    !skipped )
+  walk "" (Folder_id.to_string Folder_id.root);
+  !skipped
+
+(* A pulled tree's walk goes to disk as it is made, in walk order; a full
+   tree's is sorted by path first. *)
+let produce_walk t emit =
+  if t.pulls <> None then walk_domain t emit
+  else (
+    let entries = ref [] in
+    let skipped = walk_domain t (fun e -> entries := e :: !entries) in
+    List.iter emit
+      (List.sort
+         (fun (a : Kept_walk.entry) b -> String.compare a.path b.path)
+         !entries);
+    skipped)
 
 let list_all t ~after ~limit : Protocol.listing =
   let limit = Option.value ~default:page_limit limit in
@@ -687,13 +698,17 @@ let list_all t ~after ~limit : Protocol.listing =
     match after with
       | Some c -> (Some c, 0)
       | None -> (
-          let entries, skipped = walk_domain t in
-          match Kept_walk.write file ~skipped entries with
-            | _ -> (Kept_walk.first_cursor file, skipped)
+          let skipped = ref 0 in
+          match
+            Kept_walk.write file (fun emit ->
+                skipped := produce_walk t emit;
+                !skipped)
+          with
+            | _ -> (Kept_walk.first_cursor file, !skipped)
             | exception e ->
                 Log.warn "%s: the kept walk could not be written: %s"
                   (domain_name t) (Printexc.to_string e);
-                (None, skipped))
+                (None, !skipped))
   in
   match cursor with
     | None -> Walk_stale
@@ -1076,6 +1091,26 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Full_resync ->
         E.stamp_generation ();
         t.hooks.reannounce ()
+    | Refresh -> (
+        match t.pulls with
+          | Some pulls -> Pulls.refresh pulls
+          | None ->
+              invalid "%s keeps a full tree, which has no refresh"
+                (domain_name t))
+    | Push_register r -> (
+        match (Tsync_domain.Domain.store t.domain).push_register with
+          | None -> false
+          | Some register ->
+              register
+                (Yojson.Safe.to_string
+                   (`Assoc
+                      [
+                        ( "client",
+                          `String (Tsync_domain.Domain.client_uuid t.domain) );
+                        ("token", `String r.token);
+                        ("environment", `String r.environment);
+                        ("domain", `String r.fp_domain);
+                      ])))
     | Cursor -> E.cursor ()
     | Changes_since r -> changes t ~anchor:r.anchor ~limit:r.limit
     | Sync r ->
@@ -1294,7 +1329,7 @@ let call_with : type a.
   if Protocol.refused_while_paused req && E.is_paused () then
     Fail.raise_ Fail.Paused "%s is paused" (domain_name t);
   (match (t.pulls, req) with
-    | Some _, (Changes_since _ | List_all _ | Cursor | Full_resync | Sync _) ->
+    | Some _, (Full_resync | Sync _) ->
         invalid "%s keeps a pulled tree, which has no %s" (domain_name t)
           (Protocol.action req)
     | _ -> ());

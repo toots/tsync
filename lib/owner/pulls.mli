@@ -5,6 +5,8 @@ type params = {
   pull_freshness : float;
   view_max_age : float;
   pull_patience : float;
+  refresh_patience : float;
+  pull_page : int;
 }
 
 (** android §8. *)
@@ -44,6 +46,10 @@ val before_open : t -> string -> unit
 
 (** Rule 4: the pull of a folder a restore walks; raises its failure. *)
 val for_walk : t -> string -> unit
+
+(** android §3.2: starts a refresh pass over the held folders not fresh, unless
+    one runs, and waits for the pass at most [refresh_patience]. *)
+val refresh : t -> unit
 
 (** An [unreachable] answer was given: the next store success is a recovery. *)
 val note_unreachable : t -> unit

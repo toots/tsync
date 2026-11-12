@@ -31,7 +31,7 @@ let () =
           release_growth = given release_growth;
         }
       in
-      try Android_host.init ~bounds ~trust_store ~transfer_root ()
+      try Android_host.init ~bounds ?trust_store ~transfer_root ()
       with e -> Tsync_core.Log.warn "init: %s" (Printexc.to_string e));
   Callback.register "tsync_check_config"
     (text (fun arg ->

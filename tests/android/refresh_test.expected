@@ -1,0 +1,17 @@
+  boot                               ""
+  held folders                       201
+  notices of the first pulls         {changed root}
+== a peer writes into three of them
+  refresh                            ok, before the patience
+  pass, notices when answered        sent
+  pass, log entries read             5
+  pass, notices                      {changed d:<folder1>, changed d:<folder2>, changed d:<folder3>}
+  changes                            [put new.txt, put new.txt, put new.txt]
+== at once again: every folder is fresh
+  refresh                            ok
+  log entries read                   0
+== two refreshes while the store pends
+  refresh                            ok, at the patience
+  refresh during it                  ok, at the patience
+  log entries read                   3
+  notices                            {changed d:<folder4>}

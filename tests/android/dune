@@ -1,7 +1,27 @@
+(library
+ (name lazy_harness)
+ (modules lazy_harness)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_owner
+  tsync_catalog
+  tsync_android
+  tsync_http
+  threads.posix
+  unix
+  yojson))
+
 (executable
  (name lazy_test)
  (modules lazy_test)
  (libraries
+  lazy_harness
   test_support
   tsync_core
   tsync_store
@@ -34,6 +54,66 @@
 
 ; The bridge from threads the runtime did not create, and the ownership an
 ; embedding host holds against a spawned command.
+
+(executable
+ (name feed_test)
+ (modules feed_test)
+ (libraries lazy_harness tsync_android threads.posix unix yojson))
+
+(rule
+ (with-stdout-to
+  feed_test.output
+  (run ./feed_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff feed_test.expected feed_test.output)))
+
+(rule
+ (alias runtest-android-serial)
+ (action
+  (diff feed_test.expected feed_test.output)))
+
+(executable
+ (name pull_page_test)
+ (modules pull_page_test)
+ (libraries lazy_harness tsync_android threads.posix unix yojson))
+
+(rule
+ (with-stdout-to
+  pull_page_test.output
+  (run ./pull_page_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff pull_page_test.expected pull_page_test.output)))
+
+(rule
+ (alias runtest-android-serial)
+ (action
+  (diff pull_page_test.expected pull_page_test.output)))
+
+(executable
+ (name refresh_test)
+ (modules refresh_test)
+ (libraries lazy_harness tsync_android threads.posix unix yojson))
+
+(rule
+ (with-stdout-to
+  refresh_test.output
+  (run ./refresh_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff refresh_test.expected refresh_test.output)))
+
+(rule
+ (alias runtest-android-serial)
+ (action
+  (diff refresh_test.expected refresh_test.output)))
 
 (executable
  (name bridge_test)
@@ -104,3 +184,67 @@
  (alias runtest-android)
  (action
   (diff cli_test.expected cli_test.output)))
+
+(executable
+ (name config_file_test)
+ (modules config_file_test)
+ (libraries tsync_core tsync_catalog tsync_android unix))
+
+(rule
+ (with-stdout-to
+  config_file_test.output
+  (run ./config_file_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff config_file_test.expected config_file_test.output)))
+
+; Bridge calls each from a new thread that ends.
+
+(executable
+ (name thread_exit_test)
+ (modules thread_exit_test)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names thread_exit_stubs))
+ (libraries tsync_core tsync_catalog tsync_android_bridge threads.posix))
+
+(rule
+ (with-stdout-to
+  thread_exit_test.output
+  (run ./thread_exit_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff thread_exit_test.expected thread_exit_test.output)))
+
+; Darwin runs it too: the iOS File Provider ends a thread per callback.
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} macosx))
+ (action
+  (diff thread_exit_test.expected thread_exit_test.output)))
+
+(executable
+ (name trust_store_test)
+ (modules trust_store_test)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names trust_store_stubs))
+ (libraries tsync_core tsync_android_bridge threads.posix unix))
+
+(rule
+ (with-stdout-to
+  trust_store_test.output
+  (run ./trust_store_test.exe)))
+
+(rule
+ (alias runtest-android)
+ (action
+  (diff trust_store_test.expected trust_store_test.output)))

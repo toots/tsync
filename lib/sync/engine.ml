@@ -466,7 +466,7 @@ module Make (C : Engine_ctx.S) = struct
   let pulling_m = Mutex.create ()
 
   (* Concurrent pulls of one folder share one store read. *)
-  let pull dir =
+  let pull ?page dir =
     let running, mine =
       Mutex.protect pulling_m (fun () ->
           match Hashtbl.find_opt pulling dir with
@@ -477,13 +477,13 @@ module Make (C : Engine_ctx.S) = struct
                 (p, true))
     in
     if mine then (
-      let outcome = try Ok (pull_folder dir) with e -> Error e in
+      let outcome = try Ok (pull_folder ?page dir) with e -> Error e in
       Mutex.protect pulling_m (fun () -> Hashtbl.remove pulling dir);
       ignore (Rt.Promise.try_resolve_result running outcome));
     Rt.Promise.await running
 
   (* android §3.2 rule 3: a file's current version is its folder's view. *)
-  let refresh_file path = ignore (pull (Names.parent_of path))
+  let refresh_file ?page path = ignore (pull ?page (Names.parent_of path))
 
   type handle = Local_ops.handle
 

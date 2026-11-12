@@ -29,8 +29,9 @@ val last_commands : entry list -> Log_entry.command list
 
 val read_entry : t -> int -> entry option
 
-(** The entries from [from] on, up to the first absent one. *)
-val read_entries : t -> int -> entry list
+(** The entries from [from] on, up to the first absent one, and at most [max] of
+    them. *)
+val read_entries : ?max:int -> t -> int -> entry list
 
 (** Through the reference gate: fails with "missing chunks" on a collectable
     main that lacks one. *)

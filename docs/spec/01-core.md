@@ -424,7 +424,9 @@ NTP step extends a hold and delays stall detection by the size of the step.
 - **Immutable data may be shared.** Data that is never modified in place — objects only ever
   replaced by rename (store objects on a filesystem store, whole cache bodies, mirror entries),
   whole staged bodies, and content-addressed data — MAY be passed around as an immutable memory
-  mapping, and SHOULD be; no rule in this specification forbids it. A local-filesystem store
+  mapping, and SHOULD be, except on Windows for data the owner may remove or replace under the
+  mapping (cache bodies), which cannot be deleted while mapped
+  ([cloud-files](frontends/cloud-files.md)). A local-filesystem store
   SHOULD read objects by mapping them; positioned reads are equally allowed.
 - **Data written in place** (staged group bodies, partial cache bodies) MAY be mapped only under
   the rules of [04](04-checkout-cache.md) and

@@ -59,9 +59,9 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Wrappers re-raise two-path syscall errors naming the operand at fault.
 - **Seen** — PR #94.
 
-### B-1.12 `syncfs` is not a barrier on macOS
+### B-1.12 `sync()` is not a barrier
 - **Pitfall** — macOS has no `syncfs(2)`; the stub falls back to `sync()`, which only schedules the flush. A bulk pass that wrote without a fsync per file and then relied on one `syncfs` before a durable record (the file-id backfill's completion record) could lose or tear files behind a record that survives the crash: the backfill never ran again, and the files without an id never appeared in Finder. A position written after a `syncfs` at the end of a full walk has the directory half of this exposure.
-- **Check** — Writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record. No code treats `syncfs` as a barrier on a platform where it is `sync()`.
+- **Check** — `Fs.syncfs` is a barrier wherever a bulk pass relies on it: `syncfs(2)` on Linux and Android, `fsync_volume_np` with `SYNC_VOLUME_FULLSYNC | SYNC_VOLUME_WAIT` on macOS and iOS, which returns once the volume is flushed. Where it is none (Windows), writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record.
 - **Seen** — c2d525c8, rewrite.
 
 ## 2. Store API semantics: S3, GCS, S3-compatibles, http-proxy [store]
@@ -253,8 +253,8 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — PR #79, rewrite notes (frontends/android, frontends/fuse); recurred ×2.
 
 ### B-5.7 Foreign threads and JNI
-- **Pitfall** — An unregistered foreign thread has no `Caml_state` and segfaults at its first blocking section. Registration returns with the lock released. Registering the startup thread fails (`caml_c_thread_register` answers 0). Dead threads left registered make the GC scan a vanished stack. `GetPrimitiveArrayCritical` stalls the JVM GC for a whole network read. HOME and `SSL_CERT_FILE` must be set before `caml_startup`; a raising getenv is `exit 2` to an unread stderr. JNI `caml_shutdown` leaks threads bionic cannot cancel.
-- **Check** — Threads register lazily, acquire/release around every entry, and unregister in a key destructor. No critical array spans I/O. The environment is ready before runtime start; every entry checks the runtime is up. Embedding that must shut down execs a process instead.
+- **Pitfall** — An unregistered foreign thread has no `Caml_state` and segfaults at its first blocking section. Registration returns with the lock released. Registering the startup thread fails (`caml_c_thread_register` answers 0). Dead threads left registered make the GC scan a vanished stack; on Darwin a pthread key destructor runs after the runtime's thread-local state is gone, so unregistering there frees nothing and each ended thread keeps about 50 KB. `GetPrimitiveArrayCritical` stalls the JVM GC for a whole network read. HOME and `SSL_CERT_FILE` must be set before `caml_startup`; a raising getenv is `exit 2` to an unread stderr. JNI `caml_shutdown` leaks threads bionic cannot cancel.
+- **Check** — A foreign thread is registered for the length of each entry, acquiring and releasing around it, and unregistered before the entry returns. No critical array spans I/O. The environment is ready before runtime start; every entry checks the runtime is up. Embedding that must shut down execs a process instead.
 - **Seen** — 5ac172e2, rewrite notes (frontends/android).
 
 ### B-5.8 Names that cannot cross an FFI encoding
@@ -438,6 +438,47 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — The codes list asked the owner again at each expiry in a `LaunchedEffect` loop. It kept asking while the app was in the background, never asked when the app came back, and a change the screen itself made (adding a code) waited for the next expiry, up to 30 s.
 - **Check** — A loop that polls on behalf of a visible screen runs under `repeatOnLifecycle(RESUMED)`, and its key includes every local change that alters what it shows.
 - **Seen** — android-totp review.
+
+### B-8.19 A registration record written into a directory only another process creates
+- **Pitfall** — The domain registration pass recorded its identity scheme (file-provider §9.1 step 10) in `<group>/tsync/`, which on macOS the daemon creates. On iOS nothing did: the write failed silently, every pass took every domain for stale, and each launch and return to the foreground removed and re-added every domain, deleting its local copies and turning it off in Files. A self-test running meanwhile timed out.
+- **Check** — A record a pass relies on to stop repeating work creates its directory before writing, and a failure to write it is reported, not ignored. Two launches in a row remove no domain.
+- **Seen** — ios-app milestone 1, on an iPhone 14.
+
+### B-8.20 Asking for a background run the user turned off
+- **Pitfall** — With Background App Refresh off for the app, `BGTaskScheduler.submit` does not throw its documented error: it fails an assertion and aborts the process. The app asked at launch, so it crashed at every launch while the switch was off.
+- **Check** — The app asks for a run only while `backgroundRefreshStatus` is `available`. With the switch off, the app launches and Settings says refresh is off.
+- **Seen** — ios.md §5.2's background runs, on an iPhone 14 with iOS 18.1.1.
+
+### B-8.21 A lifetime file lock on iOS, outside the shared container
+- **Pitfall** — The File Provider extension held each domain's ownership lock (`flock`) for its life, in its own container, on the belief that iOS kills a suspended process only for locks in a shared App Group container. RunningBoard kills it for any lock ("suspended with locked system files … not in allowed directories: (null)", `0xdead10cc`): every time the extension went idle it was killed rather than suspended, twenty times in three hours, and each next use paid a cold boot. Crash-stop recovery hid it.
+- **Check** — An idle extension holds no file lock. The system log (`log collect --device-udid`) shows no `0xdead10cc` for the extension, and crash reports show no RUNNINGBOARD kill.
+- **Seen** — ios-app, on an iPhone 14 with iOS 18.1.1, found while checking memory with 5,000 held folders.
+
+### B-8.22 SwiftUI's background task registering twice
+- **Pitfall** — `.backgroundTask(.appRefresh(id))` registers the task's handler with `BGTaskScheduler` when SwiftUI builds the scene, and again when it rebuilds it after the app returns from the background; the second registration fails an assertion and aborts the app.
+- **Check** — The handler is registered once per process, as the app starts. Leaving the app in the background for a while and bringing it back does not crash it.
+- **Seen** — ios.md §5.2's background runs, on an iPhone 14 with iOS 18.1.1.
+
+### B-8.23 A folder of folders read one anchor at a time
+- **Pitfall** — Listing a folder read its children's bodies in batches, then each child folder's anchor (data-model §6.2) with a read of its own, in turn. A folder of 5,000 folders cost 5,000 round trips: about twenty minutes over a tunnel, longer than any callback keeps an iOS extension running, so the pull never finished there.
+- **Check** — A listing's reads are batches whatever the number of child folders: `tests/remote/wide_folder_test` lists 3,000 folders with no single read.
+- **Seen** — ios.md §8's 5,000-folder check, on an iPhone 14 through a test server behind a tunnel.
+
+### B-8.24 A bulk pass flushing every write
+- **Pitfall** — With `syncfs` no barrier on Apple platforms (B-1.12), an arrival's mirror writes each flushed their data, and each new directory its parent: four flushes per folder. The first pull of a folder of 5,000 folders took minutes on a Mac and never finished on an iPhone, where the extension runs only while a callback is pending; the pulls after it waited on that one.
+- **Check** — An arrival flushes once, at its barrier, whatever its size: the first pull of 5,000 folders ends within one request deadline.
+- **Seen** — ios.md §8's 5,000-folder check, on an iPhone 14; reproduced on a Mac with the Android harness.
+
+### B-8.25 A refresh pass left running once the callback returns
+- **Pitfall** — The change enumeration a push brings sent `refresh`, which started the pass and answered at once, then answered the system with the 0 rows already applied. With no callback pending, iOS suspended the extension and the pass stalled: a pushed change reached Files 83 s later, when Files was opened, though the push arrived within a second.
+- **Check** — With neither app in use, a peer's change pushed to the phone shows in the footprint log as `push for`, then a `changes_since` answering its row within seconds, with no other signal between.
+- **Seen** — ios.md §8's push check on a TestFlight build, iPhone 14; the earlier 78 s delivery was the same stall.
+
+### B-8.26 An APNs key limited to the sandbox
+- **Pitfall** — Apple ties each APNs key to Sandbox, Production, or both. A key made for development builds pushed to every phone installed from a Mac, and every push to a TestFlight build was refused with 403 `BadEnvironmentKeyInToken`.
+- **Check** — The server's `push_key` covers Production; a push to a TestFlight build counts `pushSent`, not `pushFailed`.
+- **Seen** — the first TestFlight build on the test server.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
