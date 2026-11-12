@@ -100,7 +100,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | `Handler` | job report every 10 s, progress line every 0.25 s |
 | `Report` | store state window 5 s |
 | `Owner` | housekeeping every 60 s |
-| `Rt` | 2 to 8 domains, at most 256 blocking threads (finding 94) |
+| `Rt` | 2 domains growing to 8; at most 256 blocking threads, those unused for 30 s exit (finding 94) |
 
 ## Tests
 
