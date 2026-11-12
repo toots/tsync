@@ -17,5 +17,5 @@ build: [
 install: ["dune" "install" "-x" "windows" "-p" "duppy"]
 dev-repo: "git+https://github.com/savonet/liquidsoap.git"
 url {
-  src: "git+https://github.com/savonet/liquidsoap.git#cb3231efc900221273a950c5340509d06b0d5a04"
+  src: "git+https://github.com/savonet/liquidsoap.git#0f4180c777a6f714a01b63faffbd5e380962178c"
 }
