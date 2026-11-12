@@ -17,7 +17,7 @@ Domain Media
     corrupted        not checked — no verification has run
     traffic          up 0 B (0 B/s), down 92 B (4 B/s)
 
-Processes
+Processes — private RAM 183.0 MiB in all
   supervisor   pid 100  up 11m 11s  1.2% cpu
     memory           private 61.0 MiB (heap 18.0 MiB, stacks 2.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
   store-server pid 102  up 11m 9s  1.2% cpu  Media
@@ -72,9 +72,9 @@ Domain Files
 
 Domain Media  NOT ANSWERING
 
-Processes
+Processes — private RAM 61.0 MiB in all, swapped 3.0 MiB, 1 process not answering
   supervisor   pid 100  up 1d 1h  1.2% cpu
-    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB, swapped 3.0 MiB
   owner        pid 102  Media
     NOT ANSWERING    connection refused
 
@@ -107,7 +107,7 @@ Domain Media
     corrupted        not checked — no verification has run
     traffic          up 0 B (0 B/s), down 92 B (4 B/s)
 
-Processes
+Processes — private RAM 183.0 MiB in all
   supervisor   pid 100  up 11m 11s  1.2% cpu
     memory           private 61.0 MiB (heap 18.0 MiB, stacks 2.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
   store-server pid 102  up 11m 9s  1.2% cpu  Media

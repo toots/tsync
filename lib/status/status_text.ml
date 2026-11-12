@@ -277,14 +277,33 @@ let domain b = function
       List.iter (frontend b) d.frontends;
       List.iter (backend b) d.backends
 
+let swapped bytes = if bytes > 0 then ", swapped " ^ isize bytes else ""
+
 let memory (u : usage) =
-  Printf.sprintf "private %s (heap %s%s%s), mapped files %s"
+  Printf.sprintf "private %s (heap %s%s%s), mapped files %s%s"
     (isize u.private_bytes) (isize u.heap_bytes)
     (Option.fold ~none:"" ~some:(fun s -> ", stacks " ^ isize s) u.stacks_bytes)
     (Option.fold ~none:""
        ~some:(fun a -> ", anonymous " ^ isize a)
        u.anonymous_bytes)
     (Option.fold ~none:"?" ~some:isize u.file_backed_bytes)
+    (swapped u.swapped_bytes)
+
+(* What the processes that answered hold of their own: no shared library, no
+   page cache, which the kernel frees on demand. *)
+let processes_heading b (m : machine) =
+  let answered = List.filter_map (fun (p : process) -> p.self) m.processes in
+  let silent = List.length m.processes - List.length answered in
+  let total f = List.fold_left (fun n (s : self) -> n + f s.usage) 0 answered in
+  if answered = [] then Printf.bprintf b "\nProcesses\n"
+  else
+    Printf.bprintf b "\nProcesses — private RAM %s in all%s%s\n"
+      (isize (total (fun u -> u.private_bytes)))
+      (swapped (total (fun u -> u.swapped_bytes)))
+      (if silent > 0 then
+         Printf.sprintf ", %s not answering"
+           (plural silent "process" "processes")
+       else "")
 
 (* A lessee's or Local process's own view: the rate its budget admits at. *)
 let own_uplink b (l : Uplink.link_status) =
@@ -461,7 +480,7 @@ let render ~now m =
   header b m;
   List.iter (domain b) m.domains;
   if m.processes <> [] then (
-    Printf.bprintf b "\nProcesses\n";
+    processes_heading b m;
     List.iter (process b) m.processes);
   uplinks b m;
   jobs b m;
