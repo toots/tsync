@@ -1,0 +1,11 @@
+; The media helper, the one executable that links FFmpeg: installed by the
+; tsync-media packages, run by Tsync_core.Media_helper. Built only where the
+; FFmpeg bindings are, which is why it sits outside the directories the
+; default alias builds.
+
+(executable
+ (name tsync_media)
+ (public_name tsync-media)
+ (package tsync)
+ (optional)
+ (libraries tsync_core tsync_preview_av))

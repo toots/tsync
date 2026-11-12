@@ -338,7 +338,7 @@
     %{dep:../../lambda/share-card.png}
     (setenv
      TSYNC_MEDIA_HELPER
-     %{dep:../../bin/tsync_media.exe}
+     %{dep:../../bin/tsync-media}
      (run ./preview_av_test.exe))))))
 
 (rule

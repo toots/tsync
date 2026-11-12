@@ -75,7 +75,7 @@ test -s %{_builddir}/manifests.files
 install -Dm755 %{srcdir}/_build/default/linux/mounts/libtsync_mounts.so \
   %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 strip --strip-unneeded %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
-install -Dm755 %{srcdir}/_build/default/bin/tsync_media.exe \
+install -Dm755 %{srcdir}/_build/default/bin/tsync-media \
   %{buildroot}%{_libexecdir}/tsync/tsync-media
 strip %{buildroot}%{_libexecdir}/tsync/tsync-media
 install -Dm755 %{srcdir}/_build/default/linux/tray/tsync_tray.exe %{buildroot}%{_bindir}/tsync-tray

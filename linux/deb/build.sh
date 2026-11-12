@@ -90,7 +90,7 @@ pack tsync "$deps, fuse3" "Synchronise folders through object stores" \
 # The media helper: the only binary that links FFmpeg, so that a host without
 # it carries none of FFmpeg's libraries.
 root="$work/tsync-media"
-install -Dm755 _build/default/bin/tsync_media.exe "$root/usr/libexec/tsync/tsync-media"
+install -Dm755 _build/default/bin/tsync-media "$root/usr/libexec/tsync/tsync-media"
 strip "$root/usr/libexec/tsync/tsync-media"
 deps=$(shlibs "$root/usr/libexec/tsync/tsync-media")
 test -n "$deps"

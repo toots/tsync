@@ -85,8 +85,8 @@ if BREW_PREFIX="$(brew --prefix 2>/dev/null)"; then
 fi
 (cd "$REPO" && eval "$(opam env)" && dune build bin/tsync.exe)
 # The media helper is built where the FFmpeg bindings are installed.
-MEDIA="$REPO/_build/default/bin/tsync_media.exe"
-(cd "$REPO" && eval "$(opam env)" && dune build bin/tsync_media.exe 2>/dev/null) \
+MEDIA="$REPO/_build/default/bin/tsync-media"
+(cd "$REPO" && eval "$(opam env)" && dune build bin/tsync-media 2>/dev/null) \
     || say "No FFmpeg bindings: the app makes no preview image"
 
 say "Building $CONFIGURATION app"

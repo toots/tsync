@@ -101,7 +101,7 @@ jobs:
 
       - name: The File Provider frontend, both TLS implementations and the thumbnailer are built
         run: |
-          opam exec -- dune build --profile release bin/tsync.exe bin/tsync_media.exe
+          opam exec -- dune build --profile release bin/tsync.exe bin/tsync-media
           if otool -L ./_build/default/bin/tsync.exe | grep -Eq 'libav(codec|format|filter|util)'; then
             echo "tsync links FFmpeg" >&2; exit 1
           fi

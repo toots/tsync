@@ -36,7 +36,7 @@ opam clean -y
 opam exec -- dune build --profile release bin/tsync.exe \
   linux/tray/tsync_tray.exe linux/mounts/libtsync_mounts.so \
   linux/mounts/libtsync_mounts_fake.so tests/desktop/owner_double.exe \
-  ${TSYNC_FFMPEG:+bin/tsync_media.exe}
+  ${TSYNC_FFMPEG:+bin/tsync-media}
 
 # fuse §2 and 05 tls: a release has the mount and both implementations, and an
 # optional library that failed to build would leave it without them quietly.

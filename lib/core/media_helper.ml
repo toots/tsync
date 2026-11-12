@@ -1,6 +1,5 @@
 let executable = if Sys.win32 then "tsync-media.exe" else "tsync-media"
 
-(* The build tree has the helper under its dune name. *)
 let candidates () =
   let dir =
     Filename.dirname
@@ -9,7 +8,6 @@ let candidates () =
   in
   [
     Filename.concat dir executable;
-    Filename.concat dir "tsync_media.exe";
     Filename.concat
       (Filename.concat
          (Filename.concat (Filename.dirname dir) "libexec")
