@@ -380,3 +380,29 @@ let () =
   Fs.create_new path "secret";
   p "private: %b\n" (Fs.is_private path);
   Fs.rm_rf dir
+
+(* A collection gives back the pools it emptied, so the heap a compaction
+   frees is one whose survivors are scattered: one block in ten kept. *)
+let scattered = ref [||]
+
+let scatter_over bytes =
+  let blocks = Array.init (bytes / 256) (fun _ -> Bytes.create 248) in
+  Gc.full_major ();
+  scattered := Array.init (Array.length blocks / 10) (fun i -> blocks.(i * 10))
+
+let () =
+  p "\n== housekeeping compacts a heap grown past its margin\n";
+  let mib = 1024 * 1024 in
+  let heap () = (Usage.sample ()).heap in
+  Usage.release ();
+  let base = heap () in
+  scatter_over (40 * mib);
+  Gc.full_major ();
+  let grown = heap () in
+  p "scattered survivors keep the heap grown: %b\n" (grown > base + (24 * mib));
+  Usage.release_if_grown ~by:(grown - base + mib) ();
+  p "under its margin, the heap is kept: %b\n" (heap () = grown);
+  Usage.release_if_grown ();
+  p "past the default margin, the heap goes back: %b\n"
+    (heap () < base + (8 * mib));
+  scattered := [||]

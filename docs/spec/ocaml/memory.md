@@ -54,8 +54,12 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   allocates little (an owner copying for hours to a throttled replica) piles them up: jelly's Files
   owner held 87 MiB of mapped chunks. The copy job calls `Fs.drop_mapped_pages` once a chunk is
   sent (`madvise(MADV_DONTNEED)` on mappings only; the mapping is private and never written, so a
-  later read pages it back in), and the owner's housekeeping compacts once the heap grew 64 MiB past
-  its last compaction (`Usage.release_if_grown`).
+  later read pages it back in), and the owner's housekeeping compacts once the heap grew 16 MiB past
+  its last compaction (`Usage.release_if_grown`), logging the heap before and after. A collection
+  already gives back the pools it empties; what the margin holds is the free space of pools a
+  burst's survivors are scattered over (one block in ten kept of 40 MiB: 41 MiB of heap, 4 MiB
+  after compaction). At 64 MiB, an idle Files owner on jelly kept an 82 MiB heap after its startup
+  scan, under the margin.
 - A ranged read does not drop its mapping, which waits for a major collection (review finding 86);
   the store server's whole reads and the local store's write check do.
 - tmpfs pages a process maps count as `RssShmem`, not `RssFile`: a test of mapped memory on `/tmp`

@@ -149,3 +149,8 @@ cleared a shard: its key gone true, the count follows true
 
 == a file created with the default mode is private
 private: true
+
+== housekeeping compacts a heap grown past its margin
+scattered survivors keep the heap grown: true
+under its margin, the heap is kept: true
+past the default margin, the heap goes back: true

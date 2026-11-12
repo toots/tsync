@@ -45,5 +45,10 @@ let release () =
   trim ();
   Atomic.set compacted_heap (heap_bytes ())
 
-let release_if_grown ?(by = 64 * 1024 * 1024) () =
-  if heap_bytes () > Atomic.get compacted_heap + by then release () else trim ()
+let release_if_grown ?(by = 16 * 1024 * 1024) () =
+  let before = heap_bytes () in
+  if before > Atomic.get compacted_heap + by then (
+    release ();
+    Log.info "compacted the heap from %s to %s" (Narrate.size before)
+      (Narrate.size (Atomic.get compacted_heap)))
+  else trim ()
