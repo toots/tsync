@@ -29,7 +29,8 @@ for bundle in "$app" "$appex"; do
 done
 # App Store Connect refuses an iPad app without all four.
 [ "$(value "$app" 'UISupportedInterfaceOrientations~ipad')" = 4 ] || fail "the app does not declare every orientation on iPad"
-# The Diagnostics test server is for builds installed from a Mac.
+# Test actions and the test server are for builds installed from a Mac.
+[ -z "$(value "$app" TsyncDevelopment)" ] || fail "a development build"
 [ -z "$(value "$app" TsyncTestServerURL)" ] || fail "a test server URL is built in"
 [ -z "$(value "$app" TsyncTestServerSecret)" ] || fail "a test server secret is built in"
 

@@ -14,6 +14,8 @@
     <string>$(TSYNC_APP_GROUP)</string>
     <key>TsyncCommit</key>
     <string>$(TSYNC_COMMIT)</string>
+    <key>TsyncDevelopment</key>
+    <string>$(TSYNC_DEVELOPMENT)</string>
     <key>TsyncTestServerURL</key>
     <string>$(TSYNC_TEST_SERVER_URL)</string>
     <key>TsyncTestServerSecret</key>
