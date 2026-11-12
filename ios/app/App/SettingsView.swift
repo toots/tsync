@@ -6,7 +6,6 @@ struct SettingsView: View {
     @State private var removing: Configs.Entry?
     @State private var message = ""
     @State private var adding = false
-    @State private var footprint = ""
 
     var body: some View {
         Form {
@@ -45,29 +44,11 @@ struct SettingsView: View {
                 LabeledContent("Version", value: Bundle.main.version)
                 LabeledContent("Commit", value: Bundle.main.commit)
             }
-            Section("Diagnostics") {
-                Button("Add a local test domain") {
-                    message = Configs.add([Configs.localTest()]) ?? ""
-                    model.reload()
-                }
-                if let server = Configs.testServer() {
-                    Button("Add the test server domain") {
-                        message = Configs.add([server]) ?? ""
-                        model.reload()
-                    }
-                }
-                Button("Run self-test") { Task.detached { await SelfTest.run() } }
-                Button("Walk every domain") { Task.detached { await SelfTest.walk() } }
-                Button("Refresh the memory log") { readFootprint() }
-                Button("Clear the memory log", role: .destructive) {
-                    try? FileManager.default.removeItem(at: Footprint.log)
-                    readFootprint()
-                }
-                Text(footprint).font(.system(.caption2, design: .monospaced))
+            Section {
+                NavigationLink("Diagnostics") { DiagnosticsView() }
             }
         }
         .navigationTitle("tsync")
-        .onAppear { readFootprint() }
         .sheet(isPresented: $adding) {
             NavigationStack { SetupView(dismissible: true) }
         }
@@ -85,12 +66,6 @@ struct SettingsView: View {
 
     private var removingShown: Binding<Bool> {
         Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })
-    }
-
-    private func readFootprint() {
-        SelfTest.copyLogsToDocuments()
-        let text = (try? String(contentsOf: Footprint.log, encoding: .utf8)) ?? "no record yet"
-        footprint = text.split(separator: "\n").suffix(60).joined(separator: "\n")
     }
 }
 

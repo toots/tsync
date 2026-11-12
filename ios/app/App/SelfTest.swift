@@ -130,13 +130,19 @@ enum SelfTest {
     }
 
     /// `devicectl` reads the app's own container but not the App Group's.
-    static func copyLogsToDocuments() {
+    /// The footprint log's copies, older half first, for Share.
+    @discardableResult
+    static func copyLogsToDocuments() -> [URL] {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        var footprint: [URL] = []
         for source in [log, Footprint.oldLog, Footprint.log] {
             let copy = documents.appendingPathComponent(source.lastPathComponent)
             try? FileManager.default.removeItem(at: copy)
-            try? FileManager.default.copyItem(at: source, to: copy)
+            if (try? FileManager.default.copyItem(at: source, to: copy)) != nil, source != log {
+                footprint.append(copy)
+            }
         }
+        return footprint
     }
 
     /// The system creates the item only once the extension has taken the

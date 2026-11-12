@@ -8,7 +8,7 @@ struct TsyncPhoneApp: App {
     init() {
         Core.start(bounded: false)
         BackgroundRefresh.register()
-        if CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
+        if Bundle.main.development, CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
     }
 
     var body: some Scene {

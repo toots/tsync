@@ -50,7 +50,7 @@ log "building Release for $udid (registering it with the team if needed)"
 if ! xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration Release \
     -destination "id=$udid" -derivedDataPath ~/sources/tsync-ios-dd \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
-    TSYNC_COMMIT=$(git rev-parse --short=12 HEAD) \
+    TSYNC_COMMIT=$(git rev-parse --short=12 HEAD) TSYNC_DEVELOPMENT=YES \
     TSYNC_TEST_SERVER_URL="$test_url" TSYNC_TEST_SERVER_SECRET="$test_secret" \
     build > /tmp/tsync-xcodebuild.log 2>&1; then
   grep -E "error:" /tmp/tsync-xcodebuild.log | sort -u
