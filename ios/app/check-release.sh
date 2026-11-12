@@ -27,6 +27,8 @@ done
 for bundle in "$app" "$appex"; do
   [ "$(value "$bundle" TsyncAppGroup)" = "$TSYNC_APP_GROUP" ] || fail "$bundle app group"
 done
+# App Store Connect refuses an iPad app without all four.
+[ "$(value "$app" 'UISupportedInterfaceOrientations~ipad')" = 4 ] || fail "the app does not declare every orientation on iPad"
 # The Diagnostics test server is for builds installed from a Mac.
 [ -z "$(value "$app" TsyncTestServerURL)" ] || fail "a test server URL is built in"
 [ -z "$(value "$app" TsyncTestServerSecret)" ] || fail "a test server secret is built in"
