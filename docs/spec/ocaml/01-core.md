@@ -49,8 +49,9 @@ With no counterpart in spec 01: `Fail` (failure-model), `Dqueue` (durable-queue)
 ## C.2 The runtime (spec §6.1, §6.2)
 
 `Rt` is direct style: a fiber is a duppy task, and a wait is `Rt.suspend`. The scheduler starts at
-the first `Rt.spawn` or `Rt.run_sync`, on a pool of 2 to 8 domains with at most 256 blocking
-threads.
+the first `Rt.spawn` or `Rt.run_sync`, on a pool of 2 domains that grows to at most 8 while ready
+work waits and never shrinks, with at most 256 blocking threads, of which those unused for 30 s
+exit down to one per domain.
 
 | Capability | `Rt` |
 |---|---|
@@ -125,7 +126,6 @@ Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are s
 - **Detached failure (§6.1 R1).** A detached fiber that raises is logged and ends; the process is
   not stopped, and nothing restarts the fiber.
 - **Store-root temporaries (§2.9).** Nothing sweeps the local store's random-form temporaries (122).
-- The blocking-thread pool grows to its 256 slots and never shrinks (94).
 
 ## C.5 Learnings
 

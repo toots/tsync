@@ -33,7 +33,11 @@ val trim : unit -> unit
     domain while it compacts. *)
 val release : unit -> unit
 
-(** {!release} when the heap grew by more than [by] bytes (default 64 MiB) since
-    the last one, else {!trim}: for work that never ends, such as a daemon's
-    background copies. *)
-val release_if_grown : ?by:int -> unit -> unit
+(** {!release} when more than [free] bytes (default 16 MiB) of the major heap
+    are free, as the last collection counted them, logging the heap before and
+    after; else {!trim}. For work that never ends, such as a daemon's background
+    copies. A collection gives back the pools it empties; the free space of
+    pools still holding a live block, such as a burst's scattered survivors,
+    only a compaction does, and a heap growing with live data has none to give.
+*)
+val release_if_fragmented : ?free:int -> unit -> unit

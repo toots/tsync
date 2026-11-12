@@ -179,7 +179,7 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
       let n = E.prune_applied () in
       if n > 0 then Log.info "pruned %d applied-log shards" n;
       E.daily_maintenance ());
-    Usage.release_if_grown ()
+    Usage.release_if_fragmented ()
   in
   try
     while true do
