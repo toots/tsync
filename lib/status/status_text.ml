@@ -277,14 +277,46 @@ let domain b = function
       List.iter (frontend b) d.frontends;
       List.iter (backend b) d.backends
 
+let swapped bytes = if bytes > 0 then ", swapped " ^ isize bytes else ""
+
 let memory (u : usage) =
-  Printf.sprintf "private %s (heap %s%s%s), mapped files %s"
+  Printf.sprintf "private %s (heap %s%s%s), mapped files %s%s"
     (isize u.private_bytes) (isize u.heap_bytes)
     (Option.fold ~none:"" ~some:(fun s -> ", stacks " ^ isize s) u.stacks_bytes)
     (Option.fold ~none:""
        ~some:(fun a -> ", anonymous " ^ isize a)
        u.anonymous_bytes)
     (Option.fold ~none:"?" ~some:isize u.file_backed_bytes)
+    (swapped u.swapped_bytes)
+
+(* A process's report, when it answered every question: one with an error is
+   NOT ANSWERING even if part of it answered. *)
+let answering (p : process) =
+  match (p.self, p.error) with Some s, None -> Some s | _ -> None
+
+(* A process's own RAM: its anonymous memory, the heap and malloc'd buffers.
+   Private file pages are left out, being page cache the kernel frees on
+   demand, as are shared libraries. *)
+let own_ram (u : usage) =
+  Option.value u.anonymous_bytes ~default:u.private_bytes
+
+let processes_heading b (m : machine) =
+  let answered = List.filter_map answering m.processes in
+  let silent =
+    List.length (List.filter (fun (p : process) -> p.error <> None) m.processes)
+  in
+  let total f = List.fold_left (fun n (s : self) -> n + f s.usage) 0 answered in
+  Printf.bprintf b "\nProcesses%s%s\n"
+    (if answered = [] then ""
+     else
+       Printf.sprintf " — private RAM %s in all%s"
+         (isize (total own_ram))
+         (swapped (total (fun u -> u.swapped_bytes))))
+    (if silent = 0 then ""
+     else
+       Printf.sprintf "%s%s not answering"
+         (if answered = [] then " — " else ", ")
+         (plural silent "process" "processes"))
 
 (* A lessee's or Local process's own view: the rate its budget admits at. *)
 let own_uplink b (l : Uplink.link_status) =
@@ -333,14 +365,14 @@ let process b (p : process) =
               (Option.fold ~none:"pid -" ~some:(Printf.sprintf "pid %d") p.pid);
             Option.map
               (fun (s : self) -> "up " ^ duration s.server.uptime)
-              p.self;
+              (answering p);
             Option.map
               (fun (s : self) ->
                 Printf.sprintf "%.1f%% cpu" s.usage.cpu_percent)
-              p.self;
+              (answering p);
             (if p.serves = [] then None else Some (String.concat ", " p.serves));
           ]));
-  match (p.self, p.error) with
+  match (answering p, p.error) with
     | _, Some e -> row b "    " "NOT ANSWERING" e
     | Some s, None ->
         row b "    " "memory" (memory s.usage);
@@ -461,7 +493,7 @@ let render ~now m =
   header b m;
   List.iter (domain b) m.domains;
   if m.processes <> [] then (
-    Printf.bprintf b "\nProcesses\n";
+    processes_heading b m;
     List.iter (process b) m.processes);
   uplinks b m;
   jobs b m;
