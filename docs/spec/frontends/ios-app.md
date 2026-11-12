@@ -82,17 +82,28 @@ the framework's domain-change notification.
   available on this iPhone.
 - **Add a domain** opens Setup.
 - **About**: the app's version and the commit it was built from.
-- **Diagnostics**: the extension's footprint log ([ios.md §7](ios.md#7-memory-and-observed-behaviour))
-  with Refresh, which also copies it and its previous half (`footprint.old.log`) to the app's
-  Documents for `devicectl`, and Clear; **Add a local test domain** (a domain whose store is a directory in the App
-  Group, for trying the extension without a server); **Run self-test**, the test that
-  [ios.md §8](ios.md#8-conformance) runs on a device; **Walk every domain**, which lists every folder
-  of every domain through the file system, so that the extension pulls and then holds them all, for
-  ios.md §8's check of a refresh pass over thousands of held folders. It leaves out the system's `.Trash`, which the extension does not serve, and runs while
-  the app is in front. One walk runs at a time: a tap during one is ignored. The walk logs its start, every
-  100 folders, each folder it waits on and how long, each it skips, and its end. It is in every build: the log costs the
-  extension one system call and one append per request (ios.md §7), and the rest runs only when
-  asked.
+- **Diagnostics**, a row at the end that opens a page of its own: the extension's footprint log
+  ([ios.md §7](ios.md#7-memory-and-observed-behaviour)), its last 60 lines, with **Refresh**, which
+  also copies it and its previous half (`footprint.old.log`) to the app's Documents for `devicectl`,
+  **Share**, which offers both files to the system's share sheet so a tester can attach them to a
+  report, and **Clear**. It is in every build: the log costs the extension one system call and one
+  append per request (ios.md §7), and the rest runs only when asked.
+- A development build, one installed from a Mac (`run-device.sh` sets `TSYNC_DEVELOPMENT`), adds to
+  that page the actions that write test data or load every server:
+  - **Add a local test domain**, a domain whose store is a directory in the App Group, for trying
+    the extension without a server;
+  - **Add the test server domain**, when the build is also given a test server from a file outside
+    the repository;
+  - **Run self-test**, the test that [ios.md §8](ios.md#8-conformance) runs on a device;
+  - **Walk every domain**, which lists every folder of every domain through the file system, so
+    that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
+    thousands of held folders. It leaves out the system's `.Trash`, which the extension does not
+    serve, and runs while the app is in front. One walk runs at a time: a tap during one is ignored.
+    The walk logs its start, every 100 folders, each folder it waits on and how long, each it skips,
+    and its end.
+
+  A release build offers none of them, carries no test server, and does not run the self-test at
+  launch: `check-release.sh` fails one built with `TSYNC_DEVELOPMENT` or a test server (10 §5).
 
 ## 6. Conformance
 
@@ -106,6 +117,8 @@ the framework's domain-change notification.
 - A domain turned off in Files is shown so within a second of returning to the app, and the mark goes
   once it is turned on.
 - On a device without the live scanner, Scan setup code is not offered.
+- A build from TestFlight shows Domains, About and the Diagnostics row, whose page holds the log and
+  its three actions only; Share hands over both halves of the log.
 - With Background App Refresh turned off for tsync, Settings says so; turned on, it says nothing.
 - Removing a domain and joining it again with a different server says the new settings may wait for
   a restart; joining it again from the same link says nothing.
