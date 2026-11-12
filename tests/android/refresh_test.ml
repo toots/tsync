@@ -10,6 +10,20 @@ let folders = List.init 200 (Printf.sprintf "f%03d")
 let freshness = 4.
 let wait_stale () = Thread.delay (freshness +. 0.1)
 
+(* How long a refresh waits for a pass that does not end. *)
+let patience = 1.
+
+let timed_refresh () =
+  let started = Unix.gettimeofday () in
+  let answer = outcome (action "refresh" []) in
+  let waited = Unix.gettimeofday () -. started in
+  let after =
+    if waited < patience then "before the patience"
+    else if waited < patience +. 1. then "at the patience"
+    else Printf.sprintf "after %.1f s" waited
+  in
+  answer ^ ", " ^ after
+
 let seen () =
   ( Atomic.get entry_reads,
     Mutex.protect notices_m (fun () -> List.length !notices) )
@@ -37,7 +51,11 @@ let op j = Printf.sprintf "%s %s" (text j "op") (text j "name")
 
 let pass label =
   let before = Atomic.get entry_reads in
-  p "  %-34s %s" "refresh" (outcome (action "refresh" []));
+  let notices_before = snd (seen ()) in
+  p "  %-34s %s" "refresh" (timed_refresh ());
+  p "  %-34s %s"
+    (label ^ ", notices when answered")
+    (if snd (seen ()) > notices_before then "sent" else "none yet");
   until_quiet ();
   p "  %-34s %d" (label ^ ", log entries read") (Atomic.get entry_reads - before);
   show_notices (label ^ ", notices")
@@ -53,6 +71,7 @@ let () =
            pull_freshness = freshness;
            view_max_age = 3600.;
            pull_patience = 30.;
+           refresh_patience = patience;
            pull_page = 256;
          }
        "");
@@ -86,8 +105,8 @@ let () =
   wait_stale ();
   Atomic.set mode `Hung;
   let before = Atomic.get entry_reads in
-  p "  %-34s %s" "refresh" (outcome (action "refresh" []));
-  p "  %-34s %s" "refresh during it" (outcome (action "refresh" []));
+  p "  %-34s %s" "refresh" (timed_refresh ());
+  p "  %-34s %s" "refresh during it" (timed_refresh ());
   Atomic.set mode `Up;
   until_quiet ();
   p "  %-34s %d" "log entries read" (Atomic.get entry_reads - before);
