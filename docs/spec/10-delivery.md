@@ -233,7 +233,7 @@ packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux relea
   `tests` jobs are required checks for merging, as the gate is, but which triggers no release:
   releases wait for `test` alone. `release-windows` does not exist yet.
 
-- `release-ios` has run only unsigned, on pull requests: no signed archive or upload has been seen.
+- `release-ios` has uploaded only from the `testflight` branch: the upload from `main`, after the gate, has not been seen.
 - `release-android` and `test-android-device` have never run: neither the cross build on a Linux
   runner nor the instrumented suite on an emulator has been seen passing or failing.
 - No check drives a real FUSE mount (§3.1 item 1): the end-to-end FUSE test of `main` was not
