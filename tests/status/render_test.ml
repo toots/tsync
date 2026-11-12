@@ -3,8 +3,8 @@ module Uplink = Tsync_store.Uplink
 
 let mib n = n * 1024 * 1024
 
-let usage ?(stacks = Some (mib 2)) ?(swapped = 0) ~cpu ~private_ ~heap () :
-    usage =
+let usage ?(stacks = Some (mib 2)) ?(swapped = 0) ?anonymous ~cpu ~private_
+    ~heap () : usage =
   {
     cpu_seconds = 12.;
     cpu_percent = cpu;
@@ -12,7 +12,7 @@ let usage ?(stacks = Some (mib 2)) ?(swapped = 0) ~cpu ~private_ ~heap () :
     rss_bytes = private_;
     private_bytes = private_;
     swapped_bytes = swapped;
-    anonymous_bytes = Some private_;
+    anonymous_bytes = Some (Option.value anonymous ~default:private_);
     file_backed_bytes = Some (mib 9);
     heap_bytes = heap;
     top_heap_bytes = heap;
@@ -22,7 +22,7 @@ let usage ?(stacks = Some (mib 2)) ?(swapped = 0) ~cpu ~private_ ~heap () :
   }
 
 let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ?stacks ?swapped
-    ~role ~pid ~uptime ~serves () : self =
+    ?anonymous ~role ~pid ~uptime ~serves () : self =
   {
     server =
       {
@@ -35,7 +35,8 @@ let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ?stacks ?swapped
         serves;
       };
     usage =
-      usage ?stacks ?swapped ~cpu:1.24 ~private_:(mib 61) ~heap:(mib 18) ();
+      usage ?stacks ?swapped ?anonymous ~cpu:1.24 ~private_:(mib 61)
+        ~heap:(mib 18) ();
     uplinks;
     traffic;
     recent_errors = recent;
@@ -421,15 +422,16 @@ let degraded : machine =
           error = None;
           self =
             Some
-              (self ~stacks:None ~swapped:(mib 3) ~role:"supervisor" ~pid:100
-                 ~uptime:90061. ~serves:[] ());
+              (self ~stacks:None ~swapped:(mib 3) ~anonymous:(mib 50)
+                 ~role:"supervisor" ~pid:100 ~uptime:90061. ~serves:[] ());
         };
         {
           role = "owner";
           pid = Some 102;
           serves = ["Media"];
           error = Some "connection refused";
-          self = None;
+          self =
+            Some (self ~role:"owner" ~pid:102 ~uptime:600. ~serves:["Media"] ());
         };
       ];
     uplinks = [];

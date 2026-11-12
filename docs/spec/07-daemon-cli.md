@@ -761,7 +761,7 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
 **Text rendering.** Header `tsync on <host> — N domains, M processes, up X, load L`; per domain its
 settings, cache, `PAUSED`, pending changes, parked uploads, an entry that cannot be followed,
 set-aside objects, `MAIN OFFLINE`; each frontend (`NOT ANSWERING`, traffic, open handles, transfers,
-maintenance); each backend (`UNREACHABLE`/`HELD DOWN`, corruption or "not checked", disk); then `Processes` (headed by the private RAM the answering processes hold in all, and swap when any; each process its own), `Jobs`,
+maintenance); each backend (`UNREACHABLE`/`HELD DOWN`, corruption or "not checked", disk); then `Processes` (headed by the RAM of their own, their anonymous memory, that the processes answering every question hold in all, their swap when any, and how many did not answer; each process its own), `Jobs`,
 `Warnings (newest first)` (10 shown). A row appearing is the signal: clean states print nothing.
 
 ### 5.6 Pause and resume

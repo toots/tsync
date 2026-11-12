@@ -72,9 +72,9 @@ Domain Files
 
 Domain Media  NOT ANSWERING
 
-Processes — private RAM 61.0 MiB in all, swapped 3.0 MiB, 1 process not answering
+Processes — private RAM 50.0 MiB in all, swapped 3.0 MiB, 1 process not answering
   supervisor   pid 100  up 1d 1h  1.2% cpu
-    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB, swapped 3.0 MiB
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 50.0 MiB), mapped files 9.0 MiB, swapped 3.0 MiB
   owner        pid 102  Media
     NOT ANSWERING    connection refused
 
