@@ -50,8 +50,8 @@ With no counterpart in spec 01: `Fail` (failure-model), `Dqueue` (durable-queue)
 
 `Rt` is direct style: a fiber is a duppy task, and a wait is `Rt.suspend`. The scheduler starts at
 the first `Rt.spawn` or `Rt.run_sync`, on a pool of 2 domains that grows to at most 8 while ready
-work waits, with at most 256 blocking threads, of which those unused for 30 s exit down to one per
-domain.
+work waits and never shrinks, with at most 256 blocking threads, of which those unused for 30 s
+exit down to one per domain.
 
 | Capability | `Rt` |
 |---|---|
