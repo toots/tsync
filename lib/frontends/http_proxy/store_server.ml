@@ -1535,7 +1535,7 @@ let run config =
                      sweep_sites t;
                      next_sweep := Unix.gettimeofday () +. 3600.);
                    Stop.sleep 60.;
-                   Usage.release_if_grown ()
+                   Usage.release_if_fragmented ()
                  done
                with Stop.Stopping -> ());
               0)

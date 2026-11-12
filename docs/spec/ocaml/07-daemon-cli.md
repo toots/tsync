@@ -81,7 +81,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
   with `Fs.peer_uid` (`SO_PEERCRED` on Linux, `getpeereid` on macOS).
 - **A job's lines are throttled at the socket**, not in the job: `Handler` `throttled` sends at
   most one progress line per 0.25 s and the latest held one before any other line.
-- **A job ends with `Usage.release`**, and housekeeping with `Usage.release_if_grown`
+- **A job ends with `Usage.release`**, and housekeeping with `Usage.release_if_fragmented`
   ([memory.md](memory.md) M.4).
 - **The macOS service opens its own log** (`Daemon_cmds` `log_to_service_file`): an agent
   registered through SMAppService cannot name a path under the user's home for its output.
@@ -100,7 +100,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | `Handler` | job report every 10 s, progress line every 0.25 s |
 | `Report` | store state window 5 s |
 | `Owner` | housekeeping every 60 s |
-| `Rt` | 2 domains growing to 8; at most 256 blocking threads, those unused for 30 s exit (finding 94) |
+| `Rt` | 2 domains growing to 8, never shrinking; at most 256 blocking threads, those unused for 30 s exit (finding 94) |
 
 ## Tests
 

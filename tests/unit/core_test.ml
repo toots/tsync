@@ -385,24 +385,29 @@ let () =
    frees is one whose survivors are scattered: one block in ten kept. *)
 let scattered = ref [||]
 
-let scatter_over bytes =
+let scatter_over ~at_peak bytes =
   let blocks = Array.init (bytes / 256) (fun _ -> Bytes.create 248) in
   Gc.full_major ();
+  at_peak ();
   scattered := Array.init (Array.length blocks / 10) (fun i -> blocks.(i * 10))
 
 let () =
-  p "\n== housekeeping compacts a heap grown past its margin\n";
+  p "\n== housekeeping compacts a heap whose free space is past its margin\n";
   let mib = 1024 * 1024 in
   let heap () = (Usage.sample ()).heap in
   Usage.release ();
   let base = heap () in
-  scatter_over (40 * mib);
+  (* A compaction at the burst's peak, as housekeeping may take, then about
+     36 MiB free once the survivors are scattered: under a 64 MiB margin, past
+     the default 16 MiB one. Sizes are compared with room for the pools other
+     domains may take meanwhile. *)
+  scatter_over ~at_peak:Usage.release (40 * mib);
   Gc.full_major ();
-  let grown = heap () in
-  p "scattered survivors keep the heap grown: %b\n" (grown > base + (24 * mib));
-  Usage.release_if_grown ~by:(grown - base + mib) ();
-  p "under its margin, the heap is kept: %b\n" (heap () = grown);
-  Usage.release_if_grown ();
+  let grown () = heap () > base + (24 * mib) in
+  p "scattered survivors keep the heap grown: %b\n" (grown ());
+  Usage.release_if_fragmented ~free:(64 * mib) ();
+  p "under its margin, the heap is kept: %b\n" (grown ());
+  Usage.release_if_fragmented ();
   p "past the default margin, the heap goes back: %b\n"
     (heap () < base + (8 * mib));
   scattered := [||]
