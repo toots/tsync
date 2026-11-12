@@ -35,6 +35,28 @@ Keep it a small multiple of `chunkSize`.
 
 On a machine short of memory, lower `maxChunkBuffers` rather than `maxUploads`.
 
+## Memory allocator
+
+tsync uses the system's memory allocator, and leaves the choice of another to you. On Linux, glibc's allocator keeps freed memory in a pool per thread, up to eight per core, and cannot always give it back once a burst of work has left it in pieces. On a server where tsync runs for months, that can leave each process holding several times the memory it uses. `tsync status` shows what each process holds of its own, under `Processes`, so you can compare.
+
+Two ways to change it on a Linux service, both in a drop-in that `sudo systemctl edit tsync@<user>.service` opens:
+
+```
+[Service]
+# Fewer pools for glibc's allocator:
+Environment=GLIBC_TUNABLES=glibc.malloc.arena_max=2
+```
+
+```
+[Service]
+# Another allocator, installed from your distribution (here jemalloc), which
+# returns unused memory on a timer:
+Environment=LD_PRELOAD=libjemalloc.so.2
+Environment=MALLOC_CONF=background_thread:true
+```
+
+Restart the service afterwards. Every process tsync starts inherits these settings.
+
 ## Uplink
 
 tsync paces its uploads so that they do not swamp your connection. While it uploads, it times a small request to each remote store. When that takes longer than usual, a queue is building in your modem, which is what makes everything else on the connection feel slow. So tsync slows down, and it speeds up again while the delay stays flat.
