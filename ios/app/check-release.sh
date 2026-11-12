@@ -38,7 +38,8 @@ case $signing in
       codesign -dvv "$bundle" > "$work/signature" 2>&1
       grep -q '^Authority=Apple Distribution' "$work/signature" || fail "$bundle is not signed for distribution"
       codesign -d --entitlements - --xml "$bundle" > "$work/entitlements.plist"
-      [ "$(plutil -extract com.apple.security.application-groups.0 raw "$work/entitlements.plist")" = "$TSYNC_APP_GROUP" ] \
+      # plutil splits a key path at every dot; PlistBuddy takes the key whole.
+      [ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$work/entitlements.plist")" = "$TSYNC_APP_GROUP" ] \
         || fail "$bundle is not entitled to the app group"
     done
     [ "$(plutil -extract aps-environment raw "$work/entitlements.plist")" = production ] \
