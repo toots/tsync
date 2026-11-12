@@ -4,6 +4,7 @@
 open Tsync_core
 open Tsync_store
 module Server = Tsync_http.Server
+module Share_preview_av = Tsync_preview_av.Share_preview_av
 
 let video ?(fill = fun i -> i * 4) ?rotation path ~width ~height =
   let out = Av.open_output path in
@@ -223,7 +224,7 @@ let served video root =
 (* vault §8.1: a vault's icon from any image, as the CLI makes it. *)
 let icon label source =
   let module A = Tsync_vault.Appearance in
-  let convert = Option.get (Atomic.get Icon_image.converter) in
+  let convert = Option.get (Icon_image.current ()) in
   let png =
     convert ~max_side:A.icon_max_side ~max_bytes:A.icon_max_bytes
       ~deadline:(Rt.now () +. 30.)
@@ -240,7 +241,37 @@ let icon label source =
     (String.length png <= A.icon_max_bytes)
     (Result.is_ok (A.check_icon png))
 
+(* The same conversions through the media helper, a process of their own that
+   is given a deadline and a bound on what it may answer. *)
+let through_helper card video =
+  Atomic.set Share_preview.thumbnailer None;
+  Atomic.set Icon_image.converter None;
+  Printf.printf "helper available: %b\n" (Share_preview.available ());
+  show "card through the helper" card `Image;
+  show "wide video through the helper" video `Video;
+  show "missing through the helper" (video ^ ".missing") `Video;
+  icon "the card, through the helper" card;
+  let past = Rt.now () -. 1. in
+  let started = Rt.now () in
+  let late = Media_helper.run ~deadline:past ["thumbnail"; "video"; video] in
+  Printf.printf "past its deadline: %s, within the grace: %b\n"
+    (if late = None then "none" else "an image")
+    (Rt.now () -. started < 3.);
+  Printf.printf "over its bound: %s\n"
+    (match
+       Media_helper.run ~max_output:100
+         ~deadline:(Rt.now () +. 20.)
+         ["thumbnail"; "image"; card]
+     with
+      | None -> "none"
+      | Some _ -> "an image");
+  Printf.printf "a newline in a line refused: %b\n"
+    (match Media_helper.run ~deadline:(Rt.now () +. 1.) ["a\nb"] with
+      | _ -> false
+      | exception Invalid_argument _ -> true)
+
 let () =
+  Share_preview_av.install ();
   Rt.run_sync @@ fun () ->
   Printf.printf "available: %b\n" (Share_preview.available ());
   let dir = Filename.temp_dir "tsync-preview" "" in
@@ -263,6 +294,7 @@ let () =
   icon "a tall video's first frame" tall;
   fade_in dir;
   served wide (Filename.concat dir "store");
+  through_helper (Sys.getenv "CARD") wide;
   Sys.remove wide;
   Sys.remove tall;
   Sys.remove sideways;

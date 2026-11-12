@@ -22,7 +22,7 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
 | Watch coalescing (§A7) | `Watch_gates.wait`. |
 | Bulk answers (§A8) | `children`; the caps are `Proxy_wire`'s. |
 | Share server (§A9) | `Share_server`: `claims`, `handle`, `load`, `stream`, `file_response`, `listing`, `zip_response`, `media`, `share_page`, `origin`, `wants_html`, `preview`, `make_preview`, `parse_range`, `disposition`, `fill`, `script_json`; assets in `Share_assets`, the mime table in core's `Mime`. |
-| Preview images (§A9.8) | core's `Share_preview`: the constants, `valid` (the frame-header reader), and the `thumbnailer` slot `make` calls; `tsync_preview_av` (`lib/preview_av/`, `(optional)`) fills the slot with the FFmpeg bindings: ten frames by backward seeks, picked among by FFmpeg's `thumbnail` filter, linked through the catalog's `select` and the `tsync-ffmpeg` opam package. The store server's `preview_candidates` holds the share-space rules; `self_url` is the loopback URL a thumbnailer reads through. |
+| Preview images (§A9.8) | core's `Share_preview`: the constants, `valid` (the frame-header reader), and the `thumbnailer` slot `make` calls, which falls back to the media helper through core's `Media_helper` when nothing in the process filled it; `tsync_preview_av` (`lib/preview_av/`, `(optional)`) is the FFmpeg bindings: ten frames by backward seeks, picked among by FFmpeg's `thumbnail` filter. Only `media/tsync_media.ml`, the helper (`tsync-media`, `(optional)`), links it; `Media_helper` finds it through `TSYNC_MEDIA_HELPER`, beside the running executable, or in `../libexec/tsync`. The store server's `preview_candidates` holds the share-space rules; `self_url` is the loopback URL a thumbnailer reads through. |
 | Status (§A10) | `listener_endpoint`, `verified_routes`, `collect`, `presented`, `self_report`; `Status_page.html`. |
 | Control socket (§A11) | `control`, served by `Ipc.serve` on `Paths.store_server_socket`. |
 | Counters (§A12) | `tally_names`, `count`, `count_bytes`, `listener_report`, giving `Status_report.listener`. |
@@ -88,7 +88,7 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
   generic card PNG goes in as base64: a quoted string literal turns the PNG signature's CRLF into
   LF.
 - **A server makes one preview image at a time** (`making`, a FIFO `Rt.Fmutex`): decoding runs in
-  the listener's process, on a small host beside everything else. Failed tokens sit in a table
+  one media helper process, on a small host beside everything else. Failed tokens sit in a table
   for the life of the process. The thumbnailer reads the share
   through `self_url`, so its ranged reads take share slots like any client's.
 - **A share is served from a `Context`**, never a checkout: `Share_server.of_context` takes the
@@ -109,4 +109,5 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
   `build-info` to say so): the thumbnailer on a still image and on generated videos, one that
   opens on black frames among them, and a listener making, storing and then reusing a preview
   through its own link, trying an undecodable file once, and answering the generic image for a
-  share whose file is gone.
+  share whose file is gone; then the same images and an icon through the media helper process,
+  which gives nothing past its deadline or over its size bound.

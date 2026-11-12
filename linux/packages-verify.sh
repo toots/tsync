@@ -21,8 +21,30 @@ depends tsync-dolphin | grep -iq 'kf6'
 pinned tsync-tray
 pinned tsync-dolphin
 
+# The media helper alone links FFmpeg, and is where tsync looks for it.
+ffmpeg='libav(codec|format|filter|util)|libswscale'
+if depends tsync | grep -Eiq "$ffmpeg"; then
+  echo "tsync depends on an FFmpeg library" >&2; exit 1
+fi
+if depends tsync-media | grep -Eiq "$desktop"; then
+  echo "tsync-media depends on a desktop library" >&2; exit 1
+fi
+pinned tsync-media
+files tsync-media | grep -qx '/usr/libexec/tsync/tsync-media'
+if env -u LD_LIBRARY_PATH ldd /usr/bin/tsync | grep -Eiq "$ffmpeg"; then
+  echo "the installed tsync loads FFmpeg" >&2; exit 1
+fi
+# A static FFmpeg shows in no dependency, but leaves its version tags.
+if grep -aEq 'Lav[cf][0-9]{2}\.' /usr/bin/tsync; then
+  echo "the installed tsync has FFmpeg linked in" >&2; exit 1
+fi
+tsync build-info | grep -Eq '^share previews: ffmpeg$'
+printf '20\nthumbnail\nimage\n%s\n' "$(pwd)/lambda/share-card.png" \
+  | /usr/libexec/tsync/tsync-media > /tmp/tsync-card.jpg
+test "$(head -c 3 /tmp/tsync-card.jpg | od -An -tx1 | tr -d ' ')" = ffd8ff
+
 # One file, one owning package.
-for p in tsync tsync-tray tsync-dolphin; do files "$p"; done | sort > /tmp/tsync-files
+for p in tsync tsync-media tsync-tray tsync-dolphin; do files "$p"; done | sort > /tmp/tsync-files
 test -z "$(uniq -d /tmp/tsync-files)"
 files tsync | grep -q '/tsync/libtsync_mounts\.so$'
 test "$(grep -c 'libtsync_mounts' /tmp/tsync-files)" = 1

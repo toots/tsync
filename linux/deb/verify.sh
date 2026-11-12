@@ -3,9 +3,10 @@
 # a build container can still get wrong. Run as root from the repo root.
 set -eux
 
-test "$(ls dist/*.deb | wc -l)" = 3
+test "$(ls dist/*.deb | wc -l)" = 4
 deb=$(ls dist/tsync_*.deb)
-apt-get install -y ./dist/tsync_*.deb ./dist/tsync-tray_*.deb ./dist/tsync-dolphin_*.deb
+apt-get install -y ./dist/tsync_*.deb ./dist/tsync-media_*.deb \
+  ./dist/tsync-tray_*.deb ./dist/tsync-dolphin_*.deb
 
 # The release has the mount and both TLS implementations.
 info=$(tsync build-info)

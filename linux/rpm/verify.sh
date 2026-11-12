@@ -3,9 +3,10 @@
 # a build container can still get wrong. Run as root from the repo root.
 set -eux
 
-test "$(ls dist/*.rpm | wc -l)" = 3
+test "$(ls dist/*.rpm | wc -l)" = 4
 rpm=$(ls dist/tsync_*.rpm)
-dnf install -y ./dist/tsync_*.rpm ./dist/tsync-tray_*.rpm ./dist/tsync-dolphin_*.rpm
+dnf install -y ./dist/tsync_*.rpm ./dist/tsync-media_*.rpm \
+  ./dist/tsync-tray_*.rpm ./dist/tsync-dolphin_*.rpm
 
 # The release has the mount and both TLS implementations.
 info=$(tsync build-info)

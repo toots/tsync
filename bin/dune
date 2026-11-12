@@ -41,6 +41,14 @@
  (modules tsync)
  (libraries tsync_cli))
 
+; The media helper (media/), beside tsync.exe where Media_helper looks for it,
+; where the FFmpeg bindings are.
+
+(rule
+ (enabled_if %{lib-available:tsync_preview_av})
+ (action
+  (copy %{dep:../media/tsync_media.exe} tsync-media)))
+
 ; cloud-files §14.1: the manifest ties tsyncd.exe to the identity package, whose
 ; publisher is the signing certificate's subject.
 

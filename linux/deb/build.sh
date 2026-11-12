@@ -1,6 +1,6 @@
 #!/bin/sh
-# Assembles dist/<package>_<distro>_<arch>.deb for tsync, tsync-tray and
-# tsync-dolphin from what linux/build.sh made. Run from the repo root, on the
+# Assembles dist/<package>_<distro>_<arch>.deb for tsync, tsync-media,
+# tsync-tray and tsync-dolphin from what linux/build.sh made, with TSYNC_FFMPEG. Run from the repo root, on the
 # distro being targeted.
 set -eu
 
@@ -85,7 +85,18 @@ test -n "$deps"
 pack tsync "$deps, fuse3" "Synchronise folders through object stores" \
 " Keeps folders in step across machines through cloud buckets or a peer,
  storing files as content-addressed chunks so edits and duplicates upload
- once, and mounts them with FUSE."
+ once, and mounts them with FUSE." tsync-media
+
+# The media helper: the only binary that links FFmpeg, so that a host without
+# it carries none of FFmpeg's libraries.
+root="$work/tsync-media"
+install -Dm755 _build/default/bin/tsync-media "$root/usr/libexec/tsync/tsync-media"
+strip "$root/usr/libexec/tsync/tsync-media"
+deps=$(shlibs "$root/usr/libexec/tsync/tsync-media")
+test -n "$deps"
+pack tsync-media "$deps, tsync (= $version)" "Link preview images and vault icons for tsync" \
+" Makes the picture a chat application shows for a tsync share link, and
+ converts images into vault icons, with the FFmpeg libraries."
 
 root="$work/tsync-tray"
 install -Dm755 _build/default/linux/tray/tsync_tray.exe "$root/usr/bin/tsync-tray"

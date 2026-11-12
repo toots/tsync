@@ -1,10 +1,9 @@
-; Built only where the FFmpeg bindings are installed. linkall: the thumbnailer
-; registers itself when linked.
+; Built only where the FFmpeg bindings are installed, and linked by the media
+; helper alone, so that tsync itself never loads FFmpeg.
 
 (library
  (name tsync_preview_av)
  (optional)
- (library_flags (-linkall))
  (libraries
   tsync_core
   ffmpeg-av

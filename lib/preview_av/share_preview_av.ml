@@ -219,11 +219,12 @@ let icon ~max_side ~max_bytes ~deadline source =
           (Avutil.Video.frame_get_width shown)
           (Avutil.Video.frame_get_height shown)))
 
-let () =
+let thumbnail ~kind ~deadline url =
+  jpeg (frame ~kind ~interrupt:(fun () -> Rt.now () > deadline) url)
+
+let () = Avutil.Log.set_level `Quiet
+
+let install () =
   Atomic.set Icon_image.converter (Some icon);
-  Avutil.Log.set_level `Quiet;
   Atomic.set Share_preview.thumbnailer
-    (Some
-       (fun ~kind ~deadline url ->
-         Some
-           (jpeg (frame ~kind ~interrupt:(fun () -> Rt.now () > deadline) url))))
+    (Some (fun ~kind ~deadline url -> Some (thumbnail ~kind ~deadline url)))

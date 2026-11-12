@@ -16,6 +16,7 @@ License:        MIT
 URL:            https://github.com/toots/tsync
 
 Requires:       fuse3
+Recommends:     tsync-media
 BuildRequires:  systemd-rpm-macros
 
 %description
@@ -36,6 +37,16 @@ Recommends:     wl-clipboard kdialog
 Shows the state of every tsync domain as an icon in the desktop's
 notification area, with a menu to open folders, hold changes and copy
 one-time codes.
+
+# The media helper: the only binary that links FFmpeg, so that a host without
+# it carries none of FFmpeg's libraries.
+%package media
+Summary:        Link preview images and vault icons for tsync
+Requires:       tsync = %{version}-%{release}
+
+%description media
+Makes the picture a chat application shows for a tsync share link, and
+converts images into vault icons, with the FFmpeg libraries.
 
 %package dolphin
 Summary:        Dolphin context menu for tsync
@@ -64,6 +75,9 @@ test -s %{_builddir}/manifests.files
 install -Dm755 %{srcdir}/_build/default/linux/mounts/libtsync_mounts.so \
   %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 strip --strip-unneeded %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
+install -Dm755 %{srcdir}/_build/default/bin/tsync-media \
+  %{buildroot}%{_libexecdir}/tsync/tsync-media
+strip %{buildroot}%{_libexecdir}/tsync/tsync-media
 install -Dm755 %{srcdir}/_build/default/linux/tray/tsync_tray.exe %{buildroot}%{_bindir}/tsync-tray
 strip %{buildroot}%{_bindir}/tsync-tray
 install -Dm644 %{srcdir}/linux/tsync-tray.desktop \
@@ -80,6 +94,9 @@ DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build --strip
 %{_datadir}/polkit-1/actions/org.feverdreamtv.tsync.policy
 %{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 %{_libdir}/tsync/libtsync_mounts.so
+
+%files media
+%{_libexecdir}/tsync/tsync-media
 
 %files tray
 %{_bindir}/tsync-tray

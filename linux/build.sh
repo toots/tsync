@@ -22,7 +22,8 @@ opam switch list --short | grep -qx "$SWITCH" || opam switch create "$SWITCH" "$
 eval "$(opam env --switch="$SWITCH" --set-switch)"
 
 # A release ships both TLS implementations, OpenSSL the default. TSYNC_FFMPEG
-# adds share preview images, for a caller that installed the FFmpeg libraries.
+# adds share preview images, for a caller that installed the FFmpeg libraries:
+# the media helper, which the packages ship as tsync-media.
 ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-tray \
   ${TSYNC_FFMPEG:+tsync-ffmpeg}
 
@@ -34,7 +35,8 @@ opam clean -y
 # is packaged.
 opam exec -- dune build --profile release bin/tsync.exe \
   linux/tray/tsync_tray.exe linux/mounts/libtsync_mounts.so \
-  linux/mounts/libtsync_mounts_fake.so tests/desktop/owner_double.exe
+  linux/mounts/libtsync_mounts_fake.so tests/desktop/owner_double.exe \
+  ${TSYNC_FFMPEG:+bin/tsync-media}
 
 # fuse §2 and 05 tls: a release has the mount and both implementations, and an
 # optional library that failed to build would leave it without them quietly.
