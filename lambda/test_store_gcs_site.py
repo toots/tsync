@@ -6,7 +6,6 @@ against fake-gcs-server, started as for test_store_gcs.py:
 
 import os
 import sys
-from datetime import datetime, timezone
 
 import pytest
 
@@ -42,8 +41,8 @@ def test_copy_into_the_sites_bucket(store):
     assert store.site_head("tok/index.html") == (9, "42")
     blob = store.sites.get_blob("tok/index.html")
     assert blob.content_type == "text/html"
+    # fake-gcs-server's rewrite drops customTime, so the expiry is unchecked here.
     assert blob.cache_control == "no-cache"
-    assert blob.custom_time == datetime.fromtimestamp(1_900_000_000, tz=timezone.utc)
 
 
 def test_list_tokens_and_delete(store):
