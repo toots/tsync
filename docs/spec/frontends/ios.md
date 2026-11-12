@@ -130,16 +130,18 @@ whole change feed of [file-provider.md](file-provider.md) §6.5, over the feed a
 ([android.md §6](android.md#6-the-handler-on-a-pulled-tree)):
 
 - **Items**: `list_all`, what the mirror holds.
-- **Changes**: `refresh`, then `changes_since`. The changes answered are those already applied; what
-  the refresh pass brings is announced by its notices, and the system asks again.
+- **Changes**: `refresh`, then `changes_since`. The refresh waits for its pass up to
+  `refresh_patience` ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)), so
+  the changes answered include what the pass brought; a pass longer than that announces the rest
+  by its notices, and the system asks again.
 - **Signals**: the extension signals the working set of a domain after each `changed` and
   `recovered` notice naming it, read from the bridge's notices
   ([android.md §4.2](android.md#42-notices)), and once at each domain boot. The app signals every
   configured domain's working set at launch and each time it comes to the foreground
   ([ios-app.md §3](ios-app.md#3-registration-and-signals)).
 
-A refresh pass runs only while the system lets the extension run: one cut short by suspension is
-taken up by the next signal. While neither the Files app nor the tsync app is in use, a push from
+A refresh pass runs only while the system lets the extension run, which is while one of its
+callbacks is pending: one cut short by suspension is taken up by the next signal. While neither the Files app nor the tsync app is in use, a push from
 the domain's server signals (§5.3), else the app's background runs do (§5.2).
 
 ### 5.2 In the background

@@ -131,8 +131,10 @@ A pull reads the log after the folder's position in pages of at most `pull_page`
 each page as an arrival before reading the next: what a pull holds is bounded by a page, however far
 behind the folder is.
 
-**Refresh passes.** A `refresh` request starts a pass in the background and is answered `{}` at
-once. A pass brings every **held** folder (one with a pull marker,
+**Refresh passes.** A `refresh` request starts a pass and is answered `{}` when the pass ends or
+after `refresh_patience`, whichever comes first; a pass still running then goes on in the
+background. A host that suspends its process once no request is pending (iOS) so keeps it running
+for the pass a change enumeration starts. A pass brings every **held** folder (one with a pull marker,
 [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) that is not fresh to the head, and
 its cost does not grow with how many folders are held:
 
@@ -146,7 +148,7 @@ its cost does not grow with how many folders are held:
    lost one costs the next pass a longer read, never a wrong view.
 4. A folder whose position the log no longer holds is pulled by state, on its own, after the read.
 
-A `refresh` made while a pass runs starts none. A pass ends early when the store's health breaker
+A `refresh` made while a pass runs starts none, and waits for that pass as for its own. A pass ends early when the store's health breaker
 opens; a process that dies mid-pass loses nothing, since the next pass reads from the positions
 written. Each merge sends its notices as any pull does.
 
@@ -378,6 +380,7 @@ input ends it. Framing is by count, never by delimiter.
 |---|---|---|
 | `pull_freshness` | 5 s | the window in which a folder is listed again without asking the store |
 | `view_max_age` | 10 days | how old a view no pin holds may be and still be answered while the store is silent |
+| `refresh_patience` | 20 s | < `REQUEST_DEADLINE`; how long a `refresh` waits for its pass |
 | `pull_patience` | 2 s | < `REQUEST_DEADLINE`; how long an answer the mirror can give waits for the store |
 | `pull_page` | 256 entries | ≥ 1; how many log entries a pull or a refresh pass reads and merges at a time |
 

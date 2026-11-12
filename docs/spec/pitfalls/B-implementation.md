@@ -469,6 +469,16 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — An arrival flushes once, at its barrier, whatever its size: the first pull of 5,000 folders ends within one request deadline.
 - **Seen** — ios.md §8's 5,000-folder check, on an iPhone 14; reproduced on a Mac with the Android harness.
 
+### B-8.25 A refresh pass left running once the callback returns
+- **Pitfall** — The change enumeration a push brings sent `refresh`, which started the pass and answered at once, then answered the system with the 0 rows already applied. With no callback pending, iOS suspended the extension and the pass stalled: a pushed change reached Files 83 s later, when Files was opened, though the push arrived within a second.
+- **Check** — With neither app in use, a peer's change pushed to the phone shows in the footprint log as `push for`, then a `changes_since` answering its row within seconds, with no other signal between.
+- **Seen** — ios.md §8's push check on a TestFlight build, iPhone 14; the earlier 78 s delivery was the same stall.
+
+### B-8.26 An APNs key limited to the sandbox
+- **Pitfall** — Apple ties each APNs key to Sandbox, Production, or both. A key made for development builds pushed to every phone installed from a Mac, and every push to a TestFlight build was refused with 403 `BadEnvironmentKeyInToken`.
+- **Check** — The server's `push_key` covers Production; a push to a TestFlight build counts `pushSent`, not `pushFailed`.
+- **Seen** — the first TestFlight build on the test server.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
