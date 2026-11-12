@@ -84,6 +84,10 @@ if BREW_PREFIX="$(brew --prefix 2>/dev/null)"; then
     export LIBRARY_PATH="$BREW_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 fi
 (cd "$REPO" && eval "$(opam env)" && dune build bin/tsync.exe)
+# The media helper is built where the FFmpeg bindings are installed.
+MEDIA="$REPO/_build/default/bin/tsync_media.exe"
+(cd "$REPO" && eval "$(opam env)" && dune build bin/tsync_media.exe 2>/dev/null) \
+    || say "No FFmpeg bindings: the app makes no preview image"
 
 say "Building $CONFIGURATION app"
 BUILT_PRODUCTS=$(xcodebuild "${XCODE_FLAGS[@]}" -showBuildSettings 2>/dev/null \
@@ -111,6 +115,12 @@ mkdir -p "$DAEMON_APP/Contents/MacOS"
 cp "$MACOS_DIR/TsyncDaemon/Info.plist" "$DAEMON_APP/Contents/Info.plist"
 cp "$REPO/_build/default/bin/tsync.exe" "$DAEMON"
 chmod +x "$DAEMON"
+# Beside the daemon, where Media_helper looks; the only binary linking FFmpeg.
+HELPER="$DAEMON_APP/Contents/MacOS/tsync-media"
+if [[ -f "$MEDIA" ]]; then
+    cp "$MEDIA" "$HELPER"
+    chmod +x "$HELPER"
+fi
 # The CLI link and existing paths to the app's binary keep working.
 ln -s ../Library/Helpers/tsyncd.app/Contents/MacOS/tsync "$APP/Contents/MacOS/tsync"
 # Shipped in the bundle so the installer's postinstall and deploy.sh share one
@@ -119,11 +129,14 @@ mkdir -p "$APP/Contents/Resources"
 cp "$MACOS_DIR/install-agent.sh" "$APP/Contents/Resources/install-agent.sh"
 chmod +x "$APP/Contents/Resources/install-agent.sh"
 
-# The daemon links Homebrew dylibs (openssl, gmp, pcre2, libev) that are
-# not present on a user's machine. Copy them in and rewrite the install names.
+# The daemon and the media helper link Homebrew dylibs (openssl, gmp, pcre2,
+# libev, ffmpeg) that are not present on a user's machine. Copy them in and
+# rewrite the install names.
 say "Bundling dylibs"
+BUNDLED=(-x "$DAEMON")
+[[ -f "$HELPER" ]] && BUNDLED+=(-x "$HELPER")
 dylibbundler -cd -of -b \
-    -x "$DAEMON" \
+    "${BUNDLED[@]}" \
     -d "$DAEMON_APP/Contents/libs" \
     -p "@executable_path/../libs" >/dev/null
 
@@ -279,6 +292,7 @@ fi
 for dylib in "$DAEMON_APP/Contents/libs"/*.dylib; do
     sign "$dylib"
 done
+[[ -f "$HELPER" ]] && sign "$HELPER"
 # Signing the wrapper signs its executable; bash 3.2 refuses an empty array
 # under set -u, hence the guard.
 sign ${DAEMON_SIGNING[@]+"${DAEMON_SIGNING[@]}"} "$DAEMON_APP"

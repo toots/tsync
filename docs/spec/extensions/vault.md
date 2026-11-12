@@ -486,10 +486,10 @@ lets the user tell the vaults apart at a glance; it marks a vault, never a recor
   KiB, told by its signature and its IHDR chunk; the owner refuses anything else INVALID.
 - **Any image becomes one in the client**, which has the platform's decoder and sends only the
   stored form: the owner's socket takes a request of at most 1 MiB, less than a photo. The CLI,
-  where the build links FFmpeg, takes a file or an `http(s)` URL: it sends a PNG already in the
+  where the media helper is installed, takes a file or an `http(s)` URL: it sends a PNG already in the
   stored form as it is, and otherwise the image's first frame as shown (turned as its display
-  matrix asks), its centre square scaled to 256 pixels, halved until its PNG fits 64 KiB. A build
-  without FFmpeg takes only the stored form, and says so. An app converts with its platform's
+  matrix asks), its centre square scaled to 256 pixels, halved until its PNG fits 64 KiB. A host
+  without it takes only the stored form, and says so. An app converts with its platform's
   image API.
 - **The mark** is the icon when there is one; otherwise tsync's icon in the vault's colour.
 - **Where it is drawn:** beside a vault's name, at the level that names the vault, never on a

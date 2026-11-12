@@ -71,10 +71,32 @@ let thumbnailer :
     Atomic.t =
   Atomic.make None
 
-let available () = Option.is_some (Atomic.get thumbnailer)
+let kind_name = function
+  | `Image -> "image"
+  | `Video -> "video"
+  | `Audio -> "audio"
+
+let kind_of_string = function
+  | "image" -> Some `Image
+  | "video" -> Some `Video
+  | "audio" -> Some `Audio
+  | _ -> None
+
+let helper ~kind ~deadline url =
+  Option.map Bigstring.of_string
+    (Media_helper.run ~max_output:max_bytes ~deadline
+       ["thumbnail"; kind_name kind; url])
+
+let current () =
+  match Atomic.get thumbnailer with
+    | Some make -> Some make
+    | None when Media_helper.available () -> Some helper
+    | None -> None
+
+let available () = Option.is_some (current ())
 
 let make ~kind url =
-  match Atomic.get thumbnailer with
+  match current () with
     | None -> None
     | Some make -> (
         match make ~kind ~deadline:(Rt.now () +. timeout) url with

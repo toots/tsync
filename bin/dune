@@ -4,7 +4,7 @@
  (name tsync_cli)
  (wrapped false)
  (modules
-  (:standard \ tsync tsyncd))
+  (:standard \ tsync tsyncd tsync_media))
  (libraries
   cmdliner
   tsync_core
@@ -40,6 +40,18 @@
  (package tsync)
  (modules tsync)
  (libraries tsync_cli))
+
+; The media helper, the one executable that links FFmpeg: installed by the
+; tsync-media packages, run by Tsync_core.Media_helper. Built only where the
+; FFmpeg bindings are.
+
+(executable
+ (name tsync_media)
+ (public_name tsync-media)
+ (package tsync)
+ (modules tsync_media)
+ (optional)
+ (libraries tsync_core tsync_preview_av))
 
 ; cloud-files §14.1: the manifest ties tsyncd.exe to the identity package, whose
 ; publisher is the signing certificate's subject.

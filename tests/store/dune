@@ -336,7 +336,10 @@
    (setenv
     CARD
     %{dep:../../lambda/share-card.png}
-    (run ./preview_av_test.exe)))))
+    (setenv
+     TSYNC_MEDIA_HELPER
+     %{dep:../../bin/tsync_media.exe}
+     (run ./preview_av_test.exe))))))
 
 (rule
  (alias runtest)

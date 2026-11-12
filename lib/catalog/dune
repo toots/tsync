@@ -35,9 +35,4 @@
    catalog_cloud_files.ml
    from
    (tsync_cloud_files -> catalog_cloud_files.enabled.ml)
-   (-> catalog_cloud_files.disabled.ml))
-  (select
-   catalog_preview.ml
-   from
-   (tsync_preview_av -> catalog_preview.enabled.ml)
-   (-> catalog_preview.disabled.ml))))
+   (-> catalog_cloud_files.disabled.ml))))

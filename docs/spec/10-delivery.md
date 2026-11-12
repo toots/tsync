@@ -117,9 +117,11 @@ deliberate, never an accident of the checkout. The job fails when the reports co
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
   ships. A macOS release includes the File Provider app.
 - Every desktop release includes the share preview thumbnailer
-  ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)), its FFmpeg bundled in the macOS app, required
-  from Fedora's own libraries, and linked statically in the Debian and Ubuntu packages from
-  savonet/ffmpeg-static-build.
+  ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)), the media helper: beside the daemon with its FFmpeg
+  bundled in the macOS app, and its own `tsync-media` package, which `tsync` recommends, in the Linux ones, its FFmpeg
+  required from Fedora's own libraries, and linked statically into the helper from savonet/ffmpeg-static-build in the
+  Debian and Ubuntu packages. `tsync`
+  itself links no FFmpeg library, which the package checks assert.
 - An Android release cross-builds the core for the app's one ABI at the app's minimum platform
   level, from the commit being released, and packages it
   ([android-app §12](frontends/android-app.md#12-build)). The package build fails without it.

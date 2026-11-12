@@ -19,13 +19,20 @@ type kind = [ `Image | `Video | `Audio ]
     [None] for anything it cannot make a frame of. *)
 val kind_of_name : string -> kind option
 
-(** Set when the build links the FFmpeg bindings, by the library that wraps
-    them: one frame of the file at the URL, scaled to {!size} on its longest
-    side, by the deadline (a {!Rt.now} instant). *)
+(** The names a {!Media_helper} request gives the kinds. *)
+val kind_name : kind -> string
+
+val kind_of_string : string -> kind option
+
+(** A thumbnailer in this process, set by whatever links the FFmpeg bindings:
+    one frame of the file at the URL, scaled to {!size} on its longest side, by
+    the deadline (a {!Rt.now} instant). When unset, the media helper is the
+    thumbnailer. *)
 val thumbnailer :
   (kind:kind -> deadline:float -> string -> Bigstring.t option) option Atomic.t
 
-(** Whether this build can make a preview image. *)
+(** Whether this host can make a preview image: a thumbnailer is set or the
+    media helper is installed. *)
 val available : unit -> bool
 
 (** The thumbnailer's image of the file at [url], read over ranged requests,

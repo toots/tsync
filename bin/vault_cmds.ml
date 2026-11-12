@@ -473,8 +473,8 @@ let status_cmd =
          0))
 
 (* vault §8.1 *)
-(* vault §8.1: the stored form as it is, otherwise converted by this build when
-   it can; the owner accepts only the stored form. *)
+(* vault §8.1: the stored form as it is, otherwise converted by the media helper
+   when it is installed; the owner accepts only the stored form. *)
 let icon_of source =
   let module A = Tsync_vault.Appearance in
   let is_url =
@@ -485,7 +485,7 @@ let icon_of source =
     if is_url then None
     else Some (In_channel.with_open_bin source In_channel.input_all)
   in
-  match (given, Atomic.get Icon_image.converter) with
+  match (given, Icon_image.current ()) with
     | Some icon, _ when Result.is_ok (A.check_icon icon) -> icon
     | _, Some convert ->
         convert ~max_side:A.icon_max_side ~max_bytes:A.icon_max_bytes
@@ -496,10 +496,13 @@ let icon_of source =
           | Ok icon -> icon
           | Error why ->
               Fail.invalid
-                "%s; this build converts no image: give a square PNG of at \
-                 most %d pixels and %d KiB"
+                "%s; no media helper (tsync-media) is installed to convert it: \
+                 give a square PNG of at most %d pixels and %d KiB"
                 why A.icon_max_side (A.icon_max_bytes / 1024))
-    | None, None -> Fail.invalid "this build fetches no image: give a file"
+    | None, None ->
+        Fail.invalid
+          "no media helper (tsync-media) is installed to fetch the image: give \
+           a file"
 
 let appearance_cmd =
   let color =
