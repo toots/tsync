@@ -78,8 +78,13 @@ jobs:
           path: _opam
           key: opam-ios-cross-${{ hashFiles('tsync-ios.opam', 'scripts/opam_deps.sh', '.github/opam/**') }}-${{ steps.sdk.outputs.sdk }}
 
+      # dune 3.25.0 builds no -ios package ("I don't know about package …
+      # (passed through --only-packages)"), though -android ones build.
       - name: The cross switch
-        run: ./scripts/opam_deps.sh tsync-ios
+        run: |
+          opam pin -ny dune 3.24.2
+          opam pin -ny dune-configurator 3.24.2
+          ./scripts/opam_deps.sh tsync-ios
 
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'
