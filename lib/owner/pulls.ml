@@ -5,6 +5,7 @@ type params = {
   pull_freshness : float;
   view_max_age : float;
   pull_patience : float;
+  refresh_patience : float;
   pull_page : int;
 }
 
@@ -13,6 +14,7 @@ let default =
     pull_freshness = 5.;
     view_max_age = 10. *. 86400.;
     pull_patience = 2.;
+    refresh_patience = 20.;
     pull_page = 256;
   }
 
@@ -28,7 +30,7 @@ type t = {
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
   offline : bool Atomic.t;
-  refreshing : bool Atomic.t;
+  pass : unit Rt.Promise.t option Atomic.t;  (** the refresh pass running *)
 }
 
 type view = { pulled_at : float option; outdated : bool }
@@ -44,7 +46,7 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
     offline = Atomic.make false;
-    refreshing = Atomic.make false;
+    pass = Atomic.make None;
   }
 
 let note_unreachable t = Atomic.set t.offline true
@@ -192,23 +194,38 @@ let stamp_fresh t dirs =
           owed)
         dirs)
 
+let run_pass t =
+  let (module E : Engine.S) = t.engine in
+  match
+    E.pull_pass ~page:t.params.pull_page ~stop:t.silent
+      (List.filter (fun dir -> not (is_fresh t dir)) (E.held ()))
+  with
+    | pass ->
+        let owed = stamp_fresh t pass.covered in
+        if pass.covered <> [] then succeeded t;
+        let notice = List.sort_uniq String.compare (pass.changed @ owed) in
+        if notice <> [] then (try t.changed notice with _ -> ())
+    | exception e when not (Rt.is_cancelled e) ->
+        Log.info "refresh pass failed: %s" (Printexc.to_string e)
+
 let refresh t =
-  if Atomic.compare_and_set t.refreshing false true then
-    Rt.spawn ~name:"refresh pass" (fun () ->
-        Fun.protect
-          ~finally:(fun () -> Atomic.set t.refreshing false)
-          (fun () ->
-            let (module E : Engine.S) = t.engine in
-            match
-              E.pull_pass ~page:t.params.pull_page ~stop:t.silent
-                (List.filter (fun dir -> not (is_fresh t dir)) (E.held ()))
-            with
-              | pass ->
-                  let owed = stamp_fresh t pass.covered in
-                  if pass.covered <> [] then succeeded t;
-                  let notice =
-                    List.sort_uniq String.compare (pass.changed @ owed)
-                  in
-                  if notice <> [] then (try t.changed notice with _ -> ())
-              | exception e when not (Rt.is_cancelled e) ->
-                  Log.info "refresh pass failed: %s" (Printexc.to_string e)))
+  let mine = Rt.Promise.create () in
+  let pass =
+    if Atomic.compare_and_set t.pass None (Some mine) then (
+      Rt.spawn ~name:"refresh pass" (fun () ->
+          Fun.protect
+            ~finally:(fun () ->
+              Atomic.set t.pass None;
+              ignore (Rt.Promise.try_resolve mine ()))
+            (fun () -> run_pass t));
+      Some mine)
+    else Atomic.get t.pass
+  in
+  (* ios §5.1: the host is kept running while this request is pending. *)
+  Option.iter
+    (fun pass ->
+      try
+        Rt.with_timeout t.params.refresh_patience (fun () ->
+            Rt.Promise.await pass)
+      with Rt.Timeout -> ())
+    pass

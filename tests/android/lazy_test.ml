@@ -41,6 +41,7 @@ let () =
            pull_freshness = fresh_window;
            view_max_age = 3600.;
            pull_patience = 0.5;
+           refresh_patience = 20.;
            pull_page = 256;
          }
        "");
