@@ -159,7 +159,7 @@ module Make (C : Engine_ctx.S) = struct
   let folder_position_path dir =
     Filename.concat (Mirror.path mirror dir) ".tsync-position"
 
-  let folder_position dir =
+  let own_position dir =
     Option.bind
       (Fs.read_file_opt (folder_position_path dir))
       (fun s -> int_of_string_opt (String.trim s))
@@ -176,6 +176,47 @@ module Make (C : Engine_ctx.S) = struct
     (if sync then Fs.replace else Fs.replace_unsynced)
       (pulled_marker dir)
       (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
+
+  let marker_ms dir =
+    Option.bind
+      (Fs.read_file_opt (pulled_marker dir))
+      (fun s -> float_of_string_opt (String.trim s))
+
+  type pass_record = { entry : int; start : float }
+
+  (* 04 §2.3: the last pass's record, read once; this process writes it. *)
+  let pass_record_path = Filename.concat (Mirror.path mirror "") ".tsync-pass"
+
+  let pass_record =
+    Atomic.make
+      (match
+         Option.map
+           (fun s -> String.split_on_char ' ' (String.trim s))
+           (Fs.read_file_opt pass_record_path)
+       with
+        | Some [entry; start] -> (
+            match (int_of_string_opt entry, float_of_string_opt start) with
+              | Some entry, Some start -> Some { entry; start }
+              | _ -> None)
+        | _ -> None)
+
+  let write_pass_record r =
+    Fs.replace_unsynced pass_record_path
+      (Printf.sprintf "%s %.0f" (Key.entry_number r.entry) r.start);
+    Atomic.set pass_record (Some r)
+
+  let stands_for r dir =
+    match marker_ms dir with Some marker -> marker <= r.start | None -> false
+
+  let folder_position dir =
+    match (own_position dir, Atomic.get pass_record) with
+      | Some own, Some r when r.entry > own && stands_for r dir -> Some r.entry
+      | own, _ -> own
+
+  let pulled_ms dir =
+    match (marker_ms dir, Atomic.get pass_record) with
+      | Some marker, Some r when marker <= r.start -> Some r.start
+      | marker, _ -> marker
 
   (* Every item under a folder, as it would be reported if it had just arrived:
      a host that drops a removed folder's subtree learns it again. *)
@@ -1176,7 +1217,10 @@ module Make (C : Engine_ctx.S) = struct
   (* One arrival for the folder's view; how many changes it made. *)
   let merge_view dir id (head, theirs) =
     let theirs = leaving id theirs in
-    if theirs = [] && folder_position dir = Some head then 0
+    if theirs = [] && folder_position dir = Some head then (
+      (* At the pass record's entry, which its next pull marker leaves. *)
+      if own_position dir <> Some head then set_folder_position dir head;
+      0)
     else merge_and_enact ~view:id ~head theirs
 
   (* publication §4.11, a pull: an arrival for one folder, by the entries
@@ -1227,7 +1271,11 @@ module Make (C : Engine_ctx.S) = struct
   (* android §3.2, a refresh pass: the log read once from the oldest position,
      each page merged into the views it touches. A view with no position, or
      a log pruned past the oldest, is pulled on its own. *)
-  let pull_pass ?(page = default_pull_page) ~stop dirs : Engine_intf.pass =
+  let pull_pass ?(page = default_pull_page) ~stop ~fresh () : Engine_intf.pass =
+    (* The record stands for every folder pulled before its start, fresh or not. *)
+    let start = Unix.gettimeofday () *. 1000. in
+    let dirs = held () in
+    let dirs = if List.for_all fresh dirs then [] else dirs in
     let changed = ref [] in
     let note dir n = if n > 0 then changed := dir :: !changed in
     let alone dir = if pull_folder ~page dir then changed := dir :: !changed in
@@ -1289,12 +1337,7 @@ module Make (C : Engine_ctx.S) = struct
                   List.iter (fun v -> alone v.dir) views;
                   List.map (fun v -> v.dir) views
               | `Head head ->
-                  List.iter
-                    (fun v ->
-                      if v.position < head then
-                        set_folder_position ~durable:false v.dir head;
-                      mark_pulled ~sync:false v.dir)
-                    views;
+                  write_pass_record { entry = head; start };
                   List.map (fun v -> v.dir) views)
     in
     let covered =

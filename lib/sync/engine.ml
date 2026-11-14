@@ -446,7 +446,7 @@ module Make (C : Engine_ctx.S) = struct
     Option.bind (Fs.read_file_opt path) (fun s ->
         Option.map (fun ms -> ms /. 1000.) (float_of_string_opt (String.trim s)))
 
-  let pulled_at dir = read_seconds (pulled_marker dir)
+  let pulled_at dir = Option.map (fun ms -> ms /. 1000.) (pulled_ms dir)
   let view_hold dir = read_seconds (hold_marker dir)
 
   let created_here dir =

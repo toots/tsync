@@ -49,7 +49,28 @@ let until_quiet () =
 
 let op j = Printf.sprintf "%s %s" (text j "op") (text j "name")
 
+(* Each folder's position and pull marker, by modification time. *)
+let folder_files () =
+  let rec walk dir acc =
+    Array.fold_left
+      (fun acc name ->
+        let path = Filename.concat dir name in
+        if name = ".tsync-position" || name = ".tsync-pulled" then
+          (path, (Unix.stat path).st_mtime) :: acc
+        else if Sys.is_directory path && name <> "peer" then walk path acc
+        else acc)
+      acc (Sys.readdir dir)
+  in
+  walk root []
+
+let folders_written before =
+  List.filter (fun file -> not (List.mem file before)) (folder_files ())
+  |> List.map (fun (path, _) -> Filename.dirname path)
+  |> List.sort_uniq String.compare
+  |> List.length
+
 let pass label =
+  let files = folder_files () in
   let before = Atomic.get entry_reads in
   let notices_before = snd (seen ()) in
   p "  %-34s %s" "refresh" (timed_refresh ());
@@ -58,6 +79,7 @@ let pass label =
     (if snd (seen ()) > notices_before then "sent" else "none yet");
   until_quiet ();
   p "  %-34s %d" (label ^ ", log entries read") (Atomic.get entry_reads - before);
+  p "  %-34s %d" (label ^ ", folders written") (folders_written files);
   show_notices (label ^ ", notices")
 
 let () =
@@ -91,6 +113,14 @@ let () =
     | Some (`List ops) ->
         p "  %-34s [%s]" "changes" (String.concat ", " (List.map op ops))
     | _ -> p "  %-34s none" "changes");
+
+  p "== a peer writes into a folder pulled since";
+  wait_stale ();
+  ignore (action "list_dir" [s "ref" (ref_of root "f010"); s "pull" "now"]);
+  peer_writes "f010/after.txt" "after";
+  quiet ();
+  Mutex.protect notices_m (fun () -> notices := []);
+  pass "pass";
 
   p "== at once again: every folder is fresh";
   let before = Atomic.get entry_reads in

@@ -283,14 +283,14 @@ module type S = sig
       [pull_page], 256 by default). *)
   val pull : ?page:int -> string -> bool
 
-  (** Every folder with a pull marker. *)
-  val held : unit -> string list
+  (** android §3.2, a refresh pass over every folder with a pull marker, unless
+      [fresh] says each is: the log read once, a page at a time, ending early
+      when [stop] says so. *)
+  val pull_pass :
+    ?page:int -> stop:(unit -> bool) -> fresh:(string -> bool) -> unit -> pass
 
-  (** android §3.2, a refresh pass over these folders: the log read once, a page
-      at a time, ending early when [stop] says so. *)
-  val pull_pass : ?page:int -> stop:(unit -> bool) -> string list -> pass
-
-  (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
+  (** When the folder's last pull completed, by its pull marker and the pass
+      record (04 §2.3). *)
   val pulled_at : string -> float option
 
   (** Whether this client created the folder and has not published it: then the

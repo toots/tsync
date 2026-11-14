@@ -197,8 +197,7 @@ let stamp_fresh t dirs =
 let run_pass t =
   let (module E : Engine.S) = t.engine in
   match
-    E.pull_pass ~page:t.params.pull_page ~stop:t.silent
-      (List.filter (fun dir -> not (is_fresh t dir)) (E.held ()))
+    E.pull_pass ~page:t.params.pull_page ~stop:t.silent ~fresh:(is_fresh t) ()
   with
     | pass ->
         let owed = stamp_fresh t pass.covered in

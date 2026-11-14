@@ -5,8 +5,15 @@
   refresh                            ok, before the patience
   pass, notices when answered        sent
   pass, log entries read             5
+  pass, folders written              3
   pass, notices                      {changed d:<folder1>, changed d:<folder2>, changed d:<folder3>}
   changes                            [put new.txt, put new.txt, put new.txt]
+== a peer writes into a folder pulled since
+  refresh                            ok, before the patience
+  pass, notices when answered        sent
+  pass, log entries read             3
+  pass, folders written              1
+  pass, notices                      {changed d:<folder4>}
 == at once again: every folder is fresh
   refresh                            ok
   log entries read                   0
@@ -14,4 +21,4 @@
   refresh                            ok, at the patience
   refresh during it                  ok, at the patience
   log entries read                   3
-  notices                            {changed d:<folder4>}
+  notices                            {changed d:<folder5>}
