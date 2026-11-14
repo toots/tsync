@@ -337,13 +337,15 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
   unlock ([README §5](README.md#5-host-adapters)); it never fills from a cache.
 - A `save` whose site, username and password equal those of a record adds nothing. A `save`
   whose site and username equal one record's, with another password, asks whether to update it;
-  otherwise it adds a record. The site is compared exactly, not by §4.2's suffix rule: a page on
+  with several such records, it asks which one. Otherwise it adds a record. A `save` with `check`
+  writes nothing: it answers `unchanged`, whether a record of that site and username holds that
+  password, and `logins`, the records of that site and username holding another one. The site is compared exactly, not by §4.2's suffix rule: a page on
   `login.example.com` never updates a login saved for `example.com`.
 
 | action | request | answer |
 |---|---|---|
 | `passwords_fill` | `site`, `id`, `pull?` | the login's username, password, `exact` (whether it is a login of `site` itself rather than by suffix), and current code with seconds left when one is linked; refused `invalid` when the login does not match `site` (§4.2) |
-| `passwords_save` | `site`, `username`, `password` (absent with `suggested`), `update?`, `suggested?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` with that id updates it; one carrying `suggested` sets that record's username (§5.1) |
+| `passwords_save` | `site`, `username`, `password` (absent with `suggested`), `update?`, `suggested?`, `check?` | as a `save` above: `saved`, with the record's `id` when one was added or updated, or `update` naming the record to update; a request carrying `update` naming a record of that site and username updates it; one carrying `suggested` sets that record's username (§5.1); one carrying `check` writes nothing and answers `unchanged` and `logins` (their ids) |
 | `passwords_suggest` | `site`, `username` | §5.1: the generated password and the new record's `id` |
 | `passwords_generate` | `generate` | a password (§5), saved nowhere |
 
@@ -389,7 +391,7 @@ the origin (§4.2) of the frame that holds the form, as the browser reports it t
 | `status` | — | per domain: locked or unlocked, whether it uses `totp`, and its `appearance` (`color`, and `icon` in base64 when it has one; vault §8.1); `verifier`, the platform's verifier `verify` uses, or null |
 | `match` | `origin` | the logins matching `origin` (§4.2) in every domain: domain, id, title, username, whether a code is linked, and `exact`, whether one of its sites is `origin` itself rather than a suffix match; no password |
 | `fill` | `origin`, `domain`, `id` | `passwords_fill` (§8), with `origin` as the site |
-| `save` | `origin`, `username`, `password` (absent with `suggested`), `domain?`, `update?`, `suggested?` | `passwords_save` (§8), with `origin` as the site |
+| `save` | `origin`, `username`, `password` (absent with `suggested`), `domain?`, `update?`, `suggested?`, `check?` | `passwords_save` (§8), with `origin` as the site |
 | `suggest` | `origin`, `username`, `domain?` | `passwords_suggest` (§8), with `origin` as the site |
 | `passkey_match`, `passkey_create`, `passkey_assert` | as §7.5, `origin` the frame's | as §7.5; `passkey_match` also names the locked domains, as `match` does |
 | `verify` | `origin` | verifies the user by the platform's own means before a passkey request ([browser §5](passwords/browser.md#5-passkeys)): on macOS LocalAuthentication, answering `verified`; elsewhere refused `invalid` (the extension then asks the passphrase) |

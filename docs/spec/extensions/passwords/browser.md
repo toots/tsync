@@ -173,25 +173,34 @@ browser's password manager for that.
   click that was no submit does not stop the real submit's. A
   script's submit, or a password a script set, offers nothing.
 - **Only a sign-in that worked offers.** The service worker holds the submitted login for its tab
-  until the sign-in is judged: it worked when the submitting frame shows no password field on two
-  checks half a second apart within 15 s of the submit (a page drawing its form again replaces
-  the field, and a spinner may stand in for it a moment), or when the tab loads a page whose top
-  frame shows no password field 1.5 s after loading. A top frame that cannot answer is no sign of
-  success. A password field still shown, as when the page shows the
-  form again with an error, drops the login unoffered, as does a tab closed first. A sign-in in a
-  frame is judged by the top frame's fields when the whole tab loads again.
+  until the sign-in is judged, once. A password field is an `input` of type `password`, or the
+  field the password was typed in whatever its type, since a *show password* button makes it
+  text. The sign-in worked when:
+  - the submitting frame shows no password field for 3 s on end within 15 s of the submit, a page
+    drawing its form again replacing the field and a spinner standing in for it while the site
+    answers;
+  - the tab loads a page whose top frame shows no password field 1.5 s after loading; a top frame
+    that cannot answer is no sign of success, and only the latest load judges;
+  - the login is still unjudged 16 s after the submit, as when the frame that held it was removed,
+    and the top frame shows no password field;
+  - the tab was opened by another one, as a *Sign in with* window is, and closes before the login
+    is judged.
+
+  A password field still shown, as when the page shows the form again with an error, drops the
+  login unoffered, as does any other tab closed first. A new submit in the tab replaces the
+  login waiting there, and a judgement made for the replaced one is dropped.
 - The service worker never compares the typed password with tsync's itself; the owner does. It
-  asks `match` to tell a new login from a known one. For one login of that username for this
-  exact site (`exact`), it first sends `save` without `update` to the domain holding it: the
-  owner adds nothing when the password is already the one it holds, and no sheet is shown; an
-  `update` naming the record shows *Update the password for `<title>`?*. Whether a sheet appears
-  then tells the page only whether the password in its own field, which it can read, is the one
-  saved for its own origin; a page cannot fill a field so that it offers (above), so it cannot test
-  a guess of its own. Otherwise the sheet is *Save this login in tsync?*. Its buttons are **Save**
+  asks `match` to tell a new login from a known one. For logins of that username for this exact
+  site (`exact`), it first sends `save` with `check` to each domain holding one; `check` writes
+  nothing. When one of them answers `unchanged`, no sheet is shown. Otherwise the sheet is
+  *Update the password for `<title>`?*; with several such logins it is *Update which login?*,
+  listing each by title and domain, and **Update** waits for a pick. Whether a sheet appears tells
+  the page only whether the password in its own field, which it can read, is the one saved for its
+  own origin; a page cannot fill a field so that it offers (above), so it cannot test a guess of
+  its own. With no such login the sheet is *Save this login in tsync?*. Its buttons are **Save**
   or **Update**, **Not now** and, for a new one, **Never for this site**. Only that click sends
-  the `save` that writes, naming for an update the record and the domain that holds it; the owner
-  updates only a login of the exact site (passwords §8). With several logins of that username
-  for this exact site, the sheet is *Update* and asks before any `save`.
+  the `save` that writes, naming for an update the record picked and the domain that holds it;
+  the owner updates only a login of the exact site and username (passwords §8).
 - **A suggested password's submit** shows no sheet: the content script sends `save` with
   `suggested`, the id kept at the pick, and the username submitted. The password itself is not
   sent again.
@@ -290,7 +299,8 @@ A domain following its main uses passwords only when its owner says they are in 
 
 - **The vault for new records.** With more than one domain in `status`, the popup offers *Save
   new logins in*: *Ask each time*, the default, or one of those domains. The choice is kept in
-  `chrome.storage.local`; one naming a domain no longer in `status` counts as *Ask each time*.
+  `chrome.storage.local`. One naming a domain missing from an answered `status` is forgotten, so
+  a domain of that name added later is not chosen by it; a `status` that fails forgets nothing.
 - **Where a new record goes.** A new login, a suggested password and a new passkey go to the
   chosen domain, sent as `domain`. With one domain in `status`, none is sent. Otherwise the user
   picks: the save and passkey-creation sheets carry a choice of the domains, preselected with

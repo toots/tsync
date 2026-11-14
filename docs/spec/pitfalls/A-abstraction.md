@@ -979,7 +979,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-10.17 A follower's extensions guessed from its local config
 - **Pitfall** — A domain with no `extensions` in the local config follows its main (05 §2.1 rule 5), and the CLI counted such a domain as using every extension. Reads hid the guess, since a follower answering `invalid` was dropped, but a write of a new record counted it as a candidate: with one domain using passwords and one following a main that lists none, the browser's *Save* was refused as ambiguous, naming a domain with no vault.
-- **Check** — Which extensions a follower uses comes from its owner (`Status.extensions`), never from the absent local list. A write's candidates and a read's targets come from that one answer (extensions README §6.1). Test two domains, one following a main without the extension: a new record goes to the other without `--domain`.
+- **Check** — Which extensions a follower uses comes from its owner (`Status.extensions`), never from the absent local list, and only once the owner has learned what the main states (`settingsLearned`): before that an empty list is no statement, and the follower stays a candidate. A write's candidates and a read's targets come from that one answer (extensions README §6.1). Test two domains, one following a main without the extension: a new record goes to the other without `--domain`.
 - **Seen** — rewrite (browser save refused on a two-domain machine).
 
 ## 11. Deadlines, health, liveness and shutdown
