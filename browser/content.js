@@ -347,6 +347,9 @@
     if (message.type === "open-menu") {
       const el = document.activeElement;
       if (el instanceof HTMLInputElement && kinds.has(el)) open(el);
+    } else if (message.type === "password-shown") {
+      reply({ shown: passwordShown() });
+      return;
     } else if (message.type === "apply" && message.origin === location.origin) {
       // §3.2: the popup's fill lands only in the document it was asked for.
       apply(message.values, document.activeElement instanceof HTMLInputElement ? document.activeElement : null);
@@ -375,13 +378,37 @@
       chrome.runtime.sendMessage({ type: "save-suggested", id: pick.id, domain: pick.domain, username }).catch(() => {});
       return;
     }
-    let password = "";
+    let password = "", field = null;
     for (const input of scope.querySelectorAll("input")) {
-      if (kinds.get(input) === "password" && input.value && (typed.has(input) || input.matches(":autofill"))) password = input.value;
+      if (kinds.get(input) === "password" && input.value && (typed.has(input) || input.matches(":autofill"))) {
+        password = input.value;
+        field = input;
+      }
     }
     if (!password || offered === password) return;
     offered = password;
-    chrome.runtime.sendMessage({ type: "offer-save", username, password }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "offer-save", username, password })
+      .then((reply) => reply && reply.attempt && watch(field, reply.attempt)).catch(() => {});
+  }
+  // §4: every password input of the frame, as a page drawing its form again replaces the
+  // field, and the one typed in whatever its type, as *show password* makes it text.
+  const shown = (input) => input.isConnected && input.checkVisibility();
+  const passwordShown = (field) =>
+    (field !== undefined && shown(field)) || [...document.querySelectorAll("input[type=password]")].some(shown);
+  // §4: the sign-in worked when no password field shows for 3 s on end within 15 s, so a
+  // spinner standing in for the form while the site answers does not count. A page load
+  // ends the watch; the service worker judges the next page.
+  let watching = null;
+  function watch(field, attempt) {
+    clearInterval(watching);
+    const started = Date.now();
+    let hidden = 0;
+    watching = setInterval(() => {
+      hidden = passwordShown(field) ? 0 : hidden + 1;
+      if (hidden < 6 && Date.now() - started < 15000) return;
+      clearInterval(watching);
+      chrome.runtime.sendMessage({ type: "submit-outcome", attempt, signedIn: hidden >= 6 }).catch(() => {});
+    }, 500);
   }
   document.addEventListener("submit", (e) => e.isTrusted && offer(e.target), true);
   document.addEventListener("click", (e) => {

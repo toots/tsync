@@ -23,20 +23,41 @@ let () =
 (* Where the bridge looks for the domain's owner. *)
 let socket = Tsync_config.Paths.owner_socket (Domain_name.v "pw")
 
+(* [follow] follows a main that states no extensions: it uses none, and the
+   bridge does not count it (pitfall A-10.17). *)
 let config_text =
   Printf.sprintf
     {|{"name":"test","domains":[
   {"name":"pw","symlinks":"keep","versioning":true,"extensions":["passwords","totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
   {"name":"plain","symlinks":"keep","versioning":true,"extensions":["passwords"],"frontends":["http-proxy"],
-   "backends":[{"type":"local","name":"main","role":"main","path":"%s/plain"}]}]}|}
-    root root
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/plain"}]},
+  {"name":"follow","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/follow"}]}]}|}
+    root root root
 
 let config = Tsync_config.Config.of_string config_text
 let () = Unix.putenv "TSYNC_CONFIG_JSON" config_text
+let socket_of domain = Tsync_config.Paths.owner_socket (Domain_name.v domain)
 
 let ask ?(domain = "pw") fields =
-  Ipc.call socket (`Assoc (("domain", `String domain) :: fields))
+  Ipc.call (socket_of domain) (`Assoc (("domain", `String domain) :: fields))
+
+(* An owner per socket the CLI looks in, as the supervisor runs them: one on
+   macOS, where every domain shares the service socket, one per domain
+   elsewhere. *)
+let start_owners () =
+  let by_socket = Hashtbl.create 3 in
+  List.iter
+    (fun (d : Tsync_config.Config.domain) ->
+      let s = Tsync_config.Paths.owner_socket d.name in
+      Hashtbl.replace by_socket s
+        (d :: Option.value ~default:[] (Hashtbl.find_opt by_socket s)))
+    config.Tsync_config.Config.domains;
+  Hashtbl.fold
+    (fun socket domains owners ->
+      Rt.async (fun () -> Owner.run ~socket config (List.rev domains)) :: owners)
+    by_socket []
 
 let s v = `String v
 let field = Ipc.field
@@ -179,6 +200,20 @@ let rec wait_serving n =
         Rt.sleep 0.05;
         wait_serving (n - 1)
 
+(* pitfall A-10.17: until [follow]'s owner has learned what its main states,
+   the bridge rightly counts it; the test asks once it has. *)
+let rec wait_learned domain n =
+  let learned =
+    match ask ~domain [("action", s "status")] with
+      | r -> member r "settingsLearned" = Some (`Bool true)
+      | exception _ -> false
+  in
+  if learned then ()
+  else if n > 0 then (
+    Rt.sleep 0.05;
+    wait_learned domain (n - 1))
+  else p "%s never learned its main's settings" domain
+
 let passphrase = "correct horse battery staple"
 
 let logins () =
@@ -246,6 +281,45 @@ let logins () =
         saved "save, then the same"
           [site; ("username", s "a"); ("password", s "two")]
     | None -> p "save: no update named");
+  (* A check writes nothing: the save after it still asks for the update. *)
+  let checked label password =
+    let r =
+      ask
+        [
+          ("action", s "passwords_save");
+          site;
+          ("username", s "a");
+          ("password", s password);
+          ("check", `Bool true);
+        ]
+    in
+    match (member r "unchanged", member r "logins") with
+      | Some (`Bool u), Some (`List l) ->
+          p "%-40s unchanged %b, logins %s" label u
+            (String.concat " "
+               (List.sort compare
+                  (List.map (function `String id -> show_id id | _ -> "?") l)))
+      | _ -> answer label r
+  in
+  checked "check, the same" "two";
+  checked "check, another password" "three";
+  saved "save, after the check"
+    [site; ("username", s "a"); ("password", s "three")];
+  let second =
+    id_of "add, a second login of that username"
+      (ask
+         [
+           ("action", s "passwords_add");
+           ("title", s "Example again");
+           ("urls", `List [s "https://example.org/signin"]);
+           ("username", s "a");
+           ("password", s "four");
+         ])
+  in
+  checked "check, two logins" "five";
+  saved "save, updating the second"
+    [site; ("username", s "a"); ("password", s "five"); ("update", s second)];
+  checked "check, then the same" "five";
   saved "save, from a subdomain of its site"
     [
       ("site", s "https://sub.example.org");
@@ -772,10 +846,7 @@ let passkeys () =
 let () =
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
-      let owner =
-        Rt.async (fun () ->
-            Owner.run ~socket config config.Tsync_config.Config.domains)
-      in
+      let owners = start_owners () in
       wait_serving 100;
       answer "list before init" (ask [("action", s "passwords_list")]);
       answer "init"
@@ -786,6 +857,7 @@ let () =
       ignore (logins ());
       import_export ();
       passkeys ();
+      wait_learned "follow" 400;
       p "== the bridge (§9)";
       let replies =
         bridge_session
@@ -823,6 +895,15 @@ let () =
                 ("origin", s "https://new.example");
                 ("username", s "me");
                 ("password", s "newer pass");
+              ];
+            `Assoc
+              [
+                ("type", s "save");
+                ("domain", s "pw");
+                ("origin", s "https://new.example");
+                ("username", s "me");
+                ("password", s "newer pass");
+                ("check", `Bool true);
               ];
             Yojson.Safe.from_string {|"not an object"|};
           ]
@@ -966,5 +1047,8 @@ let () =
       answer "lock" (ask [("action", s "vault_lock")]);
       answer "list, locked" (ask [("action", s "passwords_list")]);
       ignore (ask [("action", s "stop")]);
-      p "owner exit status %d" (Rt.Promise.await owner));
+      p "owner exit status %d"
+        (List.fold_left
+           (fun worst o -> max worst (Rt.Promise.await o))
+           0 owners));
   Fs.rm_rf root

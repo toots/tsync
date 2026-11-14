@@ -11,10 +11,22 @@ let dname (d : Config.domain) = Domain_name.to_string d.name
    only its owner knows whether it uses an extension. *)
 let follows (d : Config.domain) = d.extensions = None
 
+(* pitfall A-10.17: a follower's extensions are its owner's answer once it has
+   learned the main's statement. One whose owner cannot be asked, or has not
+   learned it yet, stays a candidate, to be named by what it answers. *)
+let in_force ~extension d =
+  match Tsync_owner.Owner.ask d Tsync_owner.Protocol.Status with
+    | s ->
+        (not s.Tsync_owner.Protocol.settings_learned)
+        || List.mem extension s.extensions
+    | exception (Tsync_ipc.Ipc.Not_serving _ | Fail.E _) -> true
+
 let using ~extension config =
   List.filter
     (fun (d : Config.domain) ->
-      match d.extensions with Some l -> List.mem extension l | None -> true)
+      match d.extensions with
+        | Some l -> List.mem extension l
+        | None -> in_force ~extension d)
     config.Config.domains
 
 (* README §6.1: a new record goes to --domain, else the only domain using the

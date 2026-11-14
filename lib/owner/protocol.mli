@@ -250,6 +250,9 @@ type status = {
   traffic : R.traffic;
   mount : string option;
   extensions : string list;  (** in force (05 §2.1 rule 5) *)
+  settings_learned : bool;
+      (** what the main states is known, so a follower's [extensions] are not a
+          guess made before learning it *)
   new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
   vault_backup_overdue : bool;
       (** vault §8.3, where this machine schedules them *)

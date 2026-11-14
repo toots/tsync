@@ -22,7 +22,8 @@ capability. What has been seen working is recorded in §10.
     where the user picks, approves and types. A page never sees them.
 - **It holds no secret.** It never writes a password, a code, a passkey or a match result to
   `chrome.storage`, IndexedDB or the page; what a fill hands a field is in memory for that fill
-  only. It keeps one setting of its own, whether to offer to save (§4).
+  only. It keeps two settings of its own: whether to offer to save (§4), and the vault a new
+  record goes to (§8).
 
 ## 2. Installing
 
@@ -171,22 +172,43 @@ browser's password manager for that.
   `identifier` or `login`, as such fields also carry tokens. An offer is made once per password: a
   click that was no submit does not stop the real submit's. A
   script's submit, or a password a script set, offers nothing.
-- The service worker never compares the typed password with tsync's: whether a sheet appears
-  depends on nothing secret, so a page cannot use it to test a guess. It asks `match` only to tell
-  a new login from a changed one, and shows the extension's sheet: *Save this login in tsync?*, or
-  *Update the password for `<title>`?* when tsync holds a login of that username for this exact
-  site (`exact`), with **Save** or **Update**, **Not now** and, for a new one, **Never for this
-  site**. Only that click sends `save`, naming for an update the domain that holds the login; the owner adds nothing when the password is already the one
-  it holds, and updates only a login of the exact site (passwords §8).
+- **Only a sign-in that worked offers.** The service worker holds the submitted login for its tab
+  until the sign-in is judged, once. A password field is an `input` of type `password`, or the
+  field the password was typed in whatever its type, since a *show password* button makes it
+  text. The sign-in worked when:
+  - the submitting frame shows no password field for 3 s on end within 15 s of the submit, a page
+    drawing its form again replacing the field and a spinner standing in for it while the site
+    answers;
+  - the tab loads a page whose top frame shows no password field 1.5 s after loading; a top frame
+    that cannot answer is no sign of success, and only the latest load judges;
+  - the login is still unjudged 16 s after the submit, as when the frame that held it was removed,
+    and the top frame shows no password field;
+  - the tab was opened by another one, as a *Sign in with* window is, and closes before the login
+    is judged.
+
+  A password field still shown, as when the page shows the form again with an error, drops the
+  login unoffered, as does any other tab closed first. A new submit in the tab replaces the
+  login waiting there, and a judgement made for the replaced one is dropped.
+- The service worker never compares the typed password with tsync's itself; the owner does. It
+  asks `match` to tell a new login from a known one. For logins of that username for this exact
+  site (`exact`), it first sends `save` with `check` to each domain holding one; `check` writes
+  nothing. When one of them answers `unchanged`, no sheet is shown. Otherwise the sheet is
+  *Update the password for `<title>`?*; with several such logins it is *Update which login?*,
+  listing each by title and domain, and **Update** waits for a pick. Whether a sheet appears tells
+  the page only whether the password in its own field, which it can read, is the one saved for its
+  own origin; a page cannot fill a field so that it offers (above), so it cannot test a guess of
+  its own. With no such login the sheet is *Save this login in tsync?*. Its buttons are **Save**
+  or **Update**, **Not now** and, for a new one, **Never for this site**. Only that click sends
+  the `save` that writes, naming for an update the record picked and the domain that holds it;
+  the owner updates only a login of the exact site and username (passwords §8).
 - **A suggested password's submit** shows no sheet: the content script sends `save` with
   `suggested`, the id kept at the pick, and the username submitted. The password itself is not
   sent again.
 - The sheet is a window of its own, so the page's reload after its submit does not close it; each
   page load raises the sheets still open, since a sign-in's reload brings the browser's window
   back over them.
-- The password waits in the service worker's memory until the sheet is answered or closed, then is
-  dropped. *Never for this site* is the one thing the extension keeps (§1): a list of origins,
-  without usernames.
+- The password waits in the service worker's memory until the sign-in is judged and the sheet is
+  answered or closed, then is dropped. *Never for this site* keeps a list of origins, without usernames (§1).
 - A locked vault (every domain using passwords locked): the sheet says the login was not saved
   because tsync is locked, and to unlock it in tsync and sign in again.
 
@@ -270,8 +292,21 @@ A machine may use passwords in several domains (README §6.1): every list merges
 than one domain in a list, its rows are grouped by domain under a header naming the domain with its
 vault's mark ([vault §8.1](../vault.md#81-appearance), from the bridge's `status`: the vault's
 icon, or the tsync glyph in its colour, the glyph also where a page's policy blocks the icon); a
-row carries no mark. The popup's state lines carry each domain's mark. A new login or passkey goes
-to the first domain using passwords.
+row carries no mark. The popup's state lines carry each domain's mark.
+
+A domain following its main uses passwords only when its owner says they are in force: it is in
+`status`'s domains only then.
+
+- **The vault for new records.** With more than one domain in `status`, the popup offers *Save
+  new logins in*: *Ask each time*, the default, or one of those domains. The choice is kept in
+  `chrome.storage.local`. One naming a domain missing from an answered `status` is forgotten, so
+  a domain of that name added later is not chosen by it; a `status` that fails forgets nothing.
+- **Where a new record goes.** A new login, a suggested password and a new passkey go to the
+  chosen domain, sent as `domain`. With one domain in `status`, none is sent. Otherwise the user
+  picks: the save and passkey-creation sheets carry a choice of the domains, preselected with
+  none, and their primary button is disabled until one is picked; a suggestion first shows a sheet
+  asking only the domain, and *Cancel* there suggests nothing. An update goes to the domain holding
+  the login, never asked.
 
 ## 9. Conformance
 
@@ -287,6 +322,12 @@ With the extension installed, the native host installed, and the vault unlocked:
   passphrase on Linux; signing in with it succeeds, the site seeing UV set. *Use a phone or security key* hands a sign-in to the
   browser; a creation offers only *Save in tsync* and *Cancel*.
 - With the vault locked, every menu and sheet says so and fills nothing.
+- A sign-in refused by the site, the form shown again, offers nothing. Signing in with the password
+  tsync holds offers nothing; with another one, it offers *Update*.
+- Two domains using passwords, *Ask each time* in the popup: saving a new login asks the vault, and
+  *Save* stays disabled until one is picked; the login lands in the one picked. With a vault chosen
+  in the popup, it lands there unasked. A domain following a main that lists no `passwords` is in
+  neither the popup nor the choice.
 - A page script calling `navigator.credentials.get` with a forged `origin` in its options gets an
   assertion over the real origin, or none.
 

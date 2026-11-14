@@ -295,6 +295,7 @@ let cases =
             { up_bytes = 10; up_rate = 1.5; down_bytes = 4; down_rate = 2. };
           mount = Some "/m";
           extensions = ["totp"];
+          settings_learned = true;
           new_machines = ["laptop"];
           vault_backup_overdue = true;
         } );
