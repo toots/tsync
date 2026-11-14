@@ -27,7 +27,7 @@ Running a newer `tsync-setup.exe` upgrades in place. Uninstall from *Settings â†
 
 ## Linux
 
-Packages exist for Debian 13, Ubuntu 26.04 and Fedora 44, on x86-64 and arm64. Add the repository, then install:
+Packages exist for Debian 13, Ubuntu 26.04 and Fedora 45, on x86-64 and arm64. Add the repository, then install:
 
 ```bash
 curl -fsSL https://toots.github.io/tsync/setup.sh | sudo sh
