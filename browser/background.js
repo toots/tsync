@@ -168,11 +168,12 @@ async function webauthnCreate(publicKey, origin) {
   }
   const user = publicKey.user || {};
   // §5: a creation never goes to the browser, whose own manager would keep the passkey.
-  const answer = await sheet({ kind: "passkey-create", origin, user: user.name || "" });
+  const target = await newRecordVault();
+  const answer = await sheet({ kind: "passkey-create", origin, user: user.name || "", vaults: target.ask });
   if (answer.action !== "ok") return refused({ error: "cancelled" });
   const { clientDataJSON, clientDataHash } = await clientData("webauthn.create", publicKey, origin);
   const reply = await verified(origin, publicKey.authenticatorSelection?.userVerification, {
-    type: "passkey_create", origin, rpId, userHandle: unwrap(user.id), userName: user.name || "",
+    type: "passkey_create", origin, rpId, domain: target.domain || answer.domain, userHandle: unwrap(user.id), userName: user.name || "",
     userDisplayName: user.displayName || user.name || "",
     algorithms: (publicKey.pubKeyCredParams || []).map((p) => p.alg),
     exclude: (publicKey.excludeCredentials || []).map((c) => unwrap(c.id)),
@@ -185,6 +186,17 @@ async function webauthnCreate(publicKey, origin) {
 }
 
 // --- saving (§4) ----------------------------------------------------------------
+
+// §8: where a new record goes. `domain` undefined lets the bridge pick the only
+// one; `ask` lists the domains the sheet offers when the popup chose none.
+const VAULT_KEY = "newRecordVault";
+async function newRecordVault() {
+  const status = await one({ type: "status" });
+  const domains = ((status.ok && status.domains) || []).map((d) => d.domain);
+  if (domains.length <= 1) return {};
+  const chosen = (await chrome.storage.local.get(VAULT_KEY))[VAULT_KEY];
+  return domains.includes(chosen) ? { domain: chosen } : { ask: domains };
+}
 
 // Only after a password the user typed (the content script checks), and with no
 // comparison against what tsync holds: the sheet's appearance tells a page nothing.
@@ -200,11 +212,11 @@ async function offerSave(origin, username, password, incognito) {
     return;
   }
   const same = match.logins.filter((l) => l.exact && l.username === username);
-  const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title, incognito });
+  const target = same.length ? { domain: same[0].domain } : await newRecordVault();
+  const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title, incognito, vaults: target.ask });
   if (answer.action === "never") return chrome.storage.local.set({ never: [...never, origin] });
   if (answer.action !== "ok") return;
-  // The domain holding the login updated; a new one goes to the default domain.
-  const domain = same[0]?.domain;
+  const domain = target.domain || answer.domain;
   const first = await one({ type: "save", origin, username, password, domain });
   const saved = first.ok && first.update ? await one({ type: "save", origin, username, password, update: first.update, domain }) : first;
   if (!saved.ok) await sheet({ kind: "save-failed", origin, error: saved.error || "tsync could not save it." });
@@ -212,7 +224,13 @@ async function offerSave(origin, username, password, incognito) {
 
 // passwords §5.1: the pick is the approval; the login is saved before the form is.
 async function suggestFor(origin, username) {
-  const reply = await one({ type: "suggest", origin, username });
+  const target = await newRecordVault();
+  if (target.ask) {
+    const answer = await sheet({ kind: "vault", origin, vaults: target.ask });
+    if (answer.action !== "ok") return { error: "cancelled" };
+    target.domain = answer.domain;
+  }
+  const reply = await one({ type: "suggest", origin, username, domain: target.domain });
   if (!reply.ok) return { error: reply.error || "tsync could not suggest a password" };
   return { password: reply.password, id: reply.id, domain: reply.domain };
 }

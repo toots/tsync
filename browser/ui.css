@@ -9,10 +9,11 @@ p { margin: 0; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid #8886; background: transparent; color: inherit; cursor: pointer; }
 button.primary { background: #2f6fed; border-color: #2f6fed; color: white; }
+button:disabled { opacity: .5; cursor: default; }
 .row { display: flex; flex-direction: column; align-items: flex-start; text-align: left; width: 100%; }
 .row small, .login small { opacity: .65; }
 .login { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 8px; background: #8881; }
-input[type=password], input[type=text] { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid #8886; }
+input[type=password], input[type=text], select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid #8886; }
 .mark { display: flex; align-items: center; gap: 8px; }
 .row.mark { flex-direction: row; align-items: center; gap: 10px; }
 .row.mark span { display: flex; flex-direction: column; }

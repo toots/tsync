@@ -17,6 +17,18 @@ function el(tag, attrs = {}, ...children) {
 }
 const button = (label, action, primary) => el("button", { textContent: label, className: primary ? "primary" : "", onclick: action });
 
+// §8: a new record's vault when the popup chose none; the primary button waits for a pick.
+let vault = null;
+function askVault(item, primary) {
+  if (!item.vaults) return;
+  vault = el("select", { onchange: () => (primary.disabled = !vault.value) },
+    el("option", { value: "", textContent: "Choose a vault" }),
+    ...item.vaults.map((d) => el("option", { value: d, textContent: d })));
+  primary.disabled = true;
+  main.append(el("label", { className: "detail" }, "Save in ", vault));
+}
+const approve = () => answer({ action: "ok", domain: vault?.value || undefined });
+
 function render(item) {
   if (!item) return main.append(el("p", { textContent: "This request is over." }));
   const actions = el("div", { className: "actions" });
@@ -24,14 +36,24 @@ function render(item) {
   const site = item.origin ? new URL(item.origin).host : "";
   switch (item.kind) {
     case "save":
-    case "update":
+    case "update": {
       main.append(
         el("h1", { textContent: item.kind === "save" ? `Save this login in tsync?` : `Update the password for ${item.title}?` }),
         el("p", { textContent: site }), el("p", { className: "detail", textContent: item.username || "(no username)" }),
       );
       if (item.kind === "save" && !item.incognito) actions.append(button("Never for this site", () => answer({ action: "never" })));
-      actions.append(button("Not now", () => answer({ action: "cancel" })), button(item.kind === "save" ? "Save" : "Update", () => answer({ action: "ok" }), true));
+      const save = button(item.kind === "save" ? "Save" : "Update", approve, true);
+      askVault(item, save);
+      actions.append(button("Not now", () => answer({ action: "cancel" })), save);
       break;
+    }
+    case "vault": {
+      main.append(el("h1", { textContent: "Save the new password in which vault?" }), el("p", { textContent: site }));
+      const suggest = button("Use a strong password", approve, true);
+      askVault(item, suggest);
+      actions.append(button("Cancel", () => answer({ action: "cancel" })), suggest);
+      break;
+    }
     case "save-failed":
       main.append(el("h1", { textContent: "This login was not saved" }),
         el("p", { className: "detail", textContent: item.error || `tsync is locked. Unlock it in tsync, then sign in to ${site} again to save it.` }));
@@ -71,10 +93,13 @@ function render(item) {
       }
       actions.append(button("Use a phone or security key", () => answer({ action: "fallback" })), button("Cancel", () => answer({ action: "cancel" })));
       break;
-    case "passkey-create":
+    case "passkey-create": {
       main.append(el("h1", { textContent: `Save a passkey for ${item.user} on ${site} in tsync?` }));
-      actions.append(button("Cancel", () => answer({ action: "cancel" })), button("Save in tsync", () => answer({ action: "ok" }), true));
+      const save = button("Save in tsync", approve, true);
+      askVault(item, save);
+      actions.append(button("Cancel", () => answer({ action: "cancel" })), save);
       break;
+    }
     case "passphrase": {
       // §5, Linux: verifies the user; it unlocks nothing and is never kept.
       const field = el("input", { type: "password", autocomplete: "off", placeholder: "Vault passphrase" });

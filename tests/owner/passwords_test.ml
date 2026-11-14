@@ -23,14 +23,18 @@ let () =
 (* Where the bridge looks for the domain's owner. *)
 let socket = Tsync_config.Paths.owner_socket (Domain_name.v "pw")
 
+(* [follow] follows a main that states no extensions: it uses none, and the
+   bridge does not count it (pitfall A-10.17). *)
 let config_text =
   Printf.sprintf
     {|{"name":"test","domains":[
   {"name":"pw","symlinks":"keep","versioning":true,"extensions":["passwords","totp"],"frontends":["http-proxy"],
    "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]},
   {"name":"plain","symlinks":"keep","versioning":true,"extensions":["passwords"],"frontends":["http-proxy"],
-   "backends":[{"type":"local","name":"main","role":"main","path":"%s/plain"}]}]}|}
-    root root
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/plain"}]},
+  {"name":"follow","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+   "backends":[{"type":"local","name":"main","role":"main","path":"%s/follow"}]}]}|}
+    root root root
 
 let config = Tsync_config.Config.of_string config_text
 let () = Unix.putenv "TSYNC_CONFIG_JSON" config_text

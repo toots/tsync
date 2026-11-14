@@ -2,8 +2,8 @@
 
 val dname : Tsync_config.Config.domain -> string
 
-(** The domains that may use [extension]: listing it, or following their main.
-*)
+(** The domains using [extension]: listing it, or following a main whose owner
+    says it is in force, or whose owner cannot be asked. *)
 val using :
   extension:string -> Tsync_config.Config.t -> Tsync_config.Config.domain list
 
