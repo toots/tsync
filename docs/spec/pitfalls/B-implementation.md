@@ -479,6 +479,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — The server's `push_key` covers Production; a push to a TestFlight build counts `pushSent`, not `pushFailed`.
 - **Seen** — the first TestFlight build on the test server.
 
+### B-8.27 A refresh pass rewriting every held folder
+- **Pitfall** — A pass read the log once, as android §3.2 says, then wrote each held folder's position and pull marker because the head had moved, though no entry concerned most of them: two new files per folder. With 5,000 folders held, a pass for one new file took 16 to 36 s on an iPhone, past `refresh_patience`, so the pushed change still waited for a later pass. On a Mac the writes were 1.4 s of a 2.2 s pass.
+- **Check** — A pass for one change rewrites one folder's files and the pass record, whatever the number held: `tests/android/refresh_test` counts the folders whose files a pass wrote.
+- **Seen** — B-8.25's push check on TestFlight build 20, iPhone 14; measured on a Mac with `tests/android/refresh_scale_bench`.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store

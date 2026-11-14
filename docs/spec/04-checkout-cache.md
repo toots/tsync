@@ -135,13 +135,23 @@ requires rewriting a valid existing file into another form.
   nothing on a read path writes a marker.
 - **Pull marker** (lazy tree only) `.tsync-pulled`, in a folder entry and in the mirror's root: the
   wall-clock time of the last completed pull of that folder, decimal epoch milliseconds. Written
-  atomically after the pull's entries. Absent means never pulled. It says that a view exists and how
-  old it is, which bounds how long the view is answered while the store is silent; whether a view
-  is fresh is never judged from it
+  atomically after the pull's entries. Absent means never pulled. The folder's last pull is the
+  later of this time and the pass record's start, when the record stands for the folder (below).
+  It says that a view exists and how old it is, which bounds how long the view is answered while
+  the store is silent; whether a view is fresh is never judged from it
   ([android §3.2](frontends/android.md#32-freshness-without-a-background-cycle)).
 - **Folder position** (lazy tree only) `.tsync-position`, beside the pull marker: the number of the
   log entry the folder's view is at, in its written form ([03](03-journal-sync.md) §2.4). Written
-  atomically and durably with the merge that brings the view there. Absent means never pulled.
+  atomically and durably with the merge that brings the view there. Absent means never pulled. The
+  folder's view is at the larger of this entry and the pass record's, when the record stands for the
+  folder.
+- **Pass record** (lazy tree only) `.tsync-pass`, in the mirror's root: `<entry> <start>`, the log
+  entry a refresh pass read to, in its written form, and the wall-clock time the pass started,
+  decimal epoch milliseconds. Written atomically, with no sync barrier, by each pass that reads the
+  log to the head ([android §3.2](frontends/android.md#32-freshness-without-a-background-cycle)).
+  It stands for a pull of every folder whose pull marker is no later than its start: the folders
+  the pass covered. A folder first pulled, or held again, after the pass started carries a later
+  marker and is judged by its own files alone. Absent means no pass.
 - **View hold** (lazy tree only) `.tsync-view-hold`, beside the pull marker: decimal epoch
   milliseconds until which the folder's view is answered whatever its age. Written atomically by a
   restore, on the folder of each file it pins and on every ancestor, and only ever raised. Absent

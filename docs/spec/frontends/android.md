@@ -134,18 +134,22 @@ behind the folder is.
 **Refresh passes.** A `refresh` request starts a pass and is answered `{}` when the pass ends or
 after `refresh_patience`, whichever comes first; a pass still running then goes on in the
 background. A host that suspends its process once no request is pending (iOS) so keeps it running
-for the pass a change enumeration starts. A pass brings every **held** folder (one with a pull marker,
-[04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) that is not fresh to the head, and
-its cost does not grow with how many folders are held:
+for the pass a change enumeration starts. A pass runs when a **held** folder (one with a pull
+marker, [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) is not fresh, and brings
+every held folder to the head, fresh ones too: its record stands for each folder pulled before it.
+Its store reads do not grow with how many folders are held, and it writes only the folders it merges
+and one record:
 
 1. Read the log once, in pages of `pull_page` entries, from the oldest position among those folders
    to the head.
 2. Merge each page into each of those folders its entries concern, taking only the entries after the
    folder's position, as a pull would. A folder no entry concerns has the same view at the head as
    at its position: it is not merged.
-3. At the end, every folder the pass covered stands at the head and is stamped fresh. Positions and
-   stamps of folders that were not merged are written once, at the end, with no sync barrier: a
-   lost one costs the next pass a longer read, never a wrong view.
+3. At the end, every folder the pass covered stands at the head and is stamped fresh. No file is
+   written per folder for it: the pass writes the pass record
+   ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)), with no sync barrier, and a
+   folder it merged has its position written by the merge. A lost record costs the next pass a
+   longer read, never a wrong view.
 4. A folder whose position the log no longer holds is pulled by state, on its own, after the read.
 
 A `refresh` made while a pass runs starts none, and waits for that pass as for its own. A pass ends early when the store's health breaker
