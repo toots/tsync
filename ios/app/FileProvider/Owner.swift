@@ -20,8 +20,8 @@ struct Owner {
         // ios.md §5.1: what the pass brings is announced by its notices.
         if action == "changes_since" {
             let started = Date()
-            _ = Core.text("request", domain: domain, #"{"action":"refresh"}"#)
-            Footprint.record(logLabel("refresh", [:], since: started))
+            let reply = Core.text("request", domain: domain, #"{"action":"refresh"}"#)
+            Footprint.record(logLabel("refresh", [:], since: started) + passSummary(reply))
         }
         var request = fields
         request["action"] = action
@@ -50,6 +50,18 @@ struct Owner {
         let ms = Int(Date().timeIntervalSince(started) * 1000)
         let ref = (fields["ref"] as? String).map { " \($0)" } ?? ""
         return "\(domain) \(action)\(ref) \(ms) ms"
+    }
+
+    /// ios.md §7: what the refresh's pass did, when it ended in time.
+    private func passSummary(_ reply: String?) -> String {
+        guard
+            let reply, let object = try? JSONSerialization.jsonObject(with: Data(reply.utf8)),
+            let pass = (object as? [String: Any])?["pass"] as? [String: Any]
+        else { return "" }
+        let fields = ["held", "covered", "merged", "entries", "end", "error"].compactMap { key in
+            pass[key].map { "\(key) \($0)" }
+        }
+        return ": pass " + fields.joined(separator: ", ")
     }
 
     private func rows(_ reply: [String: Any]) -> String {

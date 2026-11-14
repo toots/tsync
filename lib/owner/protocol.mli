@@ -56,6 +56,16 @@ type written = { size : int; times : Fs.times; item : row; aside : row option }
 (** The item at the destination, and [aside] as for {!written}. *)
 type placed = { item : row; aside : row option }
 
+(** android §3.2: what a refresh pass did, for a host's diagnostics. *)
+type pass_summary = {
+  held : int;
+  covered : int;
+  merged : int;
+  entries : int;
+  ended : string;  (** head, stopped, pruned, fresh or failed *)
+  error : string option;  (** why it failed *)
+}
+
 type fetched = {
   local_path : string;
   offset : int;
@@ -328,7 +338,9 @@ type _ request =
   | Revert : { item : target; version : int64 option } -> unit request
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
-  | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
+  | Refresh : pass_summary option request
+      (** android §3.2: a refresh pass on a pulled tree; its summary when it
+          ended in time *)
   | Push_register : {
       token : string;
       environment : string;

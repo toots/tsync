@@ -13,9 +13,33 @@ let wait_stale () = Thread.delay (freshness +. 0.1)
 (* How long a refresh waits for a pass that does not end. *)
 let patience = 1.
 
+(* android §3.2: the pass's summary, when the answer carries one. *)
+let last_summary = ref "none"
+
+let summary j =
+  match field j "pass" with
+    | Some p ->
+        let value k =
+          match field p k with
+            | Some (`Int i) -> string_of_int i
+            | Some (`String v) -> v
+            | _ -> "?"
+        in
+        let error =
+          match field p "error" with
+            | Some (`String e) -> ", error " ^ e
+            | _ -> ""
+        in
+        Printf.sprintf "held %s, covered %s, merged %s, entries %s, end %s%s"
+          (value "held") (value "covered") (value "merged") (value "entries")
+          (value "end") error
+    | None -> "none"
+
 let timed_refresh () =
   let started = Unix.gettimeofday () in
-  let answer = outcome (action "refresh" []) in
+  let reply = action "refresh" [] in
+  last_summary := summary reply;
+  let answer = outcome reply in
   let waited = Unix.gettimeofday () -. started in
   let after =
     if waited < patience then "before the patience"
@@ -80,6 +104,7 @@ let pass label =
   until_quiet ();
   p "  %-34s %d" (label ^ ", log entries read") (Atomic.get entry_reads - before);
   p "  %-34s %d" (label ^ ", folders written") (folders_written files);
+  p "  %-34s %s" (label ^ ", summary") !last_summary;
   show_notices (label ^ ", notices")
 
 let () =
@@ -124,7 +149,9 @@ let () =
 
   p "== at once again: every folder is fresh";
   let before = Atomic.get entry_reads in
-  p "  %-34s %s" "refresh" (outcome (action "refresh" []));
+  let reply = action "refresh" [] in
+  p "  %-34s %s" "refresh" (outcome reply);
+  p "  %-34s %s" "summary" (summary reply);
   Thread.delay 0.5;
   p "  %-34s %d" "log entries read" (Atomic.get entry_reads - before);
 
@@ -137,7 +164,20 @@ let () =
   let before = Atomic.get entry_reads in
   p "  %-34s %s" "refresh" (timed_refresh ());
   p "  %-34s %s" "refresh during it" (timed_refresh ());
+  p "  %-34s %s" "summary" !last_summary;
   Atomic.set mode `Up;
   until_quiet ();
   p "  %-34s %d" "log entries read" (Atomic.get entry_reads - before);
   show_notices "notices"
+;;
+
+p "== the store down";
+quiet ();
+Atomic.set mode `Down;
+wait_stale ();
+p "  %-34s %s" "refresh" (timed_refresh ());
+p "  %-34s %s" "summary" !last_summary;
+wait_stale ();
+p "  %-34s %s" "refresh again" (timed_refresh ());
+p "  %-34s %s" "summary" !last_summary;
+Atomic.set mode `Up

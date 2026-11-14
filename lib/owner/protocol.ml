@@ -47,6 +47,16 @@ type written = { size : int; times : Fs.times; item : row; aside : row option }
 (** The item at the destination, and [aside] as for {!written}. *)
 type placed = { item : row; aside : row option }
 
+(** android §3.2: what a refresh pass did, for a host's diagnostics. *)
+type pass_summary = {
+  held : int;
+  covered : int;
+  merged : int;
+  entries : int;
+  ended : string;  (** head, stopped, pruned, fresh or failed *)
+  error : string option;  (** why it failed *)
+}
+
 type fetched = {
   local_path : string;
   offset : int;
@@ -313,7 +323,9 @@ type _ request =
   | Revert : { item : target; version : int64 option } -> unit request
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
-  | Refresh : unit request  (** android §3.2: a refresh pass on a pulled tree *)
+  | Refresh : pass_summary option request
+      (** android §3.2: a refresh pass on a pulled tree; its summary when it
+          ended in time *)
   | Push_register : {
       token : string;
       environment : string;
@@ -1139,7 +1151,21 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
     | Delete _ -> ok (if reply = `Kept then [("kept", `Bool true)] else [])
-    | Ping | Full_resync | Refresh | Poll | Wake | Stop | Rmdir _ | Revert _
+    | Refresh ->
+        ok
+          (opt "pass"
+             (fun (p : pass_summary) ->
+               `Assoc
+                 ([
+                    ("held", `Int p.held);
+                    ("covered", `Int p.covered);
+                    ("merged", `Int p.merged);
+                    ("entries", `Int p.entries);
+                    ("end", `String p.ended);
+                  ]
+                 @ opt "error" (fun e -> `String e) p.error))
+             reply)
+    | Ping | Full_resync | Poll | Wake | Stop | Rmdir _ | Revert _
     | Vault_unlock _ | Vault_lock _ | Vault_appearance _ | Totp_rename _
     | Totp_remove _ ->
         ok []
@@ -1629,7 +1655,19 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               (member j "appearance");
         }
     | Full_resync -> ()
-    | Refresh -> ()
+    | Refresh ->
+        Option.map
+          (fun p ->
+            let count k = Option.value ~default:0 (int p k) in
+            {
+              held = count "held";
+              covered = count "covered";
+              merged = count "merged";
+              entries = count "entries";
+              ended = Option.value ~default:"" (str p "end");
+              error = str p "error";
+            })
+          (member j "pass")
     | Push_register _ -> flag j "pushes"
     | Revert _ -> ()
     | Poll -> ()

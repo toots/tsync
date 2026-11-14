@@ -1274,9 +1274,10 @@ module Make (C : Engine_ctx.S) = struct
   let pull_pass ?(page = default_pull_page) ~stop ~fresh () : Engine_intf.pass =
     (* The record stands for every folder pulled before its start, fresh or not. *)
     let start = Unix.gettimeofday () *. 1000. in
-    let dirs = held () in
-    let dirs = if List.for_all fresh dirs then [] else dirs in
+    let held = held () in
+    let dirs = if List.for_all fresh held then [] else held in
     let changed = ref [] in
+    let entries_read = ref 0 in
     let note dir n = if n > 0 then changed := dir :: !changed in
     let alone dir = if pull_folder ~page dir then changed := dir :: !changed in
     let views, unpositioned =
@@ -1321,24 +1322,25 @@ module Make (C : Engine_ctx.S) = struct
           | `Pruned -> `Pruned
           | `Entries entries ->
               let head = from + List.length entries in
+              entries_read := !entries_read + List.length entries;
               merge_page entries head;
               if List.length entries < page then `Head head else read head)
     in
-    let covered =
+    let ended, covered =
       match views with
-        | [] -> []
+        | [] -> ((if dirs = [] && held <> [] then `Fresh else `Head), [])
         | v :: rest -> (
             let oldest =
               List.fold_left (fun m v -> Int.min m v.position) v.position rest
             in
             match read oldest with
-              | `Stopped -> []
+              | `Stopped -> (`Stopped, [])
               | `Pruned ->
                   List.iter (fun v -> alone v.dir) views;
-                  List.map (fun v -> v.dir) views
+                  (`Pruned, List.map (fun v -> v.dir) views)
               | `Head head ->
                   write_pass_record { entry = head; start };
-                  List.map (fun v -> v.dir) views)
+                  (`Head, List.map (fun v -> v.dir) views))
     in
     let covered =
       if stop () then covered
@@ -1346,7 +1348,13 @@ module Make (C : Engine_ctx.S) = struct
         List.iter alone unpositioned;
         covered @ unpositioned)
     in
-    { covered; changed = List.sort_uniq String.compare !changed }
+    {
+      held = List.length held;
+      covered;
+      changed = List.sort_uniq String.compare !changed;
+      entries = !entries_read;
+      ended;
+    }
 
   (* publication §4.5: the entry this client creates of a batch. *)
   let entry_of batch : Log_entry.t =

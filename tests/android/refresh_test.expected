@@ -6,6 +6,7 @@
   pass, notices when answered        sent
   pass, log entries read             5
   pass, folders written              3
+  pass, summary                      held 201, covered 201, merged 3, entries 3, end head
   pass, notices                      {changed d:<folder1>, changed d:<folder2>, changed d:<folder3>}
   changes                            [put new.txt, put new.txt, put new.txt]
 == a peer writes into a folder pulled since
@@ -13,12 +14,20 @@
   pass, notices when answered        sent
   pass, log entries read             3
   pass, folders written              1
+  pass, summary                      held 201, covered 201, merged 1, entries 1, end head
   pass, notices                      {changed d:<folder4>}
 == at once again: every folder is fresh
   refresh                            ok
+  summary                            held 201, covered 0, merged 0, entries 0, end fresh
   log entries read                   0
 == two refreshes while the store pends
   refresh                            ok, at the patience
   refresh during it                  ok, at the patience
+  summary                            none
   log entries read                   3
   notices                            {changed d:<folder5>}
+== the store down
+  refresh                            ok, before the patience
+  summary                            held 0, covered 0, merged 0, entries 0, end failed, error the store is down [unreachable]
+  refresh again                      ok, before the patience
+  summary                            held 0, covered 0, merged 0, entries 0, end failed, error the store is down [unreachable]

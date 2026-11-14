@@ -30,7 +30,8 @@ type t = {
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
   offline : bool Atomic.t;
-  pass : unit Rt.Promise.t option Atomic.t;  (** the refresh pass running *)
+  pass : Protocol.pass_summary option Rt.Promise.t option Atomic.t;
+      (** the refresh pass running *)
 }
 
 type view = { pulled_at : float option; outdated : bool }
@@ -194,7 +195,22 @@ let stamp_fresh t dirs =
           owed)
         dirs)
 
-let run_pass t =
+let summary (pass : Engine_intf.pass) : Protocol.pass_summary =
+  {
+    held = pass.held;
+    covered = List.length pass.covered;
+    merged = List.length pass.changed;
+    entries = pass.entries;
+    ended =
+      (match pass.ended with
+        | `Head -> "head"
+        | `Stopped -> "stopped"
+        | `Pruned -> "pruned"
+        | `Fresh -> "fresh");
+    error = None;
+  }
+
+let run_pass t : Protocol.pass_summary =
   let (module E : Engine.S) = t.engine in
   match
     E.pull_pass ~page:t.params.pull_page ~stop:t.silent ~fresh:(is_fresh t) ()
@@ -203,9 +219,18 @@ let run_pass t =
         let owed = stamp_fresh t pass.covered in
         if pass.covered <> [] then succeeded t;
         let notice = List.sort_uniq String.compare (pass.changed @ owed) in
-        if notice <> [] then (try t.changed notice with _ -> ())
+        if notice <> [] then (try t.changed notice with _ -> ());
+        summary pass
     | exception e when not (Rt.is_cancelled e) ->
-        Log.info "refresh pass failed: %s" (Printexc.to_string e)
+        Log.info "refresh pass failed: %s" (Printexc.to_string e);
+        {
+          held = 0;
+          covered = 0;
+          merged = 0;
+          entries = 0;
+          ended = "failed";
+          error = Some (Printexc.to_string e);
+        }
 
 let refresh t =
   let mine = Rt.Promise.create () in
@@ -215,16 +240,14 @@ let refresh t =
           Fun.protect
             ~finally:(fun () ->
               Atomic.set t.pass None;
-              ignore (Rt.Promise.try_resolve mine ()))
-            (fun () -> run_pass t));
+              ignore (Rt.Promise.try_resolve mine None))
+            (fun () -> ignore (Rt.Promise.try_resolve mine (Some (run_pass t)))));
       Some mine)
     else Atomic.get t.pass
   in
   (* ios §5.1: the host is kept running while this request is pending. *)
-  Option.iter
-    (fun pass ->
+  Option.bind pass (fun pass ->
       try
         Rt.with_timeout t.params.refresh_patience (fun () ->
             Rt.Promise.await pass)
-      with Rt.Timeout -> ())
-    pass
+      with Rt.Timeout -> None)

@@ -49,8 +49,11 @@ type synced = {
 
 (** android §3.2: what a refresh pass did. *)
 type pass = {
+  held : int;  (** the folders with a pull marker *)
   covered : string list;  (** the folders it brought to the head *)
   changed : string list;  (** those whose children changed *)
+  entries : int;  (** the log entries it read *)
+  ended : [ `Head | `Stopped | `Pruned | `Fresh ];
 }
 
 module type S = sig
