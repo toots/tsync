@@ -3,7 +3,8 @@
 Scope: tsync on iOS: which process owns a domain, where its files live, what the host gives the
 core, and how the File Provider framework is served from Android's lazy tree. The app's screens are
 [ios-app.md](ios-app.md)'s; the rest of the app (Save to tsync, camera backup, vault, credentials) is
-[§9](#9-not-yet-specified). There is no in-app browser: the Files app is the browser.
+[§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
+([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
 
 This page is a delta. What it does not restate is owned by:
 - the embedded owner, the lazy tree, the bridge and notices: [android.md](android.md), which applies

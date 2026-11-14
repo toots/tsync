@@ -374,52 +374,12 @@ Process death and configuration changes restore the destination and, in Files, t
 
 ### 10.3 Files
 
-- **Domains.** With one domain, Files opens at its root. With several, Files opens on the list of
-  domains, in config order, each row a folder whose tap boots the domain and descends into its
-  root; a domain that fails to boot shows the core's sentence on its row.
-- **Trail.** A stack of `(reference, name)` from the root, within one domain. The title is the
-  current folder's name (the domain name at the root); the path is shown and each ancestor is
-  reachable from it, as is the list of domains when there are several. Back pops the trail and
-  leaves the app at the list of domains, or at the root when there is one domain.
-- **Listing.** `list_dir` pages, the next page loaded as the list nears its end, in the handler's
-  order. Shown while the first page loads: a progress indication, not an empty list.
-- **Row.** An icon for the kind (folder, or the file's type family from its MIME type), the name, a
-  second line (a file's size and modification date), and a **state mark**:
-  - `online-only`: bytes are on the server only;
-  - `cached`: no mark;
-  - `pinned`: available offline;
-  - `isUploaded` false: waiting to upload, which takes precedence over the others.
-- **Refresh.** A pull-to-refresh gesture lists with `"pull":"now"`. The folder is observed while
-  shown (§7.1), and re-listed when the screen is resumed, on a `changed` notice naming it and on
-  `recovered`. A refresh keeps the scroll position and does not clear the list while it runs.
-- **Offline.** When the listing is `outdated`, a banner above the list says "Offline: showing this
-  folder as of <time>" and stays until a fresh listing arrives. A folder that answers `unreachable`
-  shows "Cannot reach the server" with Retry instead of a list.
-- **Read-only.** On a read-only domain the screen says so once per domain, and nothing that writes is offered.
-- **Add.** One prominent control offering "New folder" (a name prompt; `mkdir`, exclusive; `exists`
-  is shown on the name field) and "Upload files" (the system file picker, multiple; then §10.6 into
-  the current folder).
-- **Tap**: a folder descends; a file opens (below). **Long-press or the row's menu**: the item's
-  actions (§10.4).
+[file-browser.md](file-browser.md), carried out as
+[file-browser-differences.md §1](file-browser-differences.md#1-android) says.
 
 ### 10.4 Item actions
 
-Offered in a sheet titled with the item's name; each ends with a short confirmation or the failure.
-
-| Action | For | What it does |
-|---|---|---|
-| Open | files | A view intent on the provider's document address with the file's MIME type and a read grant, through the system chooser; "No app on this phone opens <name>" when nothing takes it. |
-| Share link | all | `share`; then the URL with its expiry, and Copy and Send. `paused` and `unreachable` are shown with the owner's sentence. |
-| Make available offline | all not pinned | `restore`. For a folder the confirmation states the reply's counts: "<r> files available offline", and "<f> failed" when any did. |
-| Keep offline longer | pinned files | `restore` again, which extends the pin. |
-| Remove download | all not `online-only` | `evict`, with counts for a folder. A file waiting to upload keeps its bytes. |
-| Rename | all, when writable | A name prompt pre-filled with the current name; `rename` in place with `noreplace: true`; `exists` is shown on the field. |
-| Move | all, when writable | Files in pick mode (§10.6) to choose the destination folder, the item itself, its subtree and every other domain not offered; then `rename` into it under the same name with `noreplace: true`. `exists` is shown with the owner's sentence. |
-| Delete | all, when writable | A confirmation naming the item, and for a folder saying that everything in it is deleted; then `delete` or `rmdir`. |
-| Details | all | Name, kind, size, modified, where its bytes are, pinned until, whether it is uploaded. |
-
-A folder action that walks a subtree shows that it is running for as long as it does, and can be
-left running: its outcome is then a notification.
+[file-browser.md §4](file-browser.md#4-item-actions), every action offered.
 
 ### 10.5 Activity
 
@@ -440,15 +400,14 @@ a domain not booted is listed as such and asked nothing.
 
 ### 10.6 Saving into the domain
 
-One flow for the share target and for "Upload files". Its pick mode also chooses the destination
-of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
+One flow for the share target and for "Upload files", in
+[file-browser.md §5](file-browser.md#5-pick-mode)'s pick mode, which also chooses the destination of
+a Move.
 
 - **Share target.** No streams → "Only files can be saved to tsync"; no config → "Set up tsync
-  before saving to it"; in both cases the activity finishes. Otherwise Files opens in **pick mode**:
-  taps only navigate folders, item actions are off, "New folder" stays, the title reads "Save N
-  files to <path>" (the path starting at the domain name), and the screen offers "Save here" and
-  "Cancel". With several domains pick mode starts on the list of domains, which offers no "Save
-  here".
+  before saving to it"; in both cases the activity finishes. Otherwise Files opens in pick mode,
+  titled "Save N files to <path>" and offering "Save here". With several domains pick mode starts
+  on the list of domains, which offers no "Save here".
 - **Names.** One file: an editable name pre-filled with the stream's display name (else the last
   address segment, else "shared file"). Several: each keeps its own name. Every name is sanitised
   (§11.5).
