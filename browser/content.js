@@ -347,6 +347,9 @@
     if (message.type === "open-menu") {
       const el = document.activeElement;
       if (el instanceof HTMLInputElement && kinds.has(el)) open(el);
+    } else if (message.type === "password-shown") {
+      reply({ shown: passwordShown() });
+      return;
     } else if (message.type === "apply" && message.origin === location.origin) {
       // §3.2: the popup's fill lands only in the document it was asked for.
       apply(message.values, document.activeElement instanceof HTMLInputElement ? document.activeElement : null);
@@ -382,6 +385,25 @@
     if (!password || offered === password) return;
     offered = password;
     chrome.runtime.sendMessage({ type: "offer-save", username, password }).catch(() => {});
+    watch();
+  }
+  // A page drawing its form again replaces the field, so the frame's fields are judged, not
+  // the one typed in.
+  const passwordShown = () => [...document.querySelectorAll("input[type=password]")].some((input) => input.checkVisibility());
+  // §4: the sign-in worked when no password field shows within 15 s, twice in a row so a
+  // spinner standing in for the form does not count. A page load ends the watch; the
+  // service worker judges the next page.
+  let watching = null;
+  function watch() {
+    clearInterval(watching);
+    const started = Date.now();
+    let hidden = 0;
+    watching = setInterval(() => {
+      hidden = passwordShown() ? 0 : hidden + 1;
+      if (hidden < 2 && Date.now() - started < 15000) return;
+      clearInterval(watching);
+      chrome.runtime.sendMessage({ type: "submit-outcome", signedIn: hidden >= 2 }).catch(() => {});
+    }, 500);
   }
   document.addEventListener("submit", (e) => e.isTrusted && offer(e.target), true);
   document.addEventListener("click", (e) => {

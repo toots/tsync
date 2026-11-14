@@ -92,9 +92,15 @@ chrome.windows.onRemoved.addListener((id) => {
 });
 // A page that reloads after its submit, as a sign-in does, brings its window
 // back over the sheet: each load raises the sheets still open.
-chrome.tabs.onUpdated.addListener((_tab, change) => {
+chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.status !== "complete") return;
   for (const s of sheets.values()) if (s.window !== null) chrome.windows.update(s.window, { focused: true }).catch(() => {});
+  // §4: a load after a submit signed in unless its top frame still shows a password field.
+  // A top frame that cannot answer is no sign of success.
+  if (pendingSaves.has(tabId)) setTimeout(async () => {
+    const reply = await chrome.tabs.sendMessage(tabId, { type: "password-shown" }, { frameId: 0 }).catch(() => null);
+    judged(tabId, reply !== null && reply.shown === false);
+  }, 1500);
 });
 // An open sheet keeps a port, and pings it, so the worker outlives the user's answer.
 chrome.runtime.onConnect.addListener((port) => {
@@ -187,6 +193,16 @@ async function webauthnCreate(publicKey, origin) {
 
 // --- saving (§4) ----------------------------------------------------------------
 
+// §4: a submitted login waits, per tab, until its sign-in is judged.
+const pendingSaves = new Map();
+function judged(tabId, signedIn) {
+  const pending = pendingSaves.get(tabId);
+  if (!pending) return;
+  pendingSaves.delete(tabId);
+  if (signedIn) offerSave(pending.origin, pending.username, pending.password, pending.incognito);
+}
+chrome.tabs.onRemoved.addListener((tabId) => pendingSaves.delete(tabId));
+
 // §8: where a new record goes. `domain` undefined lets the bridge pick the only
 // one; `ask` lists the domains the sheet offers when the popup chose none.
 const VAULT_KEY = "newRecordVault";
@@ -212,12 +228,20 @@ async function offerSave(origin, username, password, incognito) {
     return;
   }
   const same = match.logins.filter((l) => l.exact && l.username === username);
+  // §4: the owner compares; the password it already holds shows no sheet.
+  let update;
+  if (same.length === 1) {
+    const probe = await one({ type: "save", origin, username, password, domain: same[0].domain });
+    if (!probe.ok) return sheet({ kind: "save-failed", origin, error: probe.error || "tsync could not save it." });
+    if (!probe.update) return;
+    update = probe.update;
+  }
   const target = same.length ? { domain: same[0].domain } : await newRecordVault();
   const answer = await sheet({ kind: same.length ? "update" : "save", origin, username, title: same[0]?.title, incognito, vaults: target.ask });
   if (answer.action === "never") return chrome.storage.local.set({ never: [...never, origin] });
   if (answer.action !== "ok") return;
   const domain = target.domain || answer.domain;
-  const first = await one({ type: "save", origin, username, password, domain });
+  const first = update ? { ok: true, update } : await one({ type: "save", origin, username, password, domain });
   const saved = first.ok && first.update ? await one({ type: "save", origin, username, password, update: first.update, domain }) : first;
   if (!saved.ok) await sheet({ kind: "save-failed", origin, error: saved.error || "tsync could not save it." });
 }
@@ -274,7 +298,14 @@ const handlers = {
   },
   async "offer-save"(m, sender) {
     const origin = originOf(sender);
-    if (origin) offerSave(origin, m.username, m.password, sender.tab?.incognito === true);
+    const tabId = sender.tab?.id;
+    if (origin && tabId !== undefined)
+      pendingSaves.set(tabId, { origin, username: m.username, password: m.password, incognito: sender.tab.incognito === true });
+    return {};
+  },
+  async "submit-outcome"(m, sender) {
+    const tabId = sender.tab?.id;
+    if (pendingSaves.get(tabId)?.origin === originOf(sender)) judged(tabId, m.signedIn === true);
     return {};
   },
   // A conditional request is held only when tsync has passkeys for it; otherwise it
