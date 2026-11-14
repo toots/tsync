@@ -67,7 +67,7 @@ for d in "$site"/rpm/*/; do
   cat > "$d/tsync.repo" <<EOF
 [tsync]
 name=tsync
-baseurl=$base/rpm/$(basename "$d")
+baseurl=$base/rpm/fc\$releasever
 enabled=1
 gpgcheck=0
 repo_gpgcheck=1
