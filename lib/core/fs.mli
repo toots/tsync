@@ -241,6 +241,10 @@ val map_file : string -> bigstring
 (** The same, of an open descriptor. *)
 val map_fd : Unix.file_descr -> bigstring
 
+(** [len] bytes from [off] of a file never modified in place, which must hold
+    them. *)
+val map_range : Unix.file_descr -> off:int -> len:int -> bigstring
+
 (** After a body read with {!map_fd} has been used: its pages leave this
     process's resident set, a later read paging them back in from the file. A
     body that is not a mapping is left alone. The collector unmaps a mapping
