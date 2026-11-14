@@ -31,6 +31,7 @@ struct DiagnosticsView: View {
                         }
                     }
                     Button("Run self-test") { Task.detached { await SelfTest.run() } }
+                    Button("Run browser test") { Task.detached { await BrowserTest.run() } }
                     Button("Walk every domain") { Task.detached { await SelfTest.walk() } }
                     if !message.isEmpty { Text(message).foregroundStyle(.red) }
                 }
