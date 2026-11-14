@@ -248,3 +248,8 @@
  (alias runtest-android)
  (action
   (diff trust_store_test.expected trust_store_test.output)))
+
+(executable
+ (name refresh_scale_bench)
+ (modules refresh_scale_bench)
+ (libraries lazy_harness tsync_android threads.posix unix yojson))
