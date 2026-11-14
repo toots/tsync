@@ -56,7 +56,7 @@ Both are the same program and the same config file, and you can put a server in 
 ## Install
 
 - **macOS** (Apple silicon, macOS 13 or later): [**tsync.pkg**](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg), or `brew install --cask tsync` from the `toots/tsync` tap ([install](docs/install.md#macos)).
-- **Linux** (Debian 13, Ubuntu 26.04, Fedora 44; x86-64 and arm64): `curl -fsSL https://toots.github.io/tsync/setup.sh | sudo sh` adds the repository, then `apt install tsync` or `dnf install tsync`.
+- **Linux** (Debian 13, Ubuntu 26.04, Fedora 45; x86-64 and arm64): `curl -fsSL https://toots.github.io/tsync/setup.sh | sudo sh` adds the repository, then `apt install tsync` or `dnf install tsync`.
 - **Android** (arm64, Android 8 or later): [**tsync-arm64-v8a.apk**](https://github.com/toots/tsync/releases/download/nightly/tsync-arm64-v8a.apk), which connects to a tsync server.
 
 Then `tsync config --edit` names a folder and its storage. [Install](docs/install.md) has the details, the desktop extras and building from source.

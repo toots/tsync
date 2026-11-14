@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ["fedora:44"]
+        image: ["fedora:45"]
         arch: [amd64, arm64]
         # `arch` has to be a matrix key: an include entry sharing no key with
         # the matrix is merged into every combination instead of selecting one.
