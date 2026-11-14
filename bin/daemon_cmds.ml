@@ -138,7 +138,7 @@ let start_cmd =
     Arg.(
       value
       & opt (some string) None
-      & info ["tls"] ~docv:"IMPL" ~doc:"native or openssl.")
+      & info ["tls"] ~docv:"IMPL" ~doc:(Tsync_http.Transport.impl_names ^ "."))
   in
   cmd "start" ~doc:"Start the owners and serve until stopped."
     Term.(const start $ mount $ tls $ verbose)

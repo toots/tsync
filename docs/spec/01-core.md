@@ -650,6 +650,11 @@ pays for finding out.
 ## 10. HTTP request discipline
 
 - **Pooled connections.** Each endpoint has a keep-alive connection cache.
+- **Connection setup** is bounded: `CONNECT_TIMEOUT` for each address tried, then
+  `HANDSHAKE_TIMEOUT` for the whole TLS handshake, whichever TLS implementation carries it
+  ([security-model §9.1](algorithms/security-model.md#91-tls-implementations)). A platform
+  connection, whose phases the core cannot tell apart, gets both bounds as one. A peer that
+  accepts and never speaks would otherwise hold the request forever.
 - **Redial.** If a pooled connection proves dead before the request left, the cache that failed
   is replaced (only if it is still the current one) and the request is tried once more. A
   request that may have left is never silently resent by this layer; it is a TRANSIENT/LINK
@@ -666,6 +671,13 @@ pays for finding out.
   [failure-model §4.2](algorithms/failure-model.md#42-http-object-stores); only statuses the
   ladder retries raise; every other status is returned to the verb to interpret.
 - **Bodies** move as off-heap buffers end to end; a body is never copied to be hashed or sent.
+  A body never has to fit in memory, since a host may bound a process's memory well below a
+  body's size: a request body is read from its source a slice at a time,
+  as the transport accepts it (an immutable mapping of the data, §5, is such a source), and a
+  response body is handed to its consumer as it arrives (a file written in place, for example).
+  Only a body its verb needs whole, such as small metadata under the verb's own size limit, is
+  held. A response delivered in part before a failure is discarded by the consumer, and a retry
+  delivers it again from its start.
 - Failure text quotes at most `HTTP_EXCERPT` characters of a response body, with whitespace
   runs collapsed.
 
@@ -783,6 +795,7 @@ advance. The format is exact:
 | `PROBE_TIMEOUT` | 10 s | includes retries |
 | `GRACE` | 10 s | owned by [07](07-daemon-cli.md) |
 | `HTTP_EXCERPT` | 200 characters | |
+| `CONNECT_TIMEOUT` / `HANDSHAKE_TIMEOUT` | 10 s / 10 s | per address tried / per handshake |
 | `IPC_MAX_LINE` | 1 MiB | |
 | `IPC_LINE_DEADLINE` | 10 s | |
 | `IPC_MAX_CONNECTIONS` | 256 per listener | |

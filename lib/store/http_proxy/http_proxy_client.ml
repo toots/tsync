@@ -468,7 +468,7 @@ let watch t k last =
           | _ -> ());
         Stop.sleep watch_floor
 
-let create ~domain ~admission ~name fields =
+let create ?spill ~domain ~admission ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)
@@ -492,7 +492,8 @@ let create ~domain ~admission ~name fields =
       name;
       domain;
       secret;
-      endpoint = Tsync_http.Client.endpoint ?ca_file:(str "ca_certificate") url;
+      endpoint =
+        Tsync_http.Client.endpoint ?ca_file:(str "ca_certificate") ?spill url;
       health = Health.create name;
       traffic = Store.new_traffic ();
       admission;

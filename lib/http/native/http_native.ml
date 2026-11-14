@@ -122,7 +122,7 @@ let native_session ?timeout fd ~host
     in
     go 0
   in
-  Transport.make ~fd ~read ~write ~close:(fun () ->
+  Transport.make ~read ~write ~close:(fun () ->
       (try
          let st, out = Tls.Engine.send_close_notify !state in
          state := st;
@@ -134,27 +134,29 @@ let () =
   Transport.register Native
     {
       client =
-        (fun fd tls ->
-          native_session fd ~host:tls.Transport.host (native_client tls));
+        `Over_socket
+          (fun fd tls ->
+            native_session fd ~host:tls.Transport.host (native_client tls));
       server =
-        (fun ~certificate ~key ->
-          init_rng ();
-          let fail what = Fail.raise_ Fail.Invalid "TLS %s" what in
-          let certs =
-            match
-              X509.Certificate.decode_pem_multiple (Fs.read_file certificate)
-            with
-              | Ok (_ :: _ as l) -> l
-              | Ok [] -> fail (certificate ^ ": no certificate")
-              | Error (`Msg m) -> fail (certificate ^ ": " ^ m)
-          and pk =
-            match X509.Private_key.decode_pem (Fs.read_file key) with
-              | Ok k -> k
-              | Error (`Msg m) -> fail (key ^ ": " ^ m)
-          in
-          match Tls.Config.server ~certificates:(`Single (certs, pk)) () with
-            | Ok c ->
-                fun fd ->
-                  native_session fd ~host:"client" (Tls.Engine.server c, None)
-            | Error (`Msg m) -> fail m);
+        Some
+          (fun ~certificate ~key ->
+            init_rng ();
+            let fail what = Fail.raise_ Fail.Invalid "TLS %s" what in
+            let certs =
+              match
+                X509.Certificate.decode_pem_multiple (Fs.read_file certificate)
+              with
+                | Ok (_ :: _ as l) -> l
+                | Ok [] -> fail (certificate ^ ": no certificate")
+                | Error (`Msg m) -> fail (certificate ^ ": " ^ m)
+            and pk =
+              match X509.Private_key.decode_pem (Fs.read_file key) with
+                | Ok k -> k
+                | Error (`Msg m) -> fail (key ^ ": " ^ m)
+            in
+            match Tls.Config.server ~certificates:(`Single (certs, pk)) () with
+              | Ok c ->
+                  fun fd ->
+                    native_session fd ~host:"client" (Tls.Engine.server c, None)
+              | Error (`Msg m) -> fail m);
     }

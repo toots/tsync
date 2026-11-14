@@ -114,22 +114,34 @@ let piece ?timeout r n =
   exactly ?timeout r b 0 n;
   b
 
-let read_body ?timeout ~limit r framing =
+(* Each piece is a view of the reader's buffer, valid until [emit] returns. *)
+let stream_body ?timeout ~limit r framing emit =
+  let total = ref 0 in
+  let take ~at_most =
+    if not (fill ?timeout r) then 0
+    else (
+      let n = min at_most (r.len - r.pos) in
+      if n > limit - !total then raise Too_large;
+      emit (Bigstring.sub r.buf ~off:r.pos ~len:n);
+      r.pos <- r.pos + n;
+      total := !total + n;
+      n)
+  in
+  let rec exact n =
+    if n > 0 then (
+      match take ~at_most:n with
+        | 0 -> raise (Malformed "end of stream inside a body")
+        | got -> exact (n - got))
+  in
   match framing with
     | `Length n ->
         if n > limit then raise Too_large;
-        piece ?timeout r n
+        exact n
     | `Eof ->
-        let rec go acc total =
-          if not (fill ?timeout r) then Bigstring.concat (List.rev acc)
-          else (
-            let n = r.len - r.pos in
-            if n > limit - total then raise Too_large;
-            go (piece ?timeout r n :: acc) (total + n))
-        in
-        go [] 0
+        let rec go () = if take ~at_most:max_int > 0 then go () in
+        go ()
     | `Chunked ->
-        let rec chunks acc total =
+        let rec chunks () =
           match line ?timeout ~limit:1024 r with
             | None -> raise (Malformed "end of stream inside a chunked body")
             | Some l -> (
@@ -141,16 +153,29 @@ let read_body ?timeout ~limit r framing =
                           | Some "" | None -> ()
                           | Some _ -> trailers ()
                       in
-                      trailers ();
-                      Bigstring.concat (List.rev acc)
+                      trailers ()
                   | Some n when n > 0 ->
-                      if n > limit - total then raise Too_large;
-                      let b = piece ?timeout r n in
+                      if n > limit - !total then raise Too_large;
+                      exact n;
                       ignore (line ?timeout ~limit:2 r);
-                      chunks (b :: acc) (total + n)
+                      chunks ()
                   | _ -> raise (Malformed "a bad chunk size"))
         in
-        chunks [] 0
+        chunks ()
+
+let read_body ?timeout ~limit r framing =
+  match framing with
+    | `Length n ->
+        if n > limit then raise Too_large;
+        piece ?timeout r n
+    | (`Eof | `Chunked) as framing ->
+        let pieces = ref [] in
+        stream_body ?timeout ~limit r framing (fun view ->
+            let b = Bigstring.create (Bigstring.length view) in
+            Bigstring.blit ~src:view ~src_off:0 ~dst:b ~dst_off:0
+              ~len:(Bigstring.length view);
+            pieces := b :: !pieces);
+        Bigstring.concat (List.rev !pieces)
 
 let framing h =
   match header h "transfer-encoding" with

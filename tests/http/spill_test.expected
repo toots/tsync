@@ -1,0 +1,10 @@
+nothing is swept before a body spills: true
+/large: 200, 1048576 bytes, same bytes true, mapped true
+a stale temporary is swept: true
+a fresh temporary is kept: true
+/chunked: 200, 614400 bytes, same bytes true, mapped true
+/small: 200, 6 bytes, same bytes true, mapped false
+/small-chunked: 200, 5 bytes, same bytes true, mapped false
+/missing: 404, 1048576 bytes, same bytes true, mapped false
+/large: corrupt/other: 127.0.0.1: its answer is larger than this client accepts
+the spill directory is empty: true

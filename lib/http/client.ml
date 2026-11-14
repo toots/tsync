@@ -4,6 +4,15 @@ let idle_limit = 60.
 let default_stall = 60.
 let excerpt_length = 200
 
+(* A body goes to a file once it reaches this size: below it the file costs
+   more than the memory it saves. *)
+let spill_min = 256 * 1024
+
+(* A mapping frees its file's blocks only when the collector finalizes it, and
+   the collector does not count a mapping's size. *)
+let collect_every = 256 * 1024 * 1024
+let spilled_since_collection = Atomic.make 0
+
 type conn = {
   t : Transport.t;
   reader : Codec.reader;
@@ -19,9 +28,24 @@ type endpoint = {
   url : string;
   idle : conn list Atomic.t;
   slots : Rt.Semaphore.t;
+  spill : spill option;
 }
 
-let endpoint ?ca_file ?(max_connections = 32) url =
+and spill = { dir : string; prepared : bool Atomic.t }
+
+(* An open file cannot be unlinked on Windows, so bodies stay in memory there. *)
+let spill_of = function
+  | Some dir when not Sys.win32 -> Some { dir; prepared = Atomic.make false }
+  | _ -> None
+
+(* A crash between creating a spill file and unlinking it leaves a temporary
+   named after the dead process, which the sweep removes. *)
+let prepare spill =
+  if not (Atomic.exchange spill.prepared true) then (
+    Fs.mkdir_p spill.dir;
+    Fs.sweep_temps spill.dir)
+
+let endpoint ?ca_file ?(max_connections = 32) ?spill url =
   let scheme, rest =
     match String.index_opt url ':' with
       | Some i when i + 2 < String.length url && String.sub url i 3 = "://" ->
@@ -85,6 +109,7 @@ let endpoint ?ca_file ?(max_connections = 32) url =
     url;
     idle = Atomic.make [];
     slots = Rt.Semaphore.create ~name:("http " ^ host) max_connections;
+    spill = spill_of spill;
   }
 
 let base_path e = e.base
@@ -179,6 +204,55 @@ let write_body ~stall ~progress ~pace t body =
   in
   go 0
 
+let open_spill_file spill =
+  prepare spill;
+  let path = Fs.temp_in spill.dir in
+  let fd = Fs.openfile ~perm:0o600 path [O_RDWR; O_CREAT; O_EXCL] in
+  Fs.unlink_quiet path;
+  fd
+
+let collect_if_spilled_much bytes =
+  if
+    Atomic.fetch_and_add spilled_since_collection bytes + bytes >= collect_every
+  then (
+    Atomic.set spilled_since_collection 0;
+    Gc.major ())
+
+(* 01 §10: a body is written to an unlinked file once it reaches [spill_min],
+   and answered as its mapping, so it never sits in memory. *)
+let spill_body spill ~max_body reader framing =
+  let held = ref [] and held_bytes = ref 0 in
+  let file = ref None and written = ref 0 in
+  let to_file fd view =
+    let len = Bigstring.length view in
+    Fs.pwrite_all fd view ~boff:0 ~len ~off:!written;
+    written := !written + len
+  in
+  let emit view =
+    match !file with
+      | Some fd -> to_file fd view
+      | None ->
+          let copy = Bigstring.create (Bigstring.length view) in
+          Bigstring.blit ~src:view ~src_off:0 ~dst:copy ~dst_off:0
+            ~len:(Bigstring.length view);
+          held := copy :: !held;
+          held_bytes := !held_bytes + Bigstring.length view;
+          if !held_bytes >= spill_min then (
+            let fd = open_spill_file spill in
+            file := Some fd;
+            List.iter (to_file fd) (List.rev !held);
+            held := [])
+  in
+  Fun.protect
+    ~finally:(fun () -> Option.iter Fs.close !file)
+    (fun () ->
+      Codec.stream_body ~limit:max_body reader framing emit;
+      match !file with
+        | None -> Bigstring.concat (List.rev !held)
+        | Some fd ->
+            collect_if_spilled_much !written;
+            Fs.map_fd fd)
+
 let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
     ~reused =
   let b = Buffer.create 256 in
@@ -227,7 +301,13 @@ let exchange ~stall ~max_body e c ~progress ~pace ~meth ~target ~headers ~body
     then `Length 0
     else Codec.framing headers
   in
-  let body = Codec.read_body ~limit:max_body c.reader framing in
+  let small = match framing with `Length n -> n < spill_min | _ -> false in
+  let body =
+    match e.spill with
+      | Some spill when status / 100 = 2 && not small ->
+          spill_body spill ~max_body c.reader framing
+      | _ -> Codec.read_body ~limit:max_body c.reader framing
+  in
   let keep =
     framing <> `Eof
     && (match Codec.header headers "connection" with

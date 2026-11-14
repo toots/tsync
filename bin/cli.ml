@@ -97,7 +97,8 @@ let use_tls (config : Config.t) tls =
         match Tsync_http.Transport.tls_impl_of_string name with
           | Some impl -> Atomic.set Tsync_http.Transport.tls_impl (Some impl)
           | None ->
-              fail "unknown TLS implementation %S (native or openssl)" name)
+              fail "unknown TLS implementation %S (%s)" name
+                Tsync_http.Transport.impl_names)
 
 (* 07 §5.1: every command takes both, so the display is set from here. *)
 let verbose =

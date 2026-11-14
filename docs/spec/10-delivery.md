@@ -111,7 +111,7 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 
 ### 4.2 Release builds
 
-- A release ships both TLS implementations, OpenSSL the default, and uses the release profile.
+- A desktop release ships its host's platform TLS implementation, the default, and OpenSSL where that is another one ([security-model §9.2](algorithms/security-model.md#92-implementation-per-host)); an iOS build ships only the platform one. It uses the release profile.
 - A Linux release includes the FUSE frontend, the tray, the discovery library and the Dolphin
   plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
