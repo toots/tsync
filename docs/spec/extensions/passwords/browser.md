@@ -172,21 +172,34 @@ browser's password manager for that.
   `identifier` or `login`, as such fields also carry tokens. An offer is made once per password: a
   click that was no submit does not stop the real submit's. A
   script's submit, or a password a script set, offers nothing.
-- The service worker never compares the typed password with tsync's: whether a sheet appears
-  depends on nothing secret, so a page cannot use it to test a guess. It asks `match` only to tell
-  a new login from a changed one, and shows the extension's sheet: *Save this login in tsync?*, or
-  *Update the password for `<title>`?* when tsync holds a login of that username for this exact
-  site (`exact`), with **Save** or **Update**, **Not now** and, for a new one, **Never for this
-  site**. Only that click sends `save`, naming for an update the domain that holds the login; the owner adds nothing when the password is already the one
-  it holds, and updates only a login of the exact site (passwords §8).
+- **Only a sign-in that worked offers.** The service worker holds the submitted login for its tab
+  until the sign-in is judged: it worked when the submitting frame shows no password field on two
+  checks half a second apart within 15 s of the submit (a page drawing its form again replaces
+  the field, and a spinner may stand in for it a moment), or when the tab loads a page whose top
+  frame shows no password field 1.5 s after loading. A top frame that cannot answer is no sign of
+  success. A password field still shown, as when the page shows the
+  form again with an error, drops the login unoffered, as does a tab closed first. A sign-in in a
+  frame is judged by the top frame's fields when the whole tab loads again.
+- The service worker never compares the typed password with tsync's itself; the owner does. It
+  asks `match` to tell a new login from a known one. For one login of that username for this
+  exact site (`exact`), it first sends `save` without `update` to the domain holding it: the
+  owner adds nothing when the password is already the one it holds, and no sheet is shown; an
+  `update` naming the record shows *Update the password for `<title>`?*. Whether a sheet appears
+  then tells the page only whether the password in its own field, which it can read, is the one
+  saved for its own origin; a page cannot fill a field so that it offers (above), so it cannot test
+  a guess of its own. Otherwise the sheet is *Save this login in tsync?*. Its buttons are **Save**
+  or **Update**, **Not now** and, for a new one, **Never for this site**. Only that click sends
+  the `save` that writes, naming for an update the record and the domain that holds it; the owner
+  updates only a login of the exact site (passwords §8). With several logins of that username
+  for this exact site, the sheet is *Update* and asks before any `save`.
 - **A suggested password's submit** shows no sheet: the content script sends `save` with
   `suggested`, the id kept at the pick, and the username submitted. The password itself is not
   sent again.
 - The sheet is a window of its own, so the page's reload after its submit does not close it; each
   page load raises the sheets still open, since a sign-in's reload brings the browser's window
   back over them.
-- The password waits in the service worker's memory until the sheet is answered or closed, then is
-  dropped. *Never for this site* keeps a list of origins, without usernames (§1).
+- The password waits in the service worker's memory until the sign-in is judged and the sheet is
+  answered or closed, then is dropped. *Never for this site* keeps a list of origins, without usernames (§1).
 - A locked vault (every domain using passwords locked): the sheet says the login was not saved
   because tsync is locked, and to unlock it in tsync and sign in again.
 
@@ -299,6 +312,8 @@ With the extension installed, the native host installed, and the vault unlocked:
   passphrase on Linux; signing in with it succeeds, the site seeing UV set. *Use a phone or security key* hands a sign-in to the
   browser; a creation offers only *Save in tsync* and *Cancel*.
 - With the vault locked, every menu and sheet says so and fills nothing.
+- A sign-in refused by the site, the form shown again, offers nothing. Signing in with the password
+  tsync holds offers nothing; with another one, it offers *Update*.
 - Two domains using passwords, *Ask each time* in the popup: saving a new login asks the vault, and
   *Save* stays disabled until one is picked; the login lands in the one picked. With a vault chosen
   in the popup, it lands there unasked. A domain following a main that lists no `passwords` is in
