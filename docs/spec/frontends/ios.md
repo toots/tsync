@@ -245,6 +245,9 @@ addition:
 - A thousand callbacks, each on a new thread, leave the extension's footprint where one thread's
   would.
 - The self-test passes with the extension below its memory limit on a device.
+- The browser test ([ios-app §5](ios-app.md#5-settings)) passes in the simulator and on a device:
+  a taken name changes nothing, a second upload of a name is numbered, a moved file is listed in
+  its new folder with its contents and no longer in the old one.
 - On a desktop, through `tsync android request`: after a peer commits into a held folder, a
   `refresh` followed by `changes_since` names the change; `list_all` makes no store request and
   lists files this client wrote in a folder it created; `refresh` while a pass runs starts none.

@@ -101,6 +101,12 @@ the framework's domain-change notification.
   - **Add the test server domain**, when the build is also given a test server from a file outside
     the repository;
   - **Run self-test**, the test that [ios.md §8](ios.md#8-conformance) runs on a device;
+  - **Run browser test**, which carries out Files' operations through the browser's own code in the
+    local test domain, in a folder of its own that it deletes at the end: a new folder and the same
+    name again, two uploads of one file (the second numbered), a rename onto a taken name and one
+    that succeeds, a move into a subfolder, a remove download and a delete. Each step's outcome
+    and the verdict go to `browsertest.log` in the App Group, copied to the app's Documents like
+    the footprint log. Launching a development build with `-browsertest` runs it too;
   - **Walk every domain**, which lists every folder of every domain through the file system, so
     that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
     thousands of held folders. It leaves out the system's `.Trash`, which the extension does not

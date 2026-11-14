@@ -59,7 +59,7 @@ main thread.
   longer, the *pinned* mark, and pinned until in Details.
 - **Listing.** The system answers a folder whole, so there are no pages. A folder the system has
   not enumerated yet fails to read until the extension has answered: the app shows progress and
-  reads again each second, up to `pull_patience`, then shows the failure with Retry.
+  reads again each second, up to `first_listing_patience`, then shows the failure with Retry.
 - **Kept current.** A file presenter on the folder on screen; the folder is read again when it
   reports a change below it.
 - **Offline.** The system's listing carries no age, so no offline banner is shown; a read that fails
@@ -70,3 +70,7 @@ main thread.
 - **Counts.** Remove download of a folder is one eviction, so its confirmation has no counts.
 - **Trail.** Kept as paths from the domain's root, restored when the app is started again.
 - **No save into the domain** from other apps: the share extension is ios.md §9 item 2.
+
+| Parameter | Default | Note |
+|---|---|---|
+| `first_listing_patience` | 30 s | how long a folder the system has not enumerated yet is read again; a first pull of a large folder takes several seconds on a device |
