@@ -484,6 +484,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — A pass for one change rewrites one folder's files and the pass record, whatever the number held: `tests/android/refresh_test` counts the folders whose files a pass wrote.
 - **Seen** — B-8.25's push check on TestFlight build 20, iPhone 14; measured on a Mac with `tests/android/refresh_scale_bench`.
 
+### B-8.28 A reader of the log passing over an entry it cannot read
+- **Pitfall** — The full cycle stopped at an entry that does not decode, or arrived by state, as publication §4.3 says; the lazy tree's pulls and refresh passes took each entry's commands through a reader that answers none for such an entry, and went past it to the head. Every change the entry held was lost to those folders, silently.
+- **Check** — An entry overwritten with bytes that do not decode: below the tree head, a lazy pull and a refresh pass read the folders by state and show the entry's change; above it, they fail naming the entry, as the full cycle does.
+- **Seen** — A test peer writing a manifest format the phone's build no longer read: its files never appeared, and every refresh pass reported nothing changed.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
