@@ -22,7 +22,8 @@ capability. What has been seen working is recorded in §10.
     where the user picks, approves and types. A page never sees them.
 - **It holds no secret.** It never writes a password, a code, a passkey or a match result to
   `chrome.storage`, IndexedDB or the page; what a fill hands a field is in memory for that fill
-  only. It keeps one setting of its own, whether to offer to save (§4).
+  only. It keeps two settings of its own: whether to offer to save (§4), and the vault a new
+  record goes to (§8).
 
 ## 2. Installing
 
@@ -185,8 +186,7 @@ browser's password manager for that.
   page load raises the sheets still open, since a sign-in's reload brings the browser's window
   back over them.
 - The password waits in the service worker's memory until the sheet is answered or closed, then is
-  dropped. *Never for this site* is the one thing the extension keeps (§1): a list of origins,
-  without usernames.
+  dropped. *Never for this site* keeps a list of origins, without usernames (§1).
 - A locked vault (every domain using passwords locked): the sheet says the login was not saved
   because tsync is locked, and to unlock it in tsync and sign in again.
 
@@ -270,8 +270,20 @@ A machine may use passwords in several domains (README §6.1): every list merges
 than one domain in a list, its rows are grouped by domain under a header naming the domain with its
 vault's mark ([vault §8.1](../vault.md#81-appearance), from the bridge's `status`: the vault's
 icon, or the tsync glyph in its colour, the glyph also where a page's policy blocks the icon); a
-row carries no mark. The popup's state lines carry each domain's mark. A new login or passkey goes
-to the first domain using passwords.
+row carries no mark. The popup's state lines carry each domain's mark.
+
+A domain following its main uses passwords only when its owner says they are in force: it is in
+`status`'s domains only then.
+
+- **The vault for new records.** With more than one domain in `status`, the popup offers *Save
+  new logins in*: *Ask each time*, the default, or one of those domains. The choice is kept in
+  `chrome.storage.local`; one naming a domain no longer in `status` counts as *Ask each time*.
+- **Where a new record goes.** A new login, a suggested password and a new passkey go to the
+  chosen domain, sent as `domain`. With one domain in `status`, none is sent. Otherwise the user
+  picks: the save and passkey-creation sheets carry a choice of the domains, preselected with
+  none, and their primary button is disabled until one is picked; a suggestion first shows a sheet
+  asking only the domain, and *Cancel* there suggests nothing. An update goes to the domain holding
+  the login, never asked.
 
 ## 9. Conformance
 
@@ -287,6 +299,10 @@ With the extension installed, the native host installed, and the vault unlocked:
   passphrase on Linux; signing in with it succeeds, the site seeing UV set. *Use a phone or security key* hands a sign-in to the
   browser; a creation offers only *Save in tsync* and *Cancel*.
 - With the vault locked, every menu and sheet says so and fills nothing.
+- Two domains using passwords, *Ask each time* in the popup: saving a new login asks the vault, and
+  *Save* stays disabled until one is picked; the login lands in the one picked. With a vault chosen
+  in the popup, it lands there unasked. A domain following a main that lists no `passwords` is in
+  neither the popup nor the choice.
 - A page script calling `navigator.credentials.get` with a forged `origin` in its options gets an
   assertion over the real origin, or none.
 
