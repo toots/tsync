@@ -591,6 +591,9 @@ let bridge_request config session j =
           @ (match str j "suggested" with
             | Some id -> [("suggested", s id)]
             | None -> [("password", s (required j "password"))])
+          @ (match member j "check" with
+            | Some (`Bool true) -> [("check", `Bool true)]
+            | _ -> [])
           @
             match str j "update" with
             | Some id -> [("update", s id)]

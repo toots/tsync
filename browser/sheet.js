@@ -17,17 +17,21 @@ function el(tag, attrs = {}, ...children) {
 }
 const button = (label, action, primary) => el("button", { textContent: label, className: primary ? "primary" : "", onclick: action });
 
-// §8: a new record's vault when the popup chose none; the primary button waits for a pick.
-let vault = null;
-function askVault(item, primary) {
-  if (!item.vaults) return;
-  vault = el("select", { onchange: () => (primary.disabled = !vault.value) },
-    el("option", { value: "", textContent: "Choose a vault" }),
-    ...item.vaults.map((d) => el("option", { value: d, textContent: d })));
+// Choices the primary button waits for: §8's vault, §4's login to update.
+const choices = {};
+function choose(key, label, placeholder, options, primary) {
+  const select = el("select", { onchange: () => (primary.disabled = Object.values(choices).some((c) => !c.value)) },
+    el("option", { value: "", textContent: placeholder }),
+    ...options.map(([value, text]) => el("option", { value, textContent: text })));
+  choices[key] = select;
   primary.disabled = true;
-  main.append(el("label", { className: "detail" }, "Save in ", vault));
+  main.append(el("label", { className: "detail" }, label, select));
 }
-const approve = () => answer({ action: "ok", domain: vault?.value || undefined });
+// §8: a new record's vault when the popup chose none.
+function askVault(item, primary) {
+  if (item.vaults) choose("domain", "Save in ", "Choose a vault", item.vaults.map((d) => [d, d]), primary);
+}
+const approve = () => answer({ action: "ok", ...Object.fromEntries(Object.entries(choices).map(([key, c]) => [key, c.value])) });
 
 function render(item) {
   if (!item) return main.append(el("p", { textContent: "This request is over." }));
@@ -38,12 +42,14 @@ function render(item) {
     case "save":
     case "update": {
       main.append(
-        el("h1", { textContent: item.kind === "save" ? `Save this login in tsync?` : `Update the password for ${item.title}?` }),
+        el("h1", { textContent: item.kind === "save" ? `Save this login in tsync?` : item.logins ? "Update which login?" : `Update the password for ${item.title}?` }),
         el("p", { textContent: site }), el("p", { className: "detail", textContent: item.username || "(no username)" }),
       );
       if (item.kind === "save" && !item.incognito) actions.append(button("Never for this site", () => answer({ action: "never" })));
       const save = button(item.kind === "save" ? "Save" : "Update", approve, true);
       askVault(item, save);
+      // §4: several logins of that username for this site; the one picked is updated.
+      if (item.logins) choose("login", "Login ", "Choose a login", item.logins.map((l, i) => [String(i), `${l.title} · ${l.domain}`]), save);
       actions.append(button("Not now", () => answer({ action: "cancel" })), save);
       break;
     }

@@ -213,6 +213,11 @@ module type S = sig
   val stated_settings :
     ?wait:bool -> unit -> Tsync_store.Store.domain_settings option
 
+  (** Whether what the main states, or that it states nothing, is known: kept
+      from an earlier run or learned in this one. Until then
+      [stated_settings ()] answering [None] is no statement of nothing. *)
+  val settings_learned : unit -> bool
+
   val pending_uploads : unit -> int
 
   (** The keys changed here and not committed yet. *)

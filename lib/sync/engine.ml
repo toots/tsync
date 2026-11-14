@@ -255,6 +255,8 @@ module Make (C : Engine_ctx.S) = struct
              | exception Yojson.Json_error _ -> None))
 
   let remembered () = Atomic.get kept
+  let learned = Atomic.make (remembered () <> None)
+  let settings_learned () = Atomic.get learned
 
   let keep settings =
     if Atomic.exchange kept settings <> settings then (
@@ -273,10 +275,12 @@ module Make (C : Engine_ctx.S) = struct
     let wait = wait && remembered () = None in
     match R.stated ~wait () with
       | `Stated s ->
+          Atomic.set learned true;
           (try keep (Some s)
            with Fail.E f -> Log.warn "domain settings not kept: %s" f.reason);
           Some s
       | `Unstated ->
+          Atomic.set learned true;
           keep None;
           None
       | `Unknown -> remembered ()

@@ -26,10 +26,12 @@ async function render() {
     main.append(el("p", { className: "detail mark" }, TsyncMark.element(d.appearance, 16),
       ` ${d.domain}: ${d.state === "unlocked" ? "unlocked" : d.state === "locked" ? "locked — unlock it in tsync" : d.state}`));
   }
-  // §8: the vault new records go to; none set means the sheet asks.
+  // §8: the vault new records go to; none set means the sheet asks. A choice naming a
+  // domain gone from the answered status is forgotten.
+  const key = "newRecordVault";
+  const chosen = (await chrome.storage.local.get(key))[key];
+  if (chosen !== undefined && !domains.some((d) => d.domain === chosen)) await chrome.storage.local.remove(key);
   if (domains.length > 1) {
-    const key = "newRecordVault";
-    const chosen = (await chrome.storage.local.get(key))[key];
     const select = el("select", { onchange: () => (select.value ? chrome.storage.local.set({ [key]: select.value }) : chrome.storage.local.remove(key)) },
       el("option", { value: "", textContent: "Ask each time" }),
       ...domains.map((d) => el("option", { value: d.domain, textContent: d.domain, selected: d.domain === chosen })));

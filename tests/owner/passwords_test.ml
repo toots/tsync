@@ -250,6 +250,45 @@ let logins () =
         saved "save, then the same"
           [site; ("username", s "a"); ("password", s "two")]
     | None -> p "save: no update named");
+  (* A check writes nothing: the save after it still asks for the update. *)
+  let checked label password =
+    let r =
+      ask
+        [
+          ("action", s "passwords_save");
+          site;
+          ("username", s "a");
+          ("password", s password);
+          ("check", `Bool true);
+        ]
+    in
+    match (member r "unchanged", member r "logins") with
+      | Some (`Bool u), Some (`List l) ->
+          p "%-40s unchanged %b, logins %s" label u
+            (String.concat " "
+               (List.sort compare
+                  (List.map (function `String id -> show_id id | _ -> "?") l)))
+      | _ -> answer label r
+  in
+  checked "check, the same" "two";
+  checked "check, another password" "three";
+  saved "save, after the check"
+    [site; ("username", s "a"); ("password", s "three")];
+  let second =
+    id_of "add, a second login of that username"
+      (ask
+         [
+           ("action", s "passwords_add");
+           ("title", s "Example again");
+           ("urls", `List [s "https://example.org/signin"]);
+           ("username", s "a");
+           ("password", s "four");
+         ])
+  in
+  checked "check, two logins" "five";
+  saved "save, updating the second"
+    [site; ("username", s "a"); ("password", s "five"); ("update", s second)];
+  checked "check, then the same" "five";
   saved "save, from a subdomain of its site"
     [
       ("site", s "https://sub.example.org");
@@ -827,6 +866,15 @@ let () =
                 ("origin", s "https://new.example");
                 ("username", s "me");
                 ("password", s "newer pass");
+              ];
+            `Assoc
+              [
+                ("type", s "save");
+                ("domain", s "pw");
+                ("origin", s "https://new.example");
+                ("username", s "me");
+                ("password", s "newer pass");
+                ("check", `Bool true);
               ];
             Yojson.Safe.from_string {|"not an object"|};
           ]

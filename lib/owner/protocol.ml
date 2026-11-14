@@ -237,6 +237,7 @@ type status = {
   traffic : R.traffic;
   mount : string option;
   extensions : string list;
+  settings_learned : bool;
   new_machines : string list;  (** vault §6.3, while the vault is unlocked *)
   vault_backup_overdue : bool;
       (** vault §8.3, where this machine schedules them *)
@@ -1378,6 +1379,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
               ( "extensions",
                 `List (List.map (fun e -> `String e) reply.extensions) );
             ]
+          @ (if reply.settings_learned then [("settingsLearned", `Bool true)]
+             else [])
           @ (if reply.new_machines = [] then []
              else
                [
@@ -1719,6 +1722,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               | Some (`List l) ->
                   List.filter_map (function `String s -> Some s | _ -> None) l
               | _ -> []);
+          settings_learned = flag j "settingsLearned";
           vault_backup_overdue = flag j "vaultBackupOverdue";
         }
     | Pause _ -> flag j "paused"

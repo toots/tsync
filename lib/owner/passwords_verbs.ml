@@ -838,17 +838,18 @@ let save_suggested ~domain ~engine ~lazy_tree t ~site ~id args =
         [("saved", `Bool true); ("id", `String id)]
     | _ -> Fail.invalid "the suggested login is no login of %s" site
 
-(* §8 save: an equal login adds nothing; one login of the site and username
+(* §8 save: an equal login adds nothing; a login of the site and username
    with another password is updated only on [update] naming it; anything else
-   is added. *)
+   is added. [check] writes nothing and says which case it is. *)
 let save ~domain ~engine ~lazy_tree t args =
   let site = site_arg args in
+  let check = flag args "check" in
   match str args "suggested" with
     | Some id -> save_suggested ~domain ~engine ~lazy_tree t ~site ~id args
     | None ->
         let username = required args "username"
         and password = required args "password" in
-        let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
+        let ctx = context ~writing:(not check) ~domain ~engine ~lazy_tree t in
         let ok, _ = records ctx in
         (* §8: a save is about the site exactly; a parent site's login that
            also matches it by suffix is never updated from a subdomain. *)
@@ -858,14 +859,23 @@ let save ~domain ~engine ~lazy_tree t args =
               l.username = username && List.mem site l.urls)
             (logins ok)
         in
-        if
+        let unchanged =
           List.exists
             (fun (_, (l : Passwords.login)) -> l.password = password)
             same
-        then [("saved", `Bool false)]
+        in
+        if check then
+          [
+            ("unchanged", `Bool unchanged);
+            ( "logins",
+              `List
+                (if unchanged then []
+                 else List.map (fun (id, _) -> `String id) same) );
+          ]
+        else if unchanged then [("saved", `Bool false)]
         else (
           match (same, str args "update") with
-            | [(id, _)], Some update when update = id ->
+            | _, Some id when List.mem_assoc id same ->
                 ignore
                   (edit ~domain ~engine ~lazy_tree t
                      [("id", `String id); ("password", `String password)]);

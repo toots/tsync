@@ -986,6 +986,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
     | Status ->
         let now = Unix.gettimeofday () in
+        let stated = try E.stated_settings () with Fail.E _ -> None in
         let transfer (x : Engine_intf.transfer) : Protocol.transfer =
           let seconds = Float.max 0. (now -. x.started) in
           {
@@ -1022,8 +1023,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           mount = Option.bind (t.hooks.frontend ()) (fun f -> f.mount);
           (* 08 §3.3: status never asks the main; the kept statement answers. *)
           extensions =
-            Tsync_config.Config.extensions_in_force t.domain.domain
-              (try E.stated_settings () with Fail.E _ -> None);
+            Tsync_config.Config.extensions_in_force t.domain.domain stated;
+          settings_learned = E.settings_learned ();
           new_machines = Vault.announced t.vault;
           vault_backup_overdue = Vault.backup_overdue t.domain;
         }
