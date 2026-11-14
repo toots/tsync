@@ -183,6 +183,20 @@ let rec wait_serving n =
         Rt.sleep 0.05;
         wait_serving (n - 1)
 
+(* pitfall A-10.17: until [follow]'s owner has learned what its main states,
+   the bridge rightly counts it; the test asks once it has. *)
+let rec wait_learned domain n =
+  let learned =
+    match ask ~domain [("action", s "status")] with
+      | r -> member r "settingsLearned" = Some (`Bool true)
+      | exception _ -> false
+  in
+  if learned then ()
+  else if n > 0 then (
+    Rt.sleep 0.05;
+    wait_learned domain (n - 1))
+  else p "%s never learned its main's settings" domain
+
 let passphrase = "correct horse battery staple"
 
 let logins () =
@@ -829,6 +843,7 @@ let () =
       ignore (logins ());
       import_export ();
       passkeys ();
+      wait_learned "follow" 400;
       p "== the bridge (§9)";
       let replies =
         bridge_session
