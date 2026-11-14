@@ -201,7 +201,8 @@ The extension appends one line per core request to the footprint log: the domain
 `ref` it names, how long it took in milliseconds, its failure code and message if it failed, the rows
 of a listing (`items`) or of a change read (`ops`) with `more` when more follow, the process's
 `phys_footprint` after it, and the kernel's record of its peak since the process started
-(`ledger_phys_footprint_peak`). Nothing samples in between, so the log costs one system call and one
+(`ledger_phys_footprint_peak`). A `refresh` line adds its pass's summary when the answer carries one
+([android.md §3.2](android.md#32-freshness-without-a-background-cycle)). Nothing samples in between, so the log costs one system call and one
 append per request. It also appends a line for each push, each notice it signals a working set for,
 and the signal's error when the system refuses it. At 1 MiB the log is renamed to `footprint.old.log`, replacing the previous one,
 and a new log begins. The app shows the log.

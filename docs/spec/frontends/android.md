@@ -131,9 +131,13 @@ A pull reads the log after the folder's position in pages of at most `pull_page`
 each page as an arrival before reading the next: what a pull holds is bounded by a page, however far
 behind the folder is.
 
-**Refresh passes.** A `refresh` request starts a pass and is answered `{}` when the pass ends or
+**Refresh passes.** A `refresh` request starts a pass and is answered when the pass ends or
 after `refresh_patience`, whichever comes first; a pass still running then goes on in the
-background. A host that suspends its process once no request is pending (iOS) so keeps it running
+background. The answer is `{}`, with `pass` when the pass ended in time: `held`, the number of held
+folders; `covered`, those it brought to the head; `merged`, those whose view changed; `entries`,
+the log entries it read; and `end`, how it ended: `head`, `stopped` (the breaker, below), `pruned`, or
+`fresh` when every held folder was fresh and no pass ran. A host shows it in its diagnostics; nothing
+acts on it. A host that suspends its process once no request is pending (iOS) so keeps it running
 for the pass a change enumeration starts. A pass runs when a **held** folder (one with a pull
 marker, [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) is not fresh, and brings
 every held folder to the head, fresh ones too: its record stands for each folder pulled before it.
