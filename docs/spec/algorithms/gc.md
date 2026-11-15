@@ -93,6 +93,7 @@ Durable, on the collected main only (never replicated):
 | Run record **R** | phase ∈ {Opening, Marking, Closing, Abandoning}, start time, the tree head read at the open, cursor, and from Closing on the run's **generation** | present iff a run is open. The cursor is the last finished unit **by name** (a log entry, a namespace or a shard), never a position |
 | Collection generation **G** | a counter; even = settled, odd = deletions on copies in flight | persists across runs; absent reads as 0. Written only by the collecting owner (§5.6) |
 | Lock file | beside R | carries the two host-level locks of §5.4; its content is irrelevant |
+| Expiry set **X** | beside R, `tsync/D/gc-expiry` | the version keys a run expires (§5.5), resolved once before the run opened; written before R, deleted after it; an X without R is stale |
 
 Durable, elsewhere:
 
@@ -129,6 +130,10 @@ versioning off, nothing references it once the entry that deleted it is projecte
 
 Delete every version whose timestamp is older than the cutoff, then any group directories left empty
 on filesystem stores.
+
+A collection may perform the expiry of versions itself, by a cutoff or a list, deleting each version
+just before it marks the version group holding it (§5.5); the space it frees is then reclaimed in the
+same run.
 
 **By an exact list.** An expiry may instead be given an **expiry list**: the versions to delete,
 one per line, as an operator reviewed them. It then deletes exactly the versions it names, then the
@@ -291,10 +296,15 @@ The phase is recorded in R **before** the step it names; resuming from any phase
 whatever that step had started.
 
 ```
-start(keep, verify):
+start(keep, verify, expiring := none):     -- expiring: version keys, resolved before the run (§4.1)
   require a collectable main (A1) on this host, else Unsupported
   in-process exclusion (check-and-set), then the run lock (non-blocking), else Busy
   R0 := read R
+  if R0 is absent: delete X                                         -- stale
+                   if expiring: write X := expiring, durably        -- before R exists
+  else: X0 := read X (absent: empty)
+        if expiring is not a subset of X0: refuse, leaving the run as it is
+        expiring := X0
   report outstanding discard requests on each copy
   if R0 is present but unparseable: treat it as Abandoning         -- the safe direction
   match:
@@ -317,6 +327,8 @@ start(keep, verify):
 
 ```
 mark(ns):                                  -- a namespace or a version group
+  if ns is a version group: delete, through the composite, every key of X in ns
+                            (absent is success), then its group directories left empty (§4.1)
   keys := list ns as a directory prefix (with its trailing separator: without it the listing is empty,
           nothing is promoted, and closing would delete every chunk)
   for each child object k (a listed key whose leaf is not internal):
@@ -378,10 +390,23 @@ close(shard):
 The doom step touches only the main's disk and the owner's local records, so the exclusive hold is
 short. The surviving shard is never listed: it is hundreds of times larger than the outgoing one.
 
-**Finish.** When Close is empty: remove F recursively, then delete R. The run's generation stays odd
+**Finish.** When Close is empty: remove F recursively, then delete R, then X. The run's generation stays odd
 until its copy deletions settle (§5.7), which may outlive the collector's session: the domain owner
 settles them. A collector MAY end its session before that and let a later session finish: R stays
 present meanwhile, which is safe.
+
+**Expiry within the run.** Marking is by presence (§5.3), so an expiring version is deleted before
+its group is listed, never skipped while present: a present version would name chunks the run then
+deletes. What may race it is safe:
+
+- a revert of an expiring version publishes a manifest through the gate, which promotes its chunks; a
+  revert after the deletion finds no such version;
+- a version written during the run has a new key, never in X;
+- a crash mid-group redoes the group: the deletions already done are absent, which is success.
+
+X is a subset rule rather than an equality because keys only leave it: a command repeated against a
+run that already deleted some of its versions resolves fewer keys. A run opened without X has the
+empty set, so it accepts only an expiry with nothing left to delete.
 
 **Abandoning** (the operator's abort, or `keep`): the same machine with "every chunk is live". Per shard
 of F, sorted, after the cursor:
@@ -396,8 +421,11 @@ keep_one(shard):
        -- names in both are identical bytes (A2): either copy may be dropped
   unlink leftovers of F/shard; remove it
   write R{Abandoning, cursor = shard}
-when Keep is empty: re-list F; shards left -> another round; none -> remove F, delete R
+when Keep is empty: re-list F; shards left -> another round; none -> remove F, delete R, delete X
 ```
+
+Abandoning restores chunks, never versions: a version marking already deleted stays deleted, and its
+chunks, put back, are garbage for the next run.
 
 Once abandoning, a run stays abandoning on resume. `keep` overrides any phase and ignores the cursor
 (a cursor means something different in each phase). Shards already closed cannot be restored; they
@@ -581,6 +609,8 @@ lock, one read of R, one stat per named chunk.
 
 | Interrupted at | State on the main | Resume does |
 |---|---|---|
+| after writing X, before R | X, no R | X is stale: the next start deletes it; the expiry is given again |
+| mid version group, some of its X deleted | R = Marking(previous namespace) | deletes the rest of the group's X (absent is success), re-lists and re-marks it |
 | after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine); the rename happens only in Opening, never once Marking is recorded |
 | after the rename, before Marking | R = Opening, F exists | enumerates again, marks from the start |
 | mid-namespace | R = Marking(previous namespace) | re-lists and re-marks that namespace |

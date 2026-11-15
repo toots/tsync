@@ -659,11 +659,14 @@ no resync generation is stamped. The reverse folder index is rebuilt from the mi
 
 ### 4.9 Garbage collection
 
-`gc` → `dry_run ?verify`, `start`, `step`, `run ?budget ?pause`, `abort`, `status`, `outstanding`,
+`gc` → `dry_run ?verify ?expiring`, `start`, `step`, `run ?budget ?pause ?expiring`, `abort`, `status`, `outstanding`,
 `retry_outstanding`, with `stats{outcome: Completed | Suspended{phase, cursor}; roots_marked; chunks_promoted;
 chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_reclaimed;
-bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
-precondition and writer interlock are [gc.md](algorithms/gc.md).
+bytes_reclaimed; versions_expired}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
+precondition and writer interlock are [gc.md](algorithms/gc.md). `run ?expiring` performs the expiry
+of those versions within the run ([gc.md §5.5](algorithms/gc.md#55-the-collector-phase-by-phase)); a
+resumed run carries on the expiry it opened with. Without a collectable main it fails `Unsupported`,
+naming `expire --from` as the way to expire by a list.
 
 `dry_run ?expiring` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
 chunks_reclaimable; bytes_reclaimable; chunks_missing; per_copy: (member, count) list;

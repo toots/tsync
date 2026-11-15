@@ -652,7 +652,7 @@ of a chunk key.
 | Log entry | JSON at `tsync/D/log/<group>/<number>` ([03-journal-sync.md](../03-journal-sync.md)) |
 | Tree head, takeover | `tsync/D/tree-head`, `tsync/D/log-takeover/<number>-<generation>` |
 | Cursor | `tsync/D/cursor` |
-| Collection run | JSON at `tsync/D/gc-run`; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
+| Collection run | JSON at `tsync/D/gc-run`; its expiry set at `tsync/D/gc-expiry`, one version key per line; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
 | Collection generation | JSON at `tsync/D/gc-generation` |
 | Collection spaces | surviving `tsync/D/chunks/`, outgoing `tsync/D/chunks.from/` |
 | Corruption marker | JSON at `tsync/corrupted/D/sss/<chunk key>` |
