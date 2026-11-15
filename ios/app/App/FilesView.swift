@@ -134,7 +134,8 @@ final class FolderModel: ObservableObject {
         guard let url else { return nil }
         if !quietly && !isListed { listing = .loading }
         do {
-            listing = .listed(try await Task.detached { try await FileStore.list(url) }.value)
+            let items = try await Task.detached { try await FileStore.list(url) }.value
+            listing = .listed(FileStore.pinned(items, await FileStore.pins(url, domain: place.domain)))
             return nil
         } catch {
             if !(quietly && isListed) {
@@ -178,9 +179,18 @@ final class FolderModel: ObservableObject {
 
     /// Runs off the main thread; the confirmation or the failure is shown.
     func run(_ confirmation: String, _ body: @escaping @Sendable () async throws -> Void) async -> Bool {
+        await counted(confirmation) {
+            try await body()
+            return nil
+        }
+    }
+
+    /// file-browser.md §4: a folder action's counts follow its confirmation.
+    @discardableResult
+    func counted(_ confirmation: String, _ body: @escaping @Sendable () async throws -> String?) async -> Bool {
         do {
-            try await Task.detached { try await body() }.value
-            message = confirmation
+            let counts = try await Task.detached { try await body() }.value
+            message = counts.map { "\(confirmation): \($0)" } ?? confirmation
             await load(quietly: true)
             return true
         } catch {
@@ -203,6 +213,7 @@ struct FolderView: View {
     @State private var acting: FileStore.Item?
     @State private var deleting: FileStore.Item?
     @State private var details: FileStore.Item?
+    @State private var sharing: FileStore.Item?
     @State private var moving: FileStore.Item?
     @State private var preview: URL?
 
@@ -227,6 +238,7 @@ struct FolderView: View {
             .refreshable { await folder.refresh() }
             .sheet(item: $naming) { purpose in NamePrompt(purpose: purpose, folder: folder) }
             .sheet(item: $details) { DetailsView(item: $0) }
+            .sheet(item: $sharing) { ShareLinkView(item: $0, domain: place.domain) }
             .sheet(item: $moving) { item in
                 MovePicker(item: item, from: place) { destination in
                     moving = nil
@@ -299,12 +311,31 @@ struct FolderView: View {
 
     /// file-browser.md §4, as differences §2 offers them.
     @ViewBuilder private func actions(_ item: FileStore.Item) -> some View {
+        let domain = place.domain
         if !item.isFolder { Button("Open") { open(item) } }
-        if item.state != .onlineOnly {
+        Button("Share link") { sharing = item }
+        if !item.pinned {
+            Button("Make available offline") {
+                Task {
+                    await folder.counted("\(item.name) is available offline") {
+                        try await FileStore.makeAvailableOffline(item.url, domain: domain)
+                    }
+                }
+            }
+        } else if !item.isFolder {
+            Button("Keep offline longer") {
+                Task {
+                    await folder.counted("\(item.name) is kept offline longer") {
+                        try await FileStore.makeAvailableOffline(item.url, domain: domain)
+                    }
+                }
+            }
+        }
+        if item.state != .onlineOnly || item.pinned {
             Button("Remove download") {
                 Task {
-                    _ = await folder.run("Removed the download of \(item.name)") {
-                        try await FileStore.removeDownload(item.url, domain: place.domain)
+                    await folder.counted("Removed the download of \(item.name)") {
+                        try await FileStore.removeDownload(item.url, domain: domain)
                     }
                 }
             }
@@ -425,6 +456,8 @@ struct ItemRow: View {
             switch item.state {
             case .waitingToUpload:
                 Image(systemName: "arrow.up.circle").accessibilityLabel("Waiting to upload")
+            case _ where item.pinned:
+                Image(systemName: "pin.fill").accessibilityLabel("Available offline")
             case .onlineOnly:
                 Image(systemName: "icloud").accessibilityLabel("On the server only")
             case .downloaded:
@@ -555,11 +588,60 @@ struct DetailsView: View {
                 if !item.isFolder {
                     LabeledContent("Bytes", value: item.state == .onlineOnly ? "On the server only" : "On this iPhone")
                 }
+                if item.pinned {
+                    LabeledContent(
+                        "Available offline",
+                        value: item.pinnedUntil.map { "Until \($0.formatted(date: .long, time: .shortened))" } ?? "Yes")
+                }
                 LabeledContent("Uploaded", value: item.state == .waitingToUpload ? "Not yet" : "Yes")
             }
             .navigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+/// file-browser.md §4 Share link: the URL with its expiry, Copy and Send.
+struct ShareLinkView: View {
+    let item: FileStore.Item
+    let domain: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var link: (url: URL, expires: Date)?
+    @State private var failure: String?
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let link {
+                    Section {
+                        Text(link.url.absoluteString).textSelection(.enabled).font(.footnote.monospaced())
+                        LabeledContent("Expires", value: link.expires.formatted(date: .long, time: .shortened))
+                    }
+                    Section {
+                        Button(copied ? "Copied" : "Copy") {
+                            UIPasteboard.general.url = link.url
+                            copied = true
+                        }
+                        ShareLink("Send", item: link.url)
+                    }
+                } else if let failure {
+                    Text(failure)
+                } else {
+                    ProgressView()
+                }
+            }
+            .navigationTitle(item.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task {
+                do {
+                    link = try await FileStore.shareLink(item.url, domain: domain)
+                } catch {
+                    failure = (error as? OwnerFailure)?.message ?? error.localizedDescription
+                }
+            }
         }
     }
 }

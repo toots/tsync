@@ -115,6 +115,7 @@ jobs:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
           IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
+          IOS_EXPORT_COMPLIANCE_CODE: ${{ secrets.IOS_EXPORT_COMPLIANCE_CODE }}
         run: |
           if [ "$PUBLISH" != true ]; then
             echo "::notice::signing not run: only a published build is signed (10 §5.6)"
@@ -122,7 +123,8 @@ jobs:
             exit 0
           fi
           missing=
-          for v in IOS_ASC_KEY_P8 IOS_ASC_KEY_ID IOS_ASC_ISSUER_ID IOS_TEAM_ID IOS_APP_ID IOS_APP_GROUP; do
+          for v in IOS_ASC_KEY_P8 IOS_ASC_KEY_ID IOS_ASC_ISSUER_ID IOS_TEAM_ID IOS_APP_ID IOS_APP_GROUP \
+                   IOS_EXPORT_COMPLIANCE_CODE; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -140,14 +142,17 @@ jobs:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
           IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
+          IOS_EXPORT_COMPLIANCE_CODE: ${{ secrets.IOS_EXPORT_COMPLIANCE_CODE }}
         run: |
           if [ "$SIGN" != true ]; then
             IOS_TEAM_ID='' IOS_APP_ID=org.example.tsync IOS_APP_GROUP=group.org.example.tsync
+            IOS_EXPORT_COMPLIANCE_CODE=''
           fi
           {
             echo "TSYNC_TEAM_ID=$IOS_TEAM_ID"
             echo "TSYNC_APP_ID=$IOS_APP_ID"
             echo "TSYNC_APP_GROUP=$IOS_APP_GROUP"
+            echo "TSYNC_EXPORT_COMPLIANCE_CODE=$IOS_EXPORT_COMPLIANCE_CODE"
             echo "TSYNC_APS_ENVIRONMENT=production"
           } >> "$GITHUB_ENV"
 

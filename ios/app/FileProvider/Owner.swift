@@ -9,11 +9,27 @@ struct Owner {
     init(domain: String) {
         self.domain = domain
         Core.start(bounded: true)
+        Owner.becomeHost
         Notices.start()
     }
 
+    /// ios.md §4.1: once per process, the keychain as the vault's keystore,
+    /// and no key derived here.
+    private static let becomeHost: Void = {
+        let refusal = Core.text("ios_owner_host", Data((Tsync.appID + ".vault").utf8)) ?? "the core is not started"
+        if !refusal.isEmpty { Footprint.record("keystore: \(refusal)") }
+    }()
+
     func call(
         _ action: String, _ fields: [String: Any] = [:], cancellation: Cancellation = Cancellation()
+    ) throws -> [String: Any] {
+        try OwnerFailure.checked(answer(action, fields, cancellation: cancellation))
+    }
+
+    /// The reply as the core gave it, a refusal included: what the service
+    /// hands back (ios.md §5.4).
+    func answer(
+        _ action: String, _ fields: [String: Any], cancellation: Cancellation = Cancellation()
     ) throws -> [String: Any] {
         if cancellation.isCancelled { throw OwnerFailure.cancelled }
         try boot()
@@ -42,7 +58,7 @@ struct Owner {
         let failed = reply["ok"] as? Bool == false
         Footprint.record(
             failed ? "\(label) failed: \(reply["code"] ?? "?") \(reply["error"] ?? "")" : label + rows(reply))
-        return try OwnerFailure.checked(reply)
+        return reply
     }
 
     /// ios.md §7: the domain, the action, the item it names and how long it took.

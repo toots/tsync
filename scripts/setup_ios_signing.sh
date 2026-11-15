@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Set the secrets release-ios signs and uploads with (10 §5.6): the App Store
-# Connect API key, its id and issuer, and the identifiers of ios.md §3.1.
+# Connect API key, its id and issuer, the identifiers of ios.md §3.1 and the
+# export compliance code of 10 §5.6.
 #
 # The key is made by hand, with the Admin role cloud signing needs, as
 # ios/RELEASING.md states. The identifiers are read from the file
@@ -27,7 +28,7 @@ grep -q 'BEGIN PRIVATE KEY' "$key" || { echo "$key holds no private key" >&2; ex
 
 # shellcheck source=/dev/null
 . "$IDENTIFIERS"
-for name in TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP; do
+for name in TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP TSYNC_EXPORT_COMPLIANCE_CODE; do
   [ -n "${!name:-}" ] || { echo "$IDENTIFIERS does not export $name" >&2; exit 1; }
 done
 
@@ -37,4 +38,5 @@ printf %s "$issuer" | gh secret set IOS_ASC_ISSUER_ID -R "$REPO"
 printf %s "$TSYNC_TEAM_ID" | gh secret set IOS_TEAM_ID -R "$REPO"
 printf %s "$TSYNC_APP_ID" | gh secret set IOS_APP_ID -R "$REPO"
 printf %s "$TSYNC_APP_GROUP" | gh secret set IOS_APP_GROUP -R "$REPO"
+printf %s "$TSYNC_EXPORT_COMPLIANCE_CODE" | gh secret set IOS_EXPORT_COMPLIANCE_CODE -R "$REPO"
 echo "secrets set on $REPO; the .p8 cannot be downloaded again, so keep it or delete it knowingly"

@@ -21,6 +21,9 @@ enum FileStore {
         let modified: Date?
         let state: State
         let type: UTType?
+        /// differences §2: from the owner's listing; false when it did not answer.
+        var pinned = false
+        var pinnedUntil: Date?
         var id: URL { url }
     }
 
@@ -58,6 +61,19 @@ enum FileStore {
                 if isUnreachable(error) || Date() > deadline { throw error }
                 try await Task.sleep(nanoseconds: 1_000_000_000)
             }
+        }
+    }
+
+    /// The listing with the owner's pins over it.
+    static func pinned(_ items: [Item], _ pins: [String: Date?]?) -> [Item] {
+        guard let pins else { return items }
+        return items.map { item in
+            var item = item
+            if let until = pins[item.name] {
+                item.pinned = true
+                item.pinnedUntil = until
+            }
+            return item
         }
     }
 
@@ -149,15 +165,85 @@ enum FileStore {
         try coordinatedRead(url) { _ in () }
     }
 
-    static func removeDownload(_ url: URL, domain: String) async throws {
+    /// differences §2: the owner's copy and its pin, then the system's.
+    @discardableResult
+    static func removeDownload(_ url: URL, domain: String) async throws -> String? {
         guard let manager = manager(domain) else { throw failure("\(domain) is not registered") }
-        let identifier: NSFileProviderItemIdentifier = try await withCheckedThrowingContinuation { done in
+        let identifier = try await identifier(url)
+        let counts = try await owner(domain, "evict", ["ref": ref(identifier)])
+        try await manager.evictItem(identifier: identifier)
+        return counted(counts, "evicted")
+    }
+
+    /// The File Provider identifier, which is the owner's reference
+    /// (file-provider.md §6.1).
+    static func identifier(_ url: URL) async throws -> NSFileProviderItemIdentifier {
+        try await withCheckedThrowingContinuation { done in
             NSFileProviderManager.getIdentifierForUserVisibleFile(at: url) { identifier, _, error in
                 if let identifier { return done.resume(returning: identifier) }
                 done.resume(throwing: error ?? failure("no item for \(url.lastPathComponent)"))
             }
         }
-        try await manager.evictItem(identifier: identifier)
+    }
+
+    static func ref(_ identifier: NSFileProviderItemIdentifier) -> String {
+        identifier == .rootContainer ? "root" : identifier.rawValue
+    }
+
+    /// One request to the domain's owner through the service (ios.md §5.4),
+    /// off the main thread.
+    static func owner(_ domain: String, _ action: String, _ fields: [String: Any] = [:]) async throws
+        -> [String: Any]
+    {
+        var request = fields
+        request["action"] = action
+        request["domain"] = domain
+        let bulk = ["restore", "evict", "share"].contains(action)
+        return try await Task.detached { try OwnerClient.call(request, bulk: bulk) }.value
+    }
+
+    /// share: the URL and when it expires.
+    static func shareLink(_ url: URL, domain: String) async throws -> (url: URL, expires: Date) {
+        let reply = try await owner(domain, "share", ["ref": ref(try await identifier(url))])
+        guard let link = (reply["url"] as? String).flatMap(URL.init(string:)),
+            let expires = reply["expires"] as? Double
+        else { throw failure("the owner's reply has no link") }
+        return (link, Date(timeIntervalSince1970: expires))
+    }
+
+    /// restore: fetched and pinned; for a folder, how many files and how many failed.
+    static func makeAvailableOffline(_ url: URL, domain: String) async throws -> String? {
+        let counts = try await owner(domain, "restore", ["ref": ref(try await identifier(url))])
+        return counted(counts, "restored")
+    }
+
+    /// file-browser.md §4: a folder's counts, said only when it was a walk.
+    private static func counted(_ reply: [String: Any], _ done: String) -> String? {
+        let n = reply[done] as? Int ?? 0, failed = reply["failed"] as? Int ?? 0
+        guard n + failed > 1 else { return failed > 0 ? "it failed" : nil }
+        return failed > 0 ? "\(n) files, \(failed) failed" : "\(n) files"
+    }
+
+    /// differences §2: the pinned children, from the owner's listing of the
+    /// folder, by name, with when each pin ends; nil when the service does not
+    /// answer.
+    static func pins(_ folder: URL, domain: String) async -> [String: Date?]? {
+        guard let identifier = try? await identifier(folder) else { return nil }
+        var pins: [String: Date?] = [:]
+        var after: String?
+        repeat {
+            var fields: [String: Any] = ["ref": ref(identifier), "pull": "never"]
+            if let after { fields["after"] = after }
+            guard let reply = try? await owner(domain, "list_dir", fields) else { return nil }
+            for row in reply["items"] as? [[String: Any]] ?? [] {
+                guard let name = row["name"] as? String else { continue }
+                if row["availability"] as? String == "pinned" {
+                    pins[name] = (row["pinnedUntil"] as? Double).map(Date.init(timeIntervalSince1970:))
+                }
+            }
+            after = reply["next"] as? String
+        } while after != nil
+        return pins
     }
 
     /// ios.md §5.1: starts a refresh pass.

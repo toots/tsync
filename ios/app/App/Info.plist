@@ -12,6 +12,25 @@
     </array>
     <key>TsyncAppGroup</key>
     <string>$(TSYNC_APP_GROUP)</string>
+    <key>TsyncAppID</key>
+    <string>$(TSYNC_APP_ID)</string>
+    <!-- ios-app.md §6: the Camera app hands a scanned code to tsync. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER).otpauth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>otpauth</string>
+            </array>
+        </dict>
+    </array>
+    <!-- 10 §5.6: the vault's ciphers are not the system's. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <true/>
+    <key>ITSEncryptionExportComplianceCode</key>
+    <string>$(TSYNC_EXPORT_COMPLIANCE_CODE)</string>
     <key>TsyncCommit</key>
     <string>$(TSYNC_COMMIT)</string>
     <key>TsyncDevelopment</key>
