@@ -35,7 +35,8 @@ and spill = { dir : string; prepared : bool Atomic.t; preparing : Mutex.t }
 
 (* An open file cannot be unlinked on Windows, so bodies stay in memory there. *)
 let spill_of = function
-  | Some dir when not Sys.win32 -> Some { dir; prepared = Atomic.make false; preparing = Mutex.create () }
+  | Some dir when not Sys.win32 ->
+      Some { dir; prepared = Atomic.make false; preparing = Mutex.create () }
   | _ -> None
 
 (* A crash between creating a spill file and unlinking it leaves a temporary
