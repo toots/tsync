@@ -53,16 +53,13 @@ let absolute p =
 
 let gc apply verify abort budget show_status copies expire_file expire_before
     name verbose =
-  let refuse msg =
-    prerr_endline ("tsync: " ^ msg);
-    2
-  in
+  early @@ fun () ->
   match (expire_file, expire_before) with
     | Some _, Some _ -> refuse "--expire and --expire-before go one at a time"
     | (Some _, _ | _, Some _) when abort ->
         refuse "--abort puts chunks back; it expires nothing"
     | Some file, None when not (Sys.file_exists file) ->
-        refuse (file ^ ": no such file")
+        refuse "%s: no such file" file
     | _ -> (
         let expire =
           match (expire_file, expire_before) with
@@ -151,10 +148,7 @@ let gc_cmd =
       $ expire_file $ expire_before $ domain_arg $ verbose)
 
 let expire apply date from export name verbose =
-  let refuse msg =
-    prerr_endline ("tsync: " ^ msg);
-    2
-  in
+  early @@ fun () ->
   match (date, from, export) with
     | Some _, Some _, _ -> refuse "expire takes a DATE or --from, not both"
     | None, None, _ -> refuse "expire needs a DATE or --from FILE"
@@ -170,7 +164,7 @@ let expire apply date from export name verbose =
                export = Option.map absolute export;
              })
     | None, Some file, None ->
-        if not (Sys.file_exists file) then refuse (file ^ ": no such file")
+        if not (Sys.file_exists file) then refuse "%s: no such file" file
         else
           run_job ?name verbose
             (Expire { apply; expiry = `Listed (absolute file); export = None })
@@ -263,19 +257,16 @@ let data_integrity_cmd =
       $ domain_arg $ verbose)
 
 let import src map only exclude force_rehash name verbose =
-  let refuse msg =
-    prerr_endline ("tsync: " ^ msg);
-    2
-  in
+  early @@ fun () ->
   match (src, map) with
     | None, None -> refuse "DIR is required without --map"
     | _, Some _ when only <> [] || exclude <> [] ->
         refuse "--map takes no --only or --exclude"
-    | _, Some m when not (Sys.file_exists m) -> refuse (m ^ " does not exist")
+    | _, Some m when not (Sys.file_exists m) -> refuse "%s does not exist" m
     | src, map ->
         let src = absolute (Option.value src ~default:".") in
         if not (Sys.file_exists src && Sys.is_directory src) then
-          refuse (src ^ " is not a directory")
+          refuse "%s is not a directory" src
         else
           run_job ?name verbose
             (Import
