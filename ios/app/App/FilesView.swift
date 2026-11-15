@@ -106,8 +106,11 @@ final class FolderModel: ObservableObject {
         do {
             let root = try await FileStore.root(place.domain)
             let url = place.url(in: root)
+            let writable = await Task.detached { FileStore.isWritable(root) }.value
+            // Gone, or started twice, while the root was asked: no second presenter.
+            guard !Task.isCancelled, watcher == nil else { return }
             self.url = url
-            writable = await Task.detached { FileStore.isWritable(root) }.value
+            self.writable = writable
             watcher = FolderWatcher(url) { [weak self] in Task { @MainActor in self?.changed() } }
         } catch {
             listing = .failed(error.localizedDescription)
@@ -146,13 +149,13 @@ final class FolderModel: ObservableObject {
     /// again once the system reports it changed, or after refresh_patience.
     func refresh() async {
         FileStore.signal(place.domain)
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.nextChange() }
-            group.addTask { try? await Task.sleep(nanoseconds: UInt64(FileStore.refreshPatience * 1e9)) }
-            await group.next()
-            group.cancelAll()
+        // The wait ignores cancellation: the patience ends it by resuming it.
+        let patience = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(FileStore.refreshPatience * 1e9))
+            if !Task.isCancelled { self.resumeWaiters() }
         }
-        resumeWaiters()
+        await nextChange()
+        patience.cancel()
         if let error = await load(quietly: true) {
             message = FileStore.isUnreachable(error) ? "Cannot reach the server" : error.localizedDescription
         }
