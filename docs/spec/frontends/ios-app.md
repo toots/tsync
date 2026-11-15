@@ -148,6 +148,11 @@ service ([ios.md §5.4](ios.md#54-the-service)). What differs:
   the form shows "Unlocking…" and takes no second tap. "The keyring changed" asks for the slots
   and derives once more; a second such answer is shown. The passphrase, the secret key and the
   KEKs are overwritten once the unlock answers.
+- **Locked**: while no vault domain is unlocked, the screen shows no tabs, only each domain's
+  form under the heading "Unlock the vault" (one domain) or "Unlock `<domain>`" (several), with
+  the line "Enter the vault's passphrase to see its codes and passwords." and, below the secret
+  key field, "This iPhone also needs the vault's secret key, the first time." Once one is
+  unlocked the tabs return, and a locked domain's rows are its form under the same heading.
 - **Fields for a secret** are secure text fields with no content type, no suggestions, no
   autocorrection and no autocapitalisation, so neither AutoFill nor the keyboard keeps them, with
   the show control of [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases).
