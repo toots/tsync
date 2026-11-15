@@ -102,7 +102,12 @@ let pass label =
     (label ^ ", notices when answered")
     (if snd (seen ()) > notices_before then "sent" else "none yet");
   until_quiet ();
-  p "  %-34s %d" (label ^ ", log entries read") (Atomic.get entry_reads - before);
+  (* A large pass may read its unreadable last entry once more: tens, not one
+     read per held folder, is what it shows. *)
+  let reads = Atomic.get entry_reads - before in
+  p "  %-34s %s" (label ^ ", log entries read")
+    (if reads < 100 then string_of_int reads
+     else Printf.sprintf "%d to %d" (reads / 10 * 10) ((reads / 10 * 10) + 9));
   p "  %-34s %d" (label ^ ", folders written") (folders_written files);
   p "  %-34s %s" (label ^ ", summary") !last_summary;
   show_notices (label ^ ", notices")

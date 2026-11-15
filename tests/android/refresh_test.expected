@@ -41,7 +41,7 @@
   tree head passed it                true
   refresh                            ok, before the patience
   pass, notices when answered        sent
-  pass, log entries read             803
+  pass, log entries read             800 to 809
   pass, folders written              200
   pass, summary                      held 200, covered 200, merged 1, entries 1, end unreadable
   pass, notices                      {changed d:<folder6>}
