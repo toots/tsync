@@ -136,7 +136,8 @@ after `refresh_patience`, whichever comes first; a pass still running then goes 
 background. The answer is `{}`, with `pass` when the pass ended in time: `held`, the number of held
 folders; `covered`, those it brought to the head; `merged`, those whose view changed; `entries`,
 the log entries it read; and `end`, how it ended: `head`, `stopped` (the breaker, below), `pruned`,
-`fresh` when every held folder was fresh and no pass ran, or `failed`, with the reason as `error`. A host shows it in its diagnostics; nothing
+`unreadable` when it met an entry no reader can follow that the tree head has passed, and so read
+each folder by state ([publication §4.3](../algorithms/publication.md)), `fresh` when every held folder was fresh and no pass ran, or `failed`, with the reason as `error`. A host shows it in its diagnostics; nothing
 acts on it. A host that suspends its process once no request is pending (iOS) so keeps it running
 for the pass a change enumeration starts. A pass runs when a **held** folder (one with a pull
 marker, [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) is not fresh, and brings
