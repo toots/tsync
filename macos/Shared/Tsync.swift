@@ -17,7 +17,13 @@ enum Tsync {
     }
 
     static let vaultDomainsKey = "vaultDomains"
+
+    /// The domains AutoFill asks (passwords/ios §2).
+    static func passwordDomainNames() -> [String] { vaultDomainNames() }
     #else
+    /// The domains AutoFill asks (passwords/macos §2): every one the owner
+    /// serves, those using no passwords refusing.
+    static func passwordDomainNames() -> [String] { domainNames() }
     static let appGroup = "group.org.feverdreamtv.tsync"
     #endif
     static let serviceLabel = "org.feverdreamtv.tsync.daemon"

@@ -42,15 +42,6 @@ enum CreationDomain {
 /// The owner's passwords requests, one per call, each blocking its thread
 /// (file-provider §4.3): callers keep them off the main queue.
 enum Requests {
-    /// The domains asked: every configured one on macOS, the vault domains the
-    /// app keeps on iOS (passwords/ios §2).
-    private static func domains() -> [String] {
-        #if os(iOS)
-        return Tsync.vaultDomainNames()
-        #else
-        return Tsync.domainNames()
-        #endif
-    }
 
     static func call(_ domain: String, _ action: String, _ args: [String: Any] = [:]) throws
         -> [String: Any]
@@ -67,7 +58,7 @@ enum Requests {
         _ ask: (String) throws -> [String: Any], _ rows: (String, [String: Any]) -> [Choice]
     ) -> Listed {
         var listed = Listed()
-        for domain in domains() {
+        for domain in Tsync.passwordDomainNames() {
             do {
                 listed.choices += rows(domain, try ask(domain))
             } catch let failure as OwnerFailure where failure.code == "locked" {
@@ -134,7 +125,7 @@ enum Requests {
     /// locked one is named so the sheet can say so.
     static func creationDomain() -> CreationDomain {
         var using: [(name: String, locked: Bool)] = []
-        for domain in domains() {
+        for domain in Tsync.passwordDomainNames() {
             do {
                 _ = try call(domain, "list", ["use": false])
                 using.append((domain, false))
