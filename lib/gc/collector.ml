@@ -374,7 +374,7 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
 
 (* §5.5: X is written before the run's first record, and an open run keeps
    the set it opened with. *)
-let expiry_set nr m d ~r0 ~(plan : Gc_plan.start) expiring =
+let expiry_set ~r0 ~(plan : Gc_plan.start) nr m d expiring =
   let store = m.member.store in
   match r0 with
     | Gc_record.Absent -> (
@@ -445,7 +445,7 @@ let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
   in
   let r0 = Gc_record.read m.member.store d in
   let groups =
-    by_group (expiry_set nr m d ~r0 ~plan:(Gc_plan.start ~r0 ~keep) expiring)
+    by_group (expiry_set ~r0 ~plan:(Gc_plan.start ~r0 ~keep) nr m d expiring)
   in
   let started =
     match r0 with Record r -> r.started | _ -> Unix.gettimeofday ()
