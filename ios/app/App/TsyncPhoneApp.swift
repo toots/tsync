@@ -59,7 +59,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var passFailures: [String] = []
     @Published private(set) var refreshStatus = UIBackgroundRefreshStatus.available
 
-    private let reconciler = Reconciler()
+    private let reconciler = Reconciler.shared
     private var observer: NSObjectProtocol?
 
     init() {

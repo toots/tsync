@@ -41,6 +41,9 @@ struct ReconcileReport {
 /// Domain registration (§9.1). Passes never overlap: one requested during a
 /// pass runs once after it.
 final class Reconciler {
+    /// One per app: two instances' passes could overlap.
+    static let shared = Reconciler()
+
     /// §13 registration_deadline / registration_retry.
     static let deadline: TimeInterval = 10
     static let retry: TimeInterval = 1
@@ -50,12 +53,21 @@ final class Reconciler {
     private var running = false
     private var again = false
     private var preserved: [String: URL] = [:]
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     /// Called after each pass with the registered domains and the report.
     var onPass: (([NSFileProviderDomain], ReconcileReport) -> Void)?
 
-    func request() {
+    /// Returns once a pass that started after the call has completed.
+    func requestAndWait() async {
+        await withCheckedContinuation { waiter in request(waiter) }
+    }
+
+    func request() { request(nil) }
+
+    private func request(_ waiter: CheckedContinuation<Void, Never>?) {
         lock.lock()
+        if let waiter { waiters.append(waiter) }
         if running {
             again = true
             lock.unlock()
@@ -77,7 +89,10 @@ final class Reconciler {
                 continue
             }
             running = false
+            let done = waiters
+            waiters = []
             lock.unlock()
+            done.forEach { $0.resume() }
             return
         }
     }

@@ -28,8 +28,8 @@ enum BrowserTest {
         if Configs.entries().allSatisfy({ $0.name != "Test" }), let refusal = Configs.add([Configs.localTest()]) {
             throw NSError(domain: "tsync", code: 1, userInfo: [NSLocalizedDescriptionKey: refusal])
         }
-        try await NSFileProviderManager.add(
-            NSFileProviderDomain(identifier: NSFileProviderDomainIdentifier(domainIdentifier("Test")), displayName: "Test"))
+        // ios-app.md §5: registered by the app's pass, never by the test.
+        await Reconciler.shared.requestAndWait()
         let root = try await FileStore.root("Test")
         let name = "browser-test-\(Int(Date().timeIntervalSince1970))"
         let folder = root.appendingPathComponent(name, isDirectory: true)

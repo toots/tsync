@@ -7,7 +7,7 @@ import ServiceManagement
 /// without it no remote change reaches the replica until the next login.
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let reconciler = Reconciler()
+    private let reconciler = Reconciler.shared
     private lazy var relay = Relay(reconciler: reconciler)
     private var menu: StatusMenu?
     /// The domains of the last pass, read on the main queue.
