@@ -135,3 +135,8 @@ let unreferenced ~referenced (listing : Tsync_store.Store.entry list) =
     { reclaimable = 0; bytes = 0; keys = [] }
     listing
   |> fun s -> { s with keys = List.rev s.keys }
+
+let split ~referenced ~expired listing =
+  ( unreferenced ~referenced:(fun c -> referenced c || expired c) listing,
+    unreferenced ~referenced:(fun c -> referenced c || not (expired c)) listing
+  )

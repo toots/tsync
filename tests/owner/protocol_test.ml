@@ -226,6 +226,7 @@ let cases =
                   verify = false;
                   abort = false;
                   budget = Some 60.;
+                  expire = Some (`Listed "/tmp/old.txt");
                 };
             narrate = true;
           },

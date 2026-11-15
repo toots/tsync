@@ -11,7 +11,13 @@ type expiry = [ `Before of float | `Listed of string ] [@@deriving yojson]
 
 type t =
   | Sync of { full : bool }
-  | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
+  | Gc of {
+      apply : bool;
+      verify : bool;
+      abort : bool;
+      budget : float option;
+      expire : expiry option;
+    }
   | Gc_copies of copies
   | Expire of {
       apply : bool;

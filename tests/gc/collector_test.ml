@@ -186,6 +186,25 @@ let () =
                     sv.per_copy))
         | _ -> p "dry run failed\n");
       p "dry run changed nothing on the main: %b\n" (files main_root = before);
+      (match
+         Collector.dry_run
+           ~expiring:[Key.version d ~group:"0123456789ab-2/h" ~ns:1L]
+           c
+       with
+        | Ok [(Ok { expiry = Some e; _ } as sv)] ->
+            let sv = Result.get_ok sv in
+            p
+              "with the version expiring: %d versions (%d bytes), freed %d (%d \
+               bytes), reclaimable %d, referenced %d, missing %d, per copy %s\n"
+              e.versions e.version_bytes e.chunks_freed e.bytes_freed
+              sv.chunks_reclaimable sv.chunks_referenced
+              (List.length sv.chunks_missing)
+              (String.concat ","
+                 (List.map
+                    (fun (n, k) -> Printf.sprintf "%s %d" n k)
+                    sv.per_copy))
+        | _ -> p "dry run with an expiry failed\n");
+      p "still nothing changed: %b\n" (files main_root = before);
       p "a cancelled dry run: %s\n"
         (match Collector.dry_run ~cancelled:(Fun.const true) c with
           | Ok [Error reason] -> reason

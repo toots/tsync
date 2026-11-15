@@ -1,6 +1,8 @@
 == dry run (§5.9)
 referenced 5, reclaimable 2 (10 bytes), missing 0, corrupt 0, per copy replica 2
 dry run changed nothing on the main: true
+with the version expiring: 1 versions (114 bytes), freed 1 (3 bytes), reclaimable 2, referenced 4, missing 0, per copy replica 3
+still nothing changed: true
 a cancelled dry run: cancelled
 
 == a collection (§5.5)

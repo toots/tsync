@@ -23,26 +23,74 @@ let print_status (s : Collector.status) =
        Printf.sprintf ", %d deletion batches owed to copies" s.owed
      else "")
 
-let gc apply verify abort budget show_status copies name verbose =
-  match copies with
-    | Some act -> run_job ?name verbose (Gc_copies act)
-    | None when show_status ->
-        set_verbose verbose;
-        run (fun () ->
-            let config = config () in
-            let dom =
-              Tsync_domain.Domain.build ~owner:false config
-                (domain ?name config)
-            in
-            match Collector.status dom.composite with
-              | [] ->
-                  fail
-                    "no main of this domain is a filesystem store local to \
-                     this host"
-              | l ->
-                  List.iter print_status l;
-                  0)
-    | None -> run_job ?name verbose (Gc { apply; verify; abort; budget })
+(* 07 §5.3: a date at local midnight. *)
+let cutoff_of date =
+  match String.split_on_char '-' date with
+    | [y; m; d] -> (
+        match
+          (int_of_string_opt y, int_of_string_opt m, int_of_string_opt d)
+        with
+          | Some y, Some m, Some d ->
+              fst
+                (Unix.mktime
+                   {
+                     Unix.tm_year = y - 1900;
+                     tm_mon = m - 1;
+                     tm_mday = d;
+                     tm_hour = 0;
+                     tm_min = 0;
+                     tm_sec = 0;
+                     tm_wday = 0;
+                     tm_yday = 0;
+                     tm_isdst = false;
+                   })
+          | _ -> fail "%s is not a date (YYYY-MM-DD)" date)
+    | _ -> fail "%s is not a date (YYYY-MM-DD)" date
+
+(* The owner's working directory is not ours: the paths go absolute. *)
+let absolute p =
+  if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
+
+let gc apply verify abort budget show_status copies expire_file expire_before
+    name verbose =
+  let refuse msg =
+    prerr_endline ("tsync: " ^ msg);
+    2
+  in
+  match (expire_file, expire_before) with
+    | Some _, Some _ -> refuse "--expire and --expire-before go one at a time"
+    | (Some _, _ | _, Some _) when apply || abort ->
+        refuse "--expire and --expire-before only report for now"
+    | Some file, None when not (Sys.file_exists file) ->
+        refuse (file ^ ": no such file")
+    | _ -> (
+        let expire =
+          match (expire_file, expire_before) with
+            | Some file, _ -> Some (`Listed (absolute file))
+            | None, Some date -> Some (`Before (cutoff_of date))
+            | None, None -> None
+        in
+        match copies with
+          | Some act -> run_job ?name verbose (Gc_copies act)
+          | None when show_status ->
+              set_verbose verbose;
+              run (fun () ->
+                  let config = config () in
+                  let dom =
+                    Tsync_domain.Domain.build ~owner:false config
+                      (domain ?name config)
+                  in
+                  match Collector.status dom.composite with
+                    | [] ->
+                        fail
+                          "no main of this domain is a filesystem store local \
+                           to this host"
+                    | l ->
+                        List.iter print_status l;
+                        0)
+          | None ->
+              run_job ?name verbose
+                (Gc { apply; verify; abort; budget; expire }))
 
 let apply_arg =
   Arg.(value & flag & info ["apply"] ~doc:"Act; without it, only report.")
@@ -81,40 +129,26 @@ let gc_cmd =
                   "Rewrite outstanding requests with the keys still to delete, \
                    firing them again." );
           ])
+  and expire_file =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["expire"] ~docv:"FILE"
+          ~doc:
+            "Count the versions an expiry list names as gone, reporting the \
+             space their expiry frees.")
+  and expire_before =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["expire-before"] ~docv:"DATE"
+          ~doc:"As --expire, for every version older than DATE.")
   in
   cmd "gc"
     ~doc:"Collect chunks no file or version names (a dry run by default)."
     Term.(
       const gc $ apply_arg $ verify $ abort $ budget $ show_status $ copies
-      $ domain_arg $ verbose)
-
-(* 07 §5.3: a date at local midnight. *)
-let cutoff_of date =
-  match String.split_on_char '-' date with
-    | [y; m; d] -> (
-        match
-          (int_of_string_opt y, int_of_string_opt m, int_of_string_opt d)
-        with
-          | Some y, Some m, Some d ->
-              fst
-                (Unix.mktime
-                   {
-                     Unix.tm_year = y - 1900;
-                     tm_mon = m - 1;
-                     tm_mday = d;
-                     tm_hour = 0;
-                     tm_min = 0;
-                     tm_sec = 0;
-                     tm_wday = 0;
-                     tm_yday = 0;
-                     tm_isdst = false;
-                   })
-          | _ -> fail "%s is not a date (YYYY-MM-DD)" date)
-    | _ -> fail "%s is not a date (YYYY-MM-DD)" date
-
-(* The owner's working directory is not ours: the paths go absolute. *)
-let absolute p =
-  if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
+      $ expire_file $ expire_before $ domain_arg $ verbose)
 
 let expire apply date from export name verbose =
   let refuse msg =

@@ -76,3 +76,12 @@ tsync expire --from old.txt --apply
 Each line is a version as `tsync versions` prints it, so a line copied from there can be pasted in. Only the timestamp and the path count: the date and size are for reading. A list touches versions only; the change log and share links still go with `tsync expire DATE`. Running the same list again is harmless: versions already gone are counted and skipped. A list whose lines no longer match a version (a mistyped name, a file renamed since) is refused whole, naming each bad line, before anything is removed.
 
 Writing the list reads every listed version, one request each on a bucket.
+
+`expire` frees no space by itself. To see how much an expiry would free, give it to a `gc` dry run:
+
+```bash
+tsync gc --expire old.txt              # from a list
+tsync gc --expire-before 2026-01-01    # every version older than the date
+```
+
+It reports the chunks only those versions use, which a collection after the expiry reclaims, beside what is already unused.

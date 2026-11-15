@@ -218,7 +218,17 @@ let () =
       ~referenced:(fun x -> Chunk_key.equal x (c "a"))
       [entry "a" 10; entry "b" 20; entry "e" 30]
   in
-  p "reclaimable %d chunks, %d bytes\n" s.reclaimable s.bytes
+  p "reclaimable %d chunks, %d bytes\n" s.reclaimable s.bytes;
+  let already, freed =
+    Gc_plan.split
+      ~referenced:(fun x -> Chunk_key.equal x (c "a"))
+      ~expired:(fun x -> Chunk_key.equal x (c "a") || Chunk_key.equal x (c "b"))
+      [entry "a" 10; entry "b" 20; entry "e" 30]
+  in
+  p
+    "with an expiry naming a (also live) and b: already unused %d (%d bytes), \
+     freed by the expiry %d (%d bytes)\n"
+    already.reclaimable already.bytes freed.reclaimable freed.bytes
 
 (* §4.1: expiry lists. Dates print in UTC for a stable snapshot. *)
 let () =

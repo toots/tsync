@@ -28,6 +28,13 @@ type stats = {
   bytes_reclaimed : int;
 }
 
+type expiry = {
+  versions : int;
+  version_bytes : int;
+  chunks_freed : int;
+  bytes_freed : int;
+}
+
 type survey = {
   surveyed : string;
   run : (Gc_record.phase * string) option;
@@ -38,6 +45,7 @@ type survey = {
   chunks_missing : Chunk_key.t list;
   per_copy : (string * int) list;
   chunks_corrupt : int;
+  expiry : expiry option;
 }
 
 let delete_batch = 1000
@@ -100,18 +108,24 @@ let references key body =
     | Ok cs -> cs
     | Error reason -> raise (Halt reason)
 
-(* Every chunk the namespace's children name; a child listed but gone names
-   nothing, since a rename's copy went through the gate. *)
-let namespace_references m d ns =
+(* The namespace's children with the chunks each names; a child listed but
+   gone names nothing, since a rename's copy went through the gate. A child
+   [expiring] holds is about to go, so its body never stops a run. *)
+let namespace_bodies ?(expiring = fun _ -> false) m d ns =
   let store = m.member.store in
-  List.concat_map
+  List.filter_map
     (fun (e : Store.entry) ->
-      if Key.is_internal_leaf (Key.leaf e.key) then []
-      else (
-        match store.get_opt e.key with
-          | None -> []
-          | Some body -> references e.key body))
+      if Key.is_internal_leaf (Key.leaf e.key) then None
+      else
+        Option.map
+          (fun body ->
+            if expiring e.key then
+              (e, Result.value ~default:[] (Chunk_spaces.references e.key body))
+            else (e, references e.key body))
+          (store.get_opt e.key))
     (store.list_prefix (Gc_plan.namespace_prefix d ns))
+
+let namespace_references m d ns = List.concat_map snd (namespace_bodies m d ns)
 
 (* gc §5.3: every chunk named by an entry above the tree head, which is
    committed and not yet in the tree. An entry that cannot be read stops the
@@ -696,10 +710,23 @@ let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
 (* §5.9 on a main of millions of chunks: one packed set of referenced chunks,
    each taken out once a shard listing shows it, and the chunk area read one
    shard at a time. What is left was referenced and never listed. *)
-let survey_one ~narrate:nr ~verify ~cancelled d m =
+let survey_one ?expiring ~narrate:nr ~verify ~cancelled d m =
   let check () = if cancelled () then raise (Halt "cancelled") in
+  let doomed =
+    Option.map
+      (fun keys ->
+        let t = Hashtbl.create (List.length keys) in
+        List.iter (fun k -> Hashtbl.replace t k ()) keys;
+        t)
+      expiring
+  in
+  let is_expiring k =
+    match doomed with Some t -> Hashtbl.mem t k | None -> false
+  in
   try
     let referenced = Chunk_set.create ~max:max_int () in
+    let expired = Chunk_set.create ~max:max_int () in
+    let versions = ref 0 and version_bytes = ref 0 in
     let corrupt = ref 0 in
     let run, run_unreadable =
       match Gc_record.read m.member.store d with
@@ -718,7 +745,14 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
       List.iteri
         (fun i ns ->
           check ();
-          List.iter (Chunk_set.add referenced) (namespace_references m d ns);
+          List.iter
+            (fun ((e : Store.entry), cs) ->
+              if is_expiring e.key then (
+                incr versions;
+                version_bytes := !version_bytes + e.size;
+                List.iter (Chunk_set.add expired) cs)
+              else List.iter (Chunk_set.add referenced) cs)
+            (namespace_bodies ~expiring:is_expiring m d ns);
           Narrate.progress nr
             ~fraction:(float (i + 1) /. float (max 1 total))
             "read %d of %d folders and version folders; %d chunks referenced"
@@ -729,6 +763,7 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
       | exception Halt reason -> Error reason
       | () ->
           let reclaimable = ref 0 and bytes = ref 0 in
+          let freed = ref 0 and freed_bytes = ref 0 in
           let chunks_referenced = Chunk_set.cardinal referenced in
           Narrate.say nr
             "  %s referenced; listing the chunk area shard by shard%s"
@@ -744,12 +779,14 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
               let listing =
                 m.member.store.list_prefix (Key.shard_prefix d shard)
               in
-              let s =
-                Gc_plan.unreferenced ~referenced:(Chunk_set.mem referenced)
-                  listing
+              let s, f =
+                Gc_plan.split ~referenced:(Chunk_set.mem referenced)
+                  ~expired:(Chunk_set.mem expired) listing
               in
               reclaimable := !reclaimable + s.reclaimable;
               bytes := !bytes + s.bytes;
+              freed := !freed + f.reclaimable;
+              freed_bytes := !freed_bytes + f.bytes;
               List.iter
                 (fun (e : Store.entry) ->
                   match Key.chunk_of e.key with
@@ -778,13 +815,24 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
               chunks_missing = missing;
               per_copy =
                 List.map
-                  (fun (c : Composite.member) -> (c.name, !reclaimable))
+                  (fun (c : Composite.member) ->
+                    (c.name, !reclaimable + !freed))
                   m.tells;
               chunks_corrupt = !corrupt;
+              expiry =
+                Option.map
+                  (fun _ ->
+                    {
+                      versions = !versions;
+                      version_bytes = !version_bytes;
+                      chunks_freed = !freed;
+                      bytes_freed = !freed_bytes;
+                    })
+                  expiring;
             }
   with Halt reason -> Error reason
 
-let dry_run ?(narrate = Narrate.none) ?(verify = false)
+let dry_run ?expiring ?(narrate = Narrate.none) ?(verify = false)
     ?(cancelled = Fun.const false) composite =
   let d = Composite.domain composite in
-  each composite (survey_one ~narrate ~verify ~cancelled d)
+  each composite (survey_one ?expiring ~narrate ~verify ~cancelled d)

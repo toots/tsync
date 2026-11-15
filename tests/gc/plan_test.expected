@@ -68,6 +68,7 @@ garbage                                            -> unparseable: left, reporte
 
 == dry run survey (§5.9)
 reclaimable 2 chunks, 50 bytes
+with an expiry naming a (also live) and b: already unused 1 (30 bytes), freed by the expiry 1 (20 bytes)
 
 == expiry list (§4.1): print
 # tsync expiry list

@@ -31,6 +31,14 @@ type stats = {
   bytes_reclaimed : int;
 }
 
+(** What an expiry given to a dry run frees (§5.9). *)
+type expiry = {
+  versions : int;  (** expiring versions present on the main *)
+  version_bytes : int;  (** their bodies *)
+  chunks_freed : int;  (** named by expiring versions alone *)
+  bytes_freed : int;
+}
+
 (** What a dry run found on one main; nothing was written. *)
 type survey = {
   surveyed : string;
@@ -44,6 +52,7 @@ type survey = {
   per_copy : (string * int) list;
       (** deletions a collection would owe each copy *)
   chunks_corrupt : int;  (** with [verify]: referenced chunks that misread *)
+  expiry : expiry option;  (** with [expiring] *)
 }
 
 (** Collect each collectable main: resume or open a run and take it as far as
@@ -79,8 +88,10 @@ val status : Composite.t -> status list
 
 (** Report what a collection would reclaim, per main; [Error reason] inside the
     list when a body stops the survey as it would stop marking, or once
-    [cancelled] holds. *)
+    [cancelled] holds. [expiring] is the version keys an expiry would delete:
+    their chunks count as freed by it rather than referenced. *)
 val dry_run :
+  ?expiring:Key.t list ->
   ?narrate:Narrate.t ->
   ?verify:bool ->
   ?cancelled:(unit -> bool) ->

@@ -517,7 +517,7 @@ let () =
                ("job", `Int id);
              ])
       and gc ?(apply = false) ?(abort = false) () =
-        Jobs.Gc { apply; verify = false; abort; budget = None }
+        Jobs.Gc { apply; verify = false; abort; budget = None; expire = None }
       in
       let narrated = ref 0 and progressed = ref 0 in
       let line l =
