@@ -137,7 +137,7 @@ background. The answer is `{}`, with `pass` when the pass ended in time: `held`,
 folders; `covered`, those it brought to the head; `merged`, those whose view changed; `entries`,
 the log entries it read; and `end`, how it ended: `head`, `stopped` (the breaker, below), `pruned`,
 `unreadable` when it met an entry no reader can follow that the tree head has passed, and so read
-each folder by state ([publication §4.3](../algorithms/publication.md)), `fresh` when every held folder was fresh and no pass ran, or `failed`, with the reason as `error`. A host shows it in its diagnostics; nothing
+each folder by state ([publication §4.3](../algorithms/publication.md)), leaving out a folder the pass's own pages removed or moved and stopping when the breaker opens, `fresh` when every held folder was fresh and no pass ran, or `failed`, with the reason as `error`. A host shows it in its diagnostics; nothing
 acts on it. A host that suspends its process once no request is pending (iOS) so keeps it running
 for the pass a change enumeration starts. A pass runs when a **held** folder (one with a pull
 marker, [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) is not fresh, and brings
@@ -160,10 +160,11 @@ and one record:
 **What a pass reads.** A process keeps its held folders in memory: each one's path, folder id,
 position and pull-marker time. It learns them from one walk of the mirror at its first pass, and
 every marker or position it writes updates the list. A folder moved or removed in the mirror drops
-the whole list, and the next pass walks again. The files stay the record: the list is never written,
+the whole list, and the next pass walks again. A folder moved during the walk starts the walk over;
+a third walk that one lands in fails the pass `local`, and the next refresh walks again. The files stay the record: the list is never written,
 so a process that starts walks once.
 
-A `refresh` made while a pass runs starts none, and waits for that pass as for its own. A pass ends early when the store's health breaker
+A `refresh` made while a pass runs waits for the pass after it, one for every refresh made meanwhile, so it reads what landed after the running pass read the log. A pass ends early when the store's health breaker
 opens; a process that dies mid-pass loses nothing, since the next pass reads from the positions
 written. Each merge sends its notices as any pull does.
 

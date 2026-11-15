@@ -152,7 +152,8 @@ With the `push_*` options set, the listener tells the iOS clients of a domain wh
 - **Registrations** are the listener's own state, kept in its data directory, one file per domain,
   replaced atomically: per client uuid, the token, environment, File Provider identifier and when it
   last registered. A registration of a client replaces its previous one. A registration is dropped
-  when APNs answers 410, or 400 `BadDeviceToken`, and when not renewed for
+  when APNs answers 410, or 400 `BadDeviceToken`, for the token it still holds (one renewed while the
+  push was on its way is kept), and when not renewed for
   `push_registration_max_age`.
 - **Trigger.** When a create under the domain's log prefix is won, beside the answer and never
   awaited by it, every registration of the domain except the entry's `author`'s is due a push.
@@ -168,6 +169,8 @@ With the `push_*` options set, the listener tells the iOS clients of a domain wh
   which keeps its connections to APNs open between pushes.
 - A failed push is logged with APNs's reason and not retried: the next change pushes again, and the
   phone's background runs catch up ([ios.md §5.2](ios.md#52-in-the-background)).
+- Pushes go to APNs one at a time; one waiting for its turn holds no thread.
+- The domain's secret is a registration's only authority: a holder of it can register under any client uuid, as it can already write the domain.
 - The listener counts pushes sent and failed, and registrations dropped, in its counters (§A12).
 
 | Parameter | Recommended | Constraint |

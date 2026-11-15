@@ -73,10 +73,11 @@ the framework's domain-change notification.
   - The app cannot end the extension's process, so there is no restart prompt: a domain removed
     while booted stays booted, unused, until the system ends that process. Joining it again before
     then serves it with the settings it booted with, as Android's *Later* does.
-  - So the app keeps each removed domain's config entry in its preferences. Joining a domain whose
-    kept entry differs from the new one says that the new settings may wait for the extension to
+  - So the app keeps a SHA-256 digest of each removed domain's config entry (its keys sorted) in its
+    preferences, never the entry, which holds the backend's secret. Joining a domain whose
+    kept digest differs from the new entry's says that the new settings may wait for the extension to
     restart, and that restarting the iPhone applies them at once. Joining it with the same entry says
-    nothing. The kept entry is dropped at that join.
+    nothing. The kept digest is dropped at that join.
   - A removal the framework refuses leaves the config as it was and shows the reason.
 - **Background refresh**, under Domains, only when the system will not run it: "Background refresh
   is off for tsync: Files shows changes from other devices when you open tsync. Turn it on in
