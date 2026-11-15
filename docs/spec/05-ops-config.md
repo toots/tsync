@@ -650,7 +650,12 @@ no resync generation is stamped. The reverse folder index is rebuilt from the mi
   empty, and the files that were in it are deleted files ([gc.md §4](algorithms/gc.md#4-retention)).
 - `expire(cutoff, ?apply)` → `{versions_deleted, log_deleted, shares_deleted}`, in that order
   (versions, log, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention). Without `apply`
-  it is a dry run: the same counts, and each key it would delete, with nothing deleted.
+  it is a dry run: the same counts, and each key it would delete, with nothing deleted. With
+  `export`, a dry run that also writes the expiry list of the versions it would delete
+  ([gc.md §4.1](algorithms/gc.md#41-versions)).
+- `expire_listed(list, ?apply)` → `{versions_deleted, absent, warnings}`: deletes exactly the
+  versions an expiry list names, leaving the log and shares alone; refused, with nothing deleted,
+  when a line is rejected.
 
 ### 4.9 Garbage collection
 

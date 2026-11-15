@@ -130,6 +130,35 @@ versioning off, nothing references it once the entry that deleted it is projecte
 Delete every version whose timestamp is older than the cutoff, then any group directories left empty
 on filesystem stores.
 
+**By an exact list.** An expiry may instead be given an **expiry list**: the versions to delete,
+one per line, as an operator reviewed them. It then deletes exactly the versions it names, then the
+group directories left empty, and leaves the log and shares alone: log entries follow their own rule
+(§4.2) and shares expire by their own field (§4.3), so neither is ever chosen by hand.
+
+A line is `<ns>  <date>  <size>  <path>`, two spaces between fields: the version's nanosecond
+timestamp, its date and file size for reading only, and the file's path in the domain, followed by
+` (folder gone)` when its folder no longer exists (the path is then the name alone). Blank lines
+and lines starting with `#` are ignored, except a `# domain: <name>` header, which MUST name the
+domain acted on. Paths may contain spaces; a name that itself ends in ` (folder gone)` cannot be
+told apart and is read without the suffix.
+
+A list written from a cutoff holds every version older than it, sorted by path, then newest first.
+Writing it reads every such version body for its size.
+
+A line is resolved against the version listing, with no body read: a version's history group is its
+manifest's location, the folder id and the dual digest of the name
+([data-model/backend.md §2.9](../data-model/backend.md#29-version)), so
+
+- a key whose timestamp is the line's and whose name digest is that of the path's last segment
+  **matches**; when the path's folder part differs from the current path of the key's folder, it
+  still matches, with a warning (folders get renamed);
+- when keys carry the timestamp but none the name digest, the line is **rejected**;
+- when no key carries the timestamp, the line is **absent**: already expired, not an error, so a
+  list can be applied again.
+
+Any rejected line refuses the whole expiry before anything is deleted, naming each rejected line
+by number.
+
 ### 4.2 Log
 
 Expiry deletes log entries only as

@@ -175,7 +175,8 @@ objects added, existing ones immutable).
   and a version that cannot be saved fails the projection of its entry, which is applied again
   ([§6.1](#61-apply)). One failure is passed: a store that refuses the version because it lacks the
   chunks the manifest names (CORRUPT `missing_chunks`). That content is not on the main, no version can
-  keep it, and the failure MUST be logged. Deleted by expiry by age.
+  keep it, and the failure MUST be logged. Deleted by expiry, by age or by an expiry list
+  ([gc.md §4.1](../algorithms/gc.md#41-versions)).
 - **Derived notion** a *deleted file* is a history group with versions and no live manifest at its
   location.
 
