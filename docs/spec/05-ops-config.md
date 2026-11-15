@@ -665,11 +665,13 @@ chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_recla
 bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
 precondition and writer interlock are [gc.md](algorithms/gc.md).
 
-`dry_run` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
+`dry_run ?expiring` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
 chunks_reclaimable; bytes_reclaimable; chunks_missing; per_copy: (member, count) list;
-chunks_corrupt}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
+chunks_corrupt; expiry: {versions; version_bytes; chunks_freed; bytes_freed} option}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
 (files a reader cannot open, and commits the gate would refuse); it changes
-nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). The operator command runs it unless a collection is
+nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). `expiring` is the versions an expiry by a cutoff
+or by an expiry list would delete ([gc.md §4.1](algorithms/gc.md#41-versions)); `expiry` then splits
+out what that expiry frees. The operator command runs it unless a collection is
 explicitly requested; `abort` and `retry_outstanding` are explicit by nature.
 
 **Exclusion.** At most one collection session per domain runs at a time on a machine, whatever the

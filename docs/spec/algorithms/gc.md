@@ -493,19 +493,31 @@ takes the run lock (a dry run beside a live collection would read spaces mid-ren
 like a collection.
 
 ```
-dry_run():
+dry_run(expiring := {}):                                 -- version keys an expiry would delete (§4.1)
   require a collectable main, the run lock, as start()
   report R's phase and cursor if a run is open, and outstanding discard requests on each copy
-  referenced := {}
+  referenced := {}; expired := {}
   for ns in every namespace (§5.3), sorted:
      for each child object k of ns:  body := read k      -- the same read rules as mark()
-        referenced += chunks named by body
+        if k in expiring: expired += chunks named by body; count k and its size as expiring
+        else referenced += chunks named by body
   for each log entry above the tree head: referenced += chunks named by the manifests it carries
   for each chunk c listed in the chunk area (both spaces, §5.8), with its size:
-     if c not in referenced: count c and its bytes as reclaimable
-  report referenced, reclaimable count and bytes, the referenced chunks absent from the chunk area
-  (damage), and per-copy the number of reclaimable keys the run would tell that copy to delete
+     if c not in referenced:
+        if c in expired: count c and its bytes as freed by the expiry
+        else: count c and its bytes as reclaimable
+  report referenced, reclaimable count and bytes, the freed-by-expiry count and bytes with the
+  expiring versions' count and bytes, the referenced chunks absent from the chunk area (damage),
+  and per-copy the number of keys the run would tell that copy to delete
 ```
+
+**With an expiry.** A dry run may be given the versions an expiry would delete, by a cutoff or an
+expiry list (§4.1), resolved to keys once before the survey. It reads them as marking would once
+they are deleted: their chunks are not referenced. A chunk they name that nothing else names is
+**freed by the expiry**; one named by nothing at all is reclaimable already. Their sum is what a
+collection that performs the same expiry reclaims (§5.5), and the expiring version bodies come on
+top. A chunk only expiring versions name is never counted missing. Per copy, the keys owed are both
+counts together.
 
 A body that stops marking stops the dry run with the same report, having deleted nothing. The
 reclaimable set is exact for a main nobody writes between the survey and the collection; writers
