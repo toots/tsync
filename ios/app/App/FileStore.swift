@@ -198,7 +198,7 @@ enum FileStore {
         var request = fields
         request["action"] = action
         request["domain"] = domain
-        let bulk = ["restore", "evict", "share"].contains(action)
+        let bulk = ["restore", "evict"].contains(action)
         return try await Task.detached { try OwnerClient.call(request, bulk: bulk) }.value
     }
 
