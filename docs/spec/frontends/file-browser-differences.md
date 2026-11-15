@@ -48,7 +48,7 @@ main thread. What the file system cannot carry goes to the owner through the ext
 
 | Operation | Carried out by |
 |---|---|
-| list | the folder's contents with their resource values: kind, size, modification date, whether the bytes are downloaded, whether the item is uploaded; then `list_dir` of the folder through the service with `"pull":"never"`, whose `availability` and `pinnedUntil` give the *pinned* mark, matched to the rows by `ref`. A folder the service does not answer shows its rows without the mark |
+| list | the folder's contents with their resource values: kind, size, modification date, whether the bytes are downloaded, whether the item is uploaded; then `list_dir` of the folder through the service with `"pull":"never"`, whose `availability` and `pinnedUntil` give the *pinned* mark, matched to the rows by name, a folder's names being unique. A folder the service does not answer shows its rows without the mark |
 | refresh | the domain's working set signalled ([ios.md §5.1](ios.md#51-the-working-set)), which starts a refresh pass, and the folder read again once the system reports it changed, or after `refresh_patience` |
 | new folder | a coordinated create of the directory; a name already taken fails it |
 | upload | the system's document picker, copying; each file a coordinated write into the current folder, a taken name numbered as [android-app §5](android-app.md#5-talking-to-the-core) numbers one |

@@ -13,7 +13,8 @@ user turns it on.
 ## 1. The component
 
 - **An AutoFill credential provider extension**, bundle `$(TSYNC_APP_ID).credentials`
-  ([ios.md §3.1](../../frontends/ios.md#31-identifiers)), embedded in the app, in the App Group.
+  ([ios.md §3.1](../../frontends/ios.md#31-identifiers)), for iOS 17 and later (the app itself runs
+  on 16, where no extension loads), embedded in the app, in the App Group. It links no core.
   It owns no domain: every request goes to the domain's owner through the File Provider
   extension's service ([ios.md §5.4](../../frontends/ios.md#54-the-service)), one connection per
   domain, in place of macOS's socket.
@@ -23,13 +24,12 @@ user turns it on.
   (`com.apple.developer.authentication-services.autofill-credential-provider`), each under its own
   profile.
 - Its `Info.plist` declares `ASCredentialProviderExtensionCapabilities`: `ProvidesPasswords`,
-  `ProvidesPasskeys` (iOS 17), `ProvidesOneTimeCodes` (iOS 18). It shows no configuration UI.
+  `ProvidesPasskeys`, `ProvidesOneTimeCodes` (iOS 18). It shows no configuration UI.
 - **Turning it on** is the user's. While the system says the extension is off
   (`ASCredentialIdentityStore.getState`) and a domain uses passwords, the app's Settings shows a
   row under Domains, "Turn on AutoFill for tsync", which on iOS 18 asks the system to turn it on
-  (`ASSettingsHelper.requestToTurnOnCredentialProviderExtension`), on iOS 17 opens its settings
-  (`openCredentialProviderAppSettings`), and on iOS 16 says where: Settings, Passwords, Password
-  Options.
+  (`ASSettingsHelper.requestToTurnOnCredentialProviderExtension`) and on iOS 17 opens its settings
+  (`openCredentialProviderAppSettings`). On iOS 16 the row is not shown.
 
 ## 2. Domains
 
@@ -47,7 +47,7 @@ off in Files".
 
 | What | From |
 |---|---|
-| logins (macOS §3) | iOS 16, the app's oldest |
+| logins (macOS §3) | iOS 17 |
 | passkeys (macOS §4), and the passkey entries (§4.1) | iOS 17 |
 | one-time codes (macOS §3, §3.1) | iOS 18 |
 | a registration's excluded credentials (`exclude`) | iOS 18 |
