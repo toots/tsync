@@ -68,3 +68,39 @@ garbage                                            -> unparseable: left, reporte
 
 == dry run survey (§5.9)
 reclaimable 2 chunks, 50 bytes
+with an expiry naming a (also live) and b: already unused 1 (30 bytes), freed by the expiry 1 (20 bytes)
+
+== expiry list (§4.1): print
+# tsync expiry list
+# domain: d
+# versions older than 2026-01-01 00:00, listed 2026-11-14 10:32
+# Remove a line to keep that version. Lines starting with # and blank lines are ignored.
+1741001235000000000  2025-03-03 11:27  unreadable  beach.jpg (folder gone)
+1740924660000000001  2025-03-02 14:11  10 B  notes/todo.txt
+1740924660000000000  2025-03-02 14:11  1.2 MiB  notes/todo.txt
+1741001234000000000  2025-03-03 11:27  3 B  photos/old/a  b.jpg
+1741001236000000000  2025-03-03 11:27  0 B  top.txt
+
+== expiry list: parsed back
+domain d, line 2
+  line 5: 1741001235000000000 folder gone name "beach.jpg"
+  line 6: 1740924660000000001 folder "notes" name "todo.txt"
+  line 7: 1740924660000000000 folder "notes" name "todo.txt"
+  line 8: 1741001234000000000 folder "photos/old" name "a  b.jpg"
+  line 9: 1741001236000000000 folder "" name "top.txt"
+
+== expiry list: a tsync versions line, edits, CRLF
+domain -
+  line 3: 5 folder "x" name "y z.txt"
+  line 4 malformed: not a version line (time  date  size  path)
+  line 5 malformed: no path
+  line 6 malformed: not a version line (time  date  size  path)
+
+== expiry list: resolved
+matched: tsync/d/versions/0000000000a1-1/1 tsync/d/versions/0000000000a2-1/3 tsync/d/versions/0000000000a3-1/4 tsync/d/versions/0000000000a4-1/6 tsync/d/versions/.tsync-root/7
+rejected line 5: "same.txt" at that time is in several folders
+rejected line 6: no version of "wrong.txt" at that time
+rejected line 10: not a version line (time  date  size  path)
+absent: 9
+warning line 3: a.txt: its folder is now docs
+another domain's list, rejected line 2: a list of domain e, not d

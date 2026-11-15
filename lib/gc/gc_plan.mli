@@ -81,3 +81,11 @@ type survey = { reclaimable : int; bytes : int; keys : Key.t list }
     (§5.9). *)
 val unreferenced :
   referenced:(Chunk_key.t -> bool) -> Tsync_store.Store.entry list -> survey
+
+(** With an expiry (§5.9): the chunks named by nothing, and those only the
+    expiring versions name, which the expiry frees. *)
+val split :
+  referenced:(Chunk_key.t -> bool) ->
+  expired:(Chunk_key.t -> bool) ->
+  Tsync_store.Store.entry list ->
+  survey * survey

@@ -5,11 +5,25 @@ open Tsync_core
 
 type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
 
+(** Which versions expire (gc.md §4.1): by age, or the expiry list at an
+    absolute path, which the owner reads. *)
+type expiry = [ `Before of float | `Listed of string ] [@@deriving yojson]
+
 type t =
   | Sync of { full : bool }
-  | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
+  | Gc of {
+      apply : bool;
+      verify : bool;
+      abort : bool;
+      budget : float option;
+      expire : expiry option;
+    }
   | Gc_copies of copies
-  | Expire of { apply : bool; cutoff : float }
+  | Expire of {
+      apply : bool;
+      expiry : expiry;
+      export : string option;  (** absolute: the owner writes it *)
+    }
   | Void_entry of { n : int }
   | Import of {
       src : string;

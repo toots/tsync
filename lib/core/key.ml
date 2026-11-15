@@ -44,6 +44,7 @@ let takeover d n ~generation =
 
 let void d n = Printf.sprintf "%s%d-void" (takeovers d) n
 let gc_run d = domain_prefix d ^ "gc-run"
+let gc_expiry d = domain_prefix d ^ "gc-expiry"
 let gc_generation d = domain_prefix d ^ "gc-generation"
 let gc_lock d = domain_prefix d ^ "gc-run.lock"
 let gc_publish_lock d = domain_prefix d ^ "gc-publish.lock"
@@ -134,6 +135,15 @@ let chunk_in space k =
     | _ -> None
 
 let chunk_parts k = chunk_in "chunks" k
+
+type version_parts = { folder : string; digest : string; ns : int64 }
+
+let version_parts k =
+  match area k with
+    | Some (_, "versions", [folder; digest; ns]) ->
+        Option.map (fun ns -> { folder; digest; ns }) (Int64.of_string_opt ns)
+    | _ -> None
+
 let chunk_of k = Option.map snd (chunk_parts k)
 let outgoing_chunk k = chunk_in "chunks.from" k
 

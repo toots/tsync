@@ -93,6 +93,7 @@ Durable, on the collected main only (never replicated):
 | Run record **R** | phase ∈ {Opening, Marking, Closing, Abandoning}, start time, the tree head read at the open, cursor, and from Closing on the run's **generation** | present iff a run is open. The cursor is the last finished unit **by name** (a log entry, a namespace or a shard), never a position |
 | Collection generation **G** | a counter; even = settled, odd = deletions on copies in flight | persists across runs; absent reads as 0. Written only by the collecting owner (§5.6) |
 | Lock file | beside R | carries the two host-level locks of §5.4; its content is irrelevant |
+| Expiry set **X** | beside R, `tsync/D/gc-expiry` | the version keys a run expires (§5.5), resolved once before the run opened; written before R, deleted after it; an X without R is stale |
 
 Durable, elsewhere:
 
@@ -129,6 +130,39 @@ versioning off, nothing references it once the entry that deleted it is projecte
 
 Delete every version whose timestamp is older than the cutoff, then any group directories left empty
 on filesystem stores.
+
+A collection may perform the expiry of versions itself, by a cutoff or a list, deleting each version
+just before it marks the version group holding it (§5.5); the space it frees is then reclaimed in the
+same run.
+
+**By an exact list.** An expiry may instead be given an **expiry list**: the versions to delete,
+one per line, as an operator reviewed them. It then deletes exactly the versions it names, then the
+group directories left empty, and leaves the log and shares alone: log entries follow their own rule
+(§4.2) and shares expire by their own field (§4.3), so neither is ever chosen by hand.
+
+A line is `<ns>  <date>  <size>  <path>`, two spaces between fields: the version's nanosecond
+timestamp, its date and file size for reading only, and the file's path in the domain, followed by
+` (folder gone)` when its folder no longer exists (the path is then the name alone). Blank lines
+and lines starting with `#` are ignored, except a `# domain: <name>` header, which MUST name the
+domain acted on. Paths may contain spaces; a name that itself ends in ` (folder gone)` cannot be
+told apart and is read without the suffix.
+
+A list written from a cutoff holds every version older than it, sorted by path, then newest first.
+Writing it reads every such version body for its size.
+
+A line is resolved against the version listing, with no body read: a version's history group is its
+manifest's location, the folder id and the dual digest of the name
+([data-model/backend.md §2.9](../data-model/backend.md#29-version)), so
+
+- a key whose timestamp is the line's and whose name digest is that of the path's last segment
+  **matches**; when the path's folder part differs from the current path of the key's folder, it
+  still matches, with a warning (folders get renamed);
+- when keys carry the timestamp but none the name digest, the line is **rejected**;
+- when no key carries the timestamp, the line is **absent**: already expired, not an error, so a
+  list can be applied again.
+
+Any rejected line refuses the whole expiry before anything is deleted, naming each rejected line
+by number.
 
 ### 4.2 Log
 
@@ -262,10 +296,15 @@ The phase is recorded in R **before** the step it names; resuming from any phase
 whatever that step had started.
 
 ```
-start(keep, verify):
+start(keep, verify, expiring := none):     -- expiring: version keys, resolved before the run (§4.1)
   require a collectable main (A1) on this host, else Unsupported
   in-process exclusion (check-and-set), then the run lock (non-blocking), else Busy
   R0 := read R
+  if R0 is absent: delete X                                         -- stale
+                   if expiring: write X := expiring, durably        -- before R exists
+  else: X0 := read X (absent: empty)
+        if expiring is not a subset of X0: refuse, leaving the run as it is
+        expiring := X0
   report outstanding discard requests on each copy
   if R0 is present but unparseable: treat it as Abandoning         -- the safe direction
   match:
@@ -288,6 +327,8 @@ start(keep, verify):
 
 ```
 mark(ns):                                  -- a namespace or a version group
+  if ns is a version group: delete, through the composite, every key of X in ns
+                            (absent is success), then its group directories left empty (§4.1)
   keys := list ns as a directory prefix (with its trailing separator: without it the listing is empty,
           nothing is promoted, and closing would delete every chunk)
   for each child object k (a listed key whose leaf is not internal):
@@ -319,6 +360,8 @@ marker for c on that main; otherwise, or if unreadable, it files one. It never d
 **Transition to closing.** When Mark is empty:
 
 ```
+delete, through the composite, every key of X in a version group the collected main does not hold
+  (resolved from another member's listing): marking never visits it, and it names no chunk of this main
 wait until this owner holds no unsettled copy deletion (§5.7)
 if G is odd: g := G                           -- left odd by a crash, or by a run whose records are gone
 else: g := G + 1; write G := g                -- odd: from here on no presence memo about a copy is relied on
@@ -349,10 +392,23 @@ close(shard):
 The doom step touches only the main's disk and the owner's local records, so the exclusive hold is
 short. The surviving shard is never listed: it is hundreds of times larger than the outgoing one.
 
-**Finish.** When Close is empty: remove F recursively, then delete R. The run's generation stays odd
+**Finish.** When Close is empty: remove F recursively, then delete R, then X. The run's generation stays odd
 until its copy deletions settle (§5.7), which may outlive the collector's session: the domain owner
 settles them. A collector MAY end its session before that and let a later session finish: R stays
 present meanwhile, which is safe.
+
+**Expiry within the run.** Marking is by presence (§5.3), so an expiring version is deleted before
+its group is listed, never skipped while present: a present version would name chunks the run then
+deletes. What may race it is safe:
+
+- a revert of an expiring version publishes a manifest through the gate, which promotes its chunks; a
+  revert after the deletion finds no such version;
+- a version written during the run has a new key, never in X;
+- a crash mid-group redoes the group: the deletions already done are absent, which is success.
+
+X is a subset rule rather than an equality because keys only leave it: a command repeated against a
+run that already deleted some of its versions resolves fewer keys. A run opened without X has the
+empty set, so it accepts only an expiry with nothing left to delete.
 
 **Abandoning** (the operator's abort, or `keep`): the same machine with "every chunk is live". Per shard
 of F, sorted, after the cursor:
@@ -367,8 +423,11 @@ keep_one(shard):
        -- names in both are identical bytes (A2): either copy may be dropped
   unlink leftovers of F/shard; remove it
   write R{Abandoning, cursor = shard}
-when Keep is empty: re-list F; shards left -> another round; none -> remove F, delete R
+when Keep is empty: re-list F; shards left -> another round; none -> remove F, delete R, delete X
 ```
+
+Abandoning restores chunks, never versions: a version marking already deleted stays deleted, and its
+chunks, put back, are garbage for the next run.
 
 Once abandoning, a run stays abandoning on resume. `keep` overrides any phase and ignores the cursor
 (a cursor means something different in each phase). Shards already closed cannot be restored; they
@@ -464,19 +523,31 @@ takes the run lock (a dry run beside a live collection would read spaces mid-ren
 like a collection.
 
 ```
-dry_run():
+dry_run(expiring := {}):                                 -- version keys an expiry would delete (§4.1)
   require a collectable main, the run lock, as start()
   report R's phase and cursor if a run is open, and outstanding discard requests on each copy
-  referenced := {}
+  referenced := {}; expired := {}
   for ns in every namespace (§5.3), sorted:
      for each child object k of ns:  body := read k      -- the same read rules as mark()
-        referenced += chunks named by body
+        if k in expiring: expired += chunks named by body; count k and its size as expiring
+        else referenced += chunks named by body
   for each log entry above the tree head: referenced += chunks named by the manifests it carries
   for each chunk c listed in the chunk area (both spaces, §5.8), with its size:
-     if c not in referenced: count c and its bytes as reclaimable
-  report referenced, reclaimable count and bytes, the referenced chunks absent from the chunk area
-  (damage), and per-copy the number of reclaimable keys the run would tell that copy to delete
+     if c not in referenced:
+        if c in expired: count c and its bytes as freed by the expiry
+        else: count c and its bytes as reclaimable
+  report referenced, reclaimable count and bytes, the freed-by-expiry count and bytes with the
+  expiring versions' count and bytes, the referenced chunks absent from the chunk area (damage),
+  and per-copy the number of keys the run would tell that copy to delete
 ```
+
+**With an expiry.** A dry run may be given the versions an expiry would delete, by a cutoff or an
+expiry list (§4.1), resolved to keys once before the survey. It reads them as marking would once
+they are deleted: their chunks are not referenced. A chunk they name that nothing else names is
+**freed by the expiry**; one named by nothing at all is reclaimable already. Their sum is what a
+collection that performs the same expiry reclaims (§5.5), and the expiring version bodies come on
+top. A chunk only expiring versions name is never counted missing. Per copy, the keys owed are both
+counts together.
 
 A body that stops marking stops the dry run with the same report, having deleted nothing. The
 reclaimable set is exact for a main nobody writes between the survey and the collection; writers
@@ -540,6 +611,9 @@ lock, one read of R, one stat per named chunk.
 
 | Interrupted at | State on the main | Resume does |
 |---|---|---|
+| after writing X, before R | X, no R | X is stale: the next start deletes it; the expiry is given again |
+| X damaged (a torn write, a hand edit) | R, X with lines that are not version keys | those lines are skipped and logged; abandoning never reads X, so a damaged X never blocks an abort |
+| mid version group, some of its X deleted | R = Marking(previous namespace) | deletes the rest of the group's X (absent is success), re-lists and re-marks it |
 | after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine); the rename happens only in Opening, never once Marking is recorded |
 | after the rename, before Marking | R = Opening, F exists | enumerates again, marks from the start |
 | mid-namespace | R = Marking(previous namespace) | re-lists and re-marks that namespace |

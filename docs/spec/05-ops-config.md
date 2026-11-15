@@ -650,21 +650,31 @@ no resync generation is stamped. The reverse folder index is rebuilt from the mi
   empty, and the files that were in it are deleted files ([gc.md §4](algorithms/gc.md#4-retention)).
 - `expire(cutoff, ?apply)` → `{versions_deleted, log_deleted, shares_deleted}`, in that order
   (versions, log, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention). Without `apply`
-  it is a dry run: the same counts, and each key it would delete, with nothing deleted.
+  it is a dry run: the same counts, and each key it would delete, with nothing deleted. With
+  `export`, a dry run that also writes the expiry list of the versions it would delete
+  ([gc.md §4.1](algorithms/gc.md#41-versions)).
+- `expire_listed(list, ?apply)` → `{versions_deleted, absent, warnings}`: deletes exactly the
+  versions an expiry list names, leaving the log and shares alone; refused, with nothing deleted,
+  when a line is rejected.
 
 ### 4.9 Garbage collection
 
-`gc` → `dry_run ?verify`, `start`, `step`, `run ?budget ?pause`, `abort`, `status`, `outstanding`,
+`gc` → `dry_run ?verify ?expiring`, `start`, `step`, `run ?budget ?pause ?expiring`, `abort`, `status`, `outstanding`,
 `retry_outstanding`, with `stats{outcome: Completed | Suspended{phase, cursor}; roots_marked; chunks_promoted;
 chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_reclaimed;
-bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
-precondition and writer interlock are [gc.md](algorithms/gc.md).
+bytes_reclaimed; versions_expired}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
+precondition and writer interlock are [gc.md](algorithms/gc.md). `run ?expiring` performs the expiry
+of those versions within the run ([gc.md §5.5](algorithms/gc.md#55-the-collector-phase-by-phase)); a
+resumed run carries on the expiry it opened with. Without a collectable main it fails `Unsupported`,
+naming `expire --from` as the way to expire by a list.
 
-`dry_run` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
+`dry_run ?expiring` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
 chunks_reclaimable; bytes_reclaimable; chunks_missing; per_copy: (member, count) list;
-chunks_corrupt}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
+chunks_corrupt; expiry: {versions; version_bytes; chunks_freed; bytes_freed} option}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
 (files a reader cannot open, and commits the gate would refuse); it changes
-nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). The operator command runs it unless a collection is
+nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). `expiring` is the versions an expiry by a cutoff
+or by an expiry list would delete ([gc.md §4.1](algorithms/gc.md#41-versions)); `expiry` then splits
+out what that expiry frees. The operator command runs it unless a collection is
 explicitly requested; `abort` and `retry_outstanding` are explicit by nature.
 
 **Exclusion.** At most one collection session per domain runs at a time on a machine, whatever the

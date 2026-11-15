@@ -3,11 +3,25 @@ open Tsync_gc
 
 type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
 
+(** Which versions expire (gc.md §4.1): by age, or the expiry list at an
+    absolute path, which the owner reads. *)
+type expiry = [ `Before of float | `Listed of string ] [@@deriving yojson]
+
 type t =
   | Sync of { full : bool }
-  | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
+  | Gc of {
+      apply : bool;
+      verify : bool;
+      abort : bool;
+      budget : float option;
+      expire : expiry option;
+    }
   | Gc_copies of copies
-  | Expire of { apply : bool; cutoff : float }
+  | Expire of {
+      apply : bool;
+      expiry : expiry;
+      export : string option;  (** absolute: the owner writes it *)
+    }
   | Void_entry of { n : int }
   | Import of {
       src : string;
@@ -47,6 +61,8 @@ let kind = function
   | Gc_copies Probe -> "gc --probe"
   | Gc_copies Outstanding -> "gc --outstanding"
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
+  | Expire { expiry = `Listed _; _ } -> "expire --from"
+  | Expire { export = Some _; _ } -> "expire --export"
   | Expire _ -> "expire"
   | Void_entry _ -> "void-entry"
   | Import _ -> "import"
@@ -96,14 +112,29 @@ let print_survey out (s : Collector.survey) =
       (fun c -> say "    %s" (Chunk_key.to_string c))
       (List.filteri (fun i _ -> i < 20) s.chunks_missing));
   if s.chunks_corrupt > 0 then
-    say "  %d referenced chunks misread" s.chunks_corrupt
+    say "  %d referenced chunks misread" s.chunks_corrupt;
+  Option.iter
+    (fun (e : Collector.expiry) ->
+      say
+        "  the expiry deletes %s (%s) and frees %d chunks (%s); with it, a \
+         collection reclaims %d chunks (%s)"
+        (Narrate.count e.versions "version")
+        (Narrate.size e.version_bytes)
+        e.chunks_freed
+        (Narrate.size e.bytes_freed)
+        (e.chunks_freed + s.chunks_reclaimable)
+        (Narrate.size (e.bytes_freed + s.bytes_reclaimable)))
+    s.expiry
 
 let print_stats out (s : Collector.stats) =
   let say fmt = Printf.ksprintf out fmt in
-  say "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%s)"
+  say "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%s)%s"
     s.main (outcome s.outcome) s.roots_marked s.chunks_promoted
     s.chunks_reclaimed
-    (Narrate.size s.bytes_reclaimed);
+    (Narrate.size s.bytes_reclaimed)
+    (if s.versions_expired > 0 then
+       Printf.sprintf ", %d versions expired" s.versions_expired
+     else "");
   if s.chunks_verified > 0 then
     say "  verified %d: %d corrupt, %d unreadable, %d markers cleared"
       s.chunks_verified s.chunks_corrupt s.chunks_unreadable s.chunks_cleared
@@ -112,6 +143,7 @@ let refuse = function
   | Collector.Busy ->
       Fail.raise_ Fail.Load "another collection holds this domain's run lock"
   | Unsupported reason -> Fail.raise_ Fail.Refused "cannot collect: %s" reason
+  | Refused reason -> Fail.raise_ Fail.Refused "%s" reason
 
 (* gc §5.7: a request no function consumes keeps G odd for good, and only
    this says so. *)
@@ -134,36 +166,74 @@ let report_outstanding out c =
         Printf.ksprintf out "outstanding discard requests not read: %s"
           (Fail.classify e).reason
 
-let gc io c ~apply ~verify ~abort ~budget =
+(* gc.md §4.1: the keys a list names, and how many lines were already gone;
+   [None] once a refusal is reported, with nothing deleted. *)
+let resolve_listed io (dom : Tsync_domain.Domain.t) file =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let module E = Expiry_list.Make ((val Tsync_domain.Domain.context dom)) in
+  let r = E.resolve (Expiry_list.parse (Fs.read_file file)) in
+  List.iter (fun (n, why) -> say "  line %d: %s" n why) r.warnings;
+  if r.rejected = [] then Some (r.matched, List.length r.absent)
+  else (
+    List.iter (fun (n, why) -> say "  line %d rejected: %s" n why) r.rejected;
+    say "nothing expired: %s rejected"
+      (Narrate.count (List.length r.rejected) "line");
+    None)
+
+let expiring_keys io (dom : Tsync_domain.Domain.t) = function
+  | `Before cutoff ->
+      let module C = (val Tsync_domain.Domain.context dom) in
+      Some
+        (Gc_plan.versions ~cutoff
+           (List.map
+              (fun (e : Tsync_store.Store.entry) -> e.key)
+              (C.store.list_prefix (Key.versions dom.name))))
+  | `Listed file -> Option.map fst (resolve_listed io dom file)
+
+let gc io (dom : Tsync_domain.Domain.t) ~apply ~verify ~abort ~budget ~expire =
+  let c = dom.composite in
   let say fmt = Printf.ksprintf io.out fmt in
   let finally () = report_outstanding io.out c in
   Fun.protect ~finally @@ fun () ->
-  if apply || abort then (
-    match
-      Collector.run ?budget ~narrate:io.narrate ~verify ~keep:abort
-        ~cancelled:io.cancelled c
-    with
-      | Error f -> refuse f
-      | Ok stats ->
-          List.iter (print_stats io.out) stats;
-          if
-            List.for_all
-              (fun (s : Collector.stats) -> s.outcome = Completed)
-              stats
-          then 0
-          else 1)
-  else (
-    match
-      Collector.dry_run ~narrate:io.narrate ~verify ~cancelled:io.cancelled c
-    with
-      | Error f -> refuse f
-      | Ok surveys ->
-          List.iter
-            (function
-              | Ok s -> print_survey io.out s
-              | Error reason -> say "survey stopped: %s" reason)
-            surveys;
-          if List.for_all Result.is_ok surveys then 0 else 1)
+  let refuse = function
+    | Collector.Unsupported reason when expire <> None ->
+        Fail.raise_ Fail.Refused
+          "cannot collect: %s; tsync expire --from FILE expires a list without \
+           collecting"
+          reason
+    | f -> refuse f
+  in
+  match Option.map (expiring_keys io dom) expire with
+    | Some None -> 1
+    | expiring ->
+        let expiring = Option.join expiring in
+        if apply || abort then (
+          match
+            Collector.run ?budget ?expiring ~narrate:io.narrate ~verify
+              ~keep:abort ~cancelled:io.cancelled c
+          with
+            | Error f -> refuse f
+            | Ok stats ->
+                List.iter (print_stats io.out) stats;
+                if
+                  List.for_all
+                    (fun (s : Collector.stats) -> s.outcome = Completed)
+                    stats
+                then 0
+                else 1)
+        else (
+          match
+            Collector.dry_run ?expiring ~narrate:io.narrate ~verify
+              ~cancelled:io.cancelled c
+          with
+            | Error f -> refuse f
+            | Ok surveys ->
+                List.iter
+                  (function
+                    | Ok s -> print_survey io.out s
+                    | Error reason -> say "survey stopped: %s" reason)
+                  surveys;
+                if List.for_all Result.is_ok surveys then 0 else 1)
 
 (* The copies' side of a collection (gc §5.7): the bucket function, and the
    discard requests it has not consumed. *)
@@ -208,11 +278,19 @@ let copies io c act =
           (Tsync_store.Composite.retry_outstanding c);
         0
 
-let expire io dom ~apply ~cutoff =
+let write_list file text =
+  let tmp = Fs.write_temp ~perm:0o644 (Filename.dirname file) text in
+  Fs.unix_rename tmp file
+
+let expire_before io (dom : Tsync_domain.Domain.t) ~apply ~cutoff ~export =
   let say fmt = Printf.ksprintf io.out fmt in
-  let module R = Retention.Make ((val Tsync_domain.Domain.context dom)) in
+  let module C = (val Tsync_domain.Domain.context dom) in
+  let module R = Retention.Make (C) in
+  let module E = Expiry_list.Make (C) in
+  let apply = apply && export = None in
+  let now = Unix.gettimeofday () in
   let r =
-    R.expire ~narrate:io.narrate ~apply ~cancelled:io.cancelled ~cutoff ()
+    R.expire ~narrate:io.narrate ~apply ~cancelled:io.cancelled ~now ~cutoff ()
   in
   say "versions %d, log entries %d, shares %d%s%s" r.counts.versions_deleted
     r.counts.log_deleted r.counts.shares_deleted (dry_note apply)
@@ -220,7 +298,45 @@ let expire io dom ~apply ~cutoff =
   List.iter
     (fun k -> say "  unparseable share left: %s" (Key.to_string k))
     r.unparseable_shares;
+  (match export with
+    | Some _ when r.cancelled -> say "  no list written: the run was cancelled"
+    | None -> ()
+    | Some file ->
+        let listed, unreadable =
+          E.entries (List.filter (Key.under (Key.versions dom.name)) r.deleted)
+        in
+        write_list file (Expiry_list.print ~domain:dom.name ~cutoff ~now listed);
+        say "  %s listed in %s"
+          (Narrate.count (List.length listed) "version")
+          file;
+        List.iter
+          (fun k ->
+            say "  left out, its body does not read: %s" (Key.to_string k))
+          unreadable);
   if r.cancelled then 1 else 0
+
+let expire_listed io (dom : Tsync_domain.Domain.t) ~apply file =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let module R = Retention.Make ((val Tsync_domain.Domain.context dom)) in
+  match resolve_listed io dom file with
+    | None -> 1
+    | Some (matched, absent) ->
+        let l =
+          R.expire_listed ~narrate:io.narrate ~apply ~cancelled:io.cancelled
+            matched
+        in
+        say
+          "versions %d, %d already gone; log and shares untouched (tsync \
+           expire DATE trims those)%s%s"
+          l.versions_deleted absent (dry_note apply)
+          (if l.cancelled then "; cancelled before the end" else "");
+        if l.cancelled then 1 else 0
+
+(* 05 §4.8. *)
+let expire io dom ~apply ~expiry ~export =
+  match expiry with
+    | `Before cutoff -> expire_before io dom ~apply ~cutoff ~export
+    | `Listed file -> expire_listed io dom ~apply file
 
 (* 05 §4.12. *)
 let void_entry io (dom : Tsync_domain.Domain.t) n =
@@ -464,10 +580,10 @@ let mirror io (dom : Tsync_domain.Domain.t) ~source ~skip_chunks ~path =
   else 0
 
 let run io (dom : Tsync_domain.Domain.t) engine = function
-  | Gc { apply; verify; abort; budget } ->
-      gc io dom.composite ~apply ~verify ~abort ~budget
+  | Gc { apply; verify; abort; budget; expire } ->
+      gc io dom ~apply ~verify ~abort ~budget ~expire
   | Gc_copies act -> copies io dom.composite act
-  | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
+  | Expire { apply; expiry; export } -> expire io dom ~apply ~expiry ~export
   | Void_entry { n } -> void_entry io dom n
   | Sync { full } ->
       let module E = (val engine : Tsync_sync.Engine.S) in

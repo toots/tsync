@@ -111,10 +111,26 @@ let () =
         in
         ignore (Jobs.run io with_bucket engine job)
       in
-      quiet (Gc { apply = true; verify = false; abort = false; budget = None });
+      quiet
+        (Gc
+           {
+             apply = true;
+             verify = false;
+             abort = false;
+             budget = None;
+             expire = None;
+           });
       Composite.settle ~timeout:10. with_bucket.composite;
       said := [];
-      quiet (Gc { apply = false; verify = false; abort = false; budget = None });
+      quiet
+        (Gc
+           {
+             apply = false;
+             verify = false;
+             abort = false;
+             budget = None;
+             expire = None;
+           });
       p "a later dry run, the function not notified: %s"
         (match List.filter (fun l -> Text.contains l "outstanding") !said with
           | [] -> "says nothing of the request"

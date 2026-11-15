@@ -218,4 +218,129 @@ let () =
       ~referenced:(fun x -> Chunk_key.equal x (c "a"))
       [entry "a" 10; entry "b" 20; entry "e" 30]
   in
-  p "reclaimable %d chunks, %d bytes\n" s.reclaimable s.bytes
+  p "reclaimable %d chunks, %d bytes\n" s.reclaimable s.bytes;
+  let already, freed =
+    Gc_plan.split
+      ~referenced:(fun x -> Chunk_key.equal x (c "a"))
+      ~expired:(fun x -> Chunk_key.equal x (c "a") || Chunk_key.equal x (c "b"))
+      [entry "a" 10; entry "b" 20; entry "e" 30]
+  in
+  p
+    "with an expiry naming a (also live) and b: already unused %d (%d bytes), \
+     freed by the expiry %d (%d bytes)\n"
+    already.reclaimable already.bytes freed.reclaimable freed.bytes
+
+(* §4.1: expiry lists. Dates print in UTC for a stable snapshot. *)
+let () =
+  Unix.putenv "TZ" "UTC";
+  p "\n== expiry list (§4.1): print\n";
+  let ns = 1740924660000000000L in
+  let entries =
+    [
+      { Expiry_list.ns; size = Some 1258291; path = "notes/todo.txt" };
+      { ns = Int64.add ns 1L; size = Some 10; path = "notes/todo.txt" };
+      { ns = 1741001234000000000L; size = Some 3; path = "photos/old/a  b.jpg" };
+      {
+        ns = 1741001235000000000L;
+        size = None;
+        path = Expiry_list.path ~folder:None ~name:"beach.jpg";
+      };
+      { ns = 1741001236000000000L; size = Some 0; path = "top.txt" };
+    ]
+  in
+  let text =
+    Expiry_list.print ~domain:d ~cutoff:1767225600. ~now:1794652320. entries
+  in
+  print_string text;
+  let show_listing (l : Expiry_list.listing) =
+    p "domain %s\n"
+      (Option.fold ~none:"-"
+         ~some:(fun (n, d) -> Printf.sprintf "%s, line %d" d n)
+         l.domain);
+    List.iter
+      (fun (x : Expiry_list.parsed) ->
+        p "  line %d: %Ld folder %s name %S\n" x.number x.ns
+          (match x.folder with
+            | None -> "gone"
+            | Some f -> Printf.sprintf "%S" f)
+          x.name)
+      l.lines;
+    List.iter (fun (n, why) -> p "  line %d malformed: %s\n" n why) l.malformed
+  in
+  p "\n== expiry list: parsed back\n";
+  show_listing (Expiry_list.parse text);
+  p "\n== expiry list: a tsync versions line, edits, CRLF\n";
+  show_listing
+    (Expiry_list.parse
+       (String.concat "\n"
+          [
+            "";
+            "# a comment";
+            Expiry_list.line { ns = 5L; size = Some 2048; path = "x/y z.txt" }
+            ^ "\r";
+            "garbage";
+            "123  2025-01-01 00:00  1 B  ";
+            "notanumber  2025-01-01 00:00  1 B  a.txt";
+            "  ";
+          ]));
+  p "\n== expiry list: resolved\n";
+  let notes = Folder_id.v "0000000000a1-1"
+  and renamed = Folder_id.v "0000000000a2-1"
+  and other = Folder_id.v "0000000000a3-1"
+  and lost = Folder_id.v "0000000000a4-1" in
+  let folder_path id =
+    if Folder_id.is_root id then Some ""
+    else if Folder_id.equal id notes then Some "notes"
+    else if Folder_id.equal id renamed then Some "docs"
+    else if Folder_id.equal id other then Some "other"
+    else None
+  in
+  let version folder name ns =
+    Key.version d ~group:(Folder_id.to_string folder ^ "/" ^ Xxh.dual name) ~ns
+  in
+  let versions =
+    [
+      version notes "todo.txt" 1L;
+      version notes "todo.txt" 2L;
+      version renamed "a.txt" 3L;
+      version notes "same.txt" 4L;
+      version other "same.txt" 4L;
+      version notes "b.txt" 5L;
+      version lost "c.txt" 6L;
+      version Folder_id.root "top.txt" 7L;
+      Key.v "tsync/d/versions/not-a-version";
+    ]
+  in
+  let line ns path = Expiry_list.line { ns; size = Some 1; path } in
+  let r =
+    Expiry_list.resolve ~domain:d ~folder_path ~versions
+      (Expiry_list.parse
+         (String.concat "\n"
+            [
+              line 1L "notes/todo.txt";
+              line 1L "notes/todo.txt";
+              line 3L "photos/a.txt";
+              line 4L "other/same.txt";
+              line 4L "elsewhere/same.txt";
+              line 5L "notes/wrong.txt";
+              line 6L "c.txt (folder gone)";
+              line 7L "top.txt";
+              line 9L "notes/expired.txt";
+              "bad line";
+            ]))
+  in
+  let short k =
+    let g, ns = Key.split_last (Key.to_string k) in
+    Printf.sprintf "%s/%s" (fst (Key.split_last g)) ns
+  in
+  p "matched: %s\n" (String.concat " " (List.map short r.matched));
+  List.iter (fun (n, why) -> p "rejected line %d: %s\n" n why) r.rejected;
+  p "absent: %s\n" (String.concat " " (List.map string_of_int r.absent));
+  List.iter (fun (n, why) -> p "warning line %d: %s\n" n why) r.warnings;
+  List.iter
+    (fun (n, why) -> p "another domain's list, rejected line %d: %s\n" n why)
+    (Expiry_list.resolve ~domain:d ~folder_path ~versions
+       (Expiry_list.parse
+          (Expiry_list.print ~domain:(Domain_name.v "e") ~cutoff:0. ~now:0.
+             [{ ns = 1L; size = Some 1; path = "notes/todo.txt" }])))
+      .rejected

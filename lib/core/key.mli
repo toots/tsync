@@ -54,6 +54,7 @@ val takeovers : Domain_name.t -> prefix
 val takeover : Domain_name.t -> int -> generation:int -> t
 val void : Domain_name.t -> int -> t
 val gc_run : Domain_name.t -> t
+val gc_expiry : Domain_name.t -> t
 val gc_generation : Domain_name.t -> t
 
 (** The collection's run lock file on a filesystem store; not a store object. *)
@@ -128,6 +129,12 @@ val marker_of : t -> t option
 
 (** A surviving-space chunk key of any domain, split. *)
 val chunk_parts : t -> (Domain_name.t * Chunk_key.t) option
+
+(** A version key of any domain, split: its history group is the folder id and
+    the dual digest of the name (data-model/backend §2.9). *)
+type version_parts = { folder : string; digest : string; ns : int64 }
+
+val version_parts : t -> version_parts option
 
 (** An outgoing-space chunk key of any domain, split. *)
 val outgoing_chunk : t -> (Domain_name.t * Chunk_key.t) option

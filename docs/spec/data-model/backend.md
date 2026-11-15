@@ -175,7 +175,8 @@ objects added, existing ones immutable).
   and a version that cannot be saved fails the projection of its entry, which is applied again
   ([§6.1](#61-apply)). One failure is passed: a store that refuses the version because it lacks the
   chunks the manifest names (CORRUPT `missing_chunks`). That content is not on the main, no version can
-  keep it, and the failure MUST be logged. Deleted by expiry by age.
+  keep it, and the failure MUST be logged. Deleted by expiry, by age or by an expiry list
+  ([gc.md §4.1](../algorithms/gc.md#41-versions)).
 - **Derived notion** a *deleted file* is a history group with versions and no live manifest at its
   location.
 
@@ -651,7 +652,7 @@ of a chunk key.
 | Log entry | JSON at `tsync/D/log/<group>/<number>` ([03-journal-sync.md](../03-journal-sync.md)) |
 | Tree head, takeover | `tsync/D/tree-head`, `tsync/D/log-takeover/<number>-<generation>` |
 | Cursor | `tsync/D/cursor` |
-| Collection run | JSON at `tsync/D/gc-run`; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
+| Collection run | JSON at `tsync/D/gc-run`; its expiry set at `tsync/D/gc-expiry`, one version key per line; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
 | Collection generation | JSON at `tsync/D/gc-generation` |
 | Collection spaces | surviving `tsync/D/chunks/`, outgoing `tsync/D/chunks.from/` |
 | Corruption marker | JSON at `tsync/corrupted/D/sss/<chunk key>` |

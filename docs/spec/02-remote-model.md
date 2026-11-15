@@ -92,6 +92,7 @@ tsync/D/manifests/.tsync-root/…                 the root folder's namespace
 tsync/D/chunks/<sss>/<chunk key>                chunks, surviving space; sss = first 3 hex of the key
 tsync/D/chunks.from/<sss>/<chunk key>           outgoing space, only during a collection run
 tsync/D/gc-run                                  collection run record, collectable main only
+tsync/D/gc-expiry                               a run's expiry set X, beside the run record
 tsync/D/gc-generation                           collection generation, collectable main only
 tsync/D/gc-run.lock                             run lock file (filesystem stores only; not a store object;
                                                 MAY exist before any collection ran)

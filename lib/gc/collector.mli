@@ -9,6 +9,8 @@ open Tsync_store
 type failure =
   | Unsupported of string  (** no main is a local filesystem store *)
   | Busy  (** another session holds a main's run lock *)
+  | Refused of string
+      (** an expiry the open run did not open with (gc.md §5.5) *)
 
 type outcome =
   | Completed
@@ -29,6 +31,15 @@ type stats = {
   chunks_cleared : int;
   chunks_reclaimed : int;
   bytes_reclaimed : int;
+  versions_expired : int;  (** deleted by this session's marking *)
+}
+
+(** What an expiry given to a dry run frees (§5.9). *)
+type expiry = {
+  versions : int;  (** expiring versions present on the main *)
+  version_bytes : int;  (** their bodies *)
+  chunks_freed : int;  (** named by expiring versions alone *)
+  bytes_freed : int;
 }
 
 (** What a dry run found on one main; nothing was written. *)
@@ -44,6 +55,7 @@ type survey = {
   per_copy : (string * int) list;
       (** deletions a collection would owe each copy *)
   chunks_corrupt : int;  (** with [verify]: referenced chunks that misread *)
+  expiry : expiry option;  (** with [expiring] *)
 }
 
 (** Collect each collectable main: resume or open a run and take it as far as
@@ -52,12 +64,18 @@ type survey = {
     chunk still outgoing, and [verify] re-hashes each chunk this run promotes,
     filing or clearing its marker.
 
+    [expiring] is the version keys to expire within the run: each is deleted,
+    through the composite, before marking lists its group. It is saved beside
+    the run record when the run opens; a resumed run carries on with the saved
+    set, and an [expiring] that is not a subset of it is [Refused].
+
     Refused with [Unsupported], unless [keep], while the collecting main would
     owe deletions to a remote copy whose bucket function this owner has not
     confirmed: that copy would get one delete request per chunk. *)
 val run :
   ?budget:float ->
   ?pause:float ->
+  ?expiring:Key.t list ->
   ?narrate:Narrate.t ->
   ?verify:bool ->
   ?keep:bool ->
@@ -79,8 +97,10 @@ val status : Composite.t -> status list
 
 (** Report what a collection would reclaim, per main; [Error reason] inside the
     list when a body stops the survey as it would stop marking, or once
-    [cancelled] holds. *)
+    [cancelled] holds. [expiring] is the version keys an expiry would delete:
+    their chunks count as freed by it rather than referenced. *)
 val dry_run :
+  ?expiring:Key.t list ->
   ?narrate:Narrate.t ->
   ?verify:bool ->
   ?cancelled:(unit -> bool) ->

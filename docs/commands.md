@@ -75,7 +75,10 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync data-integrity [--detail] [--verify \| --repair [--dry-run] [--source NAME]]` | Report on the tree and the chunks, re-check the chunks, or repair them |
 | `tsync void-entry N` | Pass a damaged entry of the change log that no machine can read |
 | `tsync expire DATE [--apply]` | Remove history older than `YYYY-MM-DD` |
+| `tsync expire DATE --export FILE` | List the versions that would go to FILE, to edit ([choosing the versions](history.md#choosing-the-versions-that-go)) |
+| `tsync expire --from FILE [--apply]` | Remove exactly the versions FILE lists |
 | `tsync gc [--apply] [--verify] [--budget SECONDS]` | Reclaim unused chunks |
+| `tsync gc --expire FILE \| --expire-before DATE [--apply]` | Expire those versions and collect what they free, in one run; without `--apply`, report the space ([choosing the versions](history.md#choosing-the-versions-that-go)) |
 | `tsync gc --status \| --abort` | Look at, or abandon, an open run |
 | `tsync gc --probe \| --outstanding \| --retry-outstanding` | The delete requests handed to bucket copies |
 
