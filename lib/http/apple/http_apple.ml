@@ -86,9 +86,13 @@ let open_connection ~host ~port (tls : Transport.tls) =
       (fun f -> Array.of_list (ders_of_pem (Fs.read_file f)))
       tls.ca_file
   in
+  (* Without a valid name the platform would check the chain only. *)
+  if not (String.is_valid_utf_8 tls.host) then
+    Fail.invalid "%s: the server name is not UTF-8" (String.escaped tls.host);
   let c =
-    try open_ host port tls.host anchors
-    with Failure why -> Transport.tls_failure tls.host why
+    try open_ host port tls.host anchors with
+      | Failure why -> Transport.tls_failure tls.host why
+      | Unix.Unix_error (e, fn, a) -> raise (Fail.E (Fail.of_unix e fn a))
   in
   match
     until c (fun () ->

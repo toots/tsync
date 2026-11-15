@@ -74,6 +74,9 @@ let () =
       in
       p "nothing is swept before a body spills: %b" (Sys.file_exists stale);
       let get ?max_body path expected =
+        (* The previous body's mapping goes first, so a collection during the
+           request cannot hide this one. *)
+        Gc.full_major ();
         let before = mappings_under dir in
         match Client.request ?max_body e ~meth:"GET" path with
           | r ->

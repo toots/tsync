@@ -22,6 +22,7 @@
 #include <caml/fail.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
+#include <caml/unixsupport.h>
 
 enum connection_state { CONNECTING, READY, FAILED, CLOSED };
 
@@ -108,7 +109,9 @@ static void record_failure(apple_connection *connection, nw_error_t error,
   }
   int code = nw_error_get_error_code(error);
   if (nw_error_get_error_domain(error) == nw_error_domain_tls) {
-    if (is_certificate_status(code))
+    /* A refusal of the verify block is a certificate's, whatever code
+       Network.framework reports it under: a retry will not change it. */
+    if (is_certificate_status(code) || connection->refusal[0])
       connection->failure = UNTRUSTED;
     if (connection->refusal[0]) {
       snprintf(connection->reason, sizeof connection->reason, "%s", connection->refusal);
@@ -253,9 +256,12 @@ value tsync_http_apple_open(value _host, value _port, value _server_name,
   CAMLlocal1(_connection);
   apple_connection *connection = calloc(1, sizeof *connection);
   int wake_pipe[2];
-  if (connection == NULL || pipe(wake_pipe) != 0) {
+  if (connection == NULL)
+    caml_unix_error(ENOMEM, "calloc", Nothing);
+  if (pipe(wake_pipe) != 0) {
+    int error = errno;
     free(connection);
-    caml_failwith("http_apple: no memory or descriptors for a connection");
+    caml_unix_error(error, "pipe", Nothing);
   }
   for (int i = 0; i < 2; i++) {
     fcntl(wake_pipe[i], F_SETFL, fcntl(wake_pipe[i], F_GETFL) | O_NONBLOCK);

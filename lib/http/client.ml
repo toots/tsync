@@ -31,19 +31,23 @@ type endpoint = {
   spill : spill option;
 }
 
-and spill = { dir : string; prepared : bool Atomic.t }
+and spill = { dir : string; prepared : bool Atomic.t; preparing : Mutex.t }
 
 (* An open file cannot be unlinked on Windows, so bodies stay in memory there. *)
 let spill_of = function
-  | Some dir when not Sys.win32 -> Some { dir; prepared = Atomic.make false }
+  | Some dir when not Sys.win32 -> Some { dir; prepared = Atomic.make false; preparing = Mutex.create () }
   | _ -> None
 
 (* A crash between creating a spill file and unlinking it leaves a temporary
    named after the dead process, which the sweep removes. *)
+(* Every spill waits for the directory; a failed preparation is tried again. *)
 let prepare spill =
-  if not (Atomic.exchange spill.prepared true) then (
-    Fs.mkdir_p spill.dir;
-    Fs.sweep_temps spill.dir)
+  if not (Atomic.get spill.prepared) then
+    Mutex.protect spill.preparing (fun () ->
+        if not (Atomic.get spill.prepared) then (
+          Fs.mkdir_p spill.dir;
+          Fs.sweep_temps spill.dir;
+          Atomic.set spill.prepared true))
 
 let endpoint ?ca_file ?(max_connections = 32) ?spill url =
   let scheme, rest =

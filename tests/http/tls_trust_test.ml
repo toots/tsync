@@ -37,6 +37,7 @@ let silent () =
     | _ -> assert false
 
 let () =
+  Apple_tls.check ();
   Rt.run_sync (fun () ->
       let valid, valid_port =
         serve ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
