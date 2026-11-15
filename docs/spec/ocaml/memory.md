@@ -132,7 +132,7 @@ set the core for it:
 | Bound | Desktop default | Capped host | Why |
 |---|---|---|---|
 | executors (`Rt.configure ~workers`) | 2 to 8 domains | 1 | each domain costs about 0.65 MiB, and eight multiplied the peak of a large write |
-| may-block in flight (`~max_blocking`) | 256 | 4 | a slot's helper thread never exits; each costs about 200 KiB (a 128 KiB OCaml stack, a 32 KiB record, its pthread stack) |
+| may-block in flight (`~max_blocking`) | 256 | 4 | a slot's helper thread exits once unused, down to one per domain; each live one costs about 200 KiB (a 128 KiB OCaml stack, a 32 KiB record, its pthread stack) |
 | release growth (`Usage.set_release_growth`) | not checked: housekeeping compacts on free space | 1 MiB | OCaml keeps freed major-heap pools until it compacts |
 | minor heap (`OCAMLRUNPARAM=s=32k`) | 256k words (2 MiB) | 32k words (256 KiB) | resident from the first allocation |
 
