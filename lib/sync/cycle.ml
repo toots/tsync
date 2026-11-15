@@ -1397,12 +1397,12 @@ module Make (C : Engine_ctx.S) = struct
     (* A folder this pass's pages removed or moved is no longer there to
        pull; any other failure ends the pass, as a page's would. *)
     let alone dir =
-      if not (stop ()) then
+      if not (stop ()) then (
         match pull_folder ~page dir with
           | true -> changed := dir :: !changed
           | false -> ()
           | exception Fail.E { kind = Unprepared | Absent; reason; _ } ->
-              Log.debug "pass: %s left out: %s" dir reason
+              Log.debug "pass: %s left out: %s" dir reason)
     in
     let views, unpositioned =
       List.partition_map

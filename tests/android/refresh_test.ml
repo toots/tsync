@@ -105,7 +105,8 @@ let pass label =
   (* A large pass may read its unreadable last entry once more: tens, not one
      read per held folder, is what it shows. *)
   let reads = Atomic.get entry_reads - before in
-  p "  %-34s %s" (label ^ ", log entries read")
+  p "  %-34s %s"
+    (label ^ ", log entries read")
     (if reads < 100 then string_of_int reads
      else Printf.sprintf "%d to %d" (reads / 10 * 10) ((reads / 10 * 10) + 9));
   p "  %-34s %d" (label ^ ", folders written") (folders_written files);
