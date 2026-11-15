@@ -112,21 +112,64 @@ let cutoff_of date =
           | _ -> fail "%s is not a date (YYYY-MM-DD)" date)
     | _ -> fail "%s is not a date (YYYY-MM-DD)" date
 
-let expire apply date name verbose =
-  run_job ?name verbose (Expire { apply; cutoff = cutoff_of date })
+(* The owner's working directory is not ours: the paths go absolute. *)
+let absolute p =
+  if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
+
+let expire apply date from export name verbose =
+  let refuse msg =
+    prerr_endline ("tsync: " ^ msg);
+    2
+  in
+  match (date, from, export) with
+    | Some _, Some _, _ -> refuse "expire takes a DATE or --from, not both"
+    | None, None, _ -> refuse "expire needs a DATE or --from FILE"
+    | None, Some _, Some _ -> refuse "--export needs a DATE"
+    | Some _, None, Some _ when apply ->
+        refuse "--export only lists; run --from FILE --apply to expire it"
+    | Some date, None, export ->
+        run_job ?name verbose
+          (Expire
+             {
+               apply;
+               expiry = `Before (cutoff_of date);
+               export = Option.map absolute export;
+             })
+    | None, Some file, None ->
+        if not (Sys.file_exists file) then refuse (file ^ ": no such file")
+        else
+          run_job ?name verbose
+            (Expire { apply; expiry = `Listed (absolute file); export = None })
 
 let expire_cmd =
   let date =
     Arg.(
-      required
+      value
       & pos 0 (some string) None
       & info [] ~docv:"DATE" ~doc:"Remove what is older than this day.")
+  and from =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["from"] ~docv:"FILE"
+          ~doc:
+            "Remove exactly the versions FILE lists, leaving the log and \
+             shares alone.")
+  and export =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["export"] ~docv:"FILE"
+          ~doc:
+            "Write the versions DATE would remove to FILE, to edit and give to \
+             --from; nothing is removed.")
   in
   cmd "expire"
     ~doc:
       "Remove versions and shares older than DATE, and the log entries its \
-       retention allows."
-    Term.(const expire $ apply_arg $ date $ domain_arg $ verbose)
+       retention allows; or exactly the versions of a list."
+    Term.(
+      const expire $ apply_arg $ date $ from $ export $ domain_arg $ verbose)
 
 let void_entry n name verbose = run_job ?name verbose (Void_entry { n })
 
@@ -185,11 +228,7 @@ let data_integrity_cmd =
       const data_integrity $ verify $ repair $ dry_run $ detail $ source
       $ domain_arg $ verbose)
 
-(* The owner's working directory is not ours: the paths go absolute. *)
 let import src map only exclude force_rehash name verbose =
-  let absolute p =
-    if Filename.is_relative p then Filename.concat (Sys.getcwd ()) p else p
-  in
   let refuse msg =
     prerr_endline ("tsync: " ^ msg);
     2
@@ -549,27 +588,10 @@ let share_cmd =
 module Versions (C : Tsync_remote.Context.S) = struct
   module R = Tsync_remote.Remote.Make (C)
   module T = Tsync_remote.Tree.Make (C)
+  module E = Tsync_gc.Expiry_list.Make (C)
 
   let manifest e = Manifest.decode (R.get_version e)
-
-  (* A folder's path, climbed through its anchors; none for a folder without
-     an anchor. *)
-  let folder_path id =
-    let rec climb id acc depth =
-      if Folder_id.is_root id then Some (String.concat "/" acc)
-      else if depth > 256 then None
-      else (
-        match T.anchor id with
-          | Some a -> climb a.parent (a.aname :: acc) (depth + 1)
-          | None -> None)
-    in
-    climb id [] 0
-
-  let line ns size what =
-    say "%Ld  %s  %s%s" ns
-      (Narrate.date (Int64.to_float ns /. 1e9))
-      (Narrate.size size)
-      (if what = "" then "" else "  " ^ what)
+  let line e = say "%s" (Tsync_gc.Expiry_list.line e)
 
   let of_file path =
     Names.check_unreserved ~op:"versions" path;
@@ -590,8 +612,8 @@ module Versions (C : Tsync_remote.Context.S) = struct
           List.iter
             (fun (ns, e) ->
               match manifest e with
-                | Some m -> line ns m.size ""
-                | None -> line ns 0 "(unreadable)")
+                | Some m -> line (E.entry ~folder:parent ~ns m)
+                | None -> line { ns; size = None; path })
             versions;
           0
 
@@ -599,27 +621,25 @@ module Versions (C : Tsync_remote.Context.S) = struct
     let found =
       List.filter_map
         (fun (group, versions) ->
-          match (String.index_opt group '/', versions) with
-            | Some i, (ns, e) :: _ -> (
-                match
-                  (Folder_id.of_string (String.sub group 0 i), manifest e)
-                with
-                  | Some id, Some m when R.head_slot id m.name = None -> (
-                      match folder_path id with
+          match (E.group_folder group, versions) with
+            | Some id, (ns, e) :: _ -> (
+                match manifest e with
+                  | Some m when R.head_slot id m.name = None -> (
+                      match E.folder_path id with
                         | Some dir
                           when Names.is_reserved (Names.join dir m.name) ->
                             None
-                        | Some dir -> Some (ns, m.size, Names.join dir m.name)
-                        | None -> Some (ns, m.size, m.name ^ " (folder gone)"))
+                        | folder -> Some (E.entry ?folder ~ns m))
                   | _ -> None)
             | _ -> None)
         (R.all_versions ())
     in
     say "%s with saved versions"
       (Narrate.count (List.length found) "deleted file");
-    List.iter
-      (fun (ns, size, path) -> line ns size path)
-      (List.sort (fun (a, _, _) (b, _, _) -> compare b a) found);
+    List.iter line
+      (List.sort
+         (fun (a : Tsync_gc.Expiry_list.entry) b -> Int64.compare b.ns a.ns)
+         found);
     0
 end
 

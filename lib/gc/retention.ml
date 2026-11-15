@@ -15,27 +15,28 @@ type report = {
   cancelled : bool;
 }
 
+(* §4.1: a filesystem store keeps the directories of a group whose versions
+   all expired; a snapshot racing the removal retries its write once. *)
+let remove_empty_groups composite keys =
+  let rmdir p = try Unix.rmdir p with Unix.Unix_error _ -> () in
+  List.iter
+    (fun (m : Composite.member) ->
+      Option.iter
+        (fun root ->
+          List.sort_uniq String.compare
+            (List.map (fun k -> Filename.dirname (Local_path.path root k)) keys)
+          |> List.iter (fun group ->
+              rmdir group;
+              rmdir (Filename.dirname group)))
+        m.store.local_path)
+    (Composite.members composite)
+
+type listed = { versions_deleted : int; cancelled : bool }
+
 module Make (C : Context.S) = struct
   let d = C.domain
   let store = C.store
-
-  (* §4.1: a filesystem store keeps the directories of a group whose versions
-     all expired; a snapshot racing the removal retries its write once. *)
-  let remove_empty_groups keys =
-    let rmdir p = try Unix.rmdir p with Unix.Unix_error _ -> () in
-    List.iter
-      (fun (m : Composite.member) ->
-        Option.iter
-          (fun root ->
-            List.sort_uniq String.compare
-              (List.map
-                 (fun k -> Filename.dirname (Local_path.path root k))
-                 keys)
-            |> List.iter (fun group ->
-                rmdir group;
-                rmdir (Filename.dirname group)))
-          m.store.local_path)
-      (Composite.members C.composite)
+  let remove_empty_groups = remove_empty_groups C.composite
 
   (* §4.3: each member holding shares, since a share may sit on a copy alone;
      copies behind the write guard, archives never. *)
@@ -234,4 +235,23 @@ module Make (C : Context.S) = struct
       unparseable_shares = !unparseable;
       cancelled = cancelled ();
     }
+
+  let expire_listed ?(narrate = Narrate.none) ?(apply = false)
+      ?(cancelled = Fun.const false) keys =
+    Narrate.say narrate "expiring %s: %s from a list%s"
+      (Domain_name.to_string d)
+      (Narrate.count (List.length keys) "version")
+      (if apply then "" else " (dry run: nothing is deleted)");
+    if not apply then { versions_deleted = List.length keys; cancelled = false }
+    else (
+      let deleted = ref 0 in
+      let outcome =
+        Cancel.batches cancelled
+          (fun batch ->
+            store.delete_multi batch;
+            remove_empty_groups batch;
+            deleted := !deleted + List.length batch)
+          keys
+      in
+      { versions_deleted = !deleted; cancelled = outcome = `Cancelled })
 end

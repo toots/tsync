@@ -3,11 +3,19 @@ open Tsync_gc
 
 type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
 
+(** Which versions expire (gc.md §4.1): by age, or the expiry list at an
+    absolute path, which the owner reads. *)
+type expiry = [ `Before of float | `Listed of string ] [@@deriving yojson]
+
 type t =
   | Sync of { full : bool }
   | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
   | Gc_copies of copies
-  | Expire of { apply : bool; cutoff : float }
+  | Expire of {
+      apply : bool;
+      expiry : expiry;
+      export : string option;  (** absolute: the owner writes it *)
+    }
   | Void_entry of { n : int }
   | Import of {
       src : string;
@@ -47,6 +55,8 @@ let kind = function
   | Gc_copies Probe -> "gc --probe"
   | Gc_copies Outstanding -> "gc --outstanding"
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
+  | Expire { expiry = `Listed _; _ } -> "expire --from"
+  | Expire { export = Some _; _ } -> "expire --export"
   | Expire _ -> "expire"
   | Void_entry _ -> "void-entry"
   | Import _ -> "import"
@@ -208,11 +218,19 @@ let copies io c act =
           (Tsync_store.Composite.retry_outstanding c);
         0
 
-let expire io dom ~apply ~cutoff =
+let write_list file text =
+  let tmp = Fs.write_temp ~perm:0o644 (Filename.dirname file) text in
+  Fs.unix_rename tmp file
+
+let expire_before io (dom : Tsync_domain.Domain.t) ~apply ~cutoff ~export =
   let say fmt = Printf.ksprintf io.out fmt in
-  let module R = Retention.Make ((val Tsync_domain.Domain.context dom)) in
+  let module C = (val Tsync_domain.Domain.context dom) in
+  let module R = Retention.Make (C) in
+  let module E = Expiry_list.Make (C) in
+  let apply = apply && export = None in
+  let now = Unix.gettimeofday () in
   let r =
-    R.expire ~narrate:io.narrate ~apply ~cancelled:io.cancelled ~cutoff ()
+    R.expire ~narrate:io.narrate ~apply ~cancelled:io.cancelled ~now ~cutoff ()
   in
   say "versions %d, log entries %d, shares %d%s%s" r.counts.versions_deleted
     r.counts.log_deleted r.counts.shares_deleted (dry_note apply)
@@ -220,7 +238,61 @@ let expire io dom ~apply ~cutoff =
   List.iter
     (fun k -> say "  unparseable share left: %s" (Key.to_string k))
     r.unparseable_shares;
+  (match export with
+    | Some _ when r.cancelled -> say "  no list written: the run was cancelled"
+    | None -> ()
+    | Some file ->
+        let listed, unreadable =
+          E.entries (List.filter (Key.under (Key.versions dom.name)) r.deleted)
+        in
+        write_list file (Expiry_list.print ~domain:dom.name ~cutoff ~now listed);
+        say "  %s listed in %s"
+          (Narrate.count (List.length listed) "version")
+          file;
+        List.iter
+          (fun k ->
+            say "  left out, its body does not read: %s" (Key.to_string k))
+          unreadable);
   if r.cancelled then 1 else 0
+
+let expire_listed io (dom : Tsync_domain.Domain.t) ~apply file =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let module C = (val Tsync_domain.Domain.context dom) in
+  let module R = Retention.Make (C) in
+  let module E = Expiry_list.Make (C) in
+  let listing = Expiry_list.parse (Fs.read_file file) in
+  match listing.domain with
+    | Some other when other <> Domain_name.to_string dom.name ->
+        say "%s lists versions of %s, not %s: nothing expired" file other
+          (Domain_name.to_string dom.name);
+        1
+    | _ ->
+        let r = E.resolve listing in
+        List.iter (fun (n, why) -> say "  line %d: %s" n why) r.warnings;
+        if r.rejected <> [] then (
+          List.iter
+            (fun (n, why) -> say "  line %d rejected: %s" n why)
+            r.rejected;
+          say "nothing expired: %s rejected"
+            (Narrate.count (List.length r.rejected) "line");
+          1)
+        else (
+          let l =
+            R.expire_listed ~narrate:io.narrate ~apply ~cancelled:io.cancelled
+              r.matched
+          in
+          say
+            "versions %d, %d already gone; log and shares untouched (tsync \
+             expire DATE trims those)%s%s"
+            l.versions_deleted (List.length r.absent) (dry_note apply)
+            (if l.cancelled then "; cancelled before the end" else "");
+          if l.cancelled then 1 else 0)
+
+(* 05 §4.8. *)
+let expire io dom ~apply ~expiry ~export =
+  match expiry with
+    | `Before cutoff -> expire_before io dom ~apply ~cutoff ~export
+    | `Listed file -> expire_listed io dom ~apply file
 
 (* 05 §4.12. *)
 let void_entry io (dom : Tsync_domain.Domain.t) n =
@@ -467,7 +539,7 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc { apply; verify; abort; budget } ->
       gc io dom.composite ~apply ~verify ~abort ~budget
   | Gc_copies act -> copies io dom.composite act
-  | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
+  | Expire { apply; expiry; export } -> expire io dom ~apply ~expiry ~export
   | Void_entry { n } -> void_entry io dom n
   | Sync { full } ->
       let module E = (val engine : Tsync_sync.Engine.S) in

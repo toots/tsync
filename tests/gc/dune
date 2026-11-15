@@ -1,7 +1,7 @@
 (executable
  (name plan_test)
  (modules plan_test)
- (libraries tsync_core tsync_store tsync_sync tsync_gc))
+ (libraries tsync_core tsync_store tsync_sync tsync_gc unix))
 
 (rule
  (with-stdout-to

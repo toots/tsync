@@ -546,7 +546,10 @@ let () =
             let started = Ipc.Client.request c (job (gc ~apply:true ())) in
             show "gc --apply, held at opening" started;
             show "expire meanwhile"
-              (Ipc.call socket (job (Expire { apply = false; cutoff = 0. })));
+              (Ipc.call socket
+                 (job
+                    (Expire
+                       { apply = false; expiry = `Before 0.; export = None })));
             let id = Yojson.Safe.Util.(to_int (member "job" started)) in
             show "cancel it" (cancel id);
             id)

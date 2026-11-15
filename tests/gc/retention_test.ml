@@ -55,18 +55,21 @@ let () =
       marker Folder_id.root "live" "live";
       file (id "live") "keep.txt";
       List.iter
-        (fun (group, days) ->
+        (fun (folder, name, days) ->
           let key =
-            Key.version d ~group
+            Key.version d
+              ~group:(folder ^ "/" ^ Xxh.dual name)
               ~ns:(Int64.of_float ((now -. (days *. day)) *. 1e9))
           in
           Hashtbl.replace labels (Key.to_string key)
-            (Printf.sprintf "version of %.0f days ago in %s" days group);
-          put key (empty "v"))
+            (Printf.sprintf "version of %.0f days ago in %s/%s" days folder name);
+          put key (empty name))
         [
-          ("0000000000a1-1/h", 40.);
-          ("0000000000a1-1/h", 5.);
-          ("0000000000a7-1/gone", 50.);
+          ("0000000000a1-1", "h", 40.);
+          ("0000000000a1-1", "h", 5.);
+          ("0000000000a1-1", "old.txt", 30.);
+          ("0000000000a1-1", "old.txt", 20.);
+          ("0000000000a7-1", "gone", 50.);
         ];
       let folder n = Folder_id.mint ~uuid:"eeeeeeeeeeee" ~counter:n in
       List.iter
@@ -183,6 +186,52 @@ let () =
             p "ran to the end: shares %d, cancelled %b\n"
               r.counts.shares_deleted r.cancelled
         | exception Fail.E f -> p "stopped: %s\n" f.reason);
+      p "\n== expiry list (§4.1): export, edit, --from\n";
+      let module E = Expiry_list.Make (C) in
+      let versions_of keys = List.filter (Key.under (Key.versions d)) keys in
+      let sorted l = List.sort Key.compare l in
+      let expired = versions_of (R.expire ~now ~cutoff ()).deleted in
+      let listed, unreadable = E.entries expired in
+      let text = Expiry_list.print ~domain:d ~cutoff ~now listed in
+      List.iter (fun (e : Expiry_list.entry) -> p "  %s\n" e.path) listed;
+      p "unreadable %d; the list resolves to the date run's versions: %b\n"
+        (List.length unreadable)
+        (sorted (E.resolve (Expiry_list.parse text)).matched = sorted expired);
+      let kept, edited =
+        match
+          List.partition
+            (fun l -> l <> "" && l.[0] <> '#')
+            (String.split_on_char '\n' text)
+        with
+          | first :: rest, header -> (first, String.concat "\n" (header @ rest))
+          | [], _ -> failwith "empty list"
+      in
+      let r = E.resolve (Expiry_list.parse edited) in
+      p "a line removed: %d matched, %d rejected, %d absent\n"
+        (List.length r.matched) (List.length r.rejected) (List.length r.absent);
+      let others () =
+        List.filter
+          (fun k -> not (String.starts_with ~prefix:"tsync/d/versions/" k))
+          (listing ())
+      in
+      let before = others () in
+      let l = R.expire_listed ~apply:true r.matched in
+      p "--from deleted %d; log and shares untouched: %b\n" l.versions_deleted
+        (others () = before);
+      p "the removed line's version is still there: %b\n"
+        (List.exists
+           (fun k ->
+             String.starts_with ~prefix:(String.sub kept 0 19)
+               (Key.leaf (Key.v k)))
+           (listing ()));
+      let again = E.resolve (Expiry_list.parse edited) in
+      p "the same list again: %d matched, %d absent\n"
+        (List.length again.matched)
+        (List.length again.absent);
+      let bad = E.resolve (Expiry_list.parse (kept ^ "x\nnonsense")) in
+      List.iter
+        (fun (n, why) -> p "  rejected line %d: %s\n" n why)
+        bad.rejected;
       p "\n== expire, applied\n";
       show (R.expire ~apply:true ~now ~cutoff ());
       p "\n== the log, from a host whose clock runs a year ahead\n";
@@ -195,8 +244,8 @@ let () =
         Fs.is_dir (Filename.concat store_root ("tsync/d/versions/" ^ rel))
       in
       p "group directories: kept %b, emptied %b, its folder %b\n"
-        (dir "0000000000a1-1/h")
-        (dir "0000000000a7-1/gone")
+        (dir ("0000000000a1-1/" ^ Xxh.dual "h"))
+        (dir ("0000000000a7-1/" ^ Xxh.dual "gone"))
         (dir "0000000000a7-1");
       p "share held only by the replica, expired there: %b\n"
         (replica.head_opt (Option.get (Key.share "aa05")) = None);

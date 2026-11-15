@@ -1,5 +1,7 @@
 == expire, dry run (cutoff 10 days ago)
-versions 2, log 2, shares 8
+versions 4, log 2, shares 8
+  delete version of 30 days ago in 0000000000a1-1/old.txt
+  delete version of 20 days ago in 0000000000a1-1/old.txt
   delete version of 40 days ago in 0000000000a1-1/h
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago
@@ -24,9 +26,21 @@ cancelled: true
 == expire, cancelled at the first share read
 stopped: cancelled
 
+== expiry list (§4.1): export, edit, --from
+  live/old.txt
+  live/old.txt
+  live/h
+  gone (folder gone)
+unreadable 0; the list resolves to the date run's versions: true
+a line removed: 3 matched, 0 rejected, 0 absent
+--from deleted 3; log and shares untouched: true
+the removed line's version is still there: true
+the same list again: 0 matched, 3 absent
+  rejected line 1: no version of "gone (folder gone)x" at that time
+  rejected line 2: not a version line (time  date  size  path)
+
 == expire, applied
-versions 2, log 2, shares 8
-  delete version of 40 days ago in 0000000000a1-1/h
+versions 1, log 2, shares 8
   delete version of 50 days ago in 0000000000a7-1/gone
   delete log entry 1, of 60 days ago
   delete log entry 2, of 45 days ago

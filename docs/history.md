@@ -61,3 +61,18 @@ tsync gc --retry-outstanding   # hand them over again
 ```
 
 A request nobody carried out means the copy still holds chunks nothing uses: wasted space, not lost data. Nothing retries on its own, so check `--outstanding` after fixing a function.
+
+### Choosing the versions that go
+
+`expire DATE` takes every version older than the date. To keep some of them, write the list out, edit it, and expire exactly what is left:
+
+```bash
+tsync expire 2026-01-01 --export old.txt   # the versions that would go; nothing is removed
+$EDITOR old.txt                            # delete a line to keep that version
+tsync expire --from old.txt                # what would go
+tsync expire --from old.txt --apply
+```
+
+Each line is a version as `tsync versions` prints it, so a line copied from there can be pasted in. Only the timestamp and the path count: the date and size are for reading. A list touches versions only; the change log and share links still go with `tsync expire DATE`. Running the same list again is harmless: versions already gone are counted and skipped. A list whose lines no longer match a version (a mistyped name, a file renamed since) is refused whole, naming each bad line, before anything is removed.
+
+Writing the list reads every listed version, one request each on a bucket.
