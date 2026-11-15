@@ -77,3 +77,18 @@ let write (main : Store.t) d r =
 
 let clear (main : Store.t) d = ignore (main.delete (Key.gc_run d))
 let run_name r = Key.run_name r.started
+
+let read_expiry (main : Store.t) d =
+  Option.map
+    (fun b ->
+      List.filter_map
+        (fun l -> if l = "" then None else Some (Key.v l))
+        (String.split_on_char '\n' (Bigstring.to_string b)))
+    (main.get_opt (Key.gc_expiry d))
+
+let write_expiry (main : Store.t) d keys =
+  main.put (Key.gc_expiry d)
+    (Bigstring.of_string
+       (String.concat "" (List.map (fun k -> Key.to_string k ^ "\n") keys)))
+
+let clear_expiry (main : Store.t) d = ignore (main.delete (Key.gc_expiry d))

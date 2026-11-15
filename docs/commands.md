@@ -78,7 +78,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync expire DATE --export FILE` | List the versions that would go to FILE, to edit ([choosing the versions](history.md#choosing-the-versions-that-go)) |
 | `tsync expire --from FILE [--apply]` | Remove exactly the versions FILE lists |
 | `tsync gc [--apply] [--verify] [--budget SECONDS]` | Reclaim unused chunks |
-| `tsync gc --expire FILE \| --expire-before DATE` | Report what collecting would reclaim once those versions expire ([choosing the versions](history.md#choosing-the-versions-that-go)) |
+| `tsync gc --expire FILE \| --expire-before DATE [--apply]` | Expire those versions and collect what they free, in one run; without `--apply`, report the space ([choosing the versions](history.md#choosing-the-versions-that-go)) |
 | `tsync gc --status \| --abort` | Look at, or abandon, an open run |
 | `tsync gc --probe \| --outstanding \| --retry-outstanding` | The delete requests handed to bucket copies |
 

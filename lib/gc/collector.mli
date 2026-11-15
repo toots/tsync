@@ -9,6 +9,8 @@ open Tsync_store
 type failure =
   | Unsupported of string  (** no main is a local filesystem store *)
   | Busy  (** another session holds a main's run lock *)
+  | Refused of string
+      (** an expiry the open run did not open with (gc.md §5.5) *)
 
 type outcome =
   | Completed
@@ -29,6 +31,7 @@ type stats = {
   chunks_cleared : int;
   chunks_reclaimed : int;
   bytes_reclaimed : int;
+  versions_expired : int;  (** deleted by this session's marking *)
 }
 
 (** What an expiry given to a dry run frees (§5.9). *)
@@ -61,12 +64,18 @@ type survey = {
     chunk still outgoing, and [verify] re-hashes each chunk this run promotes,
     filing or clearing its marker.
 
+    [expiring] is the version keys to expire within the run: each is deleted,
+    through the composite, before marking lists its group. It is saved beside
+    the run record when the run opens; a resumed run carries on with the saved
+    set, and an [expiring] that is not a subset of it is [Refused].
+
     Refused with [Unsupported], unless [keep], while the collecting main would
     owe deletions to a remote copy whose bucket function this owner has not
     confirmed: that copy would get one delete request per chunk. *)
 val run :
   ?budget:float ->
   ?pause:float ->
+  ?expiring:Key.t list ->
   ?narrate:Narrate.t ->
   ?verify:bool ->
   ?keep:bool ->

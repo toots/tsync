@@ -54,6 +54,7 @@ val takeovers : Domain_name.t -> prefix
 val takeover : Domain_name.t -> int -> generation:int -> t
 val void : Domain_name.t -> int -> t
 val gc_run : Domain_name.t -> t
+val gc_expiry : Domain_name.t -> t
 val gc_generation : Domain_name.t -> t
 
 (** The collection's run lock file on a filesystem store; not a store object. *)

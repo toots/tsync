@@ -129,9 +129,9 @@ let () =
       in
       (* Unless [held], a busy lock is the test's own settles, which a slow
          runner can catch holding it a moment, so it is waited out. *)
-      let run ?budget ?verify ?keep ?cancelled ?(held = false) () =
+      let run ?budget ?expiring ?verify ?keep ?cancelled ?(held = false) () =
         let rec attempt tries =
-          match Collector.run ?budget ?verify ?keep ?cancelled c with
+          match Collector.run ?budget ?expiring ?verify ?keep ?cancelled c with
             | Error Busy when (not held) && tries > 0 ->
                 Rt.sleep 0.1;
                 attempt (tries - 1)
@@ -139,9 +139,12 @@ let () =
         in
         match attempt 100 with
           | Ok [st] ->
-              p "run: %s; promoted %d, reclaimed %d (%d bytes)%s\n"
+              p "run: %s; promoted %d, reclaimed %d (%d bytes)%s%s\n"
                 (outcome st.outcome) st.chunks_promoted st.chunks_reclaimed
                 st.bytes_reclaimed
+                (if st.versions_expired > 0 then
+                   Printf.sprintf ", expired %d versions" st.versions_expired
+                 else "")
                 (if st.chunks_verified > 0 then
                    Printf.sprintf ", verified %d, corrupt %d" st.chunks_verified
                      st.chunks_corrupt
@@ -153,6 +156,9 @@ let () =
               Halted "busy"
           | Error (Unsupported r) ->
               p "run: unsupported: %s\n" r;
+              Halted r
+          | Error (Refused r) ->
+              p "run: refused: %s\n" r;
               Halted r
       in
       let show_status () =
@@ -339,6 +345,97 @@ let () =
       finish 0;
       Composite.settle ~timeout:10. c;
       p "generation settled: %b\n" (settled 100);
+      p "\n== expiry within the run (§5.5)\n";
+      put_chunks ["exp1"; "exp2"; "shared"; "rev"];
+      let version folder ns l =
+        let key = Key.version d ~group:(folder ^ "/h") ~ns in
+        publish key l;
+        key
+      in
+      let va = version "0123456789ab-3" 10L ["exp1"; "shared"]
+      and vb = version "0123456789ab-4" 11L ["exp2"]
+      and vr = version "0123456789ab-5" 12L ["rev"]
+      and kept = Key.version d ~group:"0123456789ab-2/h" ~ns:1L in
+      publish (slot Folder_id.root "sh") ["shared"];
+      Composite.settle ~timeout:10. c;
+      let expiring = [va; vb; vr] in
+      let present k = on_disk main_root k in
+      let x_saved () = on_disk main_root (Key.gc_expiry d) in
+      let freed, unused =
+        match Collector.dry_run ~expiring c with
+          | Ok [Ok { expiry = Some e; chunks_reclaimable; _ }] ->
+              p "dry run: %d versions, freed %d, already unused %d\n" e.versions
+                e.chunks_freed chunks_reclaimable;
+              (e.chunks_freed, chunks_reclaimable)
+          | _ ->
+              p "dry run failed\n";
+              (0, 0)
+      in
+      let reclaimed = ref 0 in
+      let step ?expiring () =
+        match Collector.run ~budget:0. ?expiring c with
+          | Ok [st] ->
+              reclaimed := !reclaimed + st.chunks_reclaimed;
+              st.outcome
+          | Error (Refused r) ->
+              p "  refused: %s\n" r;
+              Halted r
+          | _ -> Halted "failed"
+      in
+      ignore (step ~expiring ());
+      p "after one unit: X saved %b, versions present %b %b %b\n" (x_saved ())
+        (present va) (present vb) (present vr);
+      p "  reverting the version of rev before its group is marked\n";
+      publish (slot Folder_id.root "rev") ["rev"];
+      p "  a different expiry against the open run:\n";
+      ignore (step ~expiring:[va; kept] ());
+      p "  the same command again, some versions perhaps gone:\n";
+      ignore (step ~expiring:(List.filter present expiring) ());
+      let rec drain i =
+        match step () with
+          | Collector.Suspended _ when i < 40 -> drain (i + 1)
+          | o -> o
+      in
+      p "resumed without arguments: %s\n" (outcome (drain 0));
+      p "versions gone %b %b %b, kept one present %b, X gone %b\n"
+        (not (present va))
+        (not (present vb))
+        (not (present vr))
+        (present kept)
+        (not (x_saved ()));
+      p "exp1 exp2 gone %b %b; shared rev kept %b %b\n"
+        (not (on_disk main_root (Key.chunk d (chunk "exp1"))))
+        (not (on_disk main_root (Key.chunk d (chunk "exp2"))))
+        (on_disk main_root (Key.chunk d (chunk "shared")))
+        (on_disk main_root (Key.chunk d (chunk "rev")));
+      p
+        "reclaimed %d = dry run freed %d + already unused %d less rev, \
+         reverted: %b\n"
+        !reclaimed freed unused
+        (!reclaimed = freed + unused - 1);
+      Composite.settle ~timeout:10. c;
+      ignore (settled 100);
+      p "\n== abort after an expiry: chunks back, versions stay deleted\n";
+      put_chunks ["exp3"];
+      let vc = version "0123456789ab-6" 13L ["exp3"] in
+      Composite.settle ~timeout:10. c;
+      let rec until_gone i =
+        ignore (step ~expiring:(if i = 0 then [vc] else []) ());
+        if present vc && i < 40 then until_gone (i + 1)
+      in
+      until_gone 0;
+      ignore (run ~keep:true ());
+      p "version gone %b, exp3 back in S %b, X gone %b\n"
+        (not (present vc))
+        (on_disk main_root (Key.chunk d (chunk "exp3")))
+        (not (x_saved ()));
+      p "\n== a run opened without an expiry refuses one\n";
+      ignore (step ());
+      ignore (step ~expiring:[kept] ());
+      p "kept still present: %b\n" (present kept);
+      ignore (run ~keep:true ());
+      Composite.settle ~timeout:10. c;
+      ignore (settled 100);
       p "\n== exclusion\n";
       let to_holder, holder_in = Unix.pipe ~cloexec:true ()
       and holder_out, from_holder = Unix.pipe ~cloexec:true () in
@@ -403,6 +500,7 @@ let () =
         (match Collector.run c2 with
           | Error (Unsupported r) -> "refused: " ^ r
           | Error Busy -> "busy"
+          | Error (Refused r) -> "refused: " ^ r
           | Ok _ -> "ran");
       p "abort: %s\n"
         (match Collector.run ~keep:true c2 with
@@ -434,5 +532,6 @@ let () =
         (match Collector.run c3 with
           | Error (Unsupported r) -> "refused: " ^ r
           | Error Busy -> "busy"
+          | Error (Refused r) -> "refused: " ^ r
           | Ok _ -> "ran"));
   Test_support.finish root

@@ -59,8 +59,8 @@ let gc apply verify abort budget show_status copies expire_file expire_before
   in
   match (expire_file, expire_before) with
     | Some _, Some _ -> refuse "--expire and --expire-before go one at a time"
-    | (Some _, _ | _, Some _) when apply || abort ->
-        refuse "--expire and --expire-before only report for now"
+    | (Some _, _ | _, Some _) when abort ->
+        refuse "--abort puts chunks back; it expires nothing"
     | Some file, None when not (Sys.file_exists file) ->
         refuse (file ^ ": no such file")
     | _ -> (
@@ -135,8 +135,8 @@ let gc_cmd =
       & opt (some string) None
       & info ["expire"] ~docv:"FILE"
           ~doc:
-            "Count the versions an expiry list names as gone, reporting the \
-             space their expiry frees.")
+            "Expire the versions an expiry list names within the run; without \
+             --apply, report the space that frees.")
   and expire_before =
     Arg.(
       value

@@ -84,4 +84,12 @@ tsync gc --expire old.txt              # from a list
 tsync gc --expire-before 2026-01-01    # every version older than the date
 ```
 
-It reports the chunks only those versions use, which a collection after the expiry reclaims, beside what is already unused.
+It reports the chunks only those versions use, which a collection after the expiry reclaims, beside what is already unused. Add `--apply` and `gc` expires those versions itself and frees their space in the same run:
+
+```bash
+tsync gc --expire old.txt --apply
+```
+
+The run remembers its versions: a run stopped by `--budget` carries on with them at the next `tsync gc --apply`, no list needed. While it is open, `gc` refuses a different expiry. `tsync gc --abort` puts every chunk back but not the versions: those already removed stay removed, and their chunks are collected by the next run.
+
+Without a disk as main, `gc` cannot collect, so `tsync expire --from` is the way to apply a list.

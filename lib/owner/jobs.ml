@@ -128,10 +128,13 @@ let print_survey out (s : Collector.survey) =
 
 let print_stats out (s : Collector.stats) =
   let say fmt = Printf.ksprintf out fmt in
-  say "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%s)"
+  say "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%s)%s"
     s.main (outcome s.outcome) s.roots_marked s.chunks_promoted
     s.chunks_reclaimed
-    (Narrate.size s.bytes_reclaimed);
+    (Narrate.size s.bytes_reclaimed)
+    (if s.versions_expired > 0 then
+       Printf.sprintf ", %d versions expired" s.versions_expired
+     else "");
   if s.chunks_verified > 0 then
     say "  verified %d: %d corrupt, %d unreadable, %d markers cleared"
       s.chunks_verified s.chunks_corrupt s.chunks_unreadable s.chunks_cleared
@@ -140,6 +143,7 @@ let refuse = function
   | Collector.Busy ->
       Fail.raise_ Fail.Load "another collection holds this domain's run lock"
   | Unsupported reason -> Fail.raise_ Fail.Refused "cannot collect: %s" reason
+  | Refused reason -> Fail.raise_ Fail.Refused "%s" reason
 
 (* gc §5.7: a request no function consumes keeps G odd for good, and only
    this says so. *)
@@ -200,27 +204,36 @@ let gc io (dom : Tsync_domain.Domain.t) ~apply ~verify ~abort ~budget ~expire =
   let say fmt = Printf.ksprintf io.out fmt in
   let finally () = report_outstanding io.out c in
   Fun.protect ~finally @@ fun () ->
-  if apply || abort then (
-    match
-      Collector.run ?budget ~narrate:io.narrate ~verify ~keep:abort
-        ~cancelled:io.cancelled c
-    with
-      | Error f -> refuse f
-      | Ok stats ->
-          List.iter (print_stats io.out) stats;
-          if
-            List.for_all
-              (fun (s : Collector.stats) -> s.outcome = Completed)
-              stats
-          then 0
-          else 1)
-  else (
-    match Option.map (expiring_keys io dom) expire with
-      | Some None -> 1
-      | expiring -> (
+  let refuse = function
+    | Collector.Unsupported reason when expire <> None ->
+        Fail.raise_ Fail.Refused
+          "cannot collect: %s; tsync expire --from FILE expires a list without \
+           collecting"
+          reason
+    | f -> refuse f
+  in
+  match Option.map (expiring_keys io dom) expire with
+    | Some None -> 1
+    | expiring ->
+        let expiring = Option.join expiring in
+        if apply || abort then (
           match
-            Collector.dry_run ?expiring:(Option.join expiring)
-              ~narrate:io.narrate ~verify ~cancelled:io.cancelled c
+            Collector.run ?budget ?expiring ~narrate:io.narrate ~verify
+              ~keep:abort ~cancelled:io.cancelled c
+          with
+            | Error f -> refuse f
+            | Ok stats ->
+                List.iter (print_stats io.out) stats;
+                if
+                  List.for_all
+                    (fun (s : Collector.stats) -> s.outcome = Completed)
+                    stats
+                then 0
+                else 1)
+        else (
+          match
+            Collector.dry_run ?expiring ~narrate:io.narrate ~verify
+              ~cancelled:io.cancelled c
           with
             | Error f -> refuse f
             | Ok surveys ->
@@ -229,7 +242,7 @@ let gc io (dom : Tsync_domain.Domain.t) ~apply ~verify ~abort ~budget ~expire =
                     | Ok s -> print_survey io.out s
                     | Error reason -> say "survey stopped: %s" reason)
                   surveys;
-                if List.for_all Result.is_ok surveys then 0 else 1))
+                if List.for_all Result.is_ok surveys then 0 else 1)
 
 (* The copies' side of a collection (gc §5.7): the bucket function, and the
    discard requests it has not consumed. *)

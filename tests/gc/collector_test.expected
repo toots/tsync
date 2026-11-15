@@ -118,10 +118,31 @@ run: suspended in closing at "9db"; promoted 0, reclaimed 0 (0 bytes)
 run: completed; promoted 0, reclaimed 0 (0 bytes)
 generation settled: true
 
+== expiry within the run (§5.5)
+dry run: 3 versions, freed 3, already unused 0
+after one unit: X saved true, versions present true true true
+  reverting the version of rev before its group is marked
+  a different expiry against the open run:
+  refused: main: the open run expires 3 versions; this expiry names others: finish that run (gc --apply) or abandon it (gc --abort) first
+  the same command again, some versions perhaps gone:
+resumed without arguments: completed
+versions gone true true true, kept one present true, X gone true
+exp1 exp2 gone true true; shared rev kept true true
+reclaimed 2 = dry run freed 3 + already unused 0 less rev, reverted: true
+
+== abort after an expiry: chunks back, versions stay deleted
+run: completed; promoted 0, reclaimed 0 (0 bytes)
+version gone true, exp3 back in S true, X gone true
+
+== a run opened without an expiry refuses one
+  refused: main: the open run expires nothing; this expiry names others: finish that run (gc --apply) or abandon it (gc --abort) first
+kept still present: true
+run: completed; promoted 0, reclaimed 0 (0 bytes)
+
 == exclusion
 another process: held
 run: busy
-after it exits: run: completed; promoted 8, reclaimed 0 (0 bytes)
+after it exits: run: completed; promoted 10, reclaimed 1 (4 bytes)
 run: busy
 after a publish lock, another process: busy
 

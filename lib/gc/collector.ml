@@ -8,7 +8,7 @@ type main = {
   tells : Composite.member list;
 }
 
-type failure = Unsupported of string | Busy
+type failure = Unsupported of string | Busy | Refused of string
 
 type outcome =
   | Completed
@@ -26,6 +26,7 @@ type stats = {
   chunks_cleared : int;
   chunks_reclaimed : int;
   bytes_reclaimed : int;
+  versions_expired : int;
 }
 
 type expiry = {
@@ -51,6 +52,7 @@ type survey = {
 let delete_batch = 1000
 
 exception Halt of string
+exception Refused_expiry of string
 
 (* gc.md §5.2: every collectable main is collected; the first tells copies. *)
 let targets composite =
@@ -155,6 +157,7 @@ type counters = {
   mutable cleared : int;
   mutable reclaimed : int;
   mutable bytes : int;
+  mutable expired : int;
   checked : Chunk_set.t;  (** verified by this process's run *)
 }
 
@@ -169,6 +172,7 @@ let counters () =
     cleared = 0;
     reclaimed = 0;
     bytes = 0;
+    expired = 0;
   }
 
 (* §5.5: reads the collected main alone, files or clears the marker, never
@@ -369,7 +373,65 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
         Narrate.say nr "%s: opening a collection run on %s" m.member.name m.root
 
 (* One session on one main, under its run lock (§5.5). *)
-let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
+(* §5.5: X is written before the run's first record, and an open run keeps
+   the set it opened with. *)
+let expiry_set nr m d ~r0 ~(plan : Gc_plan.start) expiring =
+  let store = m.member.store in
+  match r0 with
+    | Gc_record.Absent -> (
+        Gc_record.clear_expiry store d;
+        match (plan, expiring) with
+          | Open _, Some keys ->
+              Gc_record.write_expiry store d keys;
+              keys
+          | _ -> [])
+    | _ -> (
+        let x0 = Option.value ~default:[] (Gc_record.read_expiry store d) in
+        let held = Hashtbl.create (List.length x0) in
+        List.iter (fun k -> Hashtbl.replace held k ()) x0;
+        match expiring with
+          | Some keys when not (List.for_all (Hashtbl.mem held) keys) ->
+              raise
+                (Refused_expiry
+                   (Printf.sprintf
+                      "%s: the open run expires %s; this expiry names others: \
+                       finish that run (gc --apply) or abandon it (gc --abort) \
+                       first"
+                      m.member.name
+                      (if x0 = [] then "nothing"
+                       else Narrate.count (List.length x0) "version")))
+          | _ ->
+              if x0 <> [] then
+                Narrate.say nr "  the open run expires %s as it marks"
+                  (Narrate.count (List.length x0) "version");
+              x0)
+
+(* The expiring keys by the version-group tag [v/<folder id>] marking
+   visits. *)
+let by_group d keys =
+  let groups = Hashtbl.create 64 in
+  List.iter
+    (fun k ->
+      match String.split_on_char '/' (Key.rel (Key.versions d) k) with
+        | folder :: _ :: _ ->
+            let tag = "v/" ^ folder in
+            Hashtbl.replace groups tag
+              (k :: Option.value ~default:[] (Hashtbl.find_opt groups tag))
+        | _ -> ())
+    keys;
+  groups
+
+(* §5.5: a version group's expiring keys go before it is listed. *)
+let expire_group composite groups n ns =
+  match Hashtbl.find_opt groups ns with
+    | None -> ()
+    | Some keys ->
+        (Composite.store composite).delete_multi keys;
+        Retention.remove_empty_groups composite keys;
+        n.expired <- n.expired + List.length keys
+
+let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
+    composite d m =
   let n = counters () in
   let t0 = Rt.now () in
   let deadline = Option.map (fun b -> Rt.now () +. b) budget in
@@ -382,6 +444,9 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
     Option.iter Rt.sleep pause
   in
   let r0 = Gc_record.read m.member.store d in
+  let groups =
+    by_group d (expiry_set nr m d ~r0 ~plan:(Gc_plan.start ~r0 ~keep) expiring)
+  in
   let started =
     match r0 with Record r -> r.started | _ -> Unix.gettimeofday ()
   in
@@ -427,6 +492,7 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
           else (
             Fs.rm_rf (outgoing m d);
             Gc_record.clear m.member.store d;
+            Gc_record.clear_expiry m.member.store d;
             Narrate.say nr
               "%s: abandoned in %s; every chunk is back and the run record is \
                removed"
@@ -437,11 +503,15 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
   let finish g =
     Fs.rm_rf (outgoing m d);
     Gc_record.clear m.member.store d;
+    Gc_record.clear_expiry m.member.store d;
     settle m d composite;
-    Narrate.say nr "%s: run complete in %s: %s deleted (%s)" m.member.name
+    Narrate.say nr "%s: run complete in %s: %s deleted (%s)%s" m.member.name
       (Narrate.duration (Rt.now () -. t0))
       (Narrate.count n.reclaimed "chunk")
-      (Narrate.size n.bytes);
+      (Narrate.size n.bytes)
+      (if n.expired > 0 then
+         Printf.sprintf ", %s expired" (Narrate.count n.expired "version")
+       else "");
     (match generation m d with
       | Some g' when g' mod 2 = 0 ->
           Narrate.say nr "  generation %d: every deletion has settled" g'
@@ -578,6 +648,7 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
                           chunks kept so far"
                          i total n.promoted))
                 ~write:(fun ns ->
+                  expire_group composite groups n ns;
                   mark m d n ~verify ns;
                   record m d
                     { phase = Marking; started; cursor = ns; generation = None })
@@ -632,6 +703,7 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
     chunks_cleared = n.cleared;
     chunks_reclaimed = n.reclaimed;
     bytes_reclaimed = n.bytes;
+    versions_expired = n.expired;
   }
 
 let each composite f =
@@ -691,7 +763,7 @@ let direct_deletes_refused composite =
           m.tells
     | [] -> []
 
-let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
+let run ?budget ?pause ?expiring ?(narrate = Narrate.none) ?(verify = false)
     ?(keep = false) ?(cancelled = Fun.const false) composite =
   let d = Composite.domain composite in
   match direct_deletes_refused composite with
@@ -703,9 +775,12 @@ let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
                  be sent one delete request per chunk (gc --probe)"
                 (String.concat ", "
                    (List.map (fun (c : Composite.member) -> c.name) copies))))
-    | _ ->
-        each composite
-          (session ?budget ?pause ~narrate ~verify ~keep ~cancelled composite d)
+    | _ -> (
+        try
+          each composite
+            (session ?budget ?pause ?expiring ~narrate ~verify ~keep ~cancelled
+               composite d)
+        with Refused_expiry reason -> Error (Refused reason))
 
 (* §5.9 on a main of millions of chunks: one packed set of referenced chunks,
    each taken out once a shard listing shows it, and the chunk area read one

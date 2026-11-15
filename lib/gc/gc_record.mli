@@ -32,3 +32,11 @@ val clear : Store.t -> Domain_name.t -> unit
 
 (** [started × 1000], rounded, 13 digits. *)
 val run_name : t -> string
+
+(** The run's expiry set X (gc.md §3, §5.5), beside R: the version keys the run
+    deletes before marking their groups. Written before R, cleared after it; an
+    X without R is stale. *)
+val read_expiry : Store.t -> Domain_name.t -> Key.t list option
+
+val write_expiry : Store.t -> Domain_name.t -> Key.t list -> unit
+val clear_expiry : Store.t -> Domain_name.t -> unit

@@ -44,6 +44,7 @@ let takeover d n ~generation =
 
 let void d n = Printf.sprintf "%s%d-void" (takeovers d) n
 let gc_run d = domain_prefix d ^ "gc-run"
+let gc_expiry d = domain_prefix d ^ "gc-expiry"
 let gc_generation d = domain_prefix d ^ "gc-generation"
 let gc_lock d = domain_prefix d ^ "gc-run.lock"
 let gc_publish_lock d = domain_prefix d ^ "gc-publish.lock"

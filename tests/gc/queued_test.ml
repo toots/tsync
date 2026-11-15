@@ -144,6 +144,7 @@ let () =
           | Ok _ -> "several mains"
           | Error (Unsupported r) -> "refused: " ^ r
           | Error Busy -> "busy"
+          | Error (Refused r) -> "refused: " ^ r
       in
       let outstanding () =
         String.concat ", "
