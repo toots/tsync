@@ -422,7 +422,8 @@ let create ?(verify_writes = true) ~name root =
       list_many = None;
       bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
-      fast_read = mappable;
+      (* A local disk read by position is still cheap: 06 §3.9 asks a filesystem. *)
+      fast_read = (fun () -> not (Fs.is_network_fs root));
       locality = Local;
       local_path = Some root;
       health;
