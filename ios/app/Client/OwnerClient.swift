@@ -9,6 +9,19 @@ enum OwnerClient {
     static let deadline: TimeInterval = 30
 
     private static let lock = NSLock()
+    /// Calls block their thread: never one of Swift concurrency's few.
+    private static let calls = DispatchQueue(label: "owner calls", attributes: .concurrent)
+
+    /// `call`, waited for without holding a cooperative thread.
+    static func ask(_ request: [String: Any], bulk: Bool = false) async throws -> [String: Any] {
+        nonisolated(unsafe) let request = request
+        let reply = try await withCheckedThrowingContinuation { (done: CheckedContinuation<Reply, Error>) in
+            calls.async { done.resume(with: Result { Reply(object: try call(request, bulk: bulk)) }) }
+        }
+        return reply.object
+    }
+
+    private struct Reply: @unchecked Sendable { let object: [String: Any] }
     private static var connections: [String: NSXPCConnection] = [:]
 
     /// One request naming its domain (`domain`). A bulk action waits for its
@@ -65,9 +78,12 @@ enum OwnerClient {
         }
         connection.resume()
         lock.lock()
-        connections[domain] = connection
+        // Two first calls connected at once: the first one kept wins.
+        let winner = connections[domain] ?? connection
+        connections[domain] = winner
         lock.unlock()
-        return connection
+        if winner !== connection { connection.invalidate() }
+        return winner
     }
 
     /// The framework's domain of a display name; turned off in Files, no

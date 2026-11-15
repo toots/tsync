@@ -199,7 +199,7 @@ enum FileStore {
         request["action"] = action
         request["domain"] = domain
         let bulk = ["restore", "evict"].contains(action)
-        return try await Task.detached { try OwnerClient.call(request, bulk: bulk) }.value
+        return try await OwnerClient.ask(request, bulk: bulk)
     }
 
     /// share: the URL and when it expires.

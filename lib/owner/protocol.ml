@@ -892,9 +892,9 @@ let decode j =
               match
                 Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet b
               with
-                | Ok k -> k
-                | Error _ -> Fail.invalid "a KEK is base64url")
-          | _ -> Fail.invalid "a KEK is base64url"
+                | Ok k when String.length k = 32 -> k
+                | _ -> Fail.invalid "a KEK is b64url of 32 bytes")
+          | _ -> Fail.invalid "a KEK is b64url of 32 bytes"
         in
         Request
           (Vault_unlock

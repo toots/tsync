@@ -199,6 +199,8 @@ let derived () =
           unlock_keks ~secret_key "unlock, a slot the keyring lacks"
             (List.map (fun (_, k) -> ("0123456789abcdef", k)) wrong);
           unlock_keks ~secret_key "unlock, no keks" [];
+          unlock_keks ~secret_key "unlock, a short KEK"
+            (List.map (fun (id, k) -> (id, String.sub k 0 16)) wrong);
           let keks = keks_of "derive" (derive passphrase) in
           unlock_keks ~secret_key "unlock, enrolling" keks;
           status "status";

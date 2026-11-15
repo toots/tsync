@@ -52,9 +52,14 @@ final class OwnerServiceSource: NSObject, NSFileProviderServiceSource, NSXPCList
         return true
     }
 
+    /// ios.md §5.4: in constant time.
+    private static func same(_ a: Data, _ b: Data) -> Bool {
+        a.count == b.count && zip(a, b).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+
     func request(_ token: Data, _ json: Data, reply: @escaping (Data) -> Void) {
         // Only a holder of the App Group reads the token.
-        guard let mine = self.token, token == mine else {
+        guard let mine = self.token, Self.same(token, mine) else {
             reply(Service.refusal("denied", "this caller does not hold the app group"))
             NSXPCConnection.current()?.invalidate()
             return

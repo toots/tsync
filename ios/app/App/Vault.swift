@@ -159,7 +159,8 @@ final class VaultModel: ObservableObject {
         var request = fields
         request["action"] = action
         request["domain"] = domain
-        return try await Task.detached { try OwnerClient.call(request) }.value
+        // 07 §4.3: an unlock is a bulk action, waited for past the deadline.
+        return try await OwnerClient.ask(request, bulk: action == "vault_unlock")
     }
 
     /// passwords/ios §4.

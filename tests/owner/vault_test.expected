@@ -77,6 +77,7 @@ slots                              1 slots, enrolled=false
 unlock, a wrong passphrase's     denied: wrong passphrase
 unlock, a slot the keyring lacks invalid: the keyring changed: ask for its slots again
 unlock, no keks                  invalid: the keyring changed: ask for its slots again
+unlock, a short KEK              invalid: a KEK is b64url of 32 bytes
 slots                              1 slots, enrolled=false
 unlock, enrolling                ok
 status                             unlocked enrolled cached=memory slots={"secret-key":1}
