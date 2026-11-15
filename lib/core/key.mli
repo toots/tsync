@@ -130,6 +130,12 @@ val marker_of : t -> t option
 (** A surviving-space chunk key of any domain, split. *)
 val chunk_parts : t -> (Domain_name.t * Chunk_key.t) option
 
+(** A version key of any domain, split: its history group is the folder id and
+    the dual digest of the name (data-model/backend §2.9). *)
+type version_parts = { folder : string; digest : string; ns : int64 }
+
+val version_parts : t -> version_parts option
+
 (** An outgoing-space chunk key of any domain, split. *)
 val outgoing_chunk : t -> (Domain_name.t * Chunk_key.t) option
 

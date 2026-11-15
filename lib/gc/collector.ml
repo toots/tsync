@@ -408,16 +408,16 @@ let expiry_set nr m d ~r0 ~(plan : Gc_plan.start) expiring =
 
 (* The expiring keys by the version-group tag [v/<folder id>] marking
    visits. *)
-let by_group d keys =
+let by_group keys =
   let groups = Hashtbl.create 64 in
   List.iter
     (fun k ->
-      match String.split_on_char '/' (Key.rel (Key.versions d) k) with
-        | folder :: _ :: _ ->
-            let tag = "v/" ^ folder in
+      match Key.version_parts k with
+        | Some v ->
+            let tag = "v/" ^ v.folder in
             Hashtbl.replace groups tag
               (k :: Option.value ~default:[] (Hashtbl.find_opt groups tag))
-        | _ -> ())
+        | None -> ())
     keys;
   groups
 
@@ -445,7 +445,7 @@ let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
   in
   let r0 = Gc_record.read m.member.store d in
   let groups =
-    by_group d (expiry_set nr m d ~r0 ~plan:(Gc_plan.start ~r0 ~keep) expiring)
+    by_group (expiry_set nr m d ~r0 ~plan:(Gc_plan.start ~r0 ~keep) expiring)
   in
   let started =
     match r0 with Record r -> r.started | _ -> Unix.gettimeofday ()

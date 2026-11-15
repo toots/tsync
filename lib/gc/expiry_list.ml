@@ -116,20 +116,17 @@ type resolution = {
   warnings : (int * string) list;
 }
 
-(* A version key is [versions/<folder id>/<dual digest of the name>/<ns>]
-   (data-model/backend §2.9): a line resolves without reading any body. *)
+(* A version key carries its folder id and name digest (Key.version_parts): a
+   line resolves without reading any body. *)
 let resolve ~domain ~folder_path ~versions listing =
-  let prefix = Key.versions domain in
   let by_ns = Hashtbl.create 1024 in
   List.iter
     (fun k ->
-      if Key.under prefix k then (
-        match String.split_on_char '/' (Key.rel prefix k) with
-          | [folder; digest; ns] ->
-              Option.iter
-                (fun ns -> Hashtbl.add by_ns ns (folder, digest, k))
-                (Int64.of_string_opt ns)
-          | _ -> ()))
+      if Key.under (Key.versions domain) k then
+        Option.iter
+          (fun (v : Key.version_parts) ->
+            Hashtbl.add by_ns v.ns (v.folder, v.digest, k))
+          (Key.version_parts k))
     versions;
   let paths = Hashtbl.create 64 in
   let current folder =
@@ -225,22 +222,20 @@ module Make (C : Tsync_remote.Context.S) = struct
   (* Expired version keys as list entries; a version whose body does not read
      has no name to list it under. *)
   let entries keys =
-    let prefix = Key.versions C.domain in
     let folders = Hashtbl.create 64 in
-    let folder group =
-      match Hashtbl.find_opt folders group with
+    let folder id =
+      match Hashtbl.find_opt folders id with
         | Some f -> f
         | None ->
-            let f = Option.bind (group_folder group) folder_path in
-            Hashtbl.replace folders group f;
+            let f = Option.bind (Folder_id.of_string id) folder_path in
+            Hashtbl.replace folders id f;
             f
     in
     List.fold_left
       (fun (listed, unreadable) k ->
-        let group, ns = Key.split_last (Key.rel prefix k) in
-        match (Int64.of_string_opt ns, manifest k) with
-          | Some ns, Some m ->
-              (entry ?folder:(folder group) ~ns m :: listed, unreadable)
+        match (Key.version_parts k, manifest k) with
+          | Some v, Some m ->
+              (entry ?folder:(folder v.folder) ~ns:v.ns m :: listed, unreadable)
           | _ -> (listed, k :: unreadable))
       ([], []) keys
     |> fun (listed, unreadable) -> (List.rev listed, List.rev unreadable)

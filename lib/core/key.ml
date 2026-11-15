@@ -135,6 +135,15 @@ let chunk_in space k =
     | _ -> None
 
 let chunk_parts k = chunk_in "chunks" k
+
+type version_parts = { folder : string; digest : string; ns : int64 }
+
+let version_parts k =
+  match area k with
+    | Some (_, "versions", [folder; digest; ns]) ->
+        Option.map (fun ns -> { folder; digest; ns }) (Int64.of_string_opt ns)
+    | _ -> None
+
 let chunk_of k = Option.map snd (chunk_parts k)
 let outgoing_chunk k = chunk_in "chunks.from" k
 
