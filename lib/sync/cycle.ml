@@ -1332,7 +1332,9 @@ module Make (C : Engine_ctx.S) = struct
          folders [])
 
   (* The held folders, from the list when no folder moved since its walk. *)
-  let held () =
+  (* A folder moved during the walk may sit where the walk did not look for it:
+     the walk is done again until no move lands in it. *)
+  let rec held ?(attempts = 3) () =
     let known =
       Mutex.protect held_m (fun () ->
           match !held_list with
@@ -1357,10 +1359,16 @@ module Make (C : Engine_ctx.S) = struct
                   marker = marker_ms dir;
                 })
             (walk_held ());
+          let moved = Mirror.folders_moved mirror <> moves in
           Mutex.protect held_m (fun () ->
-              if !held_writes = writes && Mirror.folders_moved mirror = moves
-              then held_list := Some { folders; moves });
-          copy_held folders
+              if !held_writes = writes && not moved then
+                held_list := Some { folders; moves });
+          if not moved then copy_held folders
+          else if attempts > 1 then held ~attempts:(attempts - 1) ()
+          else
+            Fail.raise_ Fail.Local
+              "folders kept moving while the held ones were walked: the next \
+               refresh walks again"
 
   (* The folders a command changes the children of. *)
   let touched : Log_entry.command -> Folder_id.t list = function
@@ -1386,7 +1394,16 @@ module Make (C : Engine_ctx.S) = struct
     let changed = ref [] in
     let entries_read = ref 0 in
     let note dir n = if n > 0 then changed := dir :: !changed in
-    let alone dir = if pull_folder ~page dir then changed := dir :: !changed in
+    (* A folder this pass's pages removed or moved is no longer there to
+       pull; any other failure ends the pass, as a page's would. *)
+    let alone dir =
+      if not (stop ()) then
+        match pull_folder ~page dir with
+          | true -> changed := dir :: !changed
+          | false -> ()
+          | exception Fail.E { kind = Unprepared | Absent; reason; _ } ->
+              Log.debug "pass: %s left out: %s" dir reason
+    in
     let views, unpositioned =
       List.partition_map
         (fun (dir, (h : held_folder)) ->

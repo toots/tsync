@@ -279,6 +279,31 @@ let () =
               (List.map
                  (fun (r : Push.registration) -> r.token)
                  (Push.registrations push d))));
+      p "\n== a token renewed while its push waits\n";
+      let b = List.hd others in
+      Rt.sleep 0.6;
+      Push.changed push d ~author;
+      Rt.sleep 0.1;
+      ignore (take ());
+      (* The next push waits out the interval, for the token it was due to. *)
+      Hashtbl.replace answers (token b) (410, {|{"reason":"Unregistered"}|});
+      Push.changed push d ~author;
+      Push.register push d
+        {
+          client = b;
+          token = "70beef";
+          environment = `Development;
+          fp_domain = "d-fp";
+          registered = Unix.gettimeofday ();
+        };
+      Rt.sleep 0.8;
+      p "pushed to: %s\n" (tokens (take ()));
+      p "registered: %s\n"
+        (String.concat " "
+           (List.sort compare
+              (List.map
+                 (fun (r : Push.registration) -> r.token)
+                 (Push.registrations push d))));
       p "\n== a restart\n";
       let again = make () in
       p "registered: %s\n"

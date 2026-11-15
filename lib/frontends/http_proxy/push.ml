@@ -43,6 +43,7 @@ type t = {
   options : options;
   signer : Dsa.priv;
   post : Tsync_http.Http2.post;
+  sending : Rt.Semaphore.t;
   count : string -> unit;
   dir : string;
   lock : Mutex.t;
@@ -161,6 +162,7 @@ let create ?(params = default_params) ~count ~dir options domains =
       options;
       signer = read_key options.key;
       post;
+      sending = Rt.Semaphore.create ~name:"push" 1;
       count;
       dir;
       lock = Mutex.create ();
@@ -226,14 +228,23 @@ let registrations t domain =
     (clients t (Domain_name.to_string domain))
     []
 
-let drop t domain client why =
-  Mutex.protect t.lock (fun () ->
-      let c = clients t domain in
-      if Hashtbl.mem c client then (
-        Hashtbl.remove c client;
-        save t domain c));
-  t.count "pushDropped";
-  Log.info "push: %s: dropped the registration of %s (%s)" domain client why
+(* Only the token APNs refused: the client may have registered a new one
+   while the push was on its way. *)
+let drop t domain (r : registration) why =
+  let client = r.client in
+  let dropped =
+    Mutex.protect t.lock (fun () ->
+        let c = clients t domain in
+        match Hashtbl.find_opt c client with
+          | Some stored when stored.token = r.token ->
+              Hashtbl.remove c client;
+              save t domain c;
+              true
+          | _ -> false)
+  in
+  if dropped then (
+    t.count "pushDropped";
+    Log.info "push: %s: dropped the registration of %s (%s)" domain client why)
 
 (* APNs answers a failure as {"reason": …}. *)
 let reason body =
@@ -254,6 +265,10 @@ let send t domain (r : registration) =
          ])
   in
   match
+    (* One push in flight, as may-block work; the others wait as fibers,
+       holding no thread. *)
+    Rt.Semaphore.with_slot t.sending @@ fun () ->
+    Rt.within `Threaded @@ fun () ->
     t.post ~url
       ~headers:
         [
@@ -264,9 +279,9 @@ let send t domain (r : registration) =
       body
   with
     | { status = 200; _ } -> t.count "pushSent"
-    | { status = 410; _ } -> drop t domain r.client "APNs: the token is gone"
+    | { status = 410; _ } -> drop t domain r "APNs: the token is gone"
     | { status = 400; body } when reason body = "BadDeviceToken" ->
-        drop t domain r.client "APNs: BadDeviceToken"
+        drop t domain r "APNs: BadDeviceToken"
     | { status; body } ->
         t.count "pushFailed";
         Log.warn "push: %s: APNs answered %d to %s: %s" domain status r.client
@@ -312,5 +327,5 @@ let changed t domain ~author =
             else (r :: live, stale))
           (clients t domain) ([], []))
   in
-  List.iter (fun r -> drop t domain r.client "not renewed") stale;
+  List.iter (fun r -> drop t domain r "not renewed") stale;
   List.iter (due t domain) live

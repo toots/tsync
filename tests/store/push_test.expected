@@ -34,14 +34,18 @@ pushed to: 70aaaa 70cccc
 pushed to: 70bbbb 70cccc
 registered: 70aaaa 70bbbb
 
+== a token renewed while its push waits
+pushed to: 70bbbb
+registered: 70aaaa 70beef
+
 == a restart
-registered: 70aaaa 70bbbb
+registered: 70aaaa 70beef
 
 == a registration not renewed
 pushed to: 
 registered: 0
 
 == counters
-pushSent: 7
+pushSent: 8
 pushFailed: 0
 pushDropped: 3

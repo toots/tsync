@@ -1,3 +1,4 @@
+import CryptoKit
 import FileProvider
 import Foundation
 import UIKit
@@ -120,8 +121,7 @@ enum Configs {
             return "the config does not encode"
         }
         if let refusal = write(data) { return refusal }
-        UserDefaults.standard.set(
-            try? JSONSerialization.data(withJSONObject: removed), forKey: keptKey(name))
+        UserDefaults.standard.set(digest(removed), forKey: keptKey(name))
         return nil
     }
 
@@ -133,14 +133,20 @@ enum Configs {
             guard let name = domain["name"] as? String else { return nil }
             let key = keptKey(name)
             defer { UserDefaults.standard.removeObject(forKey: key) }
-            guard let data = UserDefaults.standard.data(forKey: key),
-                let kept = try? JSONSerialization.jsonObject(with: data) as? NSDictionary
-            else { return nil }
-            return kept.isEqual(to: domain) ? nil : name
+            guard let kept = UserDefaults.standard.data(forKey: key) else { return nil }
+            return kept == digest(domain) ? nil : name
         }
     }
 
     private static func keptKey(_ name: String) -> String { "removed-domain." + name }
+
+    /// ios-app.md §5: what is kept of a removed entry, which holds its secret.
+    private static func digest(_ entry: [String: Any]) -> Data? {
+        guard let json = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else {
+            return nil
+        }
+        return Data(SHA256.hash(data: json))
+    }
 
     private static func deviceName() -> String {
         let name = UIDevice.current.name.trimmingCharacters(in: .whitespaces)

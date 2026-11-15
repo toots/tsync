@@ -30,8 +30,15 @@ type t = {
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
   offline : bool Atomic.t;
-  pass : Protocol.pass_summary option Rt.Promise.t option Atomic.t;
-      (** the refresh pass running *)
+  passes : passes;
+  passes_m : Mutex.t;
+}
+
+(* android §3.2: the pass running, and the one that follows it for the
+   refreshes made meanwhile. *)
+and passes = {
+  mutable running : Protocol.pass_summary option Rt.Promise.t option;
+  mutable queued : Protocol.pass_summary option Rt.Promise.t option;
 }
 
 type view = { pulled_at : float option; outdated : bool }
@@ -47,7 +54,8 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
     offline = Atomic.make false;
-    pass = Atomic.make None;
+    passes = { running = None; queued = None };
+    passes_m = Mutex.create ();
   }
 
 let note_unreachable t = Atomic.set t.offline true
@@ -234,22 +242,51 @@ let run_pass t : Protocol.pass_summary =
           error = Some (Printexc.to_string e);
         }
 
+(* Each pass resolves its promise, then starts the queued one, if any. *)
+let rec start_pass t mine =
+  Rt.spawn ~name:"refresh pass" (fun () ->
+      let next = ref None in
+      Fun.protect
+        ~finally:(fun () ->
+          ignore (Rt.Promise.try_resolve mine None);
+          Option.iter (start_pass t) !next)
+        (fun () ->
+          let result =
+            try Some (run_pass t)
+            with e ->
+              (* A cancelled pass gives up its successor too. *)
+              Mutex.protect t.passes_m (fun () ->
+                  Option.iter
+                    (fun q -> ignore (Rt.Promise.try_resolve q None))
+                    t.passes.queued;
+                  t.passes.running <- None;
+                  t.passes.queued <- None);
+              raise e
+          in
+          Mutex.protect t.passes_m (fun () ->
+              t.passes.running <- t.passes.queued;
+              next := t.passes.queued;
+              t.passes.queued <- None);
+          ignore (Rt.Promise.try_resolve mine result)))
+
+(* A refresh made while a pass runs waits for the next one, which reads what
+   landed after the running one read the log. *)
 let refresh t =
-  let mine = Rt.Promise.create () in
-  let pass =
-    if Atomic.compare_and_set t.pass None (Some mine) then (
-      Rt.spawn ~name:"refresh pass" (fun () ->
-          Fun.protect
-            ~finally:(fun () ->
-              Atomic.set t.pass None;
-              ignore (Rt.Promise.try_resolve mine None))
-            (fun () -> ignore (Rt.Promise.try_resolve mine (Some (run_pass t)))));
-      Some mine)
-    else Atomic.get t.pass
+  let pass, starts =
+    Mutex.protect t.passes_m (fun () ->
+        match t.passes with
+          | { running = None; _ } ->
+              let p = Rt.Promise.create () in
+              t.passes.running <- Some p;
+              (p, true)
+          | { queued = Some q; _ } -> (q, false)
+          | { queued = None; _ } ->
+              let q = Rt.Promise.create () in
+              t.passes.queued <- Some q;
+              (q, false))
   in
+  if starts then start_pass t pass;
   (* ios §5.1: the host is kept running while this request is pending. *)
-  Option.bind pass (fun pass ->
-      try
-        Rt.with_timeout t.params.refresh_patience (fun () ->
-            Rt.Promise.await pass)
-      with Rt.Timeout -> None)
+  try
+    Rt.with_timeout t.params.refresh_patience (fun () -> Rt.Promise.await pass)
+  with Rt.Timeout -> None

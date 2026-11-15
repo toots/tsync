@@ -26,6 +26,8 @@ let post ~url ~headers body =
   Curl.set_postfieldsize h (String.length body);
   Curl.set_httpheader h (List.map (fun (k, v) -> k ^ ": " ^ v) headers);
   Curl.set_timeout h 30;
+  (* A process with threads: libcurl must not time out through signals. *)
+  Curl.set_nosignal h true;
   Curl.set_writefunction h (fun s ->
       Buffer.add_string answer s;
       String.length s);

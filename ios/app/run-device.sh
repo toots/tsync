@@ -44,6 +44,16 @@ if [[ -z ${udid:-} ]]; then
   exit 1
 fi
 
+# The secret goes through a private file: a command line shows in ps and in
+# xcodebuild's log.
+test_settings=$(mktemp -t tsync-test-server)
+chmod 600 "$test_settings"
+trap 'rm -f "$test_settings"' EXIT
+# xcconfig reads // as a comment: /$()/ spells it.
+xcconfig_value() { local slashes='//' spelled='/$()/'; print -r -- "${1//$slashes/$spelled}" }
+printf 'TSYNC_TEST_SERVER_URL = %s\nTSYNC_TEST_SERVER_SECRET = %s\n' \
+  "$(xcconfig_value "$test_url")" "$(xcconfig_value "$test_secret")" > "$test_settings"
+
 log "generating the Xcode project"
 xcodegen generate > /tmp/tsync-xcodegen.log 2>&1 || { cat /tmp/tsync-xcodegen.log; exit 1 }
 log "building Release for $udid (registering it with the team if needed)"
@@ -51,7 +61,7 @@ if ! xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration 
     -destination "id=$udid" -derivedDataPath ~/sources/tsync-ios-dd \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
     TSYNC_COMMIT=$(git rev-parse --short=12 HEAD) TSYNC_DEVELOPMENT=YES \
-    TSYNC_TEST_SERVER_URL="$test_url" TSYNC_TEST_SERVER_SECRET="$test_secret" \
+    -xcconfig "$test_settings" \
     build > /tmp/tsync-xcodebuild.log 2>&1; then
   grep -E "error:" /tmp/tsync-xcodebuild.log | sort -u
   log "build failed; full log in /tmp/tsync-xcodebuild.log"
