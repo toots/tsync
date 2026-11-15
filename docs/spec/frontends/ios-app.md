@@ -106,7 +106,10 @@ the framework's domain-change notification.
     name again, two uploads of one file (the second numbered), a rename onto a taken name and one
     that succeeds, a move into a subfolder, a remove download and a delete. Each step's outcome
     and the verdict go to `browsertest.log` in the App Group, copied to the app's Documents like
-    the footprint log. Launching a development build with `-browsertest` runs it too;
+    the footprint log. Launching a development build with `-browsertest` runs it too. It adds the
+    local test domain as **Add a local test domain** does, and starts once the app's registration
+    pass has registered it. It never registers the domain itself: on a fresh install, a pass that
+    has not yet recorded the identity scheme removes every domain it finds;
   - **Walk every domain**, which lists every folder of every domain through the file system, so
     that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
     thousands of held folders. It leaves out the system's `.Trash`, which the extension does not
