@@ -38,7 +38,7 @@
     <string name="action_share_link">Share link</string>
     <string name="action_make_available">Make available offline</string>
     <string name="action_keep_longer">Keep offline longer</string>
-    <string name="action_remove_download">Remove download</string>
+    <string name="action_remove_download">Make online-only</string>
     <string name="action_rename">Rename</string>
     <string name="action_move">Move</string>
     <string name="action_delete">Delete</string>

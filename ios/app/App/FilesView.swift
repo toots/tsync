@@ -332,9 +332,9 @@ struct FolderView: View {
             }
         }
         if item.state != .onlineOnly || item.pinned {
-            Button("Remove download") {
+            Button("Make online-only") {
                 Task {
-                    await folder.counted("Removed the download of \(item.name)") {
+                    await folder.counted("Made \(item.name) online-only") {
                         try await FileStore.removeDownload(item.url, domain: domain)
                     }
                 }
