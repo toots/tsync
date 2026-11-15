@@ -482,6 +482,9 @@ let () =
       in
       p "a provider ignoring If-Match: %s\n" (replace lax "tsync/lax/replaced");
       p "a provider honouring it: %s\n" (replace s "tsync/d/wire/replaced");
-      p "every request signed correctly: %b (%d requests)\n"
-        (!bad_signatures = 0) !signed;
+      (* A retried request is signed again: the count is a floor. *)
+      p "every request signed correctly: %b (%s)\n"
+        (!bad_signatures = 0)
+        (if !signed >= 31 then "31 requests or more"
+         else Printf.sprintf "only %d requests" !signed);
       Server.close server)

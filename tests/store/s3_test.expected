@@ -68,4 +68,4 @@ and again: refused/other, s3: this store ignores If-None-Match, so it cannot cla
 a provider honouring it: won
 a provider ignoring If-Match: refused/other, s3: this store ignores If-Match, so it cannot replace conditionally
 a provider honouring it: written
-every request signed correctly: true (31 requests)
+every request signed correctly: true (31 requests or more)
