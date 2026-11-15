@@ -471,7 +471,15 @@ let write_backup_key engine ~key_id ~key text =
 let secret ~key_id secret_key : Protocol.secret =
   { secret_key = Secret_key.to_string secret_key; key_id }
 
+(* vault §6.4: a host whose owner cannot afford Argon2id, whose caller derives
+   instead. Every derivation starts from a typed passphrase. *)
+let derives = Atomic.make true
+let no_derivation () = Atomic.set derives false
+
 let chosen typed =
+  if not (Atomic.get derives) then
+    Fail.invalid
+      "this device derives the vault's keys in the tsync app: unlock from there";
   match Passphrase.of_typed typed with
     | Ok passphrase -> passphrase
     | Error reason -> Fail.invalid "%s" reason
@@ -607,33 +615,60 @@ let current ?(strict = false) ?pull:mode ~domain engine ~lazy_tree t =
 
 (* vault §6: the secret key given, else the one this machine is enrolled
    with. *)
+let typed_secret_key typed =
+  match Secret_key.of_string typed with
+    | Some key -> key
+    | None -> Fail.invalid "a secret key is 26 characters in groups 5-5-5-5-6"
+
 let secret_key_of ?given t =
   match given with
-    | Some typed -> (
-        match Secret_key.of_string typed with
-          | Some key -> key
-          | None ->
-              Fail.invalid "a secret key is 26 characters in groups 5-5-5-5-6")
+    | Some typed -> typed_secret_key typed
     | None -> (
         match Atomic.get t.secret_key with
           | Some (_, key) -> key
           | None -> Fail.invalid "this machine needs the vault's secret key")
 
-(* vault §6: K from the slots of that secret key. *)
-let unwrap ?secret_key ~domain ~engine ~lazy_tree t typed =
+(* vault §4.2's refusals, wherever the slots are derived. *)
+let refused = function
+  | `Changed -> Fail.invalid "the keyring changed: ask for its slots again"
+  | `Wrong_secret_key ->
+      Fail.raise_ Denied "wrong secret key: it is not this vault's"
+  | `Unusable ids ->
+      Fail.invalid
+        "this machine's slots (%s) are outside this release's limits; unlock \
+         on a machine that can, and change the passphrase there"
+        (String.concat ", " ids)
+  | `Wrong_passphrase -> Fail.raise_ Denied "wrong passphrase"
+
+(* vault §6: K from the slots of that secret key, derived here from the
+   passphrase or by the caller (§6.4). *)
+let unwrap ?secret_key ~domain ~engine ~lazy_tree t credential =
   let keyring = current ~domain engine ~lazy_tree t in
   let secret_key = secret_key_of ?given:secret_key t in
-  let passphrase = chosen typed in
-  match Keyring.unlock keyring ~secret_key passphrase with
+  match
+    match credential with
+      | `Passphrase typed ->
+          (Keyring.unlock keyring ~secret_key (chosen typed)
+            :> ( _,
+                 [ `Changed
+                 | `Unusable of _
+                 | `Wrong_passphrase
+                 | `Wrong_secret_key ] )
+               result)
+      | `Keks keks -> Keyring.unlock_with_keks keyring ~secret_key keks
+  with
     | Ok key -> (keyring, key, secret_key)
-    | Error `Wrong_secret_key ->
-        Fail.raise_ Denied "wrong secret key: it is not this vault's"
-    | Error (`Unusable ids) ->
-        Fail.invalid
-          "this machine's slots (%s) are outside this release's limits; unlock \
-           on a machine that can, and change the passphrase there"
-          (String.concat ", " ids)
-    | Error `Wrong_passphrase -> Fail.raise_ Denied "wrong passphrase"
+    | Error e -> refused e
+
+(* vault §6.4: the caller's half, in a process that owns nothing. *)
+let derive ~slots ~secret_key typed =
+  match
+    Keyring.derive slots
+      ~secret_key:(typed_secret_key secret_key)
+      (chosen typed)
+  with
+    | Ok keks -> keks
+    | Error e -> refused e
 
 (* vault §4.3: a machine holding a losing init's K moves every record sealed
    under it to the domain's K, then drops the keyring copies naming it. *)
@@ -673,12 +708,12 @@ let carry_retired ~from:(keyring, old_key) ~key next =
       (String.concat ", " lost);
   next
 
-let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
+let unlock ?secret_key ~domain ~engine ~lazy_tree t credential =
   let enrolls = secret_key <> None in
   check_uses ~domain ~engine;
   restore ~domain ~engine t;
   let keyring, key, secret_key =
-    unwrap ?secret_key ~domain ~engine ~lazy_tree t typed
+    unwrap ?secret_key ~domain ~engine ~lazy_tree t credential
   in
   (* §4.3: the old K is dropped only once its records are re-encrypted; a
      failure here leaves it held for the next unlock. *)
@@ -708,7 +743,7 @@ let unlock ?secret_key ~domain ~engine ~lazy_tree t typed =
 let confirm ~domain ~engine ~lazy_tree t typed =
   check_uses ~domain ~engine;
   restore ~domain ~engine t;
-  ignore (unwrap ~domain ~engine ~lazy_tree t typed)
+  ignore (unwrap ~domain ~engine ~lazy_tree t (`Passphrase typed))
 
 let lock ?(forget_secret_key = false) ~domain ~engine ~lazy_tree:_ t =
   check_uses ~domain ~engine;
@@ -840,7 +875,7 @@ let kit ~domain ~engine ~lazy_tree t typed =
   let keyring = current ~domain engine ~lazy_tree t in
   match Atomic.get t.secret_key with
     | Some (id, secret_key) when Keyring.enrolls keyring ~secret_key_id:id ->
-        ignore (unwrap ~domain ~engine ~lazy_tree t typed);
+        ignore (unwrap ~domain ~engine ~lazy_tree t (`Passphrase typed));
         secret ~key_id:keyring.key_id secret_key
     | _ ->
         Fail.raise_ Locked
@@ -856,7 +891,7 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
     | _ ->
         Fail.raise_ Locked
           "this machine is not enrolled: unlock it with the secret key");
-  ignore (unwrap ~domain ~engine ~lazy_tree t typed);
+  ignore (unwrap ~domain ~engine ~lazy_tree t (`Passphrase typed));
   let passphrase = chosen (Option.value ~default:typed new_passphrase) in
   let own =
     Option.join
@@ -1033,7 +1068,9 @@ let write_new path text =
 
 let export ~domain ~engine ~lazy_tree t ~path typed : Protocol.carried =
   let keyring, key = held ~strict:true ~domain ~engine ~lazy_tree t in
-  let _, _, secret_key = unwrap ~domain ~engine ~lazy_tree t typed in
+  let _, _, secret_key =
+    unwrap ~domain ~engine ~lazy_tree t (`Passphrase typed)
+  in
   let p, skipped = payload ~domain ~engine ~lazy_tree t (keyring, key) in
   write_new path
     (Tsync_vault.Export.seal_with_vault ~secret_key ~passphrase:(chosen typed) p);
@@ -1243,6 +1280,17 @@ let backup_tick ~(domain : Tsync_domain.Domain.t) ~engine ~lazy_tree t =
                     Log.warn "vault: no backup written: %s" reason;
                     Atomic.set t.backup_error (Some reason))
           | _ -> ())
+
+(* vault §6.4: what a caller derives for. *)
+let slots ~domain ~engine ~lazy_tree t =
+  check_uses ~domain ~engine;
+  restore ~domain ~engine t;
+  let keyring = current ~domain engine ~lazy_tree t in
+  [("keyId", `String keyring.key_id); ("slots", Keyring.slots_to_json keyring)]
+  @
+    match Atomic.get t.secret_key with
+    | Some (id, _) -> [("enrolled", `String id)]
+    | None -> []
 
 let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;

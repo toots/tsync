@@ -69,6 +69,29 @@ unlock, the passphrase alone     invalid: this machine needs the vault's secret 
 unlock, with the secret key      ok
 status                             unlocked enrolled cached=memory slots={"secret-key":1}
 owner exit status 0
+== deriving in the caller
+status                             locked not-enrolled slots={"secret-key":1}
+slots                              1 slots, enrolled=false
+derive, a wrong secret key         wrong secret key: it is not this vault's
+slots                              1 slots, enrolled=false
+unlock, a wrong passphrase's     denied: wrong passphrase
+unlock, a slot the keyring lacks invalid: the keyring changed: ask for its slots again
+unlock, no keks                  invalid: the keyring changed: ask for its slots again
+slots                              1 slots, enrolled=false
+unlock, enrolling                ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+lock                             ok
+slots                              1 slots, enrolled=true
+unlock, enrolled                 ok
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+lock                             ok
+== an owner that cannot derive
+unlock, the passphrase           invalid: this device derives the vault's keys in the tsync app: unlock from there
+kit                              invalid: this device derives the vault's keys in the tsync app: unlock from there
+unlock, keks derived elsewhere   ok
+passphrase change                invalid: this device derives the vault's keys in the tsync app: unlock from there
+status                             unlocked enrolled cached=memory slots={"secret-key":1}
+owner exit status 0
 == with a keystore: unlock
 status                             locked not-enrolled slots={"secret-key":1}
 unlock                           ok

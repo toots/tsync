@@ -119,7 +119,8 @@ let unlock_cmd =
             if (ask dom (P.Vault_status `Auto)).enrolled then None
             else Some (read_passphrase ~prompt:"secret key" ~stdin ())
           in
-          ask dom (P.Vault_unlock { passphrase; secret_key });
+          ask dom
+            (P.Vault_unlock { credential = `Passphrase passphrase; secret_key });
           say "unlocked";
           0)
       $ stdin_flag "the passphrase, then the secret key if needed,")

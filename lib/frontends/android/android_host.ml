@@ -337,6 +337,30 @@ let opened (stored : L.stored) (payload : L.payload) =
       ("about", about);
     ]
 
+(* android §5, vault §6.4: the caller's half of an unlock; it owns nothing. *)
+let vault_derive text =
+  let answer =
+    try
+      let open Yojson.Safe.Util in
+      let j = Yojson.Safe.from_string text in
+      let field k = to_string (member k j) in
+      let b64 =
+        Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      in
+      let keks =
+        Vault.derive
+          ~slots:(to_list (member "slots" j))
+          ~secret_key:(field "secretKey") (field "passphrase")
+      in
+      `Assoc
+        [
+          ( "keks",
+            `Assoc (List.map (fun (id, kek) -> (id, `String (b64 kek))) keks) );
+        ]
+    with e -> `Assoc [("error", `String (sentence e))]
+  in
+  Yojson.Safe.to_string answer
+
 let setup_link text =
   let answer =
     match

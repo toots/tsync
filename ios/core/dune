@@ -18,4 +18,5 @@
   tsync_store
   tsync_http_proxy_client
   tsync_http_apple
+  tsync_keychain
   threads.posix))

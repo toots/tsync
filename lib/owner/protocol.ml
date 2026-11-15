@@ -355,10 +355,13 @@ type _ request =
   | Stop : unit request
   | Vault_init : string -> secret request  (** the passphrase as typed *)
   | Vault_unlock : {
-      passphrase : string;
+      credential : [ `Passphrase of string | `Keks of (string * string) list ];
+          (** the passphrase as typed, or the caller's KEKs by slot id (vault
+              §6.4) *)
       secret_key : string option;
     }
       -> unit request
+  | Vault_slots : (string * Yojson.Safe.t) list request  (** vault §6.4 *)
   | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)
@@ -459,6 +462,7 @@ let action : type a. a request -> string = function
   | Stop -> "stop"
   | Vault_init _ -> "vault_init"
   | Vault_unlock _ -> "vault_unlock"
+  | Vault_slots -> "vault_slots"
   | Vault_lock _ -> "vault_lock"
   | Vault_appearance _ -> "vault_appearance"
   | Vault_passphrase _ -> "vault_passphrase"
@@ -603,8 +607,20 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
         ("fileProviderDomain", `String r.fp_domain);
       ]
   | Vault_unlock r ->
-      ("passphrase", `String r.passphrase)
+      (match r.credential with
+        | `Passphrase p -> ("passphrase", `String p)
+        | `Keks keks ->
+            ( "keks",
+              `Assoc
+                (List.map
+                   (fun (id, kek) ->
+                     ( id,
+                       `String
+                         (Base64.encode_string ~pad:false
+                            ~alphabet:Base64.uri_safe_alphabet kek) ))
+                   keks) ))
       :: opt "secretKey" (fun k -> `String k) r.secret_key
+  | Vault_slots -> []
   | Vault_lock `Lock -> []
   | Vault_lock `Forget -> [("forget", `Bool true)]
   | Vault_lock `Screen -> [("reason", `String "screen")]
@@ -871,12 +887,27 @@ let decode j =
     | "stop" -> Request Stop
     | "vault_init" -> Request (Vault_init (required j "passphrase"))
     | "vault_unlock" ->
+        let kek = function
+          | `String b -> (
+              match
+                Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet b
+              with
+                | Ok k -> k
+                | Error _ -> Fail.invalid "a KEK is base64url")
+          | _ -> Fail.invalid "a KEK is base64url"
+        in
         Request
           (Vault_unlock
              {
-               passphrase = required j "passphrase";
+               credential =
+                 (match member j "keks" with
+                   | Some (`Assoc l) ->
+                       `Keks (List.map (fun (id, b) -> (id, kek b)) l)
+                   | Some _ -> Fail.invalid "keks is an object"
+                   | None -> `Passphrase (required j "passphrase"));
                secret_key = str j "secretKey";
              })
+    | "vault_slots" -> Request Vault_slots
     | "vault_kit" -> Request (Vault_kit (required j "passphrase"))
     | "vault_export" ->
         Request
@@ -1170,6 +1201,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Totp_remove _ ->
         ok []
     | Extension _ -> ok reply
+    | Vault_slots -> ok reply
     | Push_register _ -> ok [("pushes", `Bool reply)]
     | Vault_delete _ -> ok (opt "keystoreLeft" (fun r -> `String r) reply)
     | Totp_add _ -> ok [("id", `String reply)]
@@ -1485,6 +1517,10 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   match req with
     | Ping -> ()
     | Extension _ -> (
+        match j with
+          | `Assoc l -> List.filter (fun (k, _) -> k <> "ok") l
+          | _ -> [])
+    | Vault_slots -> (
         match j with
           | `Assoc l -> List.filter (fun (k, _) -> k <> "ok") l
           | _ -> [])

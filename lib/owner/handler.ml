@@ -941,7 +941,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Vault_init passphrase -> on_vault (fun () -> vault Vault.init passphrase)
     | Vault_unlock r -> (
         on_vault (fun () ->
-            vault (Vault.unlock ?secret_key:r.secret_key) r.passphrase);
+            vault (Vault.unlock ?secret_key:r.secret_key) r.credential);
         (* The vault is unlocked whatever the fold does: one left now runs at
            the next verb. Its locks after the unlock's, in format-merge §6's
            order. pitfall A-4.18 *)
@@ -950,6 +950,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | e ->
               Log.warn "totp: the fold after unlock is left: %s"
                 (Fail.classify e).reason)
+    | Vault_slots -> on_vault (fun () -> vault Vault.slots)
     | Vault_lock `Screen -> on_vault (fun () -> vault Vault.screen_locked)
     | Vault_lock ((`Lock | `Forget) as how) ->
         on_vault (fun () ->

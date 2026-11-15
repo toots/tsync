@@ -293,27 +293,84 @@ let enrolls t ~secret_key_id =
     t.slots
 
 (* §4.2: a slot for another secret key is not derived for. *)
-let unlock t ~secret_key passphrase =
+let to_derive t ~secret_key =
   let secret_key_id = Secret_key.id secret_key in
-  let own = of_secret_key t ~secret_key_id in
-  let mine = derivable t ~secret_key_id in
-  if own = [] then Error `Wrong_secret_key
-  else if mine = [] then Error (`Unusable (List.map slot_id own))
-  else (
-    match
-      List.find_map
-        (function
-          | Secret_key { id; kdf; nonce; wrapped; _ } ->
-              Crypto.open_
-                ~key:(kek kdf ~secret_key passphrase)
-                ~nonce
-                ~ad:(slot_ad ~key_id:t.key_id id)
-                wrapped
-          | Unknown _ -> None)
-        mine
-    with
-      | Some key -> Ok key
-      | None -> Error `Wrong_passphrase)
+  match (of_secret_key t ~secret_key_id, derivable t ~secret_key_id) with
+    | [], _ -> Error `Wrong_secret_key
+    | own, [] -> Error (`Unusable (List.map slot_id own))
+    | _, mine -> Ok mine
+
+let open_slot t ~kek = function
+  | Secret_key { id; nonce; wrapped; _ } ->
+      Crypto.open_ ~key:kek ~nonce ~ad:(slot_ad ~key_id:t.key_id id) wrapped
+  | Unknown _ -> None
+
+let unlock t ~secret_key passphrase =
+  Result.bind (to_derive t ~secret_key) (fun mine ->
+      match
+        List.find_map
+          (function
+            | Secret_key { kdf; _ } as s ->
+                open_slot t ~kek:(kek kdf ~secret_key passphrase) s
+            | Unknown _ -> None)
+          mine
+      with
+        | Some key -> Ok key
+        | None -> Error `Wrong_passphrase)
+
+let slots_to_json t =
+  `List
+    (List.filter_map
+       (function
+         | Secret_key { id; secret_key_id; kdf; _ } ->
+             Some
+               (`Assoc
+                  [
+                    ("id", `String id);
+                    ("secretKeyId", `String secret_key_id);
+                    ("kdf", kdf_to_json kdf);
+                  ])
+         | Unknown _ -> None)
+       (sort_slots t.slots))
+
+(* §6.4: the slots stand in a keyring of their own, so the caller picks them
+   as an unlock would. *)
+let derive slots ~secret_key passphrase =
+  let open Yojson.Safe.Util in
+  let slot j =
+    Secret_key
+      {
+        id = to_string (member "id" j);
+        secret_key_id = to_string (member "secretKeyId" j);
+        kdf = kdf_of_json (member "kdf" j);
+        nonce = "";
+        wrapped = "";
+        created = 0;
+        extra = [];
+      }
+  in
+  let t =
+    { key_id = ""; slots = List.map slot slots; retired = []; extra = [] }
+  in
+  Result.map
+    (List.filter_map (function
+      | Secret_key { id; kdf; _ } -> Some (id, kek kdf ~secret_key passphrase)
+      | Unknown _ -> None))
+    (to_derive t ~secret_key)
+
+let unlock_with_keks t ~secret_key keks =
+  Result.bind (to_derive t ~secret_key) (fun mine ->
+      let slot id = List.find_opt (fun s -> slot_id s = id) mine in
+      if keks = [] || List.exists (fun (id, _) -> slot id = None) keks then
+        Error `Changed
+      else (
+        match
+          List.find_map
+            (fun (id, kek) -> Option.bind (slot id) (open_slot t ~kek))
+            keks
+        with
+          | Some key -> Ok key
+          | None -> Error `Wrong_passphrase))
 
 (* Spec §4.3: a union by slot id; for one id, the bytewise greatest canonical
    slot, so every client folding the same copies writes the same bytes. Copies

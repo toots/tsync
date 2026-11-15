@@ -373,10 +373,13 @@ type _ request =
   | Stop : unit request
   | Vault_init : string -> secret request  (** the passphrase as typed *)
   | Vault_unlock : {
-      passphrase : string;
+      credential : [ `Passphrase of string | `Keks of (string * string) list ];
+          (** the passphrase as typed, or the caller's KEKs by slot id (vault
+              §6.4) *)
       secret_key : string option;
     }
       -> unit request
+  | Vault_slots : (string * Yojson.Safe.t) list request  (** vault §6.4 *)
   | Vault_lock : [ `Lock | `Forget | `Screen ] -> unit request
       (** [`Forget] also forgets the secret key; [`Screen] is a host's report of
           a screen lock (vault §6.2) *)

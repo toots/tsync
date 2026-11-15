@@ -40,6 +40,7 @@ let () =
   Callback.register "tsync_boot" (text Android_host.boot);
   Callback.register "tsync_request" (text (with_domain Android_host.request));
   Callback.register "tsync_setup_link" (text Android_host.setup_link);
+  Callback.register "tsync_vault_derive" (text Android_host.vault_derive);
   Callback.register "tsync_status" (text Android_host.status);
   Callback.register "tsync_next_notice"
     (text (fun (_ : string) -> Android_host.next_notice ()));
