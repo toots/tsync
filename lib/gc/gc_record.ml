@@ -78,11 +78,21 @@ let write (main : Store.t) d r =
 let clear (main : Store.t) d = ignore (main.delete (Key.gc_run d))
 let run_name r = Key.run_name r.started
 
+(* A line that is not a version key (a torn write, a hand edit) is skipped:
+   it names nothing to expire. *)
 let read_expiry (main : Store.t) d =
   Option.map
     (fun b ->
       List.filter_map
-        (fun l -> if l = "" then None else Some (Key.v l))
+        (fun l ->
+          match Key.of_string l with
+            | Some k when Key.version_parts k <> None -> Some k
+            | _ ->
+                if l <> "" then
+                  Log.warn "%s: skipping a line that is not a version key: %S"
+                    (Key.to_string (Key.gc_expiry d))
+                    l;
+                None)
         (String.split_on_char '\n' (Bigstring.to_string b)))
     (main.get_opt (Key.gc_expiry d))
 

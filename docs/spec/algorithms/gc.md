@@ -610,6 +610,7 @@ lock, one read of R, one stat per named chunk.
 | Interrupted at | State on the main | Resume does |
 |---|---|---|
 | after writing X, before R | X, no R | X is stale: the next start deletes it; the expiry is given again |
+| X damaged (a torn write, a hand edit) | R, X with lines that are not version keys | those lines are skipped and logged; abandoning never reads X, so a damaged X never blocks an abort |
 | mid version group, some of its X deleted | R = Marking(previous namespace) | deletes the rest of the group's X (absent is success), re-lists and re-marks it |
 | after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine); the rename happens only in Opening, never once Marking is recorded |
 | after the rename, before Marking | R = Opening, F exists | enumerates again, marks from the start |

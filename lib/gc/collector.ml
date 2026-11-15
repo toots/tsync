@@ -373,18 +373,19 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
         Narrate.say nr "%s: opening a collection run on %s" m.member.name m.root
 
 (* §5.5: X is written before the run's first record, and an open run keeps
-   the set it opened with. *)
+   the set it opened with. Abandoning never reads it: it expires nothing. *)
 let expiry_set ~r0 ~(plan : Gc_plan.start) nr m d expiring =
   let store = m.member.store in
-  match r0 with
-    | Gc_record.Absent -> (
+  match (r0, plan) with
+    | _, (Resume_keep _ | Begin_keep) -> []
+    | Gc_record.Absent, _ -> (
         Gc_record.clear_expiry store d;
         match (plan, expiring) with
           | Open _, Some keys ->
               Gc_record.write_expiry store d keys;
               keys
           | _ -> [])
-    | _ -> (
+    | _, _ -> (
         let x0 = Option.value ~default:[] (Gc_record.read_expiry store d) in
         let held = Hashtbl.create (List.length x0) in
         List.iter (fun k -> Hashtbl.replace held k ()) x0;

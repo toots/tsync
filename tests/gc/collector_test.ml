@@ -424,6 +424,10 @@ let () =
         if present vc && i < 40 then until_gone (i + 1)
       in
       until_gone 0;
+      p "  a damaged expiry set beside the open run\n";
+      Fs.write_file_for_test
+        (Filename.concat main_root (Key.to_string (Key.gc_expiry d)))
+        "/torn\nnot a version\n";
       ignore (run ~keep:true ());
       p "version gone %b, exp3 back in S %b, X gone %b\n"
         (not (present vc))

@@ -131,6 +131,7 @@ exp1 exp2 gone true true; shared rev kept true true
 reclaimed 2 = dry run freed 3 + already unused 0 less rev, reverted: true
 
 == abort after an expiry: chunks back, versions stay deleted
+  a damaged expiry set beside the open run
 run: completed; promoted 0, reclaimed 0 (0 bytes)
 version gone true, exp3 back in S true, X gone true
 
