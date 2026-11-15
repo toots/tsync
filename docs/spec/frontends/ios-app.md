@@ -41,7 +41,9 @@ apply and steps 3, 7 and 11 never act. Passes do not overlap.
 
 **Removal loses what the extension has not taken.** iOS offers only the framework's remove-all mode:
 edits the system has not yet handed to the extension are deleted with the domain's files. Everything
-the extension accepted is in the owner's pending set, which removal does not touch.
+the extension accepted is in the owner's pending set, which removal does not touch. As on Android
+([android-app.md §6.1](android-app.md#61-the-config-the-app-writes)), removal deletes the domain's config entry and
+nothing of the core's: its local state and pending set stay until a config names it again.
 
 **Signals.** At launch and each time the app comes to the foreground, after its registration pass,
 the app signals the working set of every configured domain
