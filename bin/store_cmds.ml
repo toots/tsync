@@ -58,6 +58,9 @@ let gc apply verify abort budget show_status copies expire_file expire_before
     | Some _, Some _ -> refuse "--expire and --expire-before go one at a time"
     | (Some _, _ | _, Some _) when abort ->
         refuse "--abort puts chunks back; it expires nothing"
+    | (Some _, _ | _, Some _) when show_status || copies <> None ->
+        refuse
+          "--expire and --expire-before go with a collection or its dry run"
     | Some file, None when not (Sys.file_exists file) ->
         refuse "%s: no such file" file
     | _ -> (
