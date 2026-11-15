@@ -32,7 +32,8 @@ let present _domain _engine ~publish =
     ignore )
 
 let host ~mount:_ _domains ~run =
-  Keychain.register ();
+  Tsync_keychain.Keychain.register ~name:"the login keychain"
+    ~service:"org.feverdreamtv.tsync.vault" ();
   run present
 
 let () = Owner.register_host "file_provider" host

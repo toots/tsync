@@ -4,7 +4,7 @@ open Tsync_core
 external put : string -> string -> unit = "tsync_keychain_put"
 external get : string -> string option = "tsync_keychain_get"
 external delete : string -> unit = "tsync_keychain_delete"
-external no_dialogs : unit -> unit = "tsync_keychain_no_dialogs"
+external setup : string -> unit = "tsync_keychain_setup"
 
 let key_id_length = 16
 
@@ -13,11 +13,11 @@ let keychain f =
 
 (* By the host as it starts its owner, never at load: a test linking this
    library must not reach the user's keychain. *)
-let register () =
-  no_dialogs ();
+let register ~name ~service () =
+  setup service;
   Tsync_owner.Keystore.register
     {
-      name = "the login keychain";
+      name;
       put =
         (fun ~domain ~key_id ~key ->
           (* get splits the entry at this length. *)

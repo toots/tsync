@@ -1,0 +1,14 @@
+; The vault keystore of the Apple hosts (security-model §10.6).
+
+(library
+ (name tsync_keychain)
+ (enabled_if
+  (or
+   (= %{system} macosx)
+   (= %{system} ios)))
+ (libraries tsync_core tsync_owner)
+ (foreign_stubs
+  (language c)
+  (names keychain_stubs))
+ (c_library_flags
+  (-framework Security -framework CoreFoundation)))

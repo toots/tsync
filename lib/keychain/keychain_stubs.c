@@ -1,18 +1,21 @@
-/* The vault keystore of macOS (security-model §10.6): one generic-password item
-   of the login keychain per domain. No call ever shows a dialog. */
+/* The vault keystore of macOS and iOS (security-model §10.6): one
+   generic-password item per entry, in the login keychain on macOS, in the
+   data-protection keychain, on this device only, on iOS. No call ever shows a
+   dialog. */
 
 #include <stdio.h>
 #include <string.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
+#include <TargetConditionals.h>
 
 #include <caml/alloc.h>
 #include <caml/fail.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
 
-static const char *service_name = "org.feverdreamtv.tsync.vault";
+static char service_name[256];
 
 /* The login keychain is the file-based one: its no-dialog switch is the
    process-wide SecKeychainSetUserInteractionAllowed, deprecated with that
@@ -20,10 +23,16 @@ static const char *service_name = "org.feverdreamtv.tsync.vault";
    for the data-protection keychain. */
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-/* Once, at registration: the daemon never wants a keychain dialog. */
-CAMLprim value tsync_keychain_no_dialogs(value _unit) {
-  CAMLparam1(_unit);
+/* Once, at registration: the items' service, and on macOS no keychain dialog
+   for the process. */
+CAMLprim value tsync_keychain_setup(value _service) {
+  CAMLparam1(_service);
+  if (caml_string_length(_service) >= sizeof(service_name))
+    caml_failwith("the keychain service name is too long");
+  memcpy(service_name, String_val(_service), caml_string_length(_service) + 1);
+#if TARGET_OS_OSX
   SecKeychainSetUserInteractionAllowed(false);
+#endif
   CAMLreturn(Val_unit);
 }
 
@@ -92,6 +101,13 @@ CAMLprim value tsync_keychain_put(value _domain, value _secret) {
                                                     kCFStringEncodingUTF8);
       CFDictionarySetValue(query, kSecValueData, secret);
       CFDictionarySetValue(query, kSecAttrLabel, label);
+#if TARGET_OS_IPHONE
+      /* Readable unattended by an extension the system starts while the phone
+         is locked, once it has been unlocked since it started; in no backup
+         another device restores. */
+      CFDictionarySetValue(query, kSecAttrAccessible,
+                           kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly);
+#endif
       status = SecItemAdd(query, NULL);
       CFRelease(label);
     }
