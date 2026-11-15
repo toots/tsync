@@ -124,8 +124,7 @@ let resolve ~domain ~folder_path ~versions listing =
     (fun k ->
       if Key.under (Key.versions domain) k then
         Option.iter
-          (fun (v : Key.version_parts) ->
-            Hashtbl.add by_ns v.ns (v.folder, v.digest, k))
+          (fun (v : Key.version_parts) -> Hashtbl.add by_ns v.ns (v, k))
           (Key.version_parts k))
     versions;
   let paths = Hashtbl.create 64 in
@@ -148,10 +147,16 @@ let resolve ~domain ~folder_path ~versions listing =
         | candidates -> (
             let digest = Xxh.dual l.name in
             let named =
-              List.filter (fun (_, d, _) -> String.equal d digest) candidates
+              List.filter
+                (fun ((v : Key.version_parts), _) ->
+                  String.equal v.digest digest)
+                candidates
             in
             let here =
-              List.filter (fun (f, _, _) -> current f = l.folder) named
+              List.filter
+                (fun ((v : Key.version_parts), _) ->
+                  current v.folder = l.folder)
+                named
             in
             match (named, here) with
               | [], _ ->
@@ -159,12 +164,12 @@ let resolve ~domain ~folder_path ~versions listing =
                     ( l.number,
                       Printf.sprintf "no version of %S at that time" l.name )
                     :: !rejected
-              | [(f, _, k)], _ | _, [(f, _, k)] ->
-                  if current f <> l.folder then
+              | [(v, k)], _ | _, [(v, k)] ->
+                  if current v.folder <> l.folder then
                     warnings :=
                       ( l.number,
                         Printf.sprintf "%s: its folder is now %s" l.name
-                          (shown (current f)) )
+                          (shown (current v.folder)) )
                       :: !warnings;
                   if not (Hashtbl.mem seen k) then (
                     Hashtbl.replace seen k ();
