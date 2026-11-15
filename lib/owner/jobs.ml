@@ -171,23 +171,14 @@ let report_outstanding out c =
 let resolve_listed io (dom : Tsync_domain.Domain.t) file =
   let say fmt = Printf.ksprintf io.out fmt in
   let module E = Expiry_list.Make ((val Tsync_domain.Domain.context dom)) in
-  let listing = Expiry_list.parse (Fs.read_file file) in
-  match listing.domain with
-    | Some other when other <> Domain_name.to_string dom.name ->
-        say "%s lists versions of %s, not %s: nothing expired" file other
-          (Domain_name.to_string dom.name);
-        None
-    | _ ->
-        let r = E.resolve listing in
-        List.iter (fun (n, why) -> say "  line %d: %s" n why) r.warnings;
-        if r.rejected = [] then Some (r.matched, List.length r.absent)
-        else (
-          List.iter
-            (fun (n, why) -> say "  line %d rejected: %s" n why)
-            r.rejected;
-          say "nothing expired: %s rejected"
-            (Narrate.count (List.length r.rejected) "line");
-          None)
+  let r = E.resolve (Expiry_list.parse (Fs.read_file file)) in
+  List.iter (fun (n, why) -> say "  line %d: %s" n why) r.warnings;
+  if r.rejected = [] then Some (r.matched, List.length r.absent)
+  else (
+    List.iter (fun (n, why) -> say "  line %d rejected: %s" n why) r.rejected;
+    say "nothing expired: %s rejected"
+      (Narrate.count (List.length r.rejected) "line");
+    None)
 
 let expiring_keys io (dom : Tsync_domain.Domain.t) = function
   | `Before cutoff ->

@@ -82,7 +82,7 @@ with an expiry naming a (also live) and b: already unused 1 (30 bytes), freed by
 1741001236000000000  2025-03-03 11:27  0 B  top.txt
 
 == expiry list: parsed back
-domain d
+domain d, line 2
   line 5: 1741001235000000000 folder gone name "beach.jpg"
   line 6: 1740924660000000001 folder "notes" name "todo.txt"
   line 7: 1740924660000000000 folder "notes" name "todo.txt"
@@ -103,4 +103,4 @@ rejected line 6: no version of "wrong.txt" at that time
 rejected line 10: not a version line (time  date  size  path)
 absent: 9
 warning line 3: a.txt: its folder is now docs
-header of another domain's list: e
+another domain's list, rejected line 2: a list of domain e, not d

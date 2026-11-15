@@ -253,7 +253,10 @@ let () =
   in
   print_string text;
   let show_listing (l : Expiry_list.listing) =
-    p "domain %s\n" (Option.value ~default:"-" l.domain);
+    p "domain %s\n"
+      (Option.fold ~none:"-"
+         ~some:(fun (n, d) -> Printf.sprintf "%s, line %d" d n)
+         l.domain);
     List.iter
       (fun (x : Expiry_list.parsed) ->
         p "  line %d: %Ld folder %s name %S\n" x.number x.ns
@@ -334,8 +337,10 @@ let () =
   List.iter (fun (n, why) -> p "rejected line %d: %s\n" n why) r.rejected;
   p "absent: %s\n" (String.concat " " (List.map string_of_int r.absent));
   List.iter (fun (n, why) -> p "warning line %d: %s\n" n why) r.warnings;
-  p "header of another domain's list: %s\n"
-    (Option.value ~default:"-"
+  List.iter
+    (fun (n, why) -> p "another domain's list, rejected line %d: %s\n" n why)
+    (Expiry_list.resolve ~domain:d ~folder_path ~versions
        (Expiry_list.parse
-          (Expiry_list.print ~domain:(Domain_name.v "e") ~cutoff:0. ~now:0. []))
-         .domain)
+          (Expiry_list.print ~domain:(Domain_name.v "e") ~cutoff:0. ~now:0.
+             [{ ns = 1L; size = Some 1; path = "notes/todo.txt" }])))
+      .rejected

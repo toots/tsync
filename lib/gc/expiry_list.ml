@@ -44,7 +44,7 @@ type parsed = {
 }
 
 type listing = {
-  domain : string option;
+  domain : (int * string) option;
   lines : parsed list;
   malformed : (int * string) list;
 }
@@ -96,10 +96,11 @@ let parse text =
       if String.starts_with ~prefix:domain_header s then
         domain :=
           Some
-            (String.trim
-               (String.sub s
-                  (String.length domain_header)
-                  (String.length s - String.length domain_header)))
+            ( number,
+              String.trim
+                (String.sub s
+                   (String.length domain_header)
+                   (String.length s - String.length domain_header)) )
       else if String.trim s = "" || String.starts_with ~prefix:"#" s then ()
       else (
         match parse_line number s with
@@ -178,9 +179,19 @@ let resolve ~domain ~folder_path ~versions listing =
                         l.name )
                     :: !rejected))
     listing.lines;
+  let header =
+    match listing.domain with
+      | Some (n, other) when other <> Domain_name.to_string domain ->
+          [
+            ( n,
+              Printf.sprintf "a list of domain %s, not %s" other
+                (Domain_name.to_string domain) );
+          ]
+      | _ -> []
+  in
   {
     matched = List.rev !matched;
-    rejected = List.sort compare (listing.malformed @ !rejected);
+    rejected = List.sort compare (header @ listing.malformed @ !rejected);
     absent = List.rev !absent;
     warnings = List.rev !warnings;
   }

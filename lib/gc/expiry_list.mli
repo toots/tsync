@@ -27,7 +27,7 @@ type parsed = {
 }
 
 type listing = {
-  domain : string option;  (** the [# domain:] header *)
+  domain : (int * string) option;  (** the [# domain:] header, by line *)
   lines : parsed list;
   malformed : (int * string) list;
 }
@@ -43,7 +43,8 @@ type resolution = {
 }
 
 (** Against a listing of version keys; [folder_path] is a folder's current path
-    in the domain, [""] for the top. *)
+    in the domain, [""] for the top. A [# domain:] header naming another domain
+    is a rejected line. *)
 val resolve :
   domain:Domain_name.t ->
   folder_path:(Folder_id.t -> string option) ->
