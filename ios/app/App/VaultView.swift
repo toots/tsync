@@ -11,13 +11,18 @@ struct VaultView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $tab) {
-                    Text("Codes").tag("codes")
-                    Text("Passwords").tag("passwords")
+                if vault.domains.contains(where: { $0.state == .unlocked }) {
+                    Picker("", selection: $tab) {
+                        Text("Codes").tag("codes")
+                        Text("Passwords").tag("passwords")
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    if tab == "codes" { CodesList() } else { PasswordsList() }
+                } else {
+                    // ios-app §6 Locked: nothing to list yet, so no tabs.
+                    List { ForEach(vault.domains) { DomainSection(domain: $0) {} } }
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                if tab == "codes" { CodesList() } else { PasswordsList() }
             }
             .navigationTitle("Vault")
             .toolbar { ToolbarItem(placement: .primaryAction) { VaultMenu() } }
@@ -84,11 +89,17 @@ struct DomainSection<Rows: View>: View {
             case .unlocked: rows()
             }
         } header: {
-            if vault.domains.count > 1 {
+            if case .locked = domain.state {
+                Text(vault.domains.count > 1 ? "Unlock \(domain.name)" : "Unlock the vault")
+            } else if vault.domains.count > 1 {
                 HStack {
                     if let look = domain.look { Image(uiImage: look) }
                     Text(domain.name)
                 }
+            }
+        } footer: {
+            if case .locked = domain.state {
+                Text("Enter the vault's passphrase to see its codes and passwords.")
             }
         }
     }
@@ -110,7 +121,11 @@ struct UnlockForm: View {
     var body: some View {
         if let lockedBy { Text(lockedNote(lockedBy)).font(.footnote).foregroundStyle(.secondary) }
         SecretField("Passphrase", text: $passphrase)
-        if !enrolled || askKey { SecretField("Secret key", text: $secretKey) }
+        if !enrolled || askKey {
+            SecretField("Secret key", text: $secretKey)
+            Text("This iPhone also needs the vault's secret key, the first time.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
         if let failure { Text(failure).font(.footnote).foregroundStyle(.red) }
         Button(unlocking ? "Unlocking…" : "Unlock") {
             unlocking = true
