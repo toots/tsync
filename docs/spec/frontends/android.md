@@ -157,6 +157,12 @@ and one record:
    longer read, never a wrong view.
 4. A folder whose position the log no longer holds is pulled by state, on its own, after the read.
 
+**What a pass reads.** A process keeps its held folders in memory: each one's path, folder id,
+position and pull-marker time. It learns them from one walk of the mirror at its first pass, and
+every marker or position it writes updates the list. A folder moved or removed in the mirror drops
+the whole list, and the next pass walks again. The files stay the record: the list is never written,
+so a process that starts walks once.
+
 A `refresh` made while a pass runs starts none, and waits for that pass as for its own. A pass ends early when the store's health breaker
 opens; a process that dies mid-pass loses nothing, since the next pass reads from the positions
 written. Each merge sends its notices as any pull does.
