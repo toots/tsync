@@ -53,6 +53,7 @@ struct SaveView: View {
     @State private var saving = false
     @State private var saved = false
     @State private var choosing = false
+    @State private var unopened: String?
 
     var body: some View {
         NavigationStack {
@@ -69,6 +70,7 @@ struct SaveView: View {
                         LabeledContent("Folder", value: path.last ?? domain)
                     }
                     .disabled(root == nil)
+                    if let unopened { Text(unopened).foregroundStyle(.secondary) }
                     if providers.count == 1 {
                         TextField("Name", text: $name).autocorrectionDisabled()
                     } else {
@@ -82,10 +84,11 @@ struct SaveView: View {
                 if saved || problem != nil {
                     ToolbarItem(placement: .confirmationAction) { Button("Done", action: done) }
                 } else {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: done) }
+                    // ios-app §7: the request completes only once every write has returned.
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: done).disabled(saving) }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(saving ? "Saving…" : "Save") { Task { await save() } }
-                            .disabled(saving || root == nil || (providers.count == 1 && name.isEmpty))
+                            .disabled(saving || root == nil || (providers.count == 1 && (name.isEmpty || name.contains("/"))))
                     }
                 }
             }
@@ -110,16 +113,17 @@ struct SaveView: View {
             return
         }
         domain = domains[0]
-        await open()
     }
 
     /// The domain's root, and its remembered folder when it still exists.
     private func open() async {
+        let asked = domain
         root = nil
-        guard let found = try? await FileStore.root(domain) else {
-            return problem = "\(domain) cannot be opened."
-        }
-        let remembered = SaveFolders.path(domain)
+        unopened = nil
+        let found = try? await FileStore.root(asked)
+        guard asked == domain else { return }
+        guard let found else { return unopened = "\(asked) cannot be opened." }
+        let remembered = SaveFolders.path(asked)
         var isFolder: ObjCBool = false
         let folder = remembered.reduce(found) { $0.appendingPathComponent($1, isDirectory: true) }
         path = FileManager.default.fileExists(atPath: folder.path, isDirectory: &isFolder) && isFolder.boolValue
@@ -232,9 +236,11 @@ struct FolderChooser: View {
     private func load() async {
         do {
             let items = try await FileStore.list(folder)
+            guard !Task.isCancelled else { return }
             folders = items.filter(\.isFolder).map(\.name).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             problem = nil
         } catch {
+            guard !Task.isCancelled else { return }
             folders = []
             problem = error.localizedDescription
         }
