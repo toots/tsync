@@ -61,14 +61,13 @@ let key t dir =
   let (module E : Engine.S) = t.engine in
   Option.map Folder_id.to_string (E.folder_id dir)
 
-let is_fresh t dir =
-  match key t dir with
-    | None -> false
-    | Some k ->
-        Mutex.protect t.m (fun () ->
-            match Hashtbl.find_opt t.fresh k with
-              | Some at -> Rt.now () -. at < t.params.pull_freshness
-              | None -> false)
+let fresh_key t k =
+  Mutex.protect t.m (fun () ->
+      match Hashtbl.find_opt t.fresh k with
+        | Some at -> Rt.now () -. at < t.params.pull_freshness
+        | None -> false)
+
+let is_fresh t dir = Option.fold ~none:false ~some:(fresh_key t) (key t dir)
 
 (* Detached: a waiter that gives up leaves the pull running. *)
 let start t dir =
@@ -214,7 +213,9 @@ let summary (pass : Engine_intf.pass) : Protocol.pass_summary =
 let run_pass t : Protocol.pass_summary =
   let (module E : Engine.S) = t.engine in
   match
-    E.pull_pass ~page:t.params.pull_page ~stop:t.silent ~fresh:(is_fresh t) ()
+    E.pull_pass ~page:t.params.pull_page ~stop:t.silent
+      ~fresh:(fun id -> fresh_key t (Folder_id.to_string id))
+      ()
   with
     | pass ->
         let owed = stamp_fresh t pass.covered in

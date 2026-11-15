@@ -8,6 +8,7 @@ type t = {
   key_prefix : string;
   by_fid : fid_index ref;
   by_fid_m : Mutex.t;
+  folders_moved : int Atomic.t;  (** folders moved or removed *)
 }
 
 (** File id → path (04 §2.3). *)
@@ -34,8 +35,10 @@ let create ~cache_root domain =
     key_prefix = Key.prefix_to_string (Key.manifests domain);
     by_fid = ref Unbuilt;
     by_fid_m = Mutex.create ();
+    folders_moved = Atomic.make 0;
   }
 
+let folders_moved t = Atomic.get t.folders_moved
 let fid_snapshot t = Filename.concat t.root "file-ids-index"
 
 let with_fid_index t f =
@@ -297,6 +300,7 @@ let record_folder ?durable ?(on_other = `Replace) t rel id =
 let mkdir_without_id t rel = ensure_dirs t rel
 
 let remove_folder t rel =
+  Atomic.incr t.folders_moved;
   move_fid_subtree t ~src:rel ~dst:None;
   let p = path t rel in
   Fs.rm_rf p;
@@ -355,6 +359,7 @@ let whereabouts t rel =
 let move_folder t ~src ~dst =
   ensure_dirs t (Names.parent_of dst);
   check_handle t dst;
+  Atomic.incr t.folders_moved;
   let id = folder_id t src in
   Fs.rename (path t src) (path t dst);
   move_fid_subtree t ~src ~dst:(Some dst);

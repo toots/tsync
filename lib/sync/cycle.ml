@@ -164,18 +164,60 @@ module Make (C : Engine_ctx.S) = struct
       (Fs.read_file_opt (folder_position_path dir))
       (fun s -> int_of_string_opt (String.trim s))
 
+  (* android §3.2: the held folders, learned by one walk and kept by this
+     process's writes; a folder moved or removed in the mirror drops them. *)
+  type held_folder = {
+    id : Folder_id.t option;
+    mutable own : int option;
+    mutable marker : float option;
+  }
+
+  type held_list = {
+    folders : (string, held_folder) Hashtbl.t;
+    moves : int;  (** [Mirror.folders_moved] when it was walked *)
+  }
+
+  let held_m = Mutex.create ()
+  let held_list : held_list option ref = ref None
+
+  (* Counts the writes, so a walk that one overlapped is not kept. *)
+  let held_writes = ref 0
+  let drop_held () = Mutex.protect held_m (fun () -> held_list := None)
+
+  let note_held dir f =
+    Mutex.protect held_m (fun () ->
+        incr held_writes;
+        Option.iter
+          (fun l -> Option.iter f (Hashtbl.find_opt l.folders dir))
+          !held_list)
+
   let set_folder_position ?(durable = true) dir n =
-    if Fs.is_dir (Mirror.path mirror dir) then
+    if Fs.is_dir (Mirror.path mirror dir) then (
       (if durable then Fs.durable_replace else Fs.replace_unsynced)
-        (folder_position_path dir) (Key.entry_number n)
+        (folder_position_path dir) (Key.entry_number n);
+      note_held dir (fun h -> h.own <- Some n))
 
   let pulled_marker dir =
     Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
 
   let mark_pulled ?(sync = true) dir =
-    (if sync then Fs.replace else Fs.replace_unsynced)
-      (pulled_marker dir)
-      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
+    let text = Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.) in
+    let ms = float_of_string text in
+    (if sync then Fs.replace else Fs.replace_unsynced) (pulled_marker dir) text;
+    Mutex.protect held_m (fun () ->
+        incr held_writes;
+        Option.iter
+          (fun l ->
+            match Hashtbl.find_opt l.folders dir with
+              | Some h -> h.marker <- Some ms
+              | None ->
+                  Hashtbl.replace l.folders dir
+                    {
+                      id = Mirror.folder_id mirror dir;
+                      own = own_position dir;
+                      marker = Some ms;
+                    })
+          !held_list)
 
   let marker_ms dir =
     Option.bind
@@ -205,13 +247,14 @@ module Make (C : Engine_ctx.S) = struct
       (Printf.sprintf "%s %.0f" (Key.entry_number r.entry) r.start);
     Atomic.set pass_record (Some r)
 
-  let stands_for r dir =
-    match marker_ms dir with Some marker -> marker <= r.start | None -> false
+  let position_of ~own ~marker =
+    match (own, marker, Atomic.get pass_record) with
+      | Some own, Some marker, Some r when r.entry > own && marker <= r.start ->
+          Some r.entry
+      | own, _, _ -> own
 
   let folder_position dir =
-    match (own_position dir, Atomic.get pass_record) with
-      | Some own, Some r when r.entry > own && stands_for r dir -> Some r.entry
-      | own, _ -> own
+    position_of ~own:(own_position dir) ~marker:(marker_ms dir)
 
   let pulled_ms dir =
     match (marker_ms dir, Atomic.get pass_record) with
@@ -268,6 +311,7 @@ module Make (C : Engine_ctx.S) = struct
         (* A replay finds the folder under [j] and does each part again. *)
         let reidentify here =
           forget_dirs ();
+          drop_held ();
           (* publication §4.11: the main's folder has no view here. *)
           List.iter Fs.unlink_quiet
             [pulled_marker here; folder_position_path here];
@@ -1270,7 +1314,7 @@ module Make (C : Engine_ctx.S) = struct
     changed > 0
 
   (* android §3.2: every folder with a pull marker. *)
-  let held () =
+  let walk_held () =
     let rec walk dir acc =
       let acc = if Fs.exists (pulled_marker dir) then dir :: acc else acc in
       List.fold_left
@@ -1280,6 +1324,43 @@ module Make (C : Engine_ctx.S) = struct
         acc (Mirror.names mirror dir)
     in
     walk "" []
+
+  let copy_held folders =
+    List.sort compare
+      (Hashtbl.fold
+         (fun dir h acc -> (dir, { h with id = h.id }) :: acc)
+         folders [])
+
+  (* The held folders, from the list when no folder moved since its walk. *)
+  let held () =
+    let known =
+      Mutex.protect held_m (fun () ->
+          match !held_list with
+            | Some l when l.moves = Mirror.folders_moved mirror ->
+                Some (copy_held l.folders)
+            | _ ->
+                held_list := None;
+                None)
+    in
+    match known with
+      | Some held -> held
+      | None ->
+          let writes = Mutex.protect held_m (fun () -> !held_writes) in
+          let moves = Mirror.folders_moved mirror in
+          let folders = Hashtbl.create 64 in
+          List.iter
+            (fun dir ->
+              Hashtbl.replace folders dir
+                {
+                  id = Mirror.folder_id mirror dir;
+                  own = own_position dir;
+                  marker = marker_ms dir;
+                })
+            (walk_held ());
+          Mutex.protect held_m (fun () ->
+              if !held_writes = writes && Mirror.folders_moved mirror = moves
+              then held_list := Some { folders; moves });
+          copy_held folders
 
   (* The folders a command changes the children of. *)
   let touched : Log_entry.command -> Folder_id.t list = function
@@ -1298,15 +1379,18 @@ module Make (C : Engine_ctx.S) = struct
     (* The record stands for every folder pulled before its start, fresh or not. *)
     let start = Unix.gettimeofday () *. 1000. in
     let held = held () in
-    let dirs = if List.for_all fresh held then [] else held in
+    let is_fresh (_, (h : held_folder)) =
+      Option.fold ~none:false ~some:fresh h.id
+    in
+    let dirs = if List.for_all is_fresh held then [] else held in
     let changed = ref [] in
     let entries_read = ref 0 in
     let note dir n = if n > 0 then changed := dir :: !changed in
     let alone dir = if pull_folder ~page dir then changed := dir :: !changed in
     let views, unpositioned =
       List.partition_map
-        (fun dir ->
-          match (Mirror.folder_id mirror dir, folder_position dir) with
+        (fun (dir, (h : held_folder)) ->
+          match (h.id, position_of ~own:h.own ~marker:h.marker) with
             | Some id, Some position -> Left { dir; id; position }
             | _ -> Right dir)
         dirs

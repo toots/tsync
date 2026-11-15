@@ -183,6 +183,23 @@ p "  %-34s %s" "summary" !last_summary;
 Atomic.set mode `Up
 ;;
 
+p "== a peer removes a held folder, and moves another";
+quiet ();
+Mutex.protect notices_m (fun () -> notices := []);
+peer_does (fun (module E) ->
+    E.rmdir "f031";
+    E.rename ~src:"f032" ~dst:"g032" ~exclusive:true);
+wait_stale ();
+p "  %-34s %s" "refresh" (timed_refresh ());
+p "  %-34s %s" "summary" !last_summary;
+until_quiet ();
+peer_writes "g032/moved.txt" "moved";
+wait_stale ();
+p "  %-34s %s" "refresh" (timed_refresh ());
+p "  %-34s %s" "summary" !last_summary;
+ignore (list "g032" (ref_of (action "list_dir" [s "ref" "root"]) "g032"))
+;;
+
 (* publication §4.3: an entry no reader can follow is read past by state once
    the tree head has passed it, and stops the read otherwise. *)
 let log =

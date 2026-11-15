@@ -290,7 +290,11 @@ module type S = sig
       [fresh] says each is: the log read once, a page at a time, ending early
       when [stop] says so. *)
   val pull_pass :
-    ?page:int -> stop:(unit -> bool) -> fresh:(string -> bool) -> unit -> pass
+    ?page:int ->
+    stop:(unit -> bool) ->
+    fresh:(Folder_id.t -> bool) ->
+    unit ->
+    pass
 
   (** When the folder's last pull completed, by its pull marker and the pass
       record (04 §2.3). *)

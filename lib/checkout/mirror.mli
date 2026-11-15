@@ -79,6 +79,9 @@ val mkdir_without_id : t -> string -> unit
 
 val remove_folder : t -> string -> unit
 
+(** How many folders were moved or removed since [create]. *)
+val folders_moved : t -> int
+
 (** Move a folder with every record that names it. *)
 val move_folder : t -> src:string -> dst:string -> unit
 
