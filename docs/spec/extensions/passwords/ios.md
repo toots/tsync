@@ -33,10 +33,15 @@ user turns it on.
 
 ## 2. Domains
 
-macOS §2, over the domains whose config entry uses `passwords`, the config being the App Group's
-([ios.md §3.2](../../frontends/ios.md#32-paths)). A domain the service does not reach is the inert
-row "`<domain>` did not answer — open tsync"; one turned off in Files, "`<domain>` is turned off in
-Files".
+macOS §2, over the vault domains the app keeps in the App Group's shared defaults
+([ios-app §6](../../frontends/ios-app.md#6-vault)), in config order; a domain among them that
+refuses `invalid` uses no passwords and is left out. A domain the service does not reach is the
+inert row "`<domain>` did not answer — open tsync"; one turned off in Files, "`<domain>` is turned
+off in Files".
+
+- **A new passkey** goes to the first of them, in config order, that uses passwords, as on Android
+  ([android-app §10.8](../../frontends/android-app.md#108-vault)): the phone has no default domain.
+  A locked one is shown as §6 says, not passed over for another.
 
 ## 3. Versions
 

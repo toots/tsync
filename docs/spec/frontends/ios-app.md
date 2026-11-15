@@ -131,11 +131,15 @@ the framework's domain-change notification.
 [passwords/ios.md §7](../extensions/passwords/ios.md#7-in-the-app), every request through the
 service ([ios.md §5.4](ios.md#54-the-service)). What differs:
 
-- **Shown** while a configured domain opts into an extension (its config entry's `extensions`,
-  [extensions README §3](../extensions/README.md#3-opting-in)): the config is the app's own, so
-  this needs no request. Each such domain is asked `vault_status` when the screen is shown and each
-  time the app comes to the foreground. A domain the service does not reach is *unreachable*; one
-  turned off in Files says so, and how to turn it on (§4).
+- **Vault domains** are [android-app §2](android-app.md#2-components-and-process)'s set: a
+  domain's server decides which extensions it uses
+  ([extensions README §3](../extensions/README.md#3-opting-in)), so the app asks each configured
+  domain `vault_status` at launch and each time it comes to the foreground, and a domain is in the
+  set while its last answer was not refused for using no extension. The set is kept in the App
+  Group's shared defaults, where the credential provider reads it
+  ([passwords/ios.md §2](../extensions/passwords/ios.md#2-domains)). A domain the service does not
+  reach keeps its place, and is shown *unreachable*; one turned off in Files says so, and how to
+  turn it on (§4). Vault is shown while the set is not empty.
 - **Unlock** derives in the app ([vault §6.4](../extensions/vault.md#64-deriving-in-the-caller)):
   `vault_slots`, then `vault_derive` off the main thread, then `vault_unlock` with `keks`, and with
   `secretKey` when the phone enrols. The secret key is the field's, or, when `vault_slots` says the
