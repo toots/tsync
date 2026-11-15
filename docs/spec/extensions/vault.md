@@ -360,6 +360,33 @@ and notices a new one.
 - The list is informative, not a control: any machine holding K can write an entry, and removing
   one revokes nothing. Revoking is a re-key (§7.2).
 
+### 6.4 Deriving in the caller
+
+An owner that runs under a memory cap below `VAULT_KDF_MAX_MEM` cannot derive a KEK (§4.2). Its
+caller derives instead, and the owner unwraps: the passphrase stays with the caller, and K stays
+with the owner.
+
+- **The slots.** `vault_slots` (action only, needs no K, takes nothing) answers `keyId`, the
+  keyring's `secret-key` slots, each `{"id", "secretKeyId", "kdf"}` as the keyring has them, and
+  `enrolled`, the secret key id this machine holds, when it holds one.
+- **Deriving** is the core's pure call `vault_derive` (no owner, no lock, nothing written): it
+  takes `vault_slots`' reply, the passphrase and the secret key, and picks and checks the slots as
+  an unlock does (§4.2): a malformed secret key, no slot for it ("wrong secret key") and only
+  unusable ones are refused as an unlock refuses them, before any derivation. It answers `keks`,
+  one KEK per slot it derived for, by slot id, b64url.
+- **The unlock.** `vault_unlock` takes `keks` in place of `passphrase`, with `secretKey` when the
+  machine enrolls. The owner unwraps each slot named with its KEK, as §4.2 says, and goes on as an
+  unlock with the passphrase does: the same keystore writes, machine entry and replies. Every KEK
+  failing is "wrong passphrase". A `keks` member naming no slot of the keyring, or slots of
+  another secret key than the one given or held, is refused `invalid` with "the keyring changed:
+  ask for its slots again".
+- A caller holds each KEK as it holds a passphrase (security-model §10.6), and only for the one
+  unlock.
+- Such an owner refuses, `invalid` and before deriving anything, `vault_unlock` with
+  `passphrase`, and every other action that derives (§8): `vault_init`, `vault_passphrase`,
+  `vault_rekey`, `vault_kit`, `vault_export` and `vault_import`, which take no `keks`. Its host
+  offers none of them.
+
 ## 7. Rotation
 
 - **Passphrase change.** `tsync vault passphrase` (action `vault_passphrase`) needs an unlocked,
@@ -443,7 +470,8 @@ needs this machine's secret key, so it grants nothing this machine did not alrea
 | verb / action | needs K | does |
 |---|---|---|
 | `init` / `vault_init` | — | §3 |
-| `unlock` / `vault_unlock` | — | §6 |
+| `unlock` / `vault_unlock` | — | §6; with `keks`, §6.4 |
+| — / `vault_slots` | — | §6.4 |
 | `lock` / `vault_lock` | — | §6; with `reason: "screen"`, §6.2 |
 | `passphrase` / `vault_passphrase` | yes | §7 |
 | `delete` / `vault_delete` | — | §7.1 |

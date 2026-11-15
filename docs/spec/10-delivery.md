@@ -205,7 +205,7 @@ build outranks the one before.
 
 ### 5.6 iOS signing and TestFlight
 
-The core is cross-built for the device only (`ios-device`, [ios.md §3](frontends/ios.md#3-host-layout)), from the cross repository's integration branch and this repository's `.github/opam`. The app is archived with automatic signing against the App Store Connect API key, which lets Xcode create the distribution certificate and the profiles in the cloud: no certificate or profile is exported or stored. The identifiers of [ios.md §3.1](frontends/ios.md#31-identifiers) come from secrets, and `TSYNC_APS_ENVIRONMENT` is `production`. `CFBundleVersion` is the workflow's run number, so each upload outranks the one before.
+The core is cross-built for the device only (`ios-device`, [ios.md §3](frontends/ios.md#3-host-layout)), from the cross repository's integration branch and this repository's `.github/opam`. The app is archived with automatic signing against the App Store Connect API key, which lets Xcode create the distribution certificate and the profiles in the cloud: no certificate or profile is exported or stored. The identifiers of [ios.md §3.1](frontends/ios.md#31-identifiers) come from secrets, and `TSYNC_APS_ENVIRONMENT` is `production`. `CFBundleVersion` is the workflow's run number, so each upload outranks the one before. The vault's ciphers (XChaCha20-Poly1305, Argon2id) are not the system's, so the app declares `ITSAppUsesNonExemptEncryption` true and `ITSEncryptionExportComplianceCode`, the code App Store Connect issued for its export compliance documentation, given by the identifiers file as `TSYNC_EXPORT_COMPLIANCE_CODE`; a signed build without it fails at its start, as for a missing identifier.
 
 A build that §2 publishes is uploaded to TestFlight for the internal testers, who need no review, and so is every push to the `testflight` branch of this repository, which puts a branch on the testers' phones before it reaches `main`, without waiting on `test`; the job fails unless App Store Connect accepts the upload. Every other build, and every build without the secrets (a fork), archives the app unsigned, runs the checks above except the signature's, and reports the signing half "not run".
 
@@ -215,8 +215,8 @@ A build that §2 publishes is uploaded to TestFlight for the internal testers, w
   the live stores, `setup_repo_signing.sh` for the repository key and `setup_android_signing.sh`
   for the Android keystore (created once; replacing it forces every phone to reinstall). The macOS signing secrets are
   the exception: their certificate is exported by hand, so `macos/RELEASING.md` states the steps.
-  The iOS secrets (the API key, its id and issuer, and the identifiers of
-  [ios.md §3.1](frontends/ios.md#31-identifiers)) are set by `setup_ios_signing.sh` from a key
+  The iOS secrets (the API key, its id and issuer, the identifiers of
+  [ios.md §3.1](frontends/ios.md#31-identifiers) and the export compliance code of §5.6) are set by `setup_ios_signing.sh` from a key
   file and an identifiers file the operator holds; the App Store Connect app record and the key,
   with the Admin role cloud signing needs, are made by hand, as `ios/RELEASING.md` states.
 - A job that requires a secret fails naming each missing one and its script; a job on a fork, which

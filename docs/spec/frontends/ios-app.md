@@ -9,25 +9,28 @@ This page is a delta on [android-app.md](android-app.md). It applies:
 - §10.1, the interface principles;
 - §10.7's Setup as written, with the scanner of §4.
 
-Nothing else of android-app.md applies. Activity, Saving into the domain, Vault, Camera backup and
+- §10.8, the Vault screen, as §6 says.
+
+Nothing else of android-app.md applies. Activity, Saving into the domain, Camera backup and
 Storage are [ios.md §9](ios.md#9-not-yet-specified).
 
 ---
 
 ## 1. Problem
 
-The app cannot reach a domain's owner: the extension owns it, and the service that would carry
-requests to it is not yet specified. So the app does only what the config, the File Provider
-framework and the file system let it do alone: join and remove domains, register them, tell the user
-which ones the Files app shows, wake the working sets, and browse and change the domains' files
-through the file system, which the extension serves.
+The app owns no domain: the extension owns each one. So the app does with the config, the File
+Provider framework and the file system what they let it do alone: join and remove domains, register
+them, tell the user which ones the Files app shows, wake the working sets, and browse and change the
+domains' files through the file system, which the extension serves. Everything else, the vault
+and the browser's share link and offline copies, it asks of the domain's owner through the
+extension's service ([ios.md §5.4](ios.md#54-the-service)).
 
 ## 2. Structure
 
 Until a config exists, the app shows only Setup (§4). A config that does not load shows Setup with
-the core's message, as on Android. Otherwise the app has two destinations, reachable from every
-screen: **Files** (the start destination) and **Settings** (§5), from which Setup is reached by
-**Add a domain**.
+the core's message, as on Android. Otherwise the app has these destinations, reachable from every
+screen: **Files** (the start destination), **Vault** (§6) while a domain uses an extension, and
+**Settings** (§5), from which Setup is reached by **Add a domain**.
 
 The app is named **tsync** on the Home Screen and in Files. Its icon is `assets/tsync-app.svg` drawn
 square, one opaque 1024-pixel image whose corners the system rounds; `ios/app/make-icon.sh` renders
@@ -86,6 +89,8 @@ the framework's domain-change notification.
   is off for tsync: Files shows changes from other devices when you open tsync. Turn it on in
   Settings, General, Background App Refresh", or, when the device restricts it, that it is not
   available on this iPhone.
+- **AutoFill**, under Domains, while it is off for tsync and a domain uses passwords:
+  [passwords/ios.md §1](../extensions/passwords/ios.md#1-the-component).
 - **Add a domain** opens Setup.
 - **About**: the app's version and the commit it was built from.
 - **Diagnostics**, a row at the end that opens a page of its own: the extension's footprint log
@@ -120,7 +125,42 @@ the framework's domain-change notification.
   A release build offers none of them, carries no test server, and does not run the self-test at
   launch: `check-release.sh` fails one built with `TSYNC_DEVELOPMENT` or a test server (10 §5).
 
-## 6. Conformance
+## 6. Vault
+
+[android-app §10.8](android-app.md#108-vault) as written, with the Passwords tab of
+[passwords/ios.md §7](../extensions/passwords/ios.md#7-in-the-app), every request through the
+service ([ios.md §5.4](ios.md#54-the-service)). What differs:
+
+- **Shown** while a configured domain opts into an extension (its config entry's `extensions`,
+  [extensions README §3](../extensions/README.md#3-opting-in)): the config is the app's own, so
+  this needs no request. Each such domain is asked `vault_status` when the screen is shown and each
+  time the app comes to the foreground. A domain the service does not reach is *unreachable*; one
+  turned off in Files says so, and how to turn it on (§4).
+- **Unlock** derives in the app ([vault §6.4](../extensions/vault.md#64-deriving-in-the-caller)):
+  `vault_slots`, then `vault_derive` off the main thread, then `vault_unlock` with `keks`, and with
+  `secretKey` when the phone enrols. The secret key is the field's, or, when `vault_slots` says the
+  phone is enrolled, the keychain's entry ([ios.md §4.1](ios.md#41-the-keystore)); the secret key
+  field is shown only when the phone is not enrolled or that entry does not read. While it derives,
+  the form shows "Unlocking…" and takes no second tap. "The keyring changed" asks for the slots
+  and derives once more; a second such answer is shown. The passphrase, the secret key and the
+  KEKs are overwritten once the unlock answers.
+- **Fields for a secret** are secure text fields with no content type, no suggestions, no
+  autocorrection and no autocapitalisation, so neither AutoFill nor the keyboard keeps them, with
+  the show control of [security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases).
+- **Copy** writes the code, username or password to the pasteboard with `localOnly`, so Universal
+  Clipboard does not carry it to another device; iOS has no sensitive marker.
+- **Screens that show secrets**: iOS cannot refuse a screenshot, so the app covers its window
+  while the scene is not active, which keeps them out of the app switcher.
+- **Scan a QR code** uses the scanner of §4, where the device has it; otherwise the choice is not
+  offered. **Import a file** uses the system's document picker.
+- **Opened from elsewhere**: the app declares the `otpauth` URL scheme, so the Camera app hands a
+  scanned code to tsync, which shows Android's sheet.
+- **Freshness**: there are no notices; the screen asks again when the app comes to the foreground.
+- **Screen lock**: while the app runs, `protectedDataWillBecomeUnavailableNotification` sends
+  `vault_lock` with `reason: "screen"` to every domain that uses an extension
+  ([vault §6.2](../extensions/vault.md#62-auto-lock)).
+
+## 7. Conformance
 
 - With no config, only Setup is shown; a config that does not load shows Setup and the core's
   message. With a config, the app opens on Files.
@@ -140,3 +180,14 @@ the framework's domain-change notification.
 - With Background App Refresh turned off for tsync, Settings says so; turned on, it says nothing.
 - Removing a domain and joining it again with a different server says the new settings may wait for
   a restart; joining it again from the same link says nothing.
+- Vault, on a device, with a domain whose vault a computer made: the phone unlocks with the
+  passphrase and the secret key, and the extension's footprint log shows its peak below the limit
+  through the unlock. Locked again, it unlocks with the passphrase alone. A wrong passphrase and a
+  wrong secret key are each told apart, on the field.
+- After the phone restarts and is unlocked once, the vault opens unlocked, with `cached: keystore`.
+- A code copied in the app pastes on the phone and does not reach a Mac through Universal Clipboard.
+- An `otpauth://` QR code scanned by the Camera app opens the add sheet, and adds nothing before
+  **Add**.
+- Files, on a device: share link answers a URL that downloads the file; make available offline
+  marks the file *pinned*, and with the server away the file still opens; remove download clears
+  the mark and the file is *online only*.

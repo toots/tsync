@@ -1,8 +1,10 @@
 # The iOS client
 
 Scope: tsync on iOS: which process owns a domain, where its files live, what the host gives the
-core, and how the File Provider framework is served from Android's lazy tree. The app's screens are
-[ios-app.md](ios-app.md)'s; the rest of the app (Save to tsync, camera backup, vault, credentials) is
+core, how the File Provider framework is served from Android's lazy tree, and the service through
+which the app and the credential provider reach a domain's owner (§5.4). The app's screens, the
+vault's included, are [ios-app.md](ios-app.md)'s; AutoFill is
+[passwords/ios.md](../extensions/passwords/ios.md)'s; the rest (Save to tsync, camera backup) is
 [§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
 ([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
 
@@ -37,7 +39,8 @@ So:
 | Process | Started by | Boots domains | Uses the core for |
 |---|---|---|---|
 | File Provider extension | the system, on any use of a domain | yes, each domain at the first callback naming it | every callback, by direct calls ([android.md §5](android.md#5-the-bridge)) |
-| App | the user | never | `check_config` with a candidate and `setup_link`, which take no lock and write nothing |
+| App | the user | never | `check_config` with a candidate, `setup_link` and `vault_derive`, which take no lock and write nothing; everything else through the service (§5.4) |
+| Credential provider extension | the system, on an AutoFill request | never | nothing: every request through the service (§5.4) |
 
 - Ownership follows [android.md §2](android.md#2-ownership-and-process-model): held for the life of
   the process; no stop and no drain; process death is a crash-stop and the next boot recovers.
@@ -58,7 +61,8 @@ So:
 - Every other file lock the core takes is held only while a callback runs: a write awaits its upload
   ([android.md §5](android.md#5-the-bridge)), and the chunk store's locks are a local store's
   collection's.
-- The app never calls `boot`, `request` or `status`.
+- Neither the app nor the credential provider calls `boot`, `request` or `status`: a request reaches
+  the domain's owner through the service (§5.4), in the extension's process.
 
 ## 3. Host layout
 
@@ -69,6 +73,8 @@ So:
 | Signing team | `TSYNC_TEAM_ID` |
 | App | `TSYNC_APP_ID` |
 | File Provider extension | `$(TSYNC_APP_ID).fileprovider` |
+| Credential provider extension | `$(TSYNC_APP_ID).credentials` |
+| Keychain access group | `$(TSYNC_TEAM_ID).$(TSYNC_APP_ID)`, held by the app and the File Provider extension (§4.1) |
 | App Group | `TSYNC_APP_GROUP` |
 | Push environment | `TSYNC_APS_ENVIRONMENT`: `development` for a build installed from a Mac, `production` for a TestFlight or App Store build ([10 §5.6](../10-delivery.md#56-ios-signing-and-testflight)) |
 | Domain | [file-provider.md §3.3](file-provider.md#33-domain-identifier)'s identifier of its display name |
@@ -87,6 +93,7 @@ its domains.
 | Ownership records, data, cache | under the home, in the core's Apple layout | the owner |
 | Transfer root | the process's temporary directory, which in the extension is the File Provider's temporary directory | the framework and the owner |
 | Footprint log | `<group>/footprint.log` | the extension (§7) |
+| Service token | `<group>/service.token` | the first File Provider extension process that serves the service (§5.4) |
 
 - The host names the config file with `$TSYNC_CONFIG_FILE` ([07 §2.7](../07-daemon-cli.md)): the
   core's home is the process's, the config is the group's.
@@ -106,10 +113,28 @@ process before the first call:
   [memory.md §M.5](../ocaml/memory.md#m5-a-memory-capped-host), the minor heap included; the app
   keeps the defaults;
 - **log sink**: the unified log;
-- **keystore**: none yet, so a domain using the vault does not boot here (§9).
+- **keystore**: the keychain (§4.1), in the extension only.
 
 The cleartext rule of android §4.1 applies. Each callback runs on a new thread, which ends when the
 callback completes ([android.md §4.3](android.md#43-threads)).
+
+### 4.1 The keystore
+
+The keystore of [vault §6.1](../extensions/vault.md#61-the-keystore) is the keychain, kept as
+[security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases) says, in
+the access group of §3.1. Its items are readable after the device's first unlock since it started,
+so an extension the system starts while the phone is locked, before that unlock, finds the vault
+locked, and reads the entry again at its next vault request
+([vault §6.1](../extensions/vault.md#61-the-keystore)'s retry).
+
+- **Deriving.** The extension's memory cap is below `VAULT_KDF_MAX_MEM`, so the app derives an
+  unlock's keys and the extension unwraps
+  ([vault §6.4](../extensions/vault.md#64-deriving-in-the-caller)). The extension refuses every
+  action that would derive.
+- **Auto-lock.** `idleMinutes` and `maxHours` are checked when a request needs K: a suspended
+  extension runs no timer, and nothing reads K while it is suspended. `onScreenLock` is reported by
+  the app while it runs (security-model §10.6); a screen lock while the app is not running is not
+  reported (§9).
 
 ## 5. File Provider on a lazy tree
 
@@ -197,6 +222,42 @@ The key signs pushes to every app of its team, so it is given to no other server
 **The server** pushes as [http-proxy §A4.7](http-proxy.md#a47-pushes) specifies: its operator sets
 the listener's `push_*` options, and a build without libcurl cannot.
 
+### 5.4 The service
+
+The extension vends one `NSFileProviderServiceSource` for each domain it serves, named
+`<app id>.owner`, on the domain's root item. It carries the owner's requests to processes that
+cannot own the domain: the app and the credential provider extension.
+
+- **Reaching it.** A client gets the service of a domain from
+  `NSFileProviderManager(for:).getService(named:for:)` with the root item (iOS 16), and keeps one
+  `NSXPCConnection` to it per domain while it runs, opened at the first request and opened again
+  after it is invalidated. The system starts the extension for the connection when it is not
+  running; the connection is a callback naming the domain, which boots it (§2).
+- **One call.** `request(token, json) → json`: the bridge's `request`
+  ([android.md §5](android.md#5-the-bridge)), the same request and reply, on a thread of its own
+  in the extension (§4). The extension answers every action the domain's handler answers.
+- **The token.** Any app that is handed one of the domain's files can ask the system for the
+  services of its domain, so the extension answers only callers that hold the App Group: each call
+  carries the 32 bytes of `<group>/service.token`, and a call with another token is refused `denied`
+  and its connection invalidated. The first extension process to serve the service creates the file
+  exclusively, 32 bytes from the CSPRNG, mode 0600; a process that finds it existing reads it. It
+  is never logged and never leaves the group.
+- **Deadlines.** A call that is not a bulk action
+  ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)) fails
+  `unreachable` past `service_deadline`, its reply dropped if it comes. A bulk action has no
+  deadline: it fails `unreachable` when the connection is interrupted, which is the extension's
+  process ending. Either way the client says the domain did not answer, never that it is empty.
+- **No transfers.** No service call carries a file path: the files are read and written through the
+  file system ([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
+- **Not reachable** while the domain is turned off in Files: the framework starts no extension for
+  it. A client says so with the domain's "Turned off in Files" ([ios-app §3](ios-app.md#3-registration-and-signals)).
+- The footprint log (§7) has one line per service call, as for a callback, naming the action and
+  never a member's value.
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `service_deadline` | 30 s | above a listing's `refresh_patience` |
+
 ## 6. The app
 
 [ios-app.md](ios-app.md).
@@ -267,14 +328,19 @@ addition:
   `app: background refresh` followed by change enumerations, with the tsync app not in use; a peer's
   change made before it shows in the Files app without either app being opened.
 
+- The service answers the app and the credential provider extension, and refuses `denied` a call
+  whose token is not the group's file.
+- With the extension not running, a service call from the app starts it and answers; with the
+  domain turned off in Files, the app says so and does not wait out `service_deadline`.
+- In the extension, an unlock with `keks`, and `passwords_list` over a vault of 1,000 logins, stay
+  below the memory limit; `vault_unlock` with `passphrase` is refused `invalid` before deriving.
+
 ## 9. Not yet specified
 
 Each becomes a section above before its code.
 
-1. A service the extension vends (`NSFileProviderServiceSource`) for the app and other extensions,
-   one connection per domain, with deadlines, and the transfer root for its callers.
-2. The keystore (the keychain, after first unlock, this device only), the vault, passwords, passkeys
-   and one-time codes (iOS 18), the credential provider and share extensions.
+1. The share extension (Save to tsync).
+2. A screen lock while the app is not running, for a vault whose policy sets `onScreenLock` (§4.1).
 3. Camera backup with PhotoKit's change tracking.
 4. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.

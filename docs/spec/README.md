@@ -236,6 +236,7 @@ Every host runs the same core; they differ in which roles their processes hold.
 | macOS | One service process owns every domain, hosts the File Provider side and holds the uplink governor; a sandboxed extension and app are clients of it. |
 | Windows | A supervisor started at logon; one owner process per domain, which hosts the domain's sync root. No local store and no store server ([cloud-files](frontends/cloud-files.md#2-what-a-windows-host-holds)). |
 | Android | The app process owns its domain, with a lazy tree (folders read from the store when opened) and no background cycle; the UI and the DocumentsProvider call it directly. |
+| iOS | The File Provider extension owns each domain, with Android's lazy tree; the app and the credential provider extension reach it through the extension's service ([ios.md](frontends/ios.md#54-the-service)). |
 | One-shot command | Asks the running owner, or takes ownership for its own duration when none runs. |
 
 The owner of a domain does everything that changes its local state: it converges the domain,

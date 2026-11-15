@@ -316,6 +316,7 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 | `check_config(domain, candidate?)` | domain; optionally a config's text | `""` or error text | Loads and validates the config, or the candidate text in its place, and selects the domain, starting nothing, writing nothing and taking no lock. Callable before or after any boot. |
 | `boot(domain)` | domain | `""` or error text | §3.1. |
 | `setup_link(link)` | a setup link | JSON | Fetches and opens it ([setup-link §6.1](../algorithms/setup-link.md#61-opening-a-link)), before or after boot, writing nothing: `{"from","domains":[{"name","url","secret"}],"skipped":[{"name","reason"}],"about"}`, each joinable domain with its first backend's server, or `{"error"}` with the sentence to show. |
+| `vault_derive(json)` | `vault_slots`' reply with `passphrase` and `secretKey` | JSON | [vault §6.4](../extensions/vault.md#64-deriving-in-the-caller)'s derivation, before or after boot, writing nothing and taking no lock: `{"keks"}` or `{"error"}`. |
 | `request(domain, json)` | domain, request | reply | One request, one reply, through the domain's handler ([08 §3.3](../08-frontends.md#33-actions)). |
 | `status(domain)` | domain | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |
 | `open(domain, ref)` | domain, reference | handle > 0, or −errno | Resolves the file's current version (§3.2 rule 3, §3.3) and pins it to a new handle. |
