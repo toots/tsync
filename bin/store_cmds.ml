@@ -44,8 +44,8 @@ let cutoff_of date =
                      tm_yday = 0;
                      tm_isdst = false;
                    })
-          | _ -> fail "%s is not a date (YYYY-MM-DD)" date)
-    | _ -> fail "%s is not a date (YYYY-MM-DD)" date
+          | _ -> refuse "%s is not a date (YYYY-MM-DD)" date)
+    | _ -> refuse "%s is not a date (YYYY-MM-DD)" date
 
 (* The owner's working directory is not ours: the paths go absolute. *)
 let absolute p =
