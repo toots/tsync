@@ -430,6 +430,19 @@ let expire_group composite groups n ns =
         Retention.remove_empty_groups composite keys;
         n.expired <- n.expired + List.length keys
 
+(* §5.5: an expiring version in a group the collected main does not hold
+   (listed from another member) is deleted once marking ends; it names no chunk
+   this main marks. *)
+let expire_unmarked m d composite groups n =
+  let present = Hashtbl.create 1024 in
+  List.iter
+    (fun tag -> Hashtbl.replace present tag ())
+    (enumerate m d ~after:"");
+  Hashtbl.iter
+    (fun tag _ ->
+      if not (Hashtbl.mem present tag) then expire_group composite groups n tag)
+    groups
+
 (* One session on one main, under its run lock (§5.5). *)
 let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
     composite d m =
@@ -657,6 +670,7 @@ let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
             with
               | Some s -> s
               | None ->
+                  expire_unmarked m d composite groups n;
                   Narrate.say nr "  marking done in %s: %s kept%s"
                     (Narrate.duration (Rt.now () -. t_mark))
                     (Narrate.count n.promoted "chunk")

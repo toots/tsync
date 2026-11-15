@@ -433,6 +433,28 @@ let () =
         (not (present vc))
         (on_disk main_root (Key.chunk d (chunk "exp3")))
         (not (x_saved ()));
+      p "\n== an expiring version the collected main does not hold\n";
+      let far = Key.version d ~group:"0123456789ab-7/h" ~ns:14L in
+      replica.put far (Bigstring.of_string (manifest [chunk "shared"]));
+      let expired = ref 0 in
+      let rec drain_far i =
+        match
+          Collector.run ~budget:0.
+            ?expiring:(if i = 0 then Some [far] else None)
+            c
+        with
+          | Ok [st] -> (
+              expired := !expired + st.versions_expired;
+              match st.outcome with
+                | Suspended _ when i < 40 -> drain_far (i + 1)
+                | o -> o)
+          | _ -> Halted "failed"
+      in
+      let o = drain_far 0 in
+      p "run: %s, %d versions expired\n" (outcome o) !expired;
+      Composite.settle ~timeout:10. c;
+      ignore (settled 100);
+      p "deleted on the replica: %b\n" (Contract.get replica far = None);
       p "\n== a run opened without an expiry refuses one\n";
       ignore (step ());
       ignore (step ~expiring:[kept] ());

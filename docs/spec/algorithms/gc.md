@@ -360,6 +360,8 @@ marker for c on that main; otherwise, or if unreadable, it files one. It never d
 **Transition to closing.** When Mark is empty:
 
 ```
+delete, through the composite, every key of X in a version group the collected main does not hold
+  (resolved from another member's listing): marking never visits it, and it names no chunk of this main
 wait until this owner holds no unsettled copy deletion (§5.7)
 if G is odd: g := G                           -- left odd by a crash, or by a run whose records are gone
 else: g := G + 1; write G := g                -- odd: from here on no presence memo about a copy is relied on
