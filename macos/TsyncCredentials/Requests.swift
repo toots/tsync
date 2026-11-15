@@ -14,16 +14,19 @@ struct Choice {
 }
 
 /// What a list asked of every domain gave: the rows, the domains whose vault is
-/// locked, and those that did not answer (§2: never reported as empty).
+/// locked, those that did not answer (§2: never reported as empty) and, on iOS,
+/// those turned off in Files.
 struct Listed {
     var choices: [Choice] = []
     var locked: [String] = []
     var unanswered: [String] = []
+    var off: [String] = []
 
     mutating func merge(_ other: Listed) {
         choices += other.choices
         locked += other.locked.filter { !locked.contains($0) }
         unanswered += other.unanswered.filter { !unanswered.contains($0) }
+        off += other.off.filter { !off.contains($0) }
     }
 }
 
@@ -39,6 +42,16 @@ enum CreationDomain {
 /// The owner's passwords requests, one per call, each blocking its thread
 /// (file-provider §4.3): callers keep them off the main queue.
 enum Requests {
+    /// The domains asked: every configured one on macOS, the vault domains the
+    /// app keeps on iOS (passwords/ios §2).
+    private static func domains() -> [String] {
+        #if os(iOS)
+        return Tsync.vaultDomainNames()
+        #else
+        return Tsync.domainNames()
+        #endif
+    }
+
     static func call(_ domain: String, _ action: String, _ args: [String: Any] = [:]) throws
         -> [String: Any]
     {
@@ -54,13 +67,15 @@ enum Requests {
         _ ask: (String) throws -> [String: Any], _ rows: (String, [String: Any]) -> [Choice]
     ) -> Listed {
         var listed = Listed()
-        for domain in Tsync.domainNames() {
+        for domain in domains() {
             do {
                 listed.choices += rows(domain, try ask(domain))
             } catch let failure as OwnerFailure where failure.code == "locked" {
                 listed.locked.append(domain)
             } catch let failure as OwnerFailure where failure.code == "invalid" {
                 trace.info("\(domain, privacy: .public) refused: invalid")
+            } catch OwnerFailure.turnedOff {
+                listed.off.append(domain)
             } catch {
                 trace.info("\(domain, privacy: .public) did not answer")
                 listed.unanswered.append(domain)
@@ -115,10 +130,11 @@ enum Requests {
     }
 
     /// extensions README §6.1: the only domain using passwords, else the default domain
-    /// when it does; a locked one is named so the sheet can say so.
+    /// when it does; on iOS, which has no default, the first (passwords/ios §2). A
+    /// locked one is named so the sheet can say so.
     static func creationDomain() -> CreationDomain {
         var using: [(name: String, locked: Bool)] = []
-        for domain in Tsync.domainNames() {
+        for domain in domains() {
             do {
                 _ = try call(domain, "list", ["use": false])
                 using.append((domain, false))
@@ -126,8 +142,12 @@ enum Requests {
                 using.append((domain, true))
             } catch {}
         }
+        #if os(iOS)
+        let preferred = using.first?.name
+        #else
         let preferred = (try? String(contentsOf: Tsync.dataDir.appendingPathComponent("default-domain"), encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        #endif
         guard let target = using.count == 1 ? using.first : using.first(where: { $0.name == preferred }) else {
             return using.isEmpty ? .none : .several(using.map(\.name))
         }
