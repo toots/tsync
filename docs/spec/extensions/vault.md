@@ -373,11 +373,11 @@ with the owner.
   takes `vault_slots`' reply, the passphrase and the secret key, and picks and checks the slots as
   an unlock does (§4.2): a malformed secret key, no slot for it ("wrong secret key") and only
   unusable ones are refused as an unlock refuses them, before any derivation. It answers `keks`,
-  one KEK per slot it derived for, by slot id, b64url.
+  one KEK per slot it derived for, by slot id, b64url of its 32 bytes.
 - **The unlock.** `vault_unlock` takes `keks` in place of `passphrase`, with `secretKey` when the
   machine enrolls. The owner unwraps each slot named with its KEK, as §4.2 says, and goes on as an
   unlock with the passphrase does: the same keystore writes, machine entry and replies. Every KEK
-  failing is "wrong passphrase". A `keks` member naming no slot of the keyring, or slots of
+  failing is "wrong passphrase". A KEK that is not b64url of 32 bytes is refused `invalid`. A `keks` member naming no slot of the keyring, or slots of
   another secret key than the one given or held, is refused `invalid` with "the keyring changed:
   ask for its slots again".
 - A caller holds each KEK as it holds a passphrase (security-model §10.6), and only for the one

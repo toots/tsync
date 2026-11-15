@@ -146,8 +146,10 @@ service ([ios.md §5.4](ios.md#54-the-service)). What differs:
   phone is enrolled, the keychain's entry ([ios.md §4.1](ios.md#41-the-keystore)); the secret key
   field is shown only when the phone is not enrolled or that entry does not read. While it derives,
   the form shows "Unlocking…" and takes no second tap. "The keyring changed" asks for the slots
-  and derives once more; a second such answer is shown. The passphrase, the secret key and the
-  KEKs are overwritten once the unlock answers.
+  and derives once more; a second such answer is shown. The KEKs are kept only for the one request.
+  The fields are emptied once the unlock succeeds; a refused unlock keeps them, for a retry.
+  `vault_unlock` is a bulk action ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)):
+  it waits past `service_deadline`.
 - **Locked**: while no vault domain is unlocked, the screen shows no tabs, only each domain's
   form under the heading "Unlock the vault" (one domain) or "Unlock `<domain>`" (several), with
   the line "Enter the vault's passphrase to see its codes and passwords." and, below the secret

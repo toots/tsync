@@ -238,7 +238,7 @@ cannot own the domain: the app and the credential provider extension.
   in the extension (§4). The extension answers every action the domain's handler answers.
 - **The token.** Any app that is handed one of the domain's files can ask the system for the
   services of its domain, so the extension answers only callers that hold the App Group: each call
-  carries the 32 bytes of `<group>/service.token`, and a call with another token is refused `denied`
+  carries the 32 bytes of `<group>/service.token`, compared in constant time, and a call with another token is refused `denied`
   and its connection invalidated. The first extension process to serve the service creates the file
   exclusively, 32 bytes from the CSPRNG, mode 0600; a process that finds it existing reads it. It
   is never logged and never leaves the group.

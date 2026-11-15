@@ -337,7 +337,7 @@ These general rules are realised by the hosts, which link here: the vault keysto
   each time the field is shown, and is never remembered. Turning it on changes nothing else: the
   value is not copied, logged or sent by it, and the screen stays out of screenshots as before.
 - Implementations SHOULD overwrite the passphrase, the KEK, K and decrypted records once they are no longer needed, where the runtime allows.
-- The replies of `vault_init`, `vault_rekey`, `vault_kit` and `vault_passphrase`, and the `passphrase`, `newPassphrase`, `secretKey` and `keks` members of any vault request, and `vault_derive`'s answer,, are never logged; a log of IPC traffic masks them (§10.3).
+- The replies of `vault_init`, `vault_rekey`, `vault_kit` and `vault_passphrase`, and the `passphrase`, `newPassphrase`, `secretKey` and `keks` members of any vault request, and `vault_derive`'s answer, are never logged; a log of IPC traffic masks them (§10.3).
 
 ---
 
