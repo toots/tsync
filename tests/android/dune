@@ -98,7 +98,15 @@
 (executable
  (name refresh_test)
  (modules refresh_test)
- (libraries lazy_harness tsync_android threads.posix unix yojson))
+ (libraries
+  lazy_harness
+  tsync_android
+  tsync_core
+  tsync_remote
+  tsync_store
+  threads.posix
+  unix
+  yojson))
 
 (rule
  (with-stdout-to

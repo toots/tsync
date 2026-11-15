@@ -206,6 +206,7 @@ let summary (pass : Engine_intf.pass) : Protocol.pass_summary =
         | `Head -> "head"
         | `Stopped -> "stopped"
         | `Pruned -> "pruned"
+        | `Unreadable -> "unreadable"
         | `Fresh -> "fresh");
     error = None;
   }

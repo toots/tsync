@@ -53,7 +53,7 @@ type pass = {
   covered : string list;  (** the folders it brought to the head *)
   changed : string list;  (** those whose children changed *)
   entries : int;  (** the log entries it read *)
-  ended : [ `Head | `Stopped | `Pruned | `Fresh ];
+  ended : [ `Head | `Stopped | `Pruned | `Unreadable | `Fresh ];
 }
 
 module type S = sig

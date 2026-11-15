@@ -31,3 +31,15 @@
   summary                            held 0, covered 0, merged 0, entries 0, end failed, error the store is down [unreachable]
   refresh again                      ok, before the patience
   summary                            held 0, covered 0, merged 0, entries 0, end failed, error the store is down [unreachable]
+== an entry no reader can follow, below the tree head
+  tree head passed it                true
+  refresh                            ok, before the patience
+  pass, notices when answered        sent
+  pass, log entries read             808
+  pass, folders written              201
+  pass, summary                      held 201, covered 201, merged 1, entries 1, end unreadable
+  pass, notices                      {changed d:<folder6>}
+  f020                               [lost.txt] no read
+== an entry no reader can follow, above the tree head
+  refresh                            ok, before the patience
+  summary                            held 0, covered 0, merged 0, entries 0, end failed, error log entry 8 cannot be followed and the tree head has not passed it [corrupt/other]

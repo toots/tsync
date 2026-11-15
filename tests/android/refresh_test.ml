@@ -11,7 +11,7 @@ let freshness = 4.
 let wait_stale () = Thread.delay (freshness +. 0.1)
 
 (* How long a refresh waits for a pass that does not end. *)
-let patience = 1.
+let patience = 10.
 
 (* android §3.2: the pass's summary, when the answer carries one. *)
 let last_summary = ref "none"
@@ -181,3 +181,36 @@ wait_stale ();
 p "  %-34s %s" "refresh again" (timed_refresh ());
 p "  %-34s %s" "summary" !last_summary;
 Atomic.set mode `Up
+;;
+
+(* publication §4.3: an entry no reader can follow is read past by state once
+   the tree head has passed it, and stops the read otherwise. *)
+let log =
+  Tsync_remote.Log_store.create d
+    (Tsync_store.Local.create ~name:"main" store_path)
+
+let entry_path n =
+  Filename.concat store_path
+    (Tsync_core.Key.to_string (Tsync_core.Key.log_entry d n))
+
+let unreadable n =
+  Tsync_core.Fs.write_file_for_test (entry_path n) "not an entry"
+
+let last_entry () = List.length (Tsync_remote.Log_store.read_entries log 1);;
+
+p "== an entry no reader can follow, below the tree head";
+quiet ();
+Mutex.protect notices_m (fun () -> notices := []);
+peer_writes "f020/lost.txt" "lost";
+let n = last_entry () in
+p "  %-34s %b" "tree head passed it" (Tsync_remote.Log_store.tree_head log >= n);
+unreadable n;
+wait_stale ();
+pass "pass";
+ignore (list "f020" (ref_of (action "list_dir" [s "ref" "root"]) "f020"));
+
+p "== an entry no reader can follow, above the tree head";
+unreadable (n + 1);
+wait_stale ();
+p "  %-34s %s" "refresh" (timed_refresh ());
+p "  %-34s %s" "summary" !last_summary

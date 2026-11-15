@@ -1148,6 +1148,18 @@ module Make (C : Engine_ctx.S) = struct
       (fun c -> Hashtbl.mem touched (Algebra.key_of c))
       (theirs_of entries)
 
+  (* publication §4.3: an entry no reader can follow is read past by state
+     once the tree head has passed it. *)
+  let followable entries =
+    match List.find_map unfollowable entries with
+      | None -> `Yes
+      | Some s when Log_store.tree_head log >= s.n -> `By_state
+      | Some s ->
+          Fail.raise_ Fail.Corrupt
+            "log entry %d cannot be followed and the tree head has not passed \
+             it"
+            s.n
+
   let pull_id dir =
     match Mirror.folder_id mirror dir with
       | Some id -> id
@@ -1167,6 +1179,11 @@ module Make (C : Engine_ctx.S) = struct
     match fetch t with
       | `Pruned -> Fail.raise_ Fail.Link "the log moved under a pull of %s" dir
       | `Entries entries ->
+          (match followable entries with
+            | `Yes -> ()
+            | `By_state ->
+                Fail.raise_ Fail.Link "the tree head moved under a pull of %s"
+                  dir);
           let walked : Log_entry.command list =
             List.map
               (fun (e : Tree.entry) ->
@@ -1233,10 +1250,16 @@ module Make (C : Engine_ctx.S) = struct
     let rec pages h changed =
       match fetch ~max:page h with
         | `Pruned -> changed + merge (by_state dir id)
-        | `Entries entries ->
-            let head = h + List.length entries in
-            let changed = changed + merge (head, view_commands id entries) in
-            if List.length entries < page then changed else pages head changed
+        | `Entries entries -> (
+            match followable entries with
+              | `By_state -> changed + merge (by_state dir id)
+              | `Yes ->
+                  let head = h + List.length entries in
+                  let changed =
+                    changed + merge (head, view_commands id entries)
+                  in
+                  if List.length entries < page then changed
+                  else pages head changed)
     in
     let changed =
       match folder_position dir with
@@ -1320,11 +1343,15 @@ module Make (C : Engine_ctx.S) = struct
       else (
         match fetch ~max:page from with
           | `Pruned -> `Pruned
-          | `Entries entries ->
-              let head = from + List.length entries in
+          | `Entries entries -> (
               entries_read := !entries_read + List.length entries;
-              merge_page entries head;
-              if List.length entries < page then `Head head else read head)
+              match followable entries with
+                | `By_state -> `Unreadable
+                | `Yes ->
+                    let head = from + List.length entries in
+                    merge_page entries head;
+                    if List.length entries < page then `Head head else read head
+              ))
     in
     let ended, covered =
       match views with
@@ -1335,9 +1362,9 @@ module Make (C : Engine_ctx.S) = struct
             in
             match read oldest with
               | `Stopped -> (`Stopped, [])
-              | `Pruned ->
+              | (`Pruned | `Unreadable) as ended ->
                   List.iter (fun v -> alone v.dir) views;
-                  (`Pruned, List.map (fun v -> v.dir) views)
+                  (ended, List.map (fun v -> v.dir) views)
               | `Head head ->
                   write_pass_record { entry = head; start };
                   (`Head, List.map (fun v -> v.dir) views))
