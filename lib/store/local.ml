@@ -201,7 +201,8 @@ let with_key key f =
 let create ?(verify_writes = true) ~name root =
   let root = expand_home root in
   let health = Health.create name in
-  let mappable () = not (Fs.is_network_fs root) in
+  (* local §11: Windows refuses to replace a file a live mapping still holds. *)
+  let mappable () = (not Sys.win32) && not (Fs.is_network_fs root) in
   (* Only link-kind failures (a network filesystem away) count against it. *)
   let fed f =
     match f () with
@@ -341,7 +342,10 @@ let create ?(verify_writes = true) ~name root =
                             | Unix.EOPNOTSUPP ),
                             _,
                             _ ) ->
-                        durable_write root dst (Fs.map_file s)
+                        durable_write root dst
+                          (Fs.with_fd (Fs.openfile s [O_RDONLY])
+                             (if mappable () then Fs.map_fd
+                              else Fs.read_fd_bigstring))
                     | exception Unix.Unix_error (e, fn, a) ->
                         raise (Fail.E (Fail.of_unix e fn a)))
               | _ ->

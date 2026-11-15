@@ -142,7 +142,7 @@ Every errno is classified by [failure-model §4.1](../algorithms/failure-model.m
 ## 11. What the driver relies on from the filesystem
 
 - `rename` atomically replaces its target within one directory, and `link` (or rename-without-replacement) fails with EEXIST atomically. These make `put` last-writer-wins without partial reads, and `put_if_absent` a real precondition.
-- An open or mapped file stays readable after its name is unlinked or replaced.
+- An open or mapped file stays readable after its name is unlinked or replaced. Windows refuses to replace or remove a file while a mapping of it is open, and a mapping lasts until its buffer is collected, so there every read is a positioned read.
 - A name renamed into place is visible to the next status or directory read on the same host.
 - fsync of a file and of a directory makes data and names durable.
 
