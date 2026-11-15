@@ -1,4 +1,4 @@
-(* Staged.read_whole: the range asked for, clipped at the end of the body, and
+(* Staged.read_whole and map_whole: the range asked for, clipped at the end of the body, and
    empty past it. *)
 
 open Tsync_checkout
@@ -18,8 +18,11 @@ let () =
     let last =
       if n > 0 then Char.code (Bigarray.Array1.get b (n - 1)) else -1
     in
-    Printf.printf "%s: off %d len %d -> %d bytes, first %d, last %d\n" what off
-      len n first last
+    let mapped = Staged.map_whole staged "0123456789abcdef" ~off ~len in
+    Printf.printf
+      "%s: off %d len %d -> %d bytes, first %d, last %d, mapped the same %b\n"
+      what off len n first last
+      (Bigstring.to_string mapped = Bigstring.to_string b)
   in
   show "inside" ~off:4096 ~len:8192;
   show "unaligned" ~off:1000 ~len:10;

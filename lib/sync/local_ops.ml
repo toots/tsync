@@ -467,7 +467,7 @@ module Make (C : Engine_ctx.S) = struct
       let keys =
         List.init n (fun i ->
             let len = if size = 0 then 0 else Chunking.length ~size ~cs i in
-            let chunk = Staged.read_whole staged body ~off:(i * cs) ~len in
+            let chunk = Staged.map_whole staged body ~off:(i * cs) ~len in
             let key = Chunk_key.of_bigstring chunk in
             Fs.drop_mapped_pages chunk;
             key)
@@ -1346,7 +1346,9 @@ module Make (C : Engine_ctx.S) = struct
         (* The handover was checked before the rename: whatever was swapped in
            since must still be a regular file, never a link the owner follows. *)
         (match Fs.lstat_opt dst with
-          | Some { st_kind = S_REG; _ } -> ()
+          | Some { st_kind = S_REG; st_nlink = 1; _ } -> ()
+          (* security §7.3: another name could write the body in place. *)
+          | Some { st_kind = S_REG; _ } -> copy_regular ~src:dst ~dst
           | _ ->
               Fs.unlink_quiet dst;
               Fail.raise_ Fail.Invalid

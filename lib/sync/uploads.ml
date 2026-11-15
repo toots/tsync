@@ -15,7 +15,7 @@ module Make (C : Engine_ctx.S) = struct
       | Whole { body; _ } ->
           Remote.Lazy
             (fun () ->
-              Staged.read_whole staged body ~off:(i * e.chunk_size) ~len)
+              Staged.map_whole staged body ~off:(i * e.chunk_size) ~len)
       | Slots slots -> (
           match if i < Array.length slots then slots.(i) else Staged.Zero with
             | Staged.Inherit -> (
