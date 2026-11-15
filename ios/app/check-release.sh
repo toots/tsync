@@ -10,20 +10,24 @@ fail() { echo "check-release: $*" >&2; exit 1; }
 value() { plutil -extract "$2" raw "$1/Info.plist"; }
 
 plugins=("$app"/PlugIns/*.appex)
-[ "${#plugins[@]}" = 2 ] || fail "expected two extensions, found ${#plugins[@]}"
+[ "${#plugins[@]}" = 3 ] || fail "expected three extensions, found ${#plugins[@]}"
 appex=$app/PlugIns/TsyncPhoneFileProvider.appex
 credentials=$app/PlugIns/TsyncPhoneCredentials.appex
+share=$app/PlugIns/TsyncPhoneShare.appex
 [ -d "$appex" ] || fail "no File Provider extension in $app"
 [ -d "$credentials" ] || fail "no credential provider extension in $app"
+[ -d "$share" ] || fail "no share extension in $app"
 
-# passwords/ios §1: the credential provider holds no core.
+# passwords/ios §1, ios-app §7: the credential provider and the share extension hold no core.
 for bundle in "$app" "$appex"; do
   grep -q OCAMLRUNPARAM "$bundle/$(value "$bundle" CFBundleExecutable)" \
     || fail "$bundle does not hold the core"
 done
-! grep -q OCAMLRUNPARAM "$credentials/$(value "$credentials" CFBundleExecutable)" \
-  || fail "the credential provider holds the core"
-for bundle in "$app" "$appex" "$credentials"; do
+for bundle in "$credentials" "$share"; do
+  ! grep -q OCAMLRUNPARAM "$bundle/$(value "$bundle" CFBundleExecutable)" \
+    || fail "$bundle holds the core"
+done
+for bundle in "$app" "$appex" "$credentials" "$share"; do
   [ "$(value "$bundle" CFBundleVersion)" = "$BUILD_NUMBER" ] \
     || fail "$bundle is not build $BUILD_NUMBER"
   [ "$(value "$bundle" CFBundleShortVersionString)" = "$(value "$app" CFBundleShortVersionString)" ] \
@@ -34,6 +38,7 @@ done
 [ "$(value "$appex" CFBundleIdentifier)" = "$TSYNC_APP_ID.fileprovider" ] || fail "extension identifier"
 [ "$(value "$credentials" CFBundleIdentifier)" = "$TSYNC_APP_ID.credentials" ] \
   || fail "credential provider identifier"
+[ "$(value "$share" CFBundleIdentifier)" = "$TSYNC_APP_ID.share" ] || fail "share extension identifier"
 # 10 §5.6: the vault's ciphers are declared with the code App Store Connect
 # issued, and not at all before it is.
 if [ -n "$TSYNC_EXPORT_COMPLIANCE_CODE" ]; then
@@ -54,7 +59,7 @@ fi
 case $signing in
   signed)
     # The File Provider extension last: the push check reads its entitlements.
-    for bundle in "$credentials" "$app" "$appex"; do
+    for bundle in "$credentials" "$share" "$app" "$appex"; do
       codesign --verify --strict "$bundle"
       codesign -dvv "$bundle" > "$work/signature" 2>&1
       grep -q '^Authority=Apple Distribution' "$work/signature" || fail "$bundle is not signed for distribution"

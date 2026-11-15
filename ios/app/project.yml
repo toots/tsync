@@ -65,6 +65,8 @@ targets:
         embed: true
       - target: TsyncPhoneCredentials
         embed: true
+      - target: TsyncPhoneShare
+        embed: true
 
   # file-provider.md: the macOS extension's callbacks, with the owner in
   # process instead of behind a socket.
@@ -122,5 +124,29 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_ENTITLEMENTS: Credentials/Credentials.entitlements
         INFOPLIST_FILE: Credentials/Info.plist
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+
+  # ios-app.md §7: Save to tsync, writing through the file system.
+  TsyncPhoneShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Shared/Service.swift
+      - path: Client
+      - path: Share
+        excludes: [Info.plist]
+      - path: App/FileStore.swift
+      - path: ../../macos/Shared/Tsync.swift
+      - path: ../../macos/Shared/OwnerFailure.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}.share
+        # It holds no core: it writes through the file system.
+        "OTHER_LDFLAGS[sdk=iphoneos*]": ""
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]": ""
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        CODE_SIGN_ENTITLEMENTS: Share/Share.entitlements
+        INFOPLIST_FILE: Share/Info.plist
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
