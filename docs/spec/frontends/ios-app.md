@@ -187,7 +187,8 @@ it until that extension has taken it.
   falls back to the root. **Save** and **Cancel**.
 - **Writing**: each item is copied, with a coordinated write, to the folder's user-visible URL
   (`NSFileProviderManager.getUserVisibleURL`) under its name; a name already taken there gets the
-  next free one, as `report 2.pdf`. An item the sharing app offers only as data is written from that
+  first free one, as the app's upload picks it ([android-app §5](android-app.md#5-talking-to-the-core)):
+  `report (1).pdf`. An item the sharing app offers only as data is written from that
   data. The sheet completes the request only once every write has returned: the system then holds
   the bytes, and a kill of either extension loses nothing.
 - **Failure**: a write refused (the domain turned off in Files, no space) is shown with its reason
@@ -230,4 +231,4 @@ it until that extension has taken it.
   the mark and the file is *online only*.
 - Save to tsync, on a device: three photos shared from Photos to a remembered folder appear there
   in the app and in the Files app, and upload; a photo shared again under a taken name is saved as
-  its next free name; with the domain turned off in Files the sheet says so and saves nothing.
+  its first free name; with the domain turned off in Files the sheet says so and saves nothing.
