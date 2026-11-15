@@ -372,7 +372,6 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
     | Open { started = None; _ }, _ ->
         Narrate.say nr "%s: opening a collection run on %s" m.member.name m.root
 
-(* One session on one main, under its run lock (§5.5). *)
 (* §5.5: X is written before the run's first record, and an open run keeps
    the set it opened with. *)
 let expiry_set nr m d ~r0 ~(plan : Gc_plan.start) expiring =
@@ -430,6 +429,7 @@ let expire_group composite groups n ns =
         Retention.remove_empty_groups composite keys;
         n.expired <- n.expired + List.length keys
 
+(* One session on one main, under its run lock (§5.5). *)
 let session ?budget ?pause ?expiring ~narrate:nr ~verify ~keep ~cancelled
     composite d m =
   let n = counters () in
