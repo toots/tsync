@@ -4,20 +4,24 @@ import SwiftUI
 struct DiagnosticsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var message = ""
+    @State private var coreLog = ""
     @State private var footprint = ""
     @State private var shared: [URL] = []
 
     var body: some View {
         Form {
-            Section("Memory log") {
-                Button("Refresh") { readFootprint() }
+            Section {
+                Button("Refresh") { readLogs() }
                 if !shared.isEmpty { ShareLink("Share", items: shared) }
                 Button("Clear", role: .destructive) {
-                    try? FileManager.default.removeItem(at: Footprint.log)
-                    readFootprint()
+                    for log in [Core.log, Core.oldLog, Footprint.log, Footprint.oldLog] {
+                        try? FileManager.default.removeItem(at: log)
+                    }
+                    readLogs()
                 }
-                Text(footprint).font(.system(.caption2, design: .monospaced))
             }
+            Section("tsync log") { Text(coreLog).font(.system(.caption2, design: .monospaced)) }
+            Section("Memory log") { Text(footprint).font(.system(.caption2, design: .monospaced)) }
             if Bundle.main.development {
                 Section("Development") {
                     Button("Add a local test domain") {
@@ -38,13 +42,18 @@ struct DiagnosticsView: View {
             }
         }
         .navigationTitle("Diagnostics")
-        .onAppear { readFootprint() }
+        .onAppear { readLogs() }
     }
 
-    private func readFootprint() {
+    private func readLogs() {
         shared = SelfTest.copyLogsToDocuments()
-        let text = (try? String(contentsOf: Footprint.log, encoding: .utf8)) ?? "no record yet"
-        footprint = text.split(separator: "\n").suffix(60).joined(separator: "\n")
+        coreLog = Self.tail(Core.log)
+        footprint = Self.tail(Footprint.log)
+    }
+
+    private static func tail(_ log: URL) -> String {
+        let text = (try? String(contentsOf: log, encoding: .utf8)) ?? "no record yet"
+        return text.split(separator: "\n").suffix(60).joined(separator: "\n")
     }
 }
 
