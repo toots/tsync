@@ -448,7 +448,10 @@ let () =
               match st.outcome with
                 | Suspended _ when i < 40 -> drain_far (i + 1)
                 | o -> o)
-          | _ -> Halted "failed"
+          | Ok l -> Halted (Printf.sprintf "%d mains answered" (List.length l))
+          | Error Busy -> Halted "busy"
+          | Error (Unsupported r) -> Halted ("unsupported: " ^ r)
+          | Error (Refused r) -> Halted ("refused: " ^ r)
       in
       let o = drain_far 0 in
       p "run: %s, %d versions expired\n" (outcome o) !expired;
