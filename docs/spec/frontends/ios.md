@@ -95,6 +95,7 @@ its domains.
 | Ownership records, data, cache | under the home, in the core's Apple layout | the owner |
 | Transfer root | the process's temporary directory, which in the extension is the File Provider's temporary directory | the framework and the owner |
 | Footprint log | `<group>/footprint.log` | the extension (§7) |
+| Core log | `<group>/tsync.log` | the core, in the extension and in the app (§4) |
 | Service token | `<group>/service.token` | the first File Provider extension process that serves the service (§5.4) |
 
 - The host names the config file with `$TSYNC_CONFIG_FILE` ([07 §2.7](../07-daemon-cli.md)): the
@@ -114,8 +115,15 @@ process before the first call:
 - **resource bounds** (item 7), in the extension only: the capped host's of
   [memory.md §M.5](../ocaml/memory.md#m5-a-memory-capped-host), the minor heap included; the app
   keeps the defaults;
-- **log sink**: the unified log;
+- **log sink**: the unified log and the core log (§3.2), at level `info`;
 - **keystore**: the keychain (§4.1), in the extension only.
+
+The core log lets the app show what the extension's core said, which the unified log keeps from
+it. Each line is `HH:MM:SS <level> <process>[<pid>] <message>`, appended with `O_APPEND` by whichever
+process's core logs it; at 1 MiB the log is renamed to `tsync.old.log`, replacing the previous one,
+and a new log begins. A line the other process appends during a rename may be lost. Each core
+logs `core started` when its process starts it, so the log shows when the system restarted the
+extension.
 
 The cleartext rule of android §4.1 applies. Each callback runs on a new thread, which ends when the
 callback completes ([android.md §4.3](android.md#43-threads)).
