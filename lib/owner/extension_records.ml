@@ -67,6 +67,26 @@ module Make (R : RECORD) = struct
     Envelope.seal ~key:ctx.key ~key_id:ctx.key_id ~extension:name
       (R.to_string record)
 
+  (* README §4.6: each record as opened, by domain and file, until its K is
+     forgotten. [pinned] is when a lazy tree's pin was last renewed (§4.5). *)
+  type cached = {
+    version : string * string option * int * Fs.times * bool;
+    key_id : string;
+    record : R.t option;
+    pinned : float;
+  }
+
+  let cache : (string * string, cached) Hashtbl.t = Hashtbl.create 64
+  let cache_lock = Mutex.create ()
+
+  (* README §4.6: a write of this owner's can leave the version as it was (the
+     same size, within the clock's resolution), so it drops what was opened of
+     the file. *)
+  let write_record ctx ~exclusive path body =
+    Format_merge.write_file ctx.engine ~exclusive path body;
+    Mutex.protect cache_lock (fun () ->
+        Hashtbl.remove cache (ctx.domain, Names.leaf_of path))
+
   (* totp §3: a record moved from a conflicted copy to a digest id (rule 5)
      says the client it came from. A write after the fold, which sealing makes
      no function of the bytes; concurrent relabels write the same plaintext. *)
@@ -81,9 +101,7 @@ module Make (R : RECORD) = struct
           { Fold.name = dst; body = Vault.read_file ctx.engine path }
         in
         match Option.bind (opened ctx file) (R.relabel ~suffix) with
-          | Some r ->
-              Format_merge.write_file ctx.engine ~exclusive:false path
-                (seal ctx r)
+          | Some r -> write_record ctx ~exclusive:false path (seal ctx r)
           | None -> ())
     | _ -> ()
 
@@ -132,20 +150,7 @@ module Make (R : RECORD) = struct
     List.iter
       (fun dir -> E.mkdir dir ~exclusive:false)
       [Names.extension_root; folder];
-    Format_merge.write_file ctx.engine ~exclusive (Names.join folder id)
-      (seal ctx record)
-
-  (* README §4.6: each record as opened, by domain and file, until its K is
-     forgotten. [pinned] is when a lazy tree's pin was last renewed (§4.5). *)
-  type cached = {
-    version : string * string option * int * Fs.times * bool;
-    key_id : string;
-    record : R.t option;
-    pinned : float;
-  }
-
-  let cache : (string * string, cached) Hashtbl.t = Hashtbl.create 64
-  let cache_lock = Mutex.create ()
+    write_record ctx ~exclusive (Names.join folder id) (seal ctx record)
 
   let () =
     Vault.when_forgotten (fun domain ->
