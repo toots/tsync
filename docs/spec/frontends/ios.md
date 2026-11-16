@@ -43,12 +43,17 @@ So:
 - The system runs one extension process per domain: on a device, each process it killed held one
   domain, and two idle domains' processes ended in the same second. Any number of booted domains per
   process is still supported.
+- The system may invalidate an extension instance (`invalidate()`), leave its process running, and
+  start another process for the same domain, which the first one's record would refuse. An extension
+  process therefore ends itself when its last instance is invalidated: a crash-stop, which the next
+  boot recovers.
 - **The ownership record is the lock.** The owner takes no kernel lock: it writes
   [07 §2.3](../07-daemon-cli.md#23-the-ownership-lock)'s holder record into the domain's lock file,
   in the extension's own container (§3). A boot that finds a record naming another process that is
   alive (`kill(pid, 0)` succeeds or is refused) is refused as another holder's; a record naming a
   dead process, or none, is replaced. Two processes booting one domain at the same instant are not
-  told apart: the system's one process per domain is what excludes them.
+  told apart: the system never runs two instances of one domain at once, and an invalidated
+  instance's process has ended (above).
 - Every other file lock the core takes is held only while a callback runs: a write awaits its upload
   ([android.md §5](android.md#5-the-bridge)), and the chunk store's locks are a local store's
   collection's.
