@@ -34,10 +34,16 @@ done
 [ "$(value "$appex" CFBundleIdentifier)" = "$TSYNC_APP_ID.fileprovider" ] || fail "extension identifier"
 [ "$(value "$credentials" CFBundleIdentifier)" = "$TSYNC_APP_ID.credentials" ] \
   || fail "credential provider identifier"
-# 10 §5.6: the vault's ciphers are declared, with the code App Store Connect issued.
-[ "$(value "$app" ITSAppUsesNonExemptEncryption)" = true ] || fail "the app does not declare its encryption"
-[ "$(value "$app" ITSEncryptionExportComplianceCode)" = "$TSYNC_EXPORT_COMPLIANCE_CODE" ] \
-  || fail "the app's export compliance code is not the identifiers file's"
+# 10 §5.6: the vault's ciphers are declared with the code App Store Connect
+# issued, and not at all before it is.
+if [ -n "$TSYNC_EXPORT_COMPLIANCE_CODE" ]; then
+  [ "$(value "$app" ITSAppUsesNonExemptEncryption)" = true ] || fail "the app does not declare its encryption"
+  [ "$(value "$app" ITSEncryptionExportComplianceCode)" = "$TSYNC_EXPORT_COMPLIANCE_CODE" ] \
+    || fail "the app's export compliance code is not the identifiers file's"
+else
+  ! value "$app" ITSAppUsesNonExemptEncryption > /dev/null 2>&1 || fail "the app declares encryption without a code"
+  ! value "$app" ITSEncryptionExportComplianceCode > /dev/null 2>&1 || fail "the app has an empty export compliance code"
+fi
 # App Store Connect refuses an iPad app without all four.
 [ "$(value "$app" 'UISupportedInterfaceOrientations~ipad')" = 4 ] || fail "the app does not declare every orientation on iPad"
 # Test actions and the test server are for builds installed from a Mac.
@@ -47,7 +53,6 @@ done
 
 case $signing in
   signed)
-    [ -n "$TSYNC_EXPORT_COMPLIANCE_CODE" ] || fail "a signed build has no export compliance code"
     # The File Provider extension last: the push check reads its entitlements.
     for bundle in "$credentials" "$app" "$appex"; do
       codesign --verify --strict "$bundle"

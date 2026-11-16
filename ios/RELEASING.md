@@ -51,8 +51,9 @@ A build installed from a Mac is `ios/app/run-device.sh`'s job, not this one.
 
    It asks for the `.p12`'s password, and sets `IOS_ASC_KEY_P8`,
    `IOS_ASC_KEY_ID`, `IOS_ASC_ISSUER_ID`, `IOS_TEAM_ID`, `IOS_APP_ID`,
-   `IOS_APP_GROUP`, `IOS_EXPORT_COMPLIANCE_CODE`, `IOS_DEV_CERT_P12` and
-   `IOS_DEV_CERT_PASSWORD`.
+   `IOS_APP_GROUP`, `IOS_DEV_CERT_P12`, `IOS_DEV_CERT_PASSWORD`, and
+   `IOS_EXPORT_COMPLIANCE_CODE` once the identifiers file exports
+   `TSYNC_EXPORT_COMPLIANCE_CODE`.
 
 Then run `release-ios` from the Actions tab on `main` (`workflow_dispatch`) to
 see the first upload through. Before a branch reaches `main`, pushing it to
@@ -68,7 +69,9 @@ git push origin <branch>:testflight
   `ios/app/project.yml` is the version testers see.
 - The extension pushes through APNs production (`TSYNC_APS_ENVIRONMENT`), so a
   TestFlight build registers production tokens with the server.
-- The app declares nothing about encryption, so App Store Connect holds each
-  build under **Missing Compliance** until the question is answered in the
-  TestFlight tab. Setting `ITSAppUsesNonExemptEncryption` in `project.yml`
-  answers it for every build, once that answer is settled.
+- Without an export compliance code, the build declares nothing about
+  encryption, so App Store Connect holds it under **Missing Compliance** until
+  the question is answered in the TestFlight tab. The code comes from the app's
+  **App Encryption Documentation** in App Store Connect, once Apple approves it;
+  with it in the identifiers file and step 6 run again, every build declares
+  it.

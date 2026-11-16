@@ -39,7 +39,7 @@ grep -q 'Apple Development' <<< "$identities" \
 
 # shellcheck source=/dev/null
 . "$IDENTIFIERS"
-for name in TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP TSYNC_EXPORT_COMPLIANCE_CODE; do
+for name in TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP; do
   [ -n "${!name:-}" ] || { echo "$IDENTIFIERS does not export $name" >&2; exit 1; }
 done
 
@@ -49,7 +49,12 @@ printf %s "$issuer" | gh secret set IOS_ASC_ISSUER_ID -R "$REPO"
 printf %s "$TSYNC_TEAM_ID" | gh secret set IOS_TEAM_ID -R "$REPO"
 printf %s "$TSYNC_APP_ID" | gh secret set IOS_APP_ID -R "$REPO"
 printf %s "$TSYNC_APP_GROUP" | gh secret set IOS_APP_GROUP -R "$REPO"
-printf %s "$TSYNC_EXPORT_COMPLIANCE_CODE" | gh secret set IOS_EXPORT_COMPLIANCE_CODE -R "$REPO"
+# 10 §5.6: the code exists once App Store Connect issued it.
+if [ -n "${TSYNC_EXPORT_COMPLIANCE_CODE:-}" ]; then
+  printf %s "$TSYNC_EXPORT_COMPLIANCE_CODE" | gh secret set IOS_EXPORT_COMPLIANCE_CODE -R "$REPO"
+else
+  echo "no TSYNC_EXPORT_COMPLIANCE_CODE: each TestFlight build waits for the encryption question"
+fi
 base64 < "$p12" | tr -d '\n' | gh secret set IOS_DEV_CERT_P12 -R "$REPO"
 printf %s "$p12_password" | gh secret set IOS_DEV_CERT_PASSWORD -R "$REPO"
 echo "secrets set on $REPO; the .p8 cannot be downloaded again, so keep it or delete it knowingly"

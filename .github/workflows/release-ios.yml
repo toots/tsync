@@ -115,7 +115,6 @@ jobs:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
           IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
-          IOS_EXPORT_COMPLIANCE_CODE: ${{ secrets.IOS_EXPORT_COMPLIANCE_CODE }}
           IOS_DEV_CERT_P12: ${{ secrets.IOS_DEV_CERT_P12 }}
           IOS_DEV_CERT_PASSWORD: ${{ secrets.IOS_DEV_CERT_PASSWORD }}
         run: |
@@ -126,7 +125,7 @@ jobs:
           fi
           missing=
           for v in IOS_ASC_KEY_P8 IOS_ASC_KEY_ID IOS_ASC_ISSUER_ID IOS_TEAM_ID IOS_APP_ID IOS_APP_GROUP \
-                   IOS_EXPORT_COMPLIANCE_CODE IOS_DEV_CERT_P12 IOS_DEV_CERT_PASSWORD; do
+                   IOS_DEV_CERT_P12 IOS_DEV_CERT_PASSWORD; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -149,6 +148,11 @@ jobs:
           if [ "$SIGN" != true ]; then
             IOS_TEAM_ID='' IOS_APP_ID=org.example.tsync IOS_APP_GROUP=group.org.example.tsync
             IOS_EXPORT_COMPLIANCE_CODE=''
+          fi
+          # 10 §5.6: without a code, the build declares nothing about encryption.
+          if [ -z "$IOS_EXPORT_COMPLIANCE_CODE" ]; then
+            plutil -remove ITSAppUsesNonExemptEncryption ios/app/App/Info.plist
+            plutil -remove ITSEncryptionExportComplianceCode ios/app/App/Info.plist
           fi
           {
             echo "TSYNC_TEAM_ID=$IOS_TEAM_ID"
