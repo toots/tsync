@@ -159,7 +159,9 @@ Every write of an authoritative local object (the classes in
   inside it that are not records, are not part of the log and are ignored.
 - Every new record, the owner's or a submitter's, is created by durable create-if-absent
   (§3.2), minting a new id on EEXIST, so no writer ever replaces a record it did not create.
-  Updates use durable replace. Records are completed by release.
+  Updates use durable replace. Records are completed by release. A read takes the record's lock, as
+  an update and a completion do: Windows answers a read of a file being released with access
+  denied, not as absent.
 
 ### 4.2 Ownership
 

@@ -58,13 +58,17 @@ module Records = struct
       | `Created fd -> (id, fd)
       | `Exists -> create_held ~mint t body
 
-  let read t id =
+  let read_locked t id =
     match Fs.read_file_opt (path t id) with Some b -> `Body b | None -> `Gone
+
+  (* durable-queue: under the record's lock, so a completion cannot release
+     the file while it is open, which Windows refuses as access denied. *)
+  let read t id = Mutex.protect (record_lock t id) (fun () -> read_locked t id)
 
   (* A record completed meanwhile is never resurrected. *)
   let update t id f =
     Mutex.protect (record_lock t id) (fun () ->
-        match read t id with
+        match read_locked t id with
           | `Gone -> ()
           | `Body b -> Fs.durable_replace (path t id) (f b))
 
