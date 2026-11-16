@@ -158,6 +158,8 @@ A verb reads what it needs at the cost of a listing, however many records the fo
   the listing states it (its etag, content id, size, mtime and whether a local edit is staged).
   A read opens again only the files whose version changed; a listing that finds every version
   unchanged opens nothing.
+- A record the owner writes is dropped from what it opened: a write can leave the version as it
+  was (the same size, within the clock's resolution), so the next read opens it again.
 - What was opened under a K is dropped when the owner forgets that K
   ([vault §6](vault.md#6-unlocking-and-the-keystore): a lock, a lock that forgets the secret key,
   a deleted vault), so a locked vault holds no plaintext record.
