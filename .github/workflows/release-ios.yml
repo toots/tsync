@@ -116,6 +116,8 @@ jobs:
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
           IOS_APP_GROUP: ${{ secrets.IOS_APP_GROUP }}
           IOS_EXPORT_COMPLIANCE_CODE: ${{ secrets.IOS_EXPORT_COMPLIANCE_CODE }}
+          IOS_DEV_CERT_P12: ${{ secrets.IOS_DEV_CERT_P12 }}
+          IOS_DEV_CERT_PASSWORD: ${{ secrets.IOS_DEV_CERT_PASSWORD }}
         run: |
           if [ "$PUBLISH" != true ]; then
             echo "::notice::signing not run: only a published build is signed (10 §5.6)"
@@ -124,7 +126,7 @@ jobs:
           fi
           missing=
           for v in IOS_ASC_KEY_P8 IOS_ASC_KEY_ID IOS_ASC_ISSUER_ID IOS_TEAM_ID IOS_APP_ID IOS_APP_GROUP \
-                   IOS_EXPORT_COMPLIANCE_CODE; do
+                   IOS_EXPORT_COMPLIANCE_CODE IOS_DEV_CERT_P12 IOS_DEV_CERT_PASSWORD; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -160,12 +162,15 @@ jobs:
         working-directory: ios/app
         run: xcodegen generate
 
-      # Cloud signing still signs the archive with a development certificate
-      # Xcode creates; a throwaway default keychain holds it without a prompt.
+      # 10 §5.6: the archive is signed with the stored development certificate;
+      # without one, Xcode would create a certificate per run. A throwaway
+      # default keychain holds it without a prompt.
       - name: The API key and a keychain
         if: steps.secrets.outputs.sign == 'true'
         env:
           IOS_ASC_KEY_P8: ${{ secrets.IOS_ASC_KEY_P8 }}
+          IOS_DEV_CERT_P12: ${{ secrets.IOS_DEV_CERT_P12 }}
+          IOS_DEV_CERT_PASSWORD: ${{ secrets.IOS_DEV_CERT_PASSWORD }}
         run: |
           echo "$IOS_ASC_KEY_P8" | base64 -d > "$RUNNER_TEMP/asc_key.p8"
           keychain="$RUNNER_TEMP/build.keychain"
@@ -176,6 +181,13 @@ jobs:
           security default-keychain -s "$keychain"
           # shellcheck disable=SC2046 # one argument per existing keychain
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          echo "$IOS_DEV_CERT_P12" | base64 -d > "$RUNNER_TEMP/development.p12"
+          security import "$RUNNER_TEMP/development.p12" -k "$keychain" -P "$IOS_DEV_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm "$RUNNER_TEMP/development.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security find-identity -v -p codesigning "$keychain" > "$RUNNER_TEMP/identities-before"
+          grep -q '1 valid identities found' "$RUNNER_TEMP/identities-before"
 
       - name: Archive
         working-directory: ios/app
@@ -196,6 +208,12 @@ jobs:
             -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/tsync.xcarchive" \
             "${signing[@]}" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             TSYNC_COMMIT="${SHA:0:12}" archive
+          # A second identity means Xcode passed over the stored certificate and
+          # created one on the account.
+          if [ "$SIGN" = true ]; then
+            security find-identity -v -p codesigning "$RUNNER_TEMP/build.keychain" > "$RUNNER_TEMP/identities-after"
+            diff "$RUNNER_TEMP/identities-before" "$RUNNER_TEMP/identities-after"
+          fi
 
       - name: Export for App Store Connect
         if: steps.secrets.outputs.sign == 'true'

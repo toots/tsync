@@ -2,9 +2,11 @@
 
 `release-ios` builds the app on every pull request without signing it. On a
 commit of `main` that passed `test`, it archives with cloud signing and uploads
-the build to TestFlight for the internal testers (spec 10 §5.6). Nothing is
-exported by hand: Xcode creates the distribution certificate and the profiles
-in the cloud with the App Store Connect API key.
+the build to TestFlight for the internal testers (spec 10 §5.6). Xcode creates
+the distribution certificate and the profiles in the cloud with the App Store
+Connect API key. The archive is signed with one development certificate,
+exported once: without it, Xcode creates a certificate on every run until the
+account reaches its limit.
 
 A build installed from a Mac is `ios/app/run-device.sh`'s job, not this one.
 
@@ -34,14 +36,23 @@ A build installed from a Mac is `ios/app/run-device.sh`'s job, not this one.
    Developer. Download `AuthKey_<KEYID>.p8` (once only) and note the **Issuer
    ID** above the list.
 
-5. **The secrets.**
+5. **The development certificate.** In Xcode, **Settings** → **Accounts** →
+   the team → **Manage Certificates…** → **+** → **Apple Development**, unless
+   this Mac already has one. In Keychain Access, under **My Certificates**,
+   right-click **Apple Development: …** → **Export**, as a `.p12` with a
+   password. The certificate lasts a year; when it is renewed, run step 6
+   again.
+
+6. **The secrets.**
 
    ```sh
-   bash scripts/setup_ios_signing.sh AuthKey_<KEYID>.p8 <issuer-uuid>
+   bash scripts/setup_ios_signing.sh AuthKey_<KEYID>.p8 <issuer-uuid> <development.p12>
    ```
 
-   It sets `IOS_ASC_KEY_P8`, `IOS_ASC_KEY_ID`, `IOS_ASC_ISSUER_ID`,
-   `IOS_TEAM_ID`, `IOS_APP_ID` and `IOS_APP_GROUP`.
+   It asks for the `.p12`'s password, and sets `IOS_ASC_KEY_P8`,
+   `IOS_ASC_KEY_ID`, `IOS_ASC_ISSUER_ID`, `IOS_TEAM_ID`, `IOS_APP_ID`,
+   `IOS_APP_GROUP`, `IOS_EXPORT_COMPLIANCE_CODE`, `IOS_DEV_CERT_P12` and
+   `IOS_DEV_CERT_PASSWORD`.
 
 Then run `release-ios` from the Actions tab on `main` (`workflow_dispatch`) to
 see the first upload through. Before a branch reaches `main`, pushing it to
