@@ -2,6 +2,7 @@
 import AppKit
 #endif
 import FileProvider
+import os
 import UniformTypeIdentifiers
 
 /// The File Provider callbacks (§6.5): each one asks the owner and translates.
@@ -17,9 +18,22 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension {
         self.domain = domain
         owner = Owner(domain: domain.displayName)
         super.init()
+        #if os(iOS)
+        Self.live.withLock { $0 += 1 }
+        #endif
     }
 
+    #if os(iOS)
+    /// ios §2: an invalidated instance's process may outlive it and hold its domains' records, so
+    /// it ends once none is left.
+    private static let live = OSAllocatedUnfairLock(initialState: 0)
+
+    func invalidate() {
+        if Self.live.withLock({ $0 -= 1; return $0 }) == 0 { exit(0) }
+    }
+    #else
     func invalidate() {}
+    #endif
 
     private var manager: NSFileProviderManager? { NSFileProviderManager(for: domain) }
 
