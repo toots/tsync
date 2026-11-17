@@ -9,8 +9,12 @@ struct TsyncPhoneApp: App {
     init() {
         Core.start(bounded: false)
         BackgroundRefresh.register()
+        CameraBackup.register()
         if Bundle.main.development, CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
         if Bundle.main.development, CommandLine.arguments.contains("-browsertest") { Task.detached { await BrowserTest.run() } }
+        if Bundle.main.development, CommandLine.arguments.contains("-camerabackup") {
+            Task { @MainActor in _ = await CameraBackup.shared.enable(everything: true) }
+        }
     }
 
     var body: some Scene {
@@ -56,12 +60,16 @@ struct RootView: View {
         .onAppear {
             BackgroundRefresh.schedule()
             vault.refresh()
+            CameraBackup.shared.request()
         }
         .onChange(of: phase) { phase in
             if phase == .active {
                 model.reload()
                 vault.refresh()
                 BackgroundRefresh.schedule()
+                CameraBackup.shared.request()
+            } else if phase == .background {
+                CameraBackup.shared.enteredBackground()
             }
         }
         .onOpenURL { url in if url.scheme == "otpauth" { opened = OpenedLink(url: url) } }

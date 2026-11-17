@@ -53,6 +53,7 @@ struct SettingsView: View {
                 ForEach(model.passFailures, id: \.self) { Text($0).foregroundStyle(.red) }
                 if !message.isEmpty { Text(message).foregroundStyle(.red) }
             }
+            CameraBackupSection()
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.version)
                 LabeledContent("Commit", value: Bundle.main.commit)
@@ -96,5 +97,42 @@ extension Bundle {
     var commit: String {
         let value = object(forInfoDictionaryKey: "TsyncCommit") as? String ?? ""
         return value.isEmpty ? "unknown" : value
+    }
+}
+
+/// ios-app.md §8.6 Controls.
+struct CameraBackupSection: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var backup = CameraBackup.shared
+    @State private var asking = false
+    @State private var refusal: String?
+
+    var body: some View {
+        Section("Camera backup") {
+            Toggle("Back up photos and videos", isOn: Binding(
+                get: { backup.enabled },
+                set: { on in if on { asking = true } else { backup.disable() } }))
+            if backup.enabled {
+                Picker("Back up to", selection: Binding(get: { backup.domain ?? "" }, set: { backup.domain = $0 })) {
+                    if backup.domain == nil { Text("Choose").tag("") }
+                    ForEach(model.entries) { Text($0.name).tag($0.name) }
+                }
+                Toggle("Only over wifi", isOn: Binding(get: { backup.wifiOnly }, set: { backup.wifiOnly = $0 }))
+                Toggle("Not when the battery is low", isOn: Binding(get: { backup.batteryOk }, set: { backup.batteryOk = $0 }))
+                Button(backup.running ? "Backing up…" : "Back up now") { backup.request(now: true) }
+                    .disabled(backup.running)
+            }
+            Text(backup.status).font(.footnote).foregroundStyle(.secondary)
+            if let refusal { Text(refusal).font(.footnote).foregroundStyle(.red) }
+        }
+        .onAppear { backup.refreshStatus() }
+        .confirmationDialog("Back up which photos?", isPresented: $asking, titleVisibility: .visible) {
+            Button("Everything") { enable(everything: true) }
+            Button("From now on") { enable(everything: false) }
+        }
+    }
+
+    private func enable(everything: Bool) {
+        Task { refusal = await backup.enable(everything: everything) }
     }
 }

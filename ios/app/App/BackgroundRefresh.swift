@@ -40,6 +40,7 @@ enum BackgroundRefresh {
         for domain in domains {
             try? await NSFileProviderManager(for: domain)?.signalEnumerator(for: .workingSet)
         }
+        await CameraBackup.shared.refreshPass()
         await schedule()
     }
 }

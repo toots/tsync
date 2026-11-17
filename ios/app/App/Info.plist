@@ -5,10 +5,12 @@
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).camera</string>
     </array>
     <key>UIBackgroundModes</key>
     <array>
         <string>fetch</string>
+        <string>processing</string>
     </array>
     <key>TsyncAppGroup</key>
     <string>$(TSYNC_APP_GROUP)</string>

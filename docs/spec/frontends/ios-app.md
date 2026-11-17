@@ -11,8 +11,8 @@ This page is a delta on [android-app.md](android-app.md). It applies:
 
 - §10.8, the Vault screen, as §6 says.
 
-Nothing else of android-app.md applies. Saving into the domain is §7; Activity, Camera backup and
-Storage are [ios.md §9](ios.md#9-not-yet-specified).
+Nothing else of android-app.md applies. Saving into the domain is §7, camera backup §8; Storage is
+[ios.md §9](ios.md#9-not-yet-specified).
 
 ---
 
@@ -42,6 +42,8 @@ domain**.
   in Files: Browse, then More, then Edit") and is asked nothing.
 - The recent warnings and errors are the extension process's: one the system ended takes them with
   it, and the core log (§5, Diagnostics) keeps them.
+- Camera backup's row ([activity §3](activity.md#3-below-the-domains)) is §8.6's status line with
+  **Back up now**.
 - Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
   to the extension.
 
@@ -129,6 +131,8 @@ the framework's domain-change notification.
     local test domain as **Add a local test domain** does, and starts once the app's registration
     pass has registered it. It never registers the domain itself: on a fresh install, a pass that
     has not yet recorded the identity scheme removes every domain it finds;
+  - launching it with `-camerabackup` turns camera backup on with "Everything" (§8.6) and runs a
+    pass, for checking §8 in the simulator without its dialogs;
   - **Walk every domain**, which lists every folder of every domain through the file system, so
     that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
     thousands of held folders. It leaves out the system's `.Trash`, which the extension does not
@@ -212,7 +216,152 @@ it until that extension has taken it.
   the share extension does not wait for the upload.
 - It holds no secret and logs no file name at a level the system keeps.
 
-## 8. Conformance
+## 8. Camera backup
+
+[android-app §11](android-app.md#11-camera-backup)'s principle, on PhotoKit: every photo and video
+in the photo library while backup is enabled is eventually written into the chosen domain, however
+many attempts fail. Progress is a **durable record per asset**; the change token only says where the
+next discovery starts. The app writes through the file system, as Save to tsync does (§7): the
+system hands each file to the extension as any new file, so the app boots no core and the upload,
+its retries and its staging are the extension's.
+
+### 8.1 What is backed up
+
+- Every asset of the user's library (`PHAsset` of source type user library), photos and videos,
+  screenshots included. Assets shared with the user and hidden assets are not.
+- An asset as the Photos app shows it: the full-size rendition of its edits when it has them
+  (`fullSizePhoto`, `fullSizeVideo`), else its original (`photo`, `video`).
+- A Live Photo as two files of one name: the still, and its video (`fullSizePairedVideo`, else
+  `pairedVideo`) with the video's extension.
+- An original kept only in iCloud is downloaded for the write (`isNetworkAccessAllowed`), under the
+  gate (§8.6).
+
+### 8.2 Records
+
+One record per asset, keyed by its `localIdentifier`, in a SQLite database in the app's own
+container (`Library/Application Support/camera.sqlite`), never the App Group:
+
+```sql
+CREATE TABLE asset (
+  id TEXT PRIMARY KEY,                -- PHAsset.localIdentifier
+  domain TEXT NOT NULL,               -- the target domain, frozen at first sight
+  stem TEXT NOT NULL,                 -- the target path without extension, frozen (§8.5)
+  ext TEXT NOT NULL,                  -- the main file's extension, frozen; '' for none
+  paired_ext TEXT,                    -- a Live Photo's video extension, else NULL
+  modified INTEGER NOT NULL,          -- PHAsset.modificationDate when last seen, epoch seconds
+  state TEXT NOT NULL,                -- 'PENDING' | 'DONE' | 'FAILED' | 'BASELINE'
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt INTEGER,               -- epoch seconds, set with 'FAILED'
+  last_error TEXT,
+  created INTEGER NOT NULL,           -- capture time, epoch seconds: the processing order
+  written INTEGER NOT NULL DEFAULT 0); -- 1 once its files were written: a write again replaces them
+CREATE UNIQUE INDEX asset_stem ON asset(domain, stem);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
+```
+
+States mean what android-app §11.2 says, except `DONE`: the writes returned, so the system holds the
+bytes (§7). `meta` holds `token`, the archived `PHPersistentChangeToken` of the last discovery. The
+settings are the preferences `cameraBackup` (boolean, default false), `cameraDomain` (a domain name,
+default the config's first), `cameraWifiOnly` (default true), `cameraBatteryOk` (default true) and
+`cameraLastOutcome` (absent until a pass ran).
+
+### 8.3 Discovery
+
+1. With a token, `fetchPersistentChanges(since:)`; for each change's asset details, in one
+   transaction with the new token:
+   - an inserted asset without a record → `PENDING` (`BASELINE` during a "from now on" baseline
+     pass), with its name claimed (§8.5);
+   - an updated asset whose modification date differs from a `DONE` record's → `PENDING` (written
+     again over the same names); a `PENDING` or `FAILED` record's → the new date;
+   - a deleted asset → its record deleted. Its files stay in the domain.
+2. Without a token, or when the token has expired (`persistentChangeTokenExpired`): a full discovery
+   over every asset of §8.1, recording each asset without a record as step 1's insertion does, then
+   the library's current token. During a full discovery that is not a baseline pass, an asset without
+   a record created before the oldest record's capture time is `BASELINE`: it predates backup.
+
+Every asset is recorded in the transaction that moves the token, so none is ever behind it without a
+record.
+
+### 8.4 Processing
+
+`PENDING`, and `FAILED` records whose next attempt is due, in capture order:
+
+1. Fetch the asset by id. Gone → delete the record.
+2. The gate (§8.6) and the budgets: the target domain's `pendingBytes` (its owner's `status`, §2.1)
+   below `staged_bytes_budget`, since the extension stages what it has not uploaded and the
+   phone's storage holds it; free space at least `free_space_floor`. Over either, or the domain not
+   answering → stop the pass with more work.
+3. Export each resource (`PHAssetResourceManager.writeData`) into the app's temporary directory.
+4. Move each into the domain with a coordinated write to its user-visible URL
+   (`<stem>.<ext>`, and `<stem>.<paired_ext>`): a first write after checking no file is at either
+   name, else the stem moves to its next sequence name (§8.5); a write again, for a record already
+   written, over the files there, which the system sends as a change based on the version it holds, so a
+   change made meanwhile on another device becomes the core's conflict copy
+   ([conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)).
+5. Success → `DONE`, written, with the modification date. Failure (an export, iCloud unreachable, a write
+   refused, the domain turned off in Files) → `FAILED`, attempts + 1, next attempt = now +
+   `retry_backoff(attempts)`, last error. The temporary files are removed on every path.
+
+`FAILED` is never terminal. The domain is never asked whether a photo is there: the record is
+authoritative, so a photo deleted from the domain is not written again. A name another device took
+that this phone has not yet listed is the system's collision, which it resolves by numbering the
+file (`2026-08-16 14.31.04 2.jpg`).
+
+A modification date also changes with a favourite or an album change, which writes the same bytes
+again: the extension's content-addressed chunks send none of them twice.
+
+### 8.5 Naming
+
+android-app §11.5's names: `Camera Uploads/<yyyy>/<yyyy-MM-dd HH.mm.ss>[ (n)]<.ext>`, time =
+`creationDate` in the phone's time zone at first sight, frozen with the record. The extension is the
+main resource's `originalFilename`'s by §11.5's rule, frozen too: a later edit is written under the
+same name, and a Live Photo video an asset gains after it was recorded is not written, having no
+name. A stem is taken when a record holds it in that domain or a file is at either of its names;
+`(n)` runs up to `max_name_attempts`.
+
+### 8.6 Access, controls, schedule and gate
+
+- **Access**: `PHPhotoLibrary` read-write authorization (persistent changes need it). *Limited*
+  backs up only the selected assets and is reported as a limit; denied or restricted uploads nothing
+  and says "photo access not granted".
+- **Controls**, a **Camera backup** section of Settings: "Back up photos and videos"; "Back up to"
+  (one configured domain; a change applies to assets seen from then on); "Only over wifi" (default
+  on); "Not when the battery is low" (default on); "Back up now". Enabling asks "Everything" or
+  "From now on", then for access; backup is on only once access is granted. "From now on" first
+  runs a baseline full discovery (§8.3); if it cannot complete, backup stays off and says why.
+  "Everything" turns every `BASELINE` record back to `PENDING`, so an earlier "From now on" leaves
+  nothing out.
+  Turning backup off cancels the pass. A target domain the config no longer names asks for another
+  and writes nothing until one is picked.
+- **Schedule**. One pass at a time, process-wide; a pass asked for during one is run after it.
+  - While the app is in front: at launch, on returning to the foreground, and `trigger_delay` after
+    the library's change observer last fired. Going to the background, the pass finishes the asset
+    it is on (`beginBackgroundTask`) and stops.
+  - In the background, two ways, since iOS wakes no app for a change to the photo library:
+    - each background refresh run ([ios.md §5.2](ios.md#52-in-the-background)) also runs a pass,
+      stopped between assets after `refresh_pass_budget`. Writing an asset is a local copy and the
+      extension uploads it in its own process, so a short run moves several photos;
+    - a `BGProcessingTask`, asked for at the end of every pass that left work and on going to the
+      background while work is left, which the system runs at a time of its choosing (often
+      overnight on power). Its expiration cancels the pass between assets.
+  - **Back up now** runs a pass in front, ignoring the gate.
+- **Gate**, before each asset: "Only over wifi" set and the path expensive or absent (`NWPath`) →
+  "waiting for wifi"; "Not when the battery is low" set, not charging, and the level below
+  `battery_floor` or Low Power Mode on → "battery low".
+- **Status line** and outcome: android-app §11.8's, under the section's switch and as Activity's
+  camera backup row (§2.1).
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `trigger_delay` | 10 s | |
+| `refresh_pass_budget` | 20 s | inside the system's ~30 s for a refresh run |
+| `staged_bytes_budget` | 512 MiB | |
+| `free_space_floor` | 1 GiB | |
+| `retry_backoff(n)` | min(15 min × 2^(n−1), 6 h) | bounded |
+| `battery_floor` | 15 % | |
+| `max_name_attempts` | 1000 | |
+
+## 9. Conformance
 
 - With no config, only Setup is shown; a config that does not load shows Setup and the core's
   message. With a config, the app opens on Files.
@@ -249,3 +398,9 @@ it until that extension has taken it.
 - Save to tsync, on a device: three photos shared from Photos to a remembered folder appear there
   in the app and in the Files app, and upload; a photo shared again under a taken name is saved as
   its first free name; with the domain turned off in Files the sheet says so and saves nothing.
+- Camera backup, on a device: with "Everything", every library photo appears under
+  `Camera Uploads` and uploads; a Live Photo gives a still and a `.mov` of one name; a photo taken
+  with the app closed is written by a background run or at the next foreground; an edit made in
+  Photos is written again over the same name; with "From now on", only photos taken afterwards are
+  written. With the server away the records stay `FAILED` and are written once it returns; killing
+  the app mid-pass writes nothing twice and loses nothing.

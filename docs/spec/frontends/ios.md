@@ -5,7 +5,8 @@ core, how the File Provider framework is served from Android's lazy tree, and th
 which the app and the credential provider reach a domain's owner (§5.4). The app's screens, the
 vault's included, are [ios-app.md](ios-app.md)'s; AutoFill is
 [passwords/ios.md](../extensions/passwords/ios.md)'s; Save to tsync is
-[ios-app §7](ios-app.md#7-save-to-tsync)'s; camera backup is [§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
+[ios-app §7](ios-app.md#7-save-to-tsync)'s; camera backup is
+[ios-app §8](ios-app.md#8-camera-backup)'s. The app's file browser reaches the files through the file system
 ([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
 
 This page is a delta. What it does not restate is owned by:
@@ -203,6 +204,7 @@ neither the core nor a service, and is far inside the time the system gives it.
 - Runs are asked for whether or not a domain's server pushes: a push lost or a server without push
   leaves the runs to catch up.
 - Each run appends `app: background refresh` to the footprint log (§7).
+- A run also runs a camera backup pass ([ios-app §8.6](ios-app.md#86-access-controls-schedule-and-gate)).
 
 | Parameter | Recommended | Constraint |
 |---|---|---|
@@ -352,7 +354,9 @@ addition:
 Each becomes a section above before its code.
 
 1. A screen lock while the app is not running, for a vault whose policy sets `onScreenLock` (§4.1).
-2. Camera backup with PhotoKit's change tracking.
-3. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
+2. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
-4. Open on a device: the extension's limit on the oldest supported device.
+3. Open on a device: the extension's limit on the oldest supported device.
+4. Camera backup through PhotoKit's background upload extension (iOS 26.1), in which the system
+   uploads each photo to an HTTP request of the app's: it needs a store endpoint that takes a
+   whole file into a domain, which no store has.
