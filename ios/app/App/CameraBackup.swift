@@ -26,6 +26,9 @@ final class CameraRecords {
         guard sqlite3_open(folder.appendingPathComponent("camera.sqlite").path, &db) == SQLITE_OK else {
             throw Self.failure("the camera records do not open")
         }
+        // A pass, the status line and a name claim each open their own connection.
+        sqlite3_busy_timeout(db, 5000)
+        try exec("PRAGMA journal_mode = WAL")
         try exec(
             """
             CREATE TABLE IF NOT EXISTS asset (
@@ -246,7 +249,9 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     func enable(everything: Bool) async -> String? {
         let access = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard access == .authorized || access == .limited else { return "photo access not granted" }
-        if !everything {
+        if everything {
+            try? CameraRecords().exec("UPDATE asset SET state = 'PENDING' WHERE state = 'BASELINE'")
+        } else {
             do {
                 try await Task.detached { try Self.discover(try CameraRecords(), domain: nil, baseline: true) }.value
             } catch {
@@ -262,7 +267,6 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     func disable() {
         defaults.set(false, forKey: "cameraBackup")
         stopping = true
-        pass?.cancel()
         objectWillChange.send()
         refreshStatus()
     }
@@ -270,7 +274,11 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     /// One pass at a time; a pass asked for during one runs after it.
     func request(now: Bool = false) {
         observe()
-        guard pass == nil else { return again = true }
+        guard pass == nil else {
+            again = true
+            stopping = !enabled
+            return
+        }
         stopping = false
         deadline = nil
         running = true
@@ -340,22 +348,24 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         guard access == .authorized || access == .limited else { return outcome("photo access not granted") }
         guard let domain else { return outcome("choose a domain to back up to") }
         if !now, let hold = gate() { return outcome(hold) }
-        let background = UIApplication.shared.beginBackgroundTask(withName: "Backing up photos") {}
-        defer { UIApplication.shared.endBackgroundTask(background) }
+        let background = BackgroundTime()
+        background.begin { [weak self] in self?.stopping = true }
+        defer { background.end() }
         do {
             let records = try CameraRecords()
             try await Task.detached { try Self.discover(records, domain: domain, baseline: false) }.value
             var uploaded = 0, failed = 0, more = false
+            var hold: String?
             for record in records.due(now: Self.now()) {
                 if stopping || Task.isCancelled || deadline.map({ Date() > $0 }) == true { more = true; break }
-                if !now, let hold = gate() { more = true; status = hold; break }
-                if let stop = await budget(record.domain) { more = true; outcome(stop); break }
+                if !now, let reason = gate() { more = true; hold = reason; break }
+                if let reason = await budget(record.domain) { more = true; hold = reason; break }
                 do {
-                    guard let written = try await Self.write(record) else {
+                    guard let (written, modified) = try await Self.write(record) else {
                         try records.delete(record.id)
                         continue
                     }
-                    try records.done(written, modified: Self.modified(record.id) ?? record.modified)
+                    try records.done(written, modified: modified)
                     uploaded += 1
                 } catch is CancellationError {
                     more = true
@@ -366,7 +376,8 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
                 }
             }
             more = more || !records.due(now: Self.now()).isEmpty
-            outcome("\(uploaded) uploaded" + (failed > 0 ? ", \(failed) failed" : "") + (more ? ", more to do" : ""))
+            outcome("\(uploaded) uploaded" + (failed > 0 ? ", \(failed) failed" : "") + (more ? ", more to do" : "")
+                + (hold.map { " (\($0))" } ?? ""))
             if pending > 0 { schedule() }
         } catch {
             outcome("last pass failed: \(error.localizedDescription)")
@@ -499,7 +510,11 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         guard let main else { return }
         let base = stemBase(asset.creationDate ?? Date())
         var stem = base
-        for n in 1...maxNameAttempts where records.stemTaken(domain, stem) { stem = "\(base) (\(n))" }
+        var n = 0
+        while records.stemTaken(domain, stem) && n < maxNameAttempts {
+            n += 1
+            stem = "\(base) (\(n))"
+        }
         try records.insert(
             .init(
                 id: asset.localIdentifier, domain: domain, stem: stem, ext: ext(main.originalFilename),
@@ -521,17 +536,20 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
 
     // MARK: Writing (§8.4)
 
-    /// The record with the stem written to, or nil when the asset is gone.
-    nonisolated private static func write(_ record: CameraRecords.Record) async throws -> CameraRecords.Record? {
+    /// The record with the stem written to and the modification date its
+    /// export was taken at, or nil when the asset is gone.
+    nonisolated private static func write(_ record: CameraRecords.Record) async throws -> (CameraRecords.Record, Int64)? {
         guard let asset = fetch([record.id]).first else { return nil }
+        let modified = seconds(asset.modificationDate)
         let (main, paired) = resources(asset)
         guard let main else { return nil }
         let staging = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: staging) }
         var exported: [(URL, String)] = []
-        for (resource, ext) in [(main, record.ext), (paired, record.pairedExt ?? "")] {
-            guard let resource else { continue }
+        // §8.5: a Live Photo video the asset gained after it was recorded has no name.
+        for (resource, ext) in [(main, Optional(record.ext)), (paired, record.pairedExt)] {
+            guard let resource, let ext else { continue }
             let file = staging.appendingPathComponent(UUID().uuidString)
             let options = PHAssetResourceRequestOptions()
             options.isNetworkAccessAllowed = true
@@ -546,7 +564,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         record.stem = try FileStore.placeCameraFiles(
             exported, stem: record.stem, under: root, replacing: record.written
         ) { $0 != record.stem && claimed.stemTaken(record.domain, $0) }
-        return record
+        return (record, modified)
     }
 
     nonisolated private static func stemBase(_ date: Date) -> String {
@@ -568,10 +586,26 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         return part.allSatisfy { $0.isLetter || $0.isNumber } ? part.lowercased() : ""
     }
 
-    nonisolated private static func modified(_ id: String) -> Int64? {
-        fetch([id]).first.map { seconds($0.modificationDate) }
-    }
-
     nonisolated private static func seconds(_ date: Date?) -> Int64 { Int64(date?.timeIntervalSince1970 ?? 0) }
     nonisolated private static func now() -> Int64 { Int64(Date().timeIntervalSince1970) }
+}
+
+/// Background time for a pass: its expiration stops the pass between assets
+/// and ends the task, as iOS requires before it ends the app.
+@MainActor
+final class BackgroundTime {
+    private var task = UIBackgroundTaskIdentifier.invalid
+
+    func begin(onExpiry: @escaping @MainActor () -> Void) {
+        task = UIApplication.shared.beginBackgroundTask(withName: "Backing up photos") { [weak self] in
+            onExpiry()
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard task != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
+    }
 }
