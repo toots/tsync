@@ -238,8 +238,12 @@ its retries and its staging are the extension's.
 
 ### 8.2 Records
 
-One record per asset, keyed by its `localIdentifier`, in a SQLite database in the app's own
-container (`Library/Application Support/camera.sqlite`), never the App Group:
+One record per asset, keyed by its `localIdentifier`, in a SQLite database in the App Group
+(`<group>/camera.sqlite`), which the app and the upload extension (§8.7) both open. A database
+first made in the app's own container (`Library/Application Support/camera.sqlite`) is moved there
+at launch, before any pass. A process holding a lock on a file of the App Group when the system
+suspends it is ended, so every connection is opened for one pass or one extension run and closed
+at its end, never held across a suspension:
 
 ```sql
 CREATE TABLE asset (
@@ -254,16 +258,24 @@ CREATE TABLE asset (
   next_attempt INTEGER,               -- epoch seconds, set with 'FAILED'
   last_error TEXT,
   created INTEGER NOT NULL,           -- capture time, epoch seconds: the processing order
-  written INTEGER NOT NULL DEFAULT 0); -- 1 once its files were written: a write again replaces them
+  written INTEGER NOT NULL DEFAULT 0, -- 1 once its files were written: a write again replaces them
+  content_id TEXT,                    -- §8.7: the main file's content as last uploaded
+  paired_content_id TEXT);            -- §8.7: the Live Photo video's
 CREATE UNIQUE INDEX asset_stem ON asset(domain, stem);
+CREATE TABLE job (                    -- §8.7: an upload job the system holds
+  id TEXT PRIMARY KEY,                -- the job's local identifier
+  asset TEXT NOT NULL,                -- asset.id
+  part TEXT NOT NULL);                -- 'main' | 'paired'
 CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
 ```
 
 States mean what android-app §11.2 says, except `DONE`: the writes returned, so the system holds the
-bytes (§7). `meta` holds `token`, the archived `PHPersistentChangeToken` of the last discovery. The
+bytes (§7), or the listener committed every file (§8.7); and `UPLOADING`, which only §8.7 sets: the
+asset's files are jobs the system holds. `meta` holds `token`, the archived `PHPersistentChangeToken` of the last discovery. The
 settings are the preferences `cameraBackup` (boolean, default false), `cameraDomain` (a domain name,
-default the config's first), `cameraWifiOnly` (default true), `cameraBatteryOk` (default true) and
-`cameraLastOutcome` (absent until a pass ran).
+default the config's first), `cameraWifiOnly` (default true), `cameraBatteryOk` (default true),
+`cameraLastOutcome` (absent until a pass ran) and `cameraUploads` (§8.7), in the App Group's
+defaults, moved there from the app's at launch like the database.
 
 ### 8.3 Discovery
 
@@ -361,6 +373,70 @@ name. A stem is taken when a record holds it in that domain or a file is at eith
 | `battery_floor` | 15 % | |
 | `max_name_attempts` | 1000 | |
 
+### 8.7 Uploads by the system
+
+On iOS 26.1 and later, when the target domain's store takes whole-file uploads, the photos go to it
+through PhotoKit's background upload extension: the system sends each file itself, when and however
+it chooses, with the app not running, and resumes a transfer the network cut. The listener commits
+each file into the domain ([http-proxy §A4.8](http-proxy.md#a48-whole-file-uploads)), so no File
+Provider extension, staging or core is involved on the phone.
+
+**When.** `cameraUploads` is `system` when all of these hold, else `files`, which is §8.4 as before:
+
+- the build's `upload_url_base` (below) is set and the system is iOS 26.1 or later;
+- the target domain's main is an `http-proxy` store whose `url` lies under `upload_url_base`;
+- its listener answers `/upload-limit` for the domain
+  ([http-proxy wire §5.3](../backends/http-proxy.md#53-capabilities)).
+
+The app decides at launch, on returning to the foreground, and when the target or the config
+changes; a listener that does not answer leaves the last decision. With `system`, backup on and
+access granted, the app enables the extension (`setUploadJobExtensionEnabled(true)`) and runs no
+pass of its own; otherwise it disables it. Turning to `files` cancels the jobs not yet sent and turns
+`UPLOADING` records back to `PENDING`.
+
+**The build.** `upload_url_base` is the `BackgroundUploadURLBase` the extension's `Info.plist`
+must declare, from the build's identifiers like the app identifier. Unset, the extension is not
+built and `cameraUploads` stays `files`.
+
+**A run** of the extension (`processJobs`), every step stopping when the system ends it
+(`willTerminate`):
+
+1. **Settle what finished.** For each job the system lists to acknowledge, with its record and part:
+   - succeeded: the part's content id is the answer's `x-tsync-content-id`. The asset's last part to
+     succeed makes the record `DONE`, written, with the modification date its export was taken at;
+   - failed with `x-tsync-kind: exists`: the stem is taken, as a first write finding a file there
+     in §8.4; the stem moves to its next sequence name (§8.5) and the record goes back to `PENDING`;
+   - failed with `x-tsync-kind: denied` once: retried with a destination signed again;
+   - failed with no `x-tsync-kind`, which is every transient refusal and a network failure: retried,
+     with a destination signed again, by `retry(destination:)` while the system allows it, else
+     the record is `FAILED` as in §8.4 step 5;
+   - failed with another kind: the record is `FAILED` with the answer's reason.
+
+   Each job is acknowledged once its record is updated, and its `job` row deleted.
+2. **Discover**, as §8.3.
+3. **Create jobs** for `PENDING` and due `FAILED` records, in capture order, until the system answers
+   `limitExceeded`: one job per part, its resource as §8.1 picks it, the record `UPLOADING`, a `job`
+   row per job. iCloud originals are the system's to download.
+4. Return `processing` while jobs are in flight or records wait, else `completed`.
+
+**A job's destination**, made when the job is created or retried:
+
+- `POST <url>/upload?domain=<domain>&path=<stem>.<ext>&created=<creationDate, ns>`, with
+  `&base=<content id>` when the part has one (a write again), signed as
+  [http-proxy wire §5.7](../backends/http-proxy.md#57-whole-file-uploads) says with the domain's
+  secret, from the config in the App Group, and an expiry `upload_signature_lifetime` ahead.
+- "Only over wifi": `allowsExpensiveNetworkAccess` and `allowsConstrainedNetworkAccess` false.
+  "Not when the battery is low" has no counterpart: the system decides when to send by its own
+  power rules.
+
+**Status.** The extension keeps `cameraLastOutcome` as a pass does, with "Uploading *n* (by iOS)"
+while jobs are in flight. **Back up now** is not offered with `system`, whose schedule is the
+system's.
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `upload_signature_lifetime` | 29 days | below `upload_max_lifetime` ([security §4.4](../algorithms/security-model.md#44-upload-signatures)), with a day for a clock ahead of the listener's |
+
 ## 9. Conformance
 
 - With no config, only Setup is shown; a config that does not load shows Setup and the core's
@@ -395,6 +471,12 @@ name. A stem is taken when a record holds it in that domain or a file is at eith
 - Files, on a device: share link answers a URL that downloads the file; make available offline
   marks the file *pinned*, and with the server away the file still opens; remove download clears
   the mark and the file is *online only*.
+- Uploads by the system, on a device on iOS 26.1 or later, with a target whose listener takes
+  uploads: Settings shows uploads by iOS; with Resource Upload Test Mode on (iOS 27), a photo taken
+  with the app not running is in the domain without the app opened; a 1 GB video whose upload is cut
+  by airplane mode resumes from where it stopped (the listener's log shows a `PATCH`); an edited photo
+  replaces the file; with "Only over wifi" nothing is sent over cellular; with the listener's
+  `uploads` off, the app falls back to `files` at its next launch and the photos still arrive.
 - Save to tsync, on a device: three photos shared from Photos to a remembered folder appear there
   in the app and in the Files app, and upload; a photo shared again under a taken name is saved as
   its first free name; with the domain turned off in Files the sheet says so and saves nothing.

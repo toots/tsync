@@ -259,8 +259,11 @@ Test vector: secret `s3cret`, `expires` `1727600000`, target
   went aside ([frontend §A4.8](../frontends/http-proxy.md#a48-whole-file-uploads)).
 - **Refusals**: a bad, expired or too distant signature, or a domain this listener does not serve,
   401 as §6.1; bad parameters 400; a declared length over the limit 413; a domain that takes no
-  uploads 404 `not found`; a read-only domain 403; a new file whose path holds other content 409,
-  `x-tsync-kind: exists`; uploads or disk space exhausted, the domain's owner not answering 503.
+  uploads 404 `not found`; a read-only domain 403; a new file whose path holds other content 409;
+  uploads or disk space exhausted, the domain's owner not answering 503. Every refusal but a 503
+  carries `x-tsync-kind` (§6.2): `denied` for 401, `invalid` for 400 and 413, `unprepared` for 404,
+  `read_only` for 403, the commit's kind for 409 (`exists` for a path holding other content). The
+  system's uploader reports a failed upload by its headers alone, so they carry what to do.
 
 A client composes a share URL as `<its configured url>/s/<token>` when the server answered `{"self":true}` (behind TLS termination the server cannot know its public URL), or `<url>/<token>` from `{"url":…}`.
 

@@ -357,6 +357,3 @@ Each becomes a section above before its code.
 2. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
 3. Open on a device: the extension's limit on the oldest supported device.
-4. Camera backup through PhotoKit's background upload extension (iOS 26.1), in which the system
-   uploads each photo to an HTTP request of the app's: it needs a store endpoint that takes a
-   whole file into a domain, which no store has.
