@@ -19,7 +19,6 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     @Published private(set) var status = ""
     @Published private(set) var running = false
 
-    private let defaults = CameraPreferences.defaults
     private let network = NWPathMonitor()
     private var pass: Task<Void, Never>?
     private var again = false
@@ -31,20 +30,20 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
 
     var enabled: Bool { CameraPreferences.enabled }
     /// §8.7: the system sends the photos; the app runs no pass of its own.
-    var bySystem: Bool { CameraPreferences.uploads == "system" }
+    var bySystem: Bool { CameraPreferences.bySystem }
     var wifiOnly: Bool {
-        get { defaults.object(forKey: "cameraWifiOnly") as? Bool ?? true }
-        set { defaults.set(newValue, forKey: "cameraWifiOnly"); objectWillChange.send() }
+        get { CameraPreferences.wifiOnly }
+        set { CameraPreferences.wifiOnly = newValue; objectWillChange.send() }
     }
     var batteryOk: Bool {
-        get { defaults.object(forKey: "cameraBatteryOk") as? Bool ?? true }
-        set { defaults.set(newValue, forKey: "cameraBatteryOk"); objectWillChange.send() }
+        get { CameraPreferences.batteryOk }
+        set { CameraPreferences.batteryOk = newValue; objectWillChange.send() }
     }
     /// Nil when the config no longer names it: backup then asks for another.
     var domain: String? {
         get { CameraPreferences.domain }
         set {
-            defaults.set(newValue, forKey: "cameraDomain")
+            CameraPreferences.domain = newValue
             objectWillChange.send()
             request()
         }
@@ -85,14 +84,14 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
                 return "backup is not on: \(error.localizedDescription)"
             }
         }
-        defaults.set(true, forKey: "cameraBackup")
+        CameraPreferences.enabled = true
         objectWillChange.send()
         request()
         return nil
     }
 
     func disable() {
-        defaults.set(false, forKey: "cameraBackup")
+        CameraPreferences.enabled = false
         stopping = true
         objectWillChange.send()
         refreshStatus()
@@ -228,8 +227,8 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         }
         if system {
             await fillContentIds(domain)
-            defaults.removeObject(forKey: "cameraUploadsSuspended")
-            defaults.removeObject(forKey: "cameraUploadFailures")
+            CameraPreferences.suspended = nil
+            CameraPreferences.failures = 0
         }
         guard #available(iOS 26.4, *) else { return }
         let library = PHPhotoLibrary.shared()
@@ -243,9 +242,10 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
             }
             try? CameraRecords().jobsCancelled()
         }
-        let mode = system ? "system" : "files"
-        if CameraPreferences.uploads != mode { Footprint.append("app: camera uploads: \(mode)") }
-        defaults.set(mode, forKey: "cameraUploads")
+        if CameraPreferences.bySystem != system {
+            Footprint.append("app: camera uploads: \(system ? "system" : "files")")
+        }
+        CameraPreferences.bySystem = system
         if system != library.uploadJobExtensionEnabled {
             do {
                 try library.setUploadJobExtensionEnabled(system)
@@ -297,7 +297,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     }
 
     private func outcome(_ text: String) {
-        defaults.set(text, forKey: "cameraLastOutcome")
+        CameraPreferences.lastOutcome = text
         refreshStatus()
     }
 
@@ -322,7 +322,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         }
         if domain == nil { line += " (choose a domain to back up to)" }
         if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited { line += " (only the photos you selected)" }
-        if let last = defaults.string(forKey: "cameraLastOutcome") {
+        if let last = CameraPreferences.lastOutcome {
             line += (bySystem ? "\nLast run by iOS: " : "\nLast pass: ") + last
         }
         status = line

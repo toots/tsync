@@ -16,7 +16,6 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
     private static var terminating = false
     private static var stopped: Bool { flag.withLock { terminating } }
 
-    private let defaults = CameraPreferences.defaults
     private let library = PHPhotoLibrary.shared()
 
     required init() {}
@@ -28,7 +27,7 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
         do {
             return try run()
         } catch {
-            defaults.set("failed: \(error.localizedDescription)", forKey: "cameraLastOutcome")
+            CameraPreferences.lastOutcome = "failed: \(error.localizedDescription)"
             return .failure
         }
     }
@@ -36,7 +35,7 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
     func notifyTermination() { Self.flag.withLock { Self.terminating = true } }
 
     private func run() throws -> PHBackgroundResourceUploadProcessingResult {
-        guard CameraPreferences.enabled, CameraPreferences.uploads == "system",
+        guard CameraPreferences.enabled, CameraPreferences.bySystem,
               let domain = CameraPreferences.domain, let target = UploadTarget(domain)
         else { return .completed }
         let records = try CameraRecords()
@@ -47,8 +46,7 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
         try CameraLibrary.discover(records, domain: domain, baseline: false)
         if CameraPreferences.suspended == nil, try create(records, target) { progress = true }
         let inFlight = records.jobsInFlight()
-        defaults.set(
-            "\(committed) uploaded" + (inFlight > 0 ? ", \(inFlight) uploading" : ""), forKey: "cameraLastOutcome")
+        CameraPreferences.lastOutcome = "\(committed) uploaded" + (inFlight > 0 ? ", \(inFlight) uploading" : "")
         return progress || inFlight > 0 ? .processing : .completed
     }
 
@@ -81,7 +79,7 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
     private func settle(_ records: CameraRecords) throws -> (Int, Bool) {
         let jobs = PHAssetResourceUploadJob.fetchJobs(action: .acknowledge, options: nil)
         var committed = 0
-        var failures = defaults.integer(forKey: "cameraUploadFailures")
+        var failures = CameraPreferences.failures
         for i in 0..<jobs.count where !Self.stopped {
             let job = jobs.object(at: i)
             if let row = records.job(job.localIdentifier) {
@@ -102,21 +100,21 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
                     case "denied":
                         let reason = "the server refused the domain's secret"
                         try records.failed(row.asset, reason, now: CameraLibrary.now())
-                        defaults.set(reason, forKey: "cameraUploadsSuspended")
+                        CameraPreferences.suspended = reason
                     default:
                         let reason = kind.map { "refused: \($0)" }
                             ?? job.error?.localizedDescription ?? "the upload did not complete"
                         try records.failed(row.asset, reason, now: CameraLibrary.now())
                         if kind != nil {
                             failures += 1
-                            if failures >= Self.failureLimit { defaults.set(reason, forKey: "cameraUploadsSuspended") }
+                            if failures >= Self.failureLimit { CameraPreferences.suspended = reason }
                         }
                     }
                 }
             }
             try library.performChangesAndWait { PHAssetResourceUploadJobChangeRequest(for: job)?.acknowledge() }
         }
-        defaults.set(failures, forKey: "cameraUploadFailures")
+        CameraPreferences.failures = failures
         return (committed, jobs.count > 0)
     }
 

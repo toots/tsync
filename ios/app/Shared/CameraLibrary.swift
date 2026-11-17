@@ -299,17 +299,45 @@ enum CameraPreferences {
         }
     }
 
-    static var enabled: Bool { defaults.bool(forKey: "cameraBackup") }
-    static var wifiOnly: Bool { defaults.object(forKey: "cameraWifiOnly") as? Bool ?? true }
-    /// §8.7: `system` or `files`.
-    static var uploads: String { defaults.string(forKey: "cameraUploads") ?? "files" }
-    static var suspended: String? { defaults.string(forKey: "cameraUploadsSuspended") }
+    static var enabled: Bool {
+        get { defaults.bool(forKey: "cameraBackup") }
+        set { defaults.set(newValue, forKey: "cameraBackup") }
+    }
+    static var wifiOnly: Bool {
+        get { defaults.object(forKey: "cameraWifiOnly") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "cameraWifiOnly") }
+    }
+    static var batteryOk: Bool {
+        get { defaults.object(forKey: "cameraBatteryOk") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "cameraBatteryOk") }
+    }
+    /// §8.7: `cameraUploads` is `system` or `files`.
+    static var bySystem: Bool {
+        get { defaults.string(forKey: "cameraUploads") == "system" }
+        set { defaults.set(newValue ? "system" : "files", forKey: "cameraUploads") }
+    }
+    static var suspended: String? {
+        get { defaults.string(forKey: "cameraUploadsSuspended") }
+        set { defaults.set(newValue, forKey: "cameraUploadsSuspended") }
+    }
+    /// §8.7: consecutive refusals, toward the suspension.
+    static var failures: Int {
+        get { defaults.integer(forKey: "cameraUploadFailures") }
+        set { defaults.set(newValue, forKey: "cameraUploadFailures") }
+    }
+    static var lastOutcome: String? {
+        get { defaults.string(forKey: "cameraLastOutcome") }
+        set { defaults.set(newValue, forKey: "cameraLastOutcome") }
+    }
 
     /// Nil when the config no longer names it.
     static var domain: String? {
-        let configured = Tsync.domainNames()
-        guard let chosen = defaults.string(forKey: "cameraDomain") else { return configured.first }
-        return configured.contains(chosen) ? chosen : nil
+        get {
+            let configured = Tsync.domainNames()
+            guard let chosen = defaults.string(forKey: "cameraDomain") else { return configured.first }
+            return configured.contains(chosen) ? chosen : nil
+        }
+        set { defaults.set(newValue, forKey: "cameraDomain") }
     }
 }
 
