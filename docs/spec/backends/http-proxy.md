@@ -263,7 +263,9 @@ Test vector: secret `s3cret`, `expires` `1727600000`, target
   uploads or disk space exhausted, the domain's owner not answering 503. Every refusal but a 503
   carries `x-tsync-kind` (§6.2): `denied` for 401, `invalid` for 400 and 413, `unprepared` for 404,
   `read_only` for 403, the commit's kind for 409 (`exists` for a path holding other content). The
-  system's uploader reports a failed upload by its headers alone, so they carry what to do.
+  system's uploader reports a failed upload by its headers alone, so they carry what to do; a 401
+  also carries `www-authenticate: tsync-upload`, which the system reports as an authentication
+  failure.
 
 A client composes a share URL as `<its configured url>/s/<token>` when the server answered `{"self":true}` (behind TLS termination the server cannot know its public URL), or `<url>/<token>` from `{"url":…}`.
 

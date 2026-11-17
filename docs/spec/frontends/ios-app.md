@@ -375,7 +375,8 @@ name. A stem is taken when a record holds it in that domain or a file is at eith
 
 ### 8.7 Uploads by the system
 
-On iOS 26.1 and later, when the target domain's store takes whole-file uploads, the photos go to it
+On iOS 26.4 and later (job response headers and errors), when the target domain's store takes
+whole-file uploads, the photos go to it
 through PhotoKit's background upload extension: the system sends each file itself, when and however
 it chooses, with the app not running, and resumes a transfer the network cut. The listener commits
 each file into the domain ([http-proxy §A4.8](http-proxy.md#a48-whole-file-uploads)), so no File
@@ -383,41 +384,54 @@ Provider extension, staging or core is involved on the phone.
 
 **When.** `cameraUploads` is `system` when all of these hold, else `files`, which is §8.4 as before:
 
-- the build's `upload_url_base` (below) is set and the system is iOS 26.1 or later;
-- the target domain's main is an `http-proxy` store whose `url` lies under `upload_url_base`;
+- the system is iOS 26.4 or later;
+- the target domain's main is an `http-proxy` store;
 - its listener answers `/upload-limit` for the domain
   ([http-proxy wire §5.3](../backends/http-proxy.md#53-capabilities)).
 
 The app decides at launch, on returning to the foreground, and when the target or the config
-changes; a listener that does not answer leaves the last decision. With `system`, backup on and
+changes; a listener that does not answer leaves the last decision. The decision also clears a
+suspension (below). With `system`, backup on and
 access granted, the app enables the extension (`setUploadJobExtensionEnabled(true)`) and runs no
 pass of its own; otherwise it disables it. Turning to `files` cancels the jobs not yet sent and turns
 `UPLOADING` records back to `PENDING`.
 
-**The build.** `upload_url_base` is the `BackgroundUploadURLBase` the extension's `Info.plist`
-must declare, from the build's identifiers like the app identifier. Unset, the extension is not
-built and `cameraUploads` stays `files`.
+**The build.** The extension's `Info.plist` declares `BackgroundUploadURLBase`, which the system
+requires "for network access validation". It names no upload server: every job's destination is
+its own domain's listener. It is `upload_reachability_url`, a host the phone reaches whenever it
+has a working network, as other apps that upload to servers of the user's choosing do (Nextcloud
+declares `https://cloud.nextcloud.com`).
 
 **A run** of the extension (`processJobs`), every step stopping when the system ends it
 (`willTerminate`):
 
 1. **Settle what finished.** For each job the system lists to acknowledge, with its record and part:
-   - succeeded: the part's content id is the answer's `x-tsync-content-id`. The asset's last part to
-     succeed makes the record `DONE`, written, with the modification date its export was taken at;
+   - an answer carrying `x-tsync-content-id`, whatever state the system reports: the part is
+     committed and that is its content id. The asset's last part committed makes the record `DONE`,
+     written, with the asset's modification date when its jobs were created;
    - failed with `x-tsync-kind: exists`: the stem is taken, as a first write finding a file there
      in §8.4; the stem moves to its next sequence name (§8.5) and the record goes back to `PENDING`;
-   - failed with `x-tsync-kind: denied` once: retried with a destination signed again;
+   - failed with `x-tsync-kind: denied`: retried once with a destination signed again, for an
+     expired signature; denied again, the secret no longer opens the domain: uploads are suspended
+     with "the server refused the domain's secret";
    - failed with no `x-tsync-kind`, which is every transient refusal and a network failure: retried,
      with a destination signed again, by `retry(destination:)` while the system allows it, else
      the record is `FAILED` as in §8.4 step 5;
-   - failed with another kind: the record is `FAILED` with the answer's reason.
+   - failed with another kind: the record is `FAILED` with the answer's reason. After
+     `upload_failure_limit` assets in a row end so with no part committed in between, uploads are
+     suspended with the last reason, so a broken server does not churn through the library.
 
    Each job is acknowledged once its record is updated, and its `job` row deleted.
 2. **Discover**, as §8.3.
-3. **Create jobs** for `PENDING` and due `FAILED` records, in capture order, until the system answers
+3. **Create jobs**, unless suspended, for `PENDING` and due `FAILED` records, in capture order,
+   while fewer than `upload_jobs_max` are in flight and the system does not answer
    `limitExceeded`: one job per part, its resource as §8.1 picks it, the record `UPLOADING`, a `job`
    row per job. iCloud originals are the system's to download.
-4. Return `processing` while jobs are in flight or records wait, else `completed`.
+4. Return `processing` while jobs are in flight or the run made progress, else `completed`.
+
+One run at a time per extension process; a run asked for during one returns `processing` at once.
+A suspension is the `cameraUploadsSuspended` preference, holding its reason: the status line shows
+it and no job is created until the app's next decision clears it.
 
 **A job's destination**, made when the job is created or retried:
 
@@ -425,7 +439,7 @@ built and `cameraUploads` stays `files`.
   `&base=<content id>` when the part has one (a write again), signed as
   [http-proxy wire §5.7](../backends/http-proxy.md#57-whole-file-uploads) says with the domain's
   secret, from the config in the App Group, and an expiry `upload_signature_lifetime` ahead.
-- "Only over wifi": `allowsExpensiveNetworkAccess` and `allowsConstrainedNetworkAccess` false.
+- "Only over wifi": `allowsCellularAccess` false.
   "Not when the battery is low" has no counterpart: the system decides when to send by its own
   power rules.
 
@@ -436,6 +450,9 @@ system's.
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `upload_signature_lifetime` | 29 days | below `upload_max_lifetime` ([security §4.4](../algorithms/security-model.md#44-upload-signatures)), with a day for a clock ahead of the listener's |
+| `upload_reachability_url` | `https://github.com` | a host every working network reaches |
+| `upload_jobs_max` | 20 | jobs in flight at once |
+| `upload_failure_limit` | 3 | assets failed in a row before uploads are suspended |
 
 ## 9. Conformance
 
@@ -471,7 +488,7 @@ system's.
 - Files, on a device: share link answers a URL that downloads the file; make available offline
   marks the file *pinned*, and with the server away the file still opens; remove download clears
   the mark and the file is *online only*.
-- Uploads by the system, on a device on iOS 26.1 or later, with a target whose listener takes
+- Uploads by the system, on a device on iOS 26.4 or later, with a target whose listener takes
   uploads: Settings shows uploads by iOS; with Resource Upload Test Mode on (iOS 27), a photo taken
   with the app not running is in the domain without the app opened; a 1 GB video whose upload is cut
   by airplane mode resumes from where it stopped (the listener's log shows a `PATCH`); an edited photo

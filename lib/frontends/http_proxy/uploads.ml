@@ -132,7 +132,12 @@ let refused t status msg =
       | 403 -> ["read_only"]
       | _ -> []
   in
-  Server.text ~headers:(List.map (fun k -> ("x-tsync-kind", k)) kind) status msg
+  let challenge =
+    if status = 401 then [("www-authenticate", "tsync-upload")] else []
+  in
+  Server.text
+    ~headers:(challenge @ List.map (fun k -> ("x-tsync-kind", k)) kind)
+    status msg
 
 let offset_headers n complete =
   [
