@@ -29,29 +29,22 @@ extension's service ([ios.md §5.4](ios.md#54-the-service)).
 
 Until a config exists, the app shows only Setup (§4). A config that does not load shows Setup with
 the core's message, as on Android. Otherwise the app has these destinations, reachable from every
-screen: **Files** (the start destination), **Activity** (§2.1), **Vault** (§6) while a domain uses
-an extension, and **Settings** (§5), from which Setup is reached by **Add a domain**.
+screen, in this order: **Files** (the start destination), **Vault** (§6) while a domain uses an
+extension, **Activity** (§2.1), and **Settings** (§5), from which Setup is reached by **Add a
+domain**.
 
 ### 2.1 Activity
 
-What each domain is doing and what went wrong: [android-app §10.5](android-app.md#105-activity)'s
-screen, read through the service ([ios.md §5.4](ios.md#54-the-service)) with `status` and `stats`
-(`arg: frontend`) every `status_poll` (2 s) while it is visible, and not at all otherwise.
+[activity.md](activity.md)'s screen, asked through the service
+([ios.md §5.4](ios.md#54-the-service)), with these differences:
 
-- One section per configured domain, in config order. One turned off in Files says so and is asked
-  nothing; one whose service does not answer says that it did not answer, never that it is idle.
-- **State line**: up to date, syncing, paused, read-only, or not syncing with `failing`'s reason.
-- **Uploads**: the files uploading now, how many more are waiting, and the bytes owed.
-- **Downloads**: each transfer running now with its progress and rate.
-- **Problems**: the parked uploads (`queues.parked`) with **Retry now** (`retry`), and the owner's
-  recent warnings and errors (`recentErrors`), newest first, each with its time. They are the
-  extension process's: one the system ended takes them with it, and the core log (§5,
-  Diagnostics) keeps them.
-- **Pause** or **Resume** (`pause`).
-- **Details**: the domain's `status` and `stats` replies as indented JSON, selectable, with **Copy**.
-
-Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
-to the extension.
+- One section per configured domain, in config order. One turned off in Files says so ("Turned off
+  in Files: Browse, then More, then Edit") and is asked nothing.
+- The recent warnings and errors are the extension process's: one the system ended takes them with
+  it, and the core log (§5, Diagnostics) keeps them.
+- Camera backup's row is §8.6's status line with **Back up now**.
+- Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
+  to the extension.
 
 The app is named **tsync** on the Home Screen and in Files. Its icon is `assets/tsync-app.svg` drawn
 square, one opaque 1024-pixel image whose corners the system rounds; `ios/app/make-icon.sh` renders

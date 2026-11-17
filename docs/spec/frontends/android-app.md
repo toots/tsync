@@ -365,9 +365,9 @@ implementation's.
 Until a config exists the app shows only Setup (§10.7). A config that does not load at all (one
 written by an earlier version, for instance) also shows Setup, with the core's message; joining a
 link there replaces it. A domain the core refuses at boot shows the core's message on its row in
-Files and in Settings, which offers its **Remove**; nothing is deleted otherwise. After that, three top-level destinations
-reachable from every screen: **Files** (the start destination), **Activity** and **Settings**, and
-**Vault** (§10.8) while a domain uses an extension: shown when the set of vault domains (§2) is not
+Files and in Settings, which offers its **Remove**; nothing is deleted otherwise. After that, the top-level destinations,
+reachable from every screen and in this order: **Files** (the start destination), **Vault** (§10.8)
+while a domain uses an extension, **Activity** and **Settings**. Vault is shown when the set of vault domains (§2) is not
 empty, settled by `vault_status` of each of them at launch and again each time the app comes to the
 foreground.
 Process death and configuration changes restore the destination and, in Files, the folder trail.
@@ -383,20 +383,13 @@ Process death and configuration changes restore the destination and, in Files, t
 
 ### 10.5 Activity
 
-What the app is doing and what went wrong, read from the `status` and `stats` actions every `status_poll` while
-the screen is visible, and not at all otherwise.
+[activity.md](activity.md)'s screen, asked through the core's `status` and `stats`, with these
+differences:
 
-Every line below is per booted domain, under a header naming it when more than one domain is booted;
-a domain not booted is listed as such and asked nothing.
-
-- **State line**: connected, offline (the offline state of §5), paused, or read-only.
-- **Uploads**: the files uploading now, how many more are waiting and how many bytes are owed.
-- **Downloads**: each transfer running now with its progress and rate.
-- **Problems**: failed saves, with Retry (commit the intent again) where a ready intent remains; and
-  the owner's parked records, with "Retry now" (`retry`).
-- **Pause / Resume** (`pause`).
-- **Camera backup**: the status line of §11.8 and "Back up now".
-- **Details**: each booted domain's `status(domain)` text verbatim, selectable, for diagnosis.
+- Every line is per booted domain; a domain not booted is listed as such and asked nothing.
+- Problems also lists the failed saves, with **Retry** (commit the intent again) where a ready intent
+  remains.
+- Camera backup's row is §11.8's status line with **Back up now**.
 
 ### 10.6 Saving into the domain
 
@@ -719,7 +712,6 @@ What the app's build MUST guarantee; where it runs and what it gates is [10](../
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `observed_refresh` | 30 s | ≥ `pull_freshness` |
-| `status_poll` | 2 s | only while the Activity screen is visible |
 | `max_tree_depth` | 4096 | |
 | `max_name_attempts` | 1000 | |
 | `staging_orphan_age` | 24 h | |
