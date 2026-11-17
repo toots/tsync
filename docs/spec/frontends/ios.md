@@ -77,6 +77,7 @@ So:
 | File Provider extension | `$(TSYNC_APP_ID).fileprovider` |
 | Credential provider extension | `$(TSYNC_APP_ID).credentials` |
 | Share extension | `$(TSYNC_APP_ID).share` |
+| Photos background upload extension | `$(TSYNC_APP_ID).upload` ([ios-app.md §8.7](ios-app.md#87-uploads-by-the-system)) |
 | Keychain access group | `$(TSYNC_TEAM_ID).$(TSYNC_APP_ID)`, held by the app and the File Provider extension (§4.1) |
 | App Group | `TSYNC_APP_GROUP` |
 | Push environment | `TSYNC_APS_ENVIRONMENT`: `development` for a build installed from a Mac, `production` for a TestFlight or App Store build ([10 §5.6](../10-delivery.md#56-ios-signing-and-testflight)) |
@@ -357,6 +358,3 @@ Each becomes a section above before its code.
 2. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
 3. Open on a device: the extension's limit on the oldest supported device.
-4. Camera backup through PhotoKit's background upload extension (iOS 26.1), in which the system
-   uploads each photo to an HTTP request of the app's: it needs a store endpoint that takes a
-   whole file into a domain, which no store has.

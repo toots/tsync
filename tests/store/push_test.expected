@@ -30,6 +30,9 @@ pushed to: 70bbbb 70cccc
 == the author's change of its own
 pushed to: 70aaaa 70cccc
 
+== a change by no client: an upload's
+pushed to: 70aaaa 70bbbb 70cccc
+
 == a token APNs says is gone
 pushed to: 70bbbb 70cccc
 registered: 70aaaa 70bbbb
@@ -46,6 +49,6 @@ pushed to:
 registered: 0
 
 == counters
-pushSent: 8
+pushSent: 11
 pushFailed: 0
 pushDropped: 3

@@ -21,6 +21,12 @@ type request = {
   peer : string;
   body_length : [ `Length of int | `Chunked | `Eof ];
   received : float;  (** {!Tsync_core.Rt.now} once the head was read *)
+  interim : int -> Codec.headers -> unit;
+      (** writes a 1xx answer before the final one *)
+  stream_body : limit:int -> (Tsync_core.Bigstring.t -> unit) -> unit;
+      (** the body handed over a piece at a time, each piece valid only until
+          the call returns; the body is read at most once, by this or by the
+          handler's reader *)
 }
 
 type body =

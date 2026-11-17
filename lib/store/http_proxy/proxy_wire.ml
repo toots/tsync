@@ -71,6 +71,35 @@ let fresh ~now timestamp =
 let verify ~secret ~meth ~target ~timestamp ~signature:given body =
   Eqaf.equal given (signature ~secret ~meth ~target ~timestamp body)
 
+let upload_max_lifetime = 30. *. 86400.
+
+let upload_hmac ~secret ~target expires =
+  Digestif.SHA256.(
+    to_hex
+      (hmac_string ~key:secret (String.concat "\n" ["UPLOAD"; target; expires])))
+
+let upload_signature ~secret ~target ~expires =
+  let expires = string_of_int expires in
+  expires ^ "." ^ upload_hmac ~secret ~target expires
+
+let upload_verifies ~now ~secret ~target header =
+  match String.index_opt header '.' with
+    | None -> false
+    | Some i ->
+        let expires = String.sub header 0 i in
+        let given = String.sub header (i + 1) (String.length header - i - 1) in
+        let digits =
+          expires <> ""
+          && String.length expires <= 15
+          && String.for_all (fun c -> c >= '0' && c <= '9') expires
+        in
+        digits
+        &&
+        let at = float_of_string expires in
+        at > now
+        && at -. now <= upload_max_lifetime
+        && Eqaf.equal given (upload_hmac ~secret ~target expires)
+
 let encode_key k =
   Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
     (Key.to_string k)
@@ -286,3 +315,5 @@ let decode_folders ~asked buf =
       folders ({ Store.prefix; listing; bodies } :: acc))
   in
   folders []
+
+let escape_value = escape allowed_in_value

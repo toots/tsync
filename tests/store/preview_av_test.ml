@@ -198,6 +198,8 @@ let served video root =
           peer = "";
           body_length = `Length 0;
           received = 0.;
+          interim = (fun _ _ -> ());
+          stream_body = (fun ~limit:_ _ -> ());
         }
         ~token ~sub:"preview" []
     in

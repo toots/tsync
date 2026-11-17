@@ -15,6 +15,16 @@ timestamp +300           true
 timestamp +301           false
 non-decimal timestamp    false
 16 digits                false
+== upload signatures (§5.7)
+/upload?domain=docs&path=Camera%20Uploads/2026/2026-08-16%2014.31.04.jpg&created=1786890664000000000
+1727600000.1849c7288db352b22e64d71c69d59e8d6016f2540b833a3d03eccb35e33365a6
+an hour before expiry    true
+at expiry                false
+31 days before expiry    false
+wrong secret             false
+another path             false
+no expiry                false
+upper-case hex           false
 == canonical query (§3.2)
 prefix=a%20b%2C%2B%26%C3%A9&k%3D=v=
 parses back: true

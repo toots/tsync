@@ -626,7 +626,7 @@ struct CameraBackupRow: View {
     var body: some View {
         Section("Camera backup") {
             Text(backup.status).font(.footnote)
-            if backup.enabled {
+            if backup.enabled && !backup.bySystem {
                 Button(backup.running ? "Backing up…" : "Back up now") { backup.request(now: true) }
                     .disabled(backup.running)
             }

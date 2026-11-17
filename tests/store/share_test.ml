@@ -135,6 +135,8 @@ let routes () =
               peer = "";
               body_length = `Length 0;
               received = 0.;
+              interim = (fun _ _ -> ());
+              stream_body = (fun ~limit:_ _ -> ());
             }
             ~token ~sub params
         in
@@ -231,6 +233,8 @@ let routes () =
                peer = "";
                body_length = `Length 0;
                received = 0.;
+               interim = (fun _ _ -> ());
+               stream_body = (fun ~limit:_ _ -> ());
              }
              ~token:"d1" ~sub:"download" [])
       in

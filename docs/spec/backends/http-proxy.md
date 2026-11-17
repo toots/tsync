@@ -176,6 +176,7 @@ Each takes `?prefix=P`, a prefix within the client's domain; it routes and autho
 | `GET /domain-settings?prefix=P` | `{"chunkSize":n,"symlinks":p,"projectLease":l,"projectQuarantine":q,"projectSettle":s,"maxEntryCommands":m,"extensions":[e…],"vaultLock":v?,"projector":u?}`: every domain-wide setting ([05 §2.1](../05-ops-config.md#21-schema-and-validation)) in force for the serving domain, configured or default, and the extensions the serving domain uses (its configured list, else `[]`); `vaultLock` the serving domain's configured auto-lock, absent when none; sizes in bytes, timings in seconds; `projector` is the client uuid of the serving owner, present when the listener projects the domain's commits | a listener older than the endpoint: the client asks `/chunk-size` |
 | `GET /max-concurrency?prefix=P` | `{"maxConcurrency":n}`, `n > 0`: how many object reads and writes the listener runs at once | no bound |
 | `GET /verified?prefix=P` | `{"verified":bool}`: the far composite store's `verified` capability | never (always answers) |
+| `GET /upload-limit?prefix=P` | `{"uploadLimit":n}`: the domain takes whole-file uploads (§5.7) of at most `n` bytes | the domain takes none |
 
 A value that is not a positive integer, or a body that does not parse, is no opinion.
 
@@ -207,6 +208,65 @@ Only `GET` matches these paths.
 
 It is not refused on a read-only route: a registration changes no domain content.
 
+### 5.7 Whole-file uploads
+
+A client that runs no core, such as the photo library's upload extension on iOS
+([ios-app §8.7](../frontends/ios-app.md#87-uploads-by-the-system)), hands the listener a whole
+file, which the listener commits into the domain ([frontend §A4.8](../frontends/http-proxy.md#a48-whole-file-uploads)).
+The exchange is the IETF draft *Resumable Uploads for HTTP* as the system's uploader speaks it, so an
+upload the network interrupts resumes where it stopped.
+
+**Signature.** The system sends an upload when it chooses, long after it was made, and its signer
+never holds the body, so a creation request is not signed as §3.1. It carries
+
+```
+x-tsync-upload: <expires>.<lowercase-hex( HMAC-SHA256( key = UTF-8 bytes of the secret,
+                  msg = "UPLOAD" "\n" TARGET "\n" expires ) )>
+```
+
+`expires` is Unix seconds in decimal digits, `TARGET` the canonical target of §3.2. The request is
+authentic iff the secret of the domain it names verifies it, `expires` is in the future, and no more
+than `upload_max_lifetime` away ([security §4.4](../algorithms/security-model.md#44-upload-signatures)).
+The target binds every parameter:
+
+Test vector: secret `s3cret`, `expires` `1727600000`, target
+`/upload?domain=docs&path=Camera%20Uploads/2026/2026-08-16%2014.31.04.jpg&created=1786890664000000000`:
+`1727600000.1849c7288db352b22e64d71c69d59e8d6016f2540b833a3d03eccb35e33365a6`.
+
+| Parameter | Rule |
+|---|---|
+| `domain` | the domain's name; it routes the request |
+| `path` | the file's domain-relative path: leaves of [01 §2.3](../01-core.md#23-leaf-names-and-logical-paths) joined by `/`, none empty, `.`, `..` or `.tsync-ext` |
+| `created` | optional: the file's creation time, nanoseconds since the epoch |
+| `base` | optional: the `contentId` the client last uploaded at `path` ([08 §2.3](../08-frontends.md#23-item-row)). Present: a write again over that version. Absent: a new file |
+
+| Request | Answer |
+|---|---|
+| `OPTIONS /upload` | Unsigned. 200 with `Upload-Limit: <n>` when some domain of the listener takes uploads, `n` the largest of their limits; else 501. |
+| `POST /upload?domain=…&path=…[&created=…][&base=…]`, `x-tsync-upload`, `content-length` | The creation, body = the file or its first part. The signature, the parameters and the declared length are checked before any body byte is read. Then `104 Upload Resumption Supported` with `Location: upload/r/<id>`, then the body. With every byte of the file received (`Upload-Complete: ?1`, `Upload-Incomplete: ?0`, or neither header), the file is committed and the answer is the commit's; with `Upload-Complete: ?0` or `Upload-Incomplete: ?1`, 201 with `Upload-Offset` once the part is received. |
+| `HEAD /upload/r/<id>` | 204 with `Upload-Offset` (bytes received), `Upload-Complete: ?0` and `Upload-Incomplete: ?1` while incomplete, `cache-control: no-store`; for a committed upload the commit's answer headers with `Upload-Complete: ?1` and `Upload-Incomplete: ?0`. 404 for an unknown or expired id. |
+| `PATCH /upload/r/<id>`, `Upload-Offset: o`, `content-length` | An append: `o` MUST equal the bytes received, else 409 with the right `Upload-Offset`. The complete flags read as for the creation. An append of 0 bytes with the file complete retries a commit that failed. |
+| `DELETE /upload/r/<id>` | The upload is dropped: 204. |
+
+- `Location` is relative, so it resolves under the base path the client used (§1), which a server
+  behind a reverse proxy cannot know. `<id>` is 32 lowercase hex characters from the CSPRNG and is
+  the capability for the requests on it, which carry no signature; it MUST NOT appear in logs above
+  debug level.
+- A request carrying `Upload-Draft-Interop-Version` is answered with the same header and value.
+- **Commit answer**: 201 with `Upload-Offset: <size>`, `x-tsync-content-id: <contentId>` of the file
+  committed, and `x-tsync-path: <path>`, percent-encoded as a query value (§3.2): the path the file
+  has, which is `path` except when a write again met a version the client never saw and the file
+  went aside ([frontend §A4.8](../frontends/http-proxy.md#a48-whole-file-uploads)).
+- **Refusals**: a bad, expired or too distant signature, or a domain this listener does not serve,
+  401 as §6.1; bad parameters 400; a declared length over the limit 413; a domain that takes no
+  uploads 404 `not found`; a read-only domain 403; a new file whose path holds other content 409;
+  uploads or disk space exhausted, the domain's owner not answering 503. Every refusal but a 503
+  carries `x-tsync-kind` (§6.2): `denied` for 401, `invalid` for 400 and 413, `unprepared` for 404,
+  `read_only` for 403, the commit's kind for 409 (`exists` for a path holding other content). The
+  system's uploader reports a failed upload by its headers alone, so they carry what to do; a 401
+  also carries `www-authenticate: tsync-upload`, which the system reports as an authentication
+  failure.
+
 A client composes a share URL as `<its configured url>/s/<token>` when the server answered `{"self":true}` (behind TLS termination the server cannot know its public URL), or `<url>/<token>` from `{"url":…}`.
 
 Share **manifests** are written through the object API at `tsync/shares/<token>`, confined per [security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener).
@@ -219,7 +279,8 @@ Share **manifests** are written through the object API at `tsync/shares/<token>`
 
 The first rule that applies decides the answer.
 
-1. `/s/…` with shares served → share server. `/`, `/index.html` → status page.
+1. `/s/…` with shares served → share server. `/`, `/index.html` → status page. `/upload` and
+   `/upload/r/…` → §5.7, which checks its own signature before reading a body.
 2. Request line and headers over their limits → 414/431 ([security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener)).
 3. Parse the operation. A path outside the API → **404** `not found`. An API path with malformed arguments (undecodable key, key or prefix failing the grammar, invalid parameter, a body where none belongs) → **400** `bad request`.
 4. Declared body length over its limit → **413** `too large`.

@@ -43,9 +43,9 @@ val create :
 (** Durable once it returns. *)
 val register : t -> Domain_name.t -> registration -> unit
 
-(** A log entry by [author] was won: every other client of the domain is due a
-    push. Never blocks. *)
-val changed : t -> Domain_name.t -> author:string -> unit
+(** The domain changed: every client of it but [author] is due a push. Never
+    blocks. *)
+val changed : ?author:string -> t -> Domain_name.t -> unit
 
 (** The registration's fields from a [/push-register] body; [None] when it is
     malformed. *)

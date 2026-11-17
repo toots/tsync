@@ -56,6 +56,7 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
 | `shares` | bool, or a backend name | false | per domain | never inherited. `true`: serve `/s/` for this domain. A name: the domain's links are that member's (§A4.6), and `/s/` is not served for it. The name MUST be the domain's main or one of its replicas, whose capabilities give a `share_url`: never a backfill, which is not guaranteed to be in sync, nor an archive, which is never written. Otherwise startup fails naming the option |
 | `readOnly` | bool | false | per domain | never inherited |
+| `uploads` | bool | false | per domain | never inherited. Take whole-file uploads into the domain (§A4.8), committed through the domain's owner on this host |
 | `projectCommits` | bool | true | per domain | *advanced*; never inherited. The serving host's owner of the domain projects the entries created through this listener ([publication §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)): the listener states that owner as the domain's projector and wakes its cycle when a create of a log entry is won. `false` leaves each entry to its author. With it on, every writer of the domain's main MUST reach it through this listener: the serving owner then projects every entry of the domain |
 | `maxEntryCommands` | int ≥ 1 | 4096 with `projectCommits` on a domain whose main is a local store, else the domain's | per domain | *advanced*; never inherited. The entry size the listener states to its clients ([05 §2.1](../05-ops-config.md#21-schema-and-validation), domain-wide settings): a projection that crosses no network takes thousands of commands in the time a remote one takes a few hundred |
 
@@ -157,6 +158,8 @@ With the `push_*` options set, the listener tells the iOS clients of a domain wh
   `push_registration_max_age`.
 - **Trigger.** When a create under the domain's log prefix is won, beside the answer and never
   awaited by it, every registration of the domain except the entry's `author`'s is due a push.
+  An upload that commits a write ([§A4.8](#a48-whole-file-uploads)) makes every registration of the domain due
+  one, the uploading phone's included: no File Provider of its wrote the file.
 - **Coalescing.** A registration gets at most one push per `push_coalesce`. A push due inside that
   interval is sent at its end, once, however many entries were won meanwhile.
 - **Sending.** An HTTP/2 POST to `https://api.push.apple.com/3/device/<token>`, or
@@ -178,6 +181,51 @@ With the `push_*` options set, the listener tells the iOS clients of a domain wh
 | `push_coalesce` | 10 s | the shortest interval between two pushes to one registration |
 | `push_registration_max_age` | 60 days | a registration not renewed for this long is dropped |
 | `push_auth_renewal` | 30 min | between 20 and 60 min, APNs's bounds for a token's age |
+
+### A4.8 Whole-file uploads
+
+With `uploads`, the listener takes a domain's files whole ([wire §5.7](../backends/http-proxy.md#57-whole-file-uploads))
+and commits each through the domain's owner on this host, as a frontend writes a file: the listener
+still writes no local domain state, and the owner chunks, stages and uploads the file as any other.
+
+- **Spool.** An upload's bytes go to `<data dir>/uploads/<id>`, beside its record `<id>.json` (domain,
+  path, created, base, declared length, and once committed the commit's answer), the record replaced
+  atomically, the directory 0700. The bytes received are the spool file's size. They survive a restart, so an
+  upload resumes across one. Bytes are written to disk as they arrive: an upload holds no body memory
+  and no admission slot (§A5), since it does not touch a store.
+- **Limits**, checked before a creation reads its body: at most `max_uploads` uploads receiving at
+  once, the declared length at most `max_upload_size` (the `Upload-Limit` and `/upload-limit`
+  answer), and the spool's file system left with at least `upload_free_floor` after every
+  incomplete upload's remaining bytes. Past one, 503 or 413 ([wire §5.7](../backends/http-proxy.md#57-whole-file-uploads)).
+  A connection that stops sending is closed after `idle_timeout` and its upload kept for a resume.
+- **Expiry.** An upload neither complete nor touched for `upload_resume_ttl` is deleted with its
+  record; so is a committed upload's record after the same time. Swept at start and every hour.
+- **Commit**, once every declared byte is received, its `contentId` computed over the spool:
+  1. The parent folders of `path`, from the root, each `stat` by `parentRef` and `name` and made with
+     a non-exclusive `mkdir` when absent ([08 §3.3](../08-frontends.md#33-actions)).
+  2. `stat` of the file: when its `contentId` equals the upload's, the commit is done with that row,
+     nothing written. A retry, or a replay, of an upload already committed lands here.
+  3. Else `write` by `parentRef` and `name` with `staging` = the spool file and `createdNs` =
+     `created`; with `base` when the upload has one, which puts the file aside when the version there
+     is another ([conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)),
+     else with `exclusive`, whose `exists` is the 409 of the wire.
+  4. The answer is the commit's once the owner adopted the file; it does not wait for the upload to
+     the stores. The record keeps the answer, so a `HEAD` after a lost answer repeats it.
+
+  The owner is reached on its socket ([07 §4.1](../07-daemon-cli.md#41-sockets)). Not answering, or a
+  transient failure, is 503 with the spool kept complete: the next append of 0 bytes, or a new
+  creation, commits it. The spool lies under the owner's staging root
+  ([security §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)), the
+  user's home where the host declares no other.
+- A read-only domain refuses the creation 403.
+- The listener counts uploads started, resumed, committed and refused, and bytes received (§A12).
+
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `max_uploads` | 8 | uploads receiving at once |
+| `max_upload_size` | 64 GiB | the largest file taken |
+| `upload_free_floor` | 2 GiB | free space kept on the spool's file system |
+| `upload_resume_ttl` | 24 h | an idle incomplete upload's lifetime |
 
 ---
 
@@ -409,7 +457,7 @@ The store-server socket of [07 §4.1](../07-daemon-cli.md#41-sockets), access-co
 
 ## A12. Counters
 
-- `requests`: `inFlight`, `requestsPerSec`, `dataInFlight` (gate slots held), `dataWaiting` (gate queue length), `sharesInFlight` and `sharesMax` (share responses open, and their bound), and one integer per tally: `get getRange watch head put putIfAbsent putIfUnchanged checksum delete getMulti childrenMulti deleteMulti copy list shareUrl chunkSize maxConcurrency verified share page stats domains unauthorized notFound badRequest tooLarge busy error`. Keys sorted.
+- `requests`: `inFlight`, `requestsPerSec`, `dataInFlight` (gate slots held), `dataWaiting` (gate queue length), `sharesInFlight` and `sharesMax` (share responses open, and their bound), and one integer per tally: `get getRange watch head put putIfAbsent putIfUnchanged checksum delete getMulti childrenMulti deleteMulti copy list shareUrl chunkSize maxConcurrency verified share page stats domains unauthorized notFound badRequest tooLarge busy error uploadStarted uploadResumed uploadCommitted uploadRefused`, and `uploadBytes`. Keys sorted.
 - Byte counters are the server's own (once per request), distinct from backend link counters.
 - Counters are updated atomically.
 
@@ -454,6 +502,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - GC: during a run, a chunk only in the space being collected is readable through the listener, and a log entry or a manifest written through it naming that chunk promotes it; a log entry or a manifest naming a chunk the main lacks is refused 409 `missing_chunks` with the key.
 - Status: every status endpoint answers 401 unless signed; control-socket `stats` equals `/api/v1/stats` for a secret opening every domain; the text report snapshot; secrets masked; `/stats` refuses unsigned and wrong secrets and counts them; a secret opening one domain sees only that domain; totals states (not asked, counting, estimate, exact, served stale, refreshing, error); `/domains` unsigned 401, wrong 401, signed lists the domain with `readOnly`.
 - Pushes: without the `push_*` options, `/push-register` answers 404; with it, a registration survives a restart; a won log entry by one client pushes once to every other registered client of the domain and not to its author; ten entries won within `push_coalesce` push once at the interval's end; a 410 drops the registration; an expired registration is dropped; against a stub APNs, the request carries the headers, body and a JWT that verifies with the key's public half; a `push_key` readable by others, or on a build without push, fails startup naming the option.
+- Uploads: a domain without `uploads` answers `/upload-limit` 404 and a signed creation 404; `OPTIONS /upload` answers 501 when no domain takes them, else 200 with `Upload-Limit`; a creation with an expired, too distant or wrong signature is 401 before its body is read; a creation answers 104 with a relative `Location` before 201, and the file is in the domain with its creation time; a creation cut halfway, then `HEAD` and `PATCH` from the offset, commits the whole file byte-exact, also across a listener restart; a `PATCH` at a wrong offset is 409 with the right one; the same upload sent twice commits once; a new file at a path holding other content is 409 `exists`; a write again with the current `base` replaces the file, and with a stale one leaves it and answers the aside path; past `max_uploads` a creation is 503; an idle incomplete upload is gone after `upload_resume_ttl`; with the owner stopped, the commit is 503 and a 0-byte append after it is back commits; nothing is written under the mirror or chunk cache by the listener.
 - Control socket: bad JSON, non-object JSON, unknown action, empty action → `invalid`; `stop` answers `{"ok":true}`, requests stop once, and leaves the connection open.
 
 ---

@@ -50,6 +50,18 @@ val verify :
   Bigstring.t ->
   bool
 
+(** security-model §4.4: how far ahead an upload signature may expire. *)
+val upload_max_lifetime : float
+
+(** §5.7: [x-tsync-upload] for an upload's canonical [target], expiring at
+    [expires] (Unix seconds). *)
+val upload_signature : secret:string -> target:string -> expires:int -> string
+
+(** §5.7: whether [header] is a signature of [target] by [secret] that has not
+    expired and expires within {!upload_max_lifetime} of [now]. *)
+val upload_verifies :
+  now:float -> secret:string -> target:string -> string -> bool
+
 (** §4.1: a key in a path, base64url without padding. *)
 val encode_key : Key.t -> string
 
@@ -88,3 +100,6 @@ val encode_folders : Tsync_store.Store.folder list -> Bigstring.t
 (** CORRUPT for a folder not asked for or a child outside its folder. *)
 val decode_folders :
   asked:Key.prefix list -> Bigstring.t -> Tsync_store.Store.folder list
+
+(** §3.2: a query value, percent-encoded. *)
+val escape_value : string -> string

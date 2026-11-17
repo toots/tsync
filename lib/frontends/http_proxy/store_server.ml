@@ -32,6 +32,7 @@ type t = {
   in_flight : int Atomic.t;
   epoch : string;  (** uplink-governor A10: drawn at start *)
   mutable push : Push.t option;  (** set once, at creation *)
+  mutable uploads : Uploads.t option;  (** set once, at creation *)
 }
 
 and traffic = { read : int Atomic.t; written : int Atomic.t }
@@ -56,6 +57,12 @@ let tally_names =
     "chunkSize";
     "maxConcurrency";
     "verified";
+    "uploadLimit";
+    "uploadStarted";
+    "uploadResumed";
+    "uploadCommitted";
+    "uploadRefused";
+    "uploadBytes";
     "pushRegister";
     "pushSent";
     "pushFailed";
@@ -92,7 +99,12 @@ let derive_bound ?max_concurrent routes =
 
 let count t name = Option.iter Atomic.incr (Hashtbl.find_opt t.tallies name)
 
-let create ?max_concurrent ?listener ?push routes =
+let add t name n =
+  Option.iter
+    (fun a -> ignore (Atomic.fetch_and_add a n))
+    (Hashtbl.find_opt t.tallies name)
+
+let create ?max_concurrent ?listener ?push ?uploads routes =
   let bound, origin = derive_bound ?max_concurrent routes in
   Log.info "http-proxy: at most %d data operations at once (%s)" bound origin;
   let t =
@@ -115,6 +127,7 @@ let create ?max_concurrent ?listener ?push routes =
       in_flight = Atomic.make 0;
       epoch = Ids.hex (Ids.urandom 8);
       push = None;
+      uploads = None;
       traffic =
         (let h = Hashtbl.create 4 in
          List.iter
@@ -126,6 +139,12 @@ let create ?max_concurrent ?listener ?push routes =
     }
   in
   t.push <- Option.map (fun make -> make (count t)) push;
+  t.uploads <-
+    Option.map
+      (fun make ->
+        make (add t) (fun domain ->
+            Option.iter (fun p -> Push.changed p domain) t.push))
+      uploads;
   t
 
 let text = Server.text
@@ -171,6 +190,7 @@ type op =
   | Domain_settings of Key.prefix
   | Max_concurrency of Key.prefix
   | Verified of Key.prefix
+  | Upload_limit of Key.prefix
   | Push_register of Key.prefix
 
 let tally = function
@@ -192,6 +212,7 @@ let tally = function
   | Domain_settings _ -> "domainSettings"
   | Max_concurrency _ -> "maxConcurrency"
   | Verified _ -> "verified"
+  | Upload_limit _ -> "uploadLimit"
   | Push_register _ -> "pushRegister"
 
 (* §A5: data operations are gated, metadata never waits behind transfers. *)
@@ -330,6 +351,7 @@ let parse_op t (r : Server.request) params =
     | "GET", [""; "domain-settings"] -> Domain_settings (needs_prefix ())
     | "GET", [""; "max-concurrency"] -> Max_concurrency (needs_prefix ())
     | "GET", [""; "verified"] -> Verified (needs_prefix ())
+    | "GET", [""; "upload-limit"] -> Upload_limit (needs_prefix ())
     | "POST", [""; "push-register"] -> Push_register (needs_prefix ())
     | _ ->
         count t "notFound";
@@ -353,6 +375,7 @@ let key_names = function
   | Domain_settings p
   | Max_concurrency p
   | Verified p
+  | Upload_limit p
   | Push_register p ->
       [Key.prefix_to_string p]
   | Get_multi | Children_multi | Delete_multi -> []
@@ -685,7 +708,7 @@ let changed push domain body =
   match Yojson.Safe.from_string (Bigstring.to_string body) with
     | `Assoc l -> (
         match List.assoc_opt "author" l with
-          | Some (`String author) -> Push.changed push domain ~author
+          | Some (`String author) -> Push.changed ~author push domain
           | _ -> ())
     | _ | (exception Yojson.Json_error _) -> ()
 
@@ -866,6 +889,11 @@ let execute ?(partial = false) t route op body =
     | Max_concurrency _ -> json (`Assoc [("maxConcurrency", `Int t.bound)])
     | Verified p ->
         json (`Assoc [("verified", `Bool (s.capabilities p).verified)])
+    | Upload_limit _ -> (
+        match t.uploads with
+          | Some u when Uploads.takes u route.domain ->
+              json (`Assoc [("uploadLimit", `Int Uploads.max_upload_size)])
+          | _ -> text 404 "no uploads")
     | Push_register _ -> (
         match t.push with
           | None -> text 404 "not found"
@@ -1352,11 +1380,14 @@ let stamped t (r : Server.request) =
 
 (* wire §2: every API answer, refusals included, carries its receipt stamp. *)
 let handle t (r : Server.request) read_body =
-  let route = route r in
-  let response = answer_request t r read_body route in
-  match route with
-    | `Share _ | `Setup _ -> response
-    | `Api -> { response with headers = stamped t r :: response.headers }
+  match Option.bind t.uploads (fun u -> Uploads.handle u r) with
+    | Some response -> response
+    | None -> (
+        let route = route r in
+        let response = answer_request t r read_body route in
+        match route with
+          | `Share _ | `Setup _ -> response
+          | `Api -> { response with headers = stamped t r :: response.headers })
 
 (* replication §4.9: a share written to a copy directly waits for the main. *)
 let guarded composite (m : Composite.member) =
@@ -1555,6 +1586,30 @@ let run config =
                      options
                      (List.map (fun r -> r.domain) routes))
                  listener.push)
+            ?uploads:
+              (if
+                 List.exists
+                   (fun (b : Proxy_options.binding) -> b.uploads)
+                   bindings
+               then
+                 Some
+                   (fun count wrote ->
+                     Uploads.create ~count ~wrote
+                       ~dir:
+                         (Filename.concat
+                            (Tsync_config.Paths.data_dir ())
+                            "uploads")
+                       (List.map2
+                          (fun (b : Proxy_options.binding) (r : route) ->
+                            {
+                              Uploads.domain = r.domain;
+                              secret = r.secret;
+                              read_only = r.read_only;
+                              takes = b.uploads;
+                              chunk = r.domain_settings.chunk;
+                            })
+                          bindings routes))
+               else None)
             routes
         in
         let ctl =
@@ -1587,6 +1642,7 @@ let run config =
                  while true do
                    if Unix.gettimeofday () >= !next_sweep then (
                      sweep_sites t;
+                     Option.iter Uploads.sweep t.uploads;
                      next_sweep := Unix.gettimeofday () +. 3600.);
                    Stop.sleep 60.;
                    Usage.release_if_fragmented ()

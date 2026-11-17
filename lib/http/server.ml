@@ -26,6 +26,8 @@ type request = {
   peer : string;
   body_length : [ `Length of int | `Chunked | `Eof ];
   received : float;
+  interim : int -> Codec.headers -> unit;
+  stream_body : limit:int -> (Bigstring.t -> unit) -> unit;
 }
 
 type body =
@@ -62,7 +64,9 @@ type t = {
 }
 
 let reason = function
+  | 104 -> "Upload Resumption Supported"
   | 200 -> "OK"
+  | 201 -> "Created"
   | 204 -> "No Content"
   | 206 -> "Partial Content"
   | 400 -> "Bad Request"
@@ -78,6 +82,7 @@ let reason = function
   | 431 -> "Request Header Fields Too Large"
   | 500 -> "Internal Server Error"
   | 502 -> "Bad Gateway"
+  | 501 -> "Not Implemented"
   | 503 -> "Service Unavailable"
   | _ -> "Status"
 
@@ -165,6 +170,50 @@ let serve_conn lim handle ~peer conn requests =
                   match body_length with `Eof -> `Length 0 | f -> f
                 in
                 let path, query = split_target target in
+                (* Pitfall A-9.10: the connection is reused only once the
+                   body was read to its end; [started] refuses a second read
+                   after a failed one. *)
+                let consumed = ref (body_length = `Length 0) in
+                let started = ref false in
+                let consume ~limit read =
+                  if !started then raise (Codec.Malformed "body read twice");
+                  started := true;
+                  (match body_length with
+                    | `Length n when n > limit -> raise Body_too_large
+                    | `Length n when n < 0 ->
+                        raise (Codec.Malformed "bad length")
+                    | _ -> ());
+                  if Codec.header headers "expect" = Some "100-continue" then
+                    Transport.write_string ~timeout:lim.idle_timeout conn
+                      "HTTP/1.1 100 Continue\r\n\r\n";
+                  let body =
+                    try read ~limit
+                    with Codec.Too_large -> raise Body_too_large
+                  in
+                  consumed := true;
+                  body
+                in
+                let read_body ~limit =
+                  if !consumed then Bigstring.empty
+                  else
+                    consume ~limit (fun ~limit ->
+                        Codec.read_body ~timeout:lim.idle_timeout ~limit reader
+                          body_length)
+                in
+                let stream_body ~limit emit =
+                  if not !consumed then
+                    consume ~limit (fun ~limit ->
+                        Codec.stream_body ~timeout:lim.idle_timeout ~limit
+                          reader body_length emit)
+                in
+                let interim status headers =
+                  let b = Buffer.create 128 in
+                  Codec.write_head b
+                    (Printf.sprintf "HTTP/1.1 %d %s" status (reason status))
+                    headers;
+                  Transport.write_string ~timeout:lim.idle_timeout conn
+                    (Buffer.contents b)
+                in
                 let req =
                   {
                     meth;
@@ -175,35 +224,9 @@ let serve_conn lim handle ~peer conn requests =
                     peer;
                     body_length;
                     received;
+                    interim;
+                    stream_body;
                   }
-                in
-                (* Pitfall A-9.10: the connection is reused only once the
-                   body was read to its end; [started] refuses a second read
-                   after a failed one. *)
-                let consumed = ref (body_length = `Length 0) in
-                let started = ref false in
-                let read_body ~limit =
-                  if !consumed then Bigstring.empty
-                  else if !started then
-                    raise (Codec.Malformed "body read twice")
-                  else (
-                    started := true;
-                    (match body_length with
-                      | `Length n when n > limit -> raise Body_too_large
-                      | `Length n when n < 0 ->
-                          raise (Codec.Malformed "bad length")
-                      | _ -> ());
-                    if Codec.header headers "expect" = Some "100-continue" then
-                      Transport.write_string ~timeout:lim.idle_timeout conn
-                        "HTTP/1.1 100 Continue\r\n\r\n";
-                    let body =
-                      try
-                        Codec.read_body ~timeout:lim.idle_timeout ~limit reader
-                          body_length
-                      with Codec.Too_large -> raise Body_too_large
-                    in
-                    consumed := true;
-                    body)
                 in
                 Atomic.incr requests;
                 let r =
