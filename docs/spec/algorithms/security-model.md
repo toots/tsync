@@ -210,7 +210,7 @@ Some clients are less privileged than the owner process (the sandboxed macOS ext
 
 - Each host declares, per client kind, a **staging root** and a **destination root**. A path outside the declared root is refused `denied`. A host with no sandboxed clients MAY declare the owner's home as both roots. A host whose socket only its own clients can reach, and whose sandboxed client receives files in a directory the owner cannot learn, MAY declare no roots and rely on the rules below: on macOS the App Group container is that boundary (only the app, the extension and unsandboxed processes of the user reach the socket), and the File Provider temporary directory has no location the owner could derive ([file-provider §4.4](../frontends/file-provider.md#44-transfer-paths)).
 - The path's parent is resolved without following symbolic links and MUST lie under the root; the final component MUST NOT be a symbolic link.
-- `staging` MUST be a regular file owned by the owner uid. It is adopted by rename within the same filesystem; it MAY have other hard links (the system's own name for the file).
+- `staging` MUST be a regular file owned by the owner uid. It is adopted by rename within the same filesystem; it MAY have other hard links (the system's own name for the file), and the owner then keeps a copy instead, since a writer at the other name would change in place a body the owner maps.
 - `dest` MUST NOT exist: the core creates it exclusively, without following links, mode 0600. It never overwrites.
 
 ---

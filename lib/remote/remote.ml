@@ -231,11 +231,14 @@ module Make (C : Context.S) = struct
                 if Bigstring.length b <> expected then
                   raise (Source_changed name);
                 let ck = Chunk_key.of_bigstring b in
-                if not (known ck) then (
-                  put_chunk ck b;
-                  sent (Bigstring.length b));
-                progress (Bigstring.length b);
-                ck)
+                Fun.protect
+                  ~finally:(fun () -> Fs.drop_mapped_pages b)
+                  (fun () ->
+                    if not (known ck) then (
+                      put_chunk ck b;
+                      sent (Bigstring.length b));
+                    progress (Bigstring.length b);
+                    ck))
     in
     let keys = Rt.map_bounded ~width:2 one (List.init count Fun.id) in
     Manifest.make ~name ~size ~times ~chunk_size keys

@@ -422,12 +422,12 @@ NTP step extends a hold and delays stall detection by the size of the step.
   can observe: wire limits, request size and time limits at trust boundaries, retention
   horizons and deadlines. Each is a named parameter in the file that owns it.
 - **Immutable data may be shared.** Data that is never modified in place — objects only ever
-  replaced by rename (store objects on a filesystem store, whole cache bodies, mirror entries)
-  and content-addressed data — MAY be passed around as an immutable memory mapping, and SHOULD
-  be; no rule in this specification forbids it. A local-filesystem store SHOULD read objects by
-  mapping them; positioned reads are equally allowed.
-- **Data written in place** (staged bodies, partial cache bodies) MAY be mapped only under the
-  rules of [04](04-checkout-cache.md) and
+  replaced by rename (store objects on a filesystem store, whole cache bodies, mirror entries),
+  whole staged bodies, and content-addressed data — MAY be passed around as an immutable memory
+  mapping, and SHOULD be; no rule in this specification forbids it. A local-filesystem store
+  SHOULD read objects by mapping them; positioned reads are equally allowed.
+- **Data written in place** (staged group bodies, partial cache bodies) MAY be mapped only under
+  the rules of [04](04-checkout-cache.md) and
   [read-path-and-cache](algorithms/read-path-and-cache.md). Files outside tsync's control that
   others change in place (a user's source files during an import) follow §12.
 

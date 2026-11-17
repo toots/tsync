@@ -316,6 +316,25 @@ let body_size t id =
 let body_links t id =
   match Fs.lstat_opt (body_path t id) with Some st -> st.st_nlink | None -> 0
 
+(* 04 §2.6: a whole body is never modified in place, so an upload's chunk and
+   adoption's digest map it (P6); memory M.2 reads it by position per kernel
+   request, on a network mount, which could fault a mapped page, and on
+   Windows, where a live mapping would keep its release from unlinking it. *)
+let whole t id ~mapped ~off ~len =
+  let path = whole_path t id in
+  Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
+      let size = (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
+      let len = max 0 (min len (Int64.to_int size - off)) in
+      if mapped && (not Sys.win32) && not (Fs.is_network_fs path) then
+        Fs.map_range fd ~off ~len
+      else (
+        let buf = Bigstring.create len in
+        let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
+        Bigstring.sub buf ~off:0 ~len:n))
+
+let read_whole t id ~off ~len = whole t id ~mapped:false ~off ~len
+let map_whole t id ~off ~len = whole t id ~mapped:true ~off ~len
+
 (* A staged slot whose body does not exist is CORRUPT; bytes past a body's end
    within the edit's size are zeros (a staged body is sparse). *)
 let read_body t id ~off ~len =

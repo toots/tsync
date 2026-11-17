@@ -415,6 +415,14 @@ let map_fd fd =
 
 let map_file p = with_fd (openfile p [O_RDONLY]) map_fd
 
+let map_range fd ~off ~len =
+  if len = 0 then Bigstring.empty
+  else
+    Bigarray.array1_of_genarray
+      (sys (fun () ->
+           Unix.map_file fd ~pos:(Int64.of_int off) Bigarray.char
+             Bigarray.c_layout false [| len |]))
+
 let read_fd_bigstring fd =
   let size = fd_size fd in
   let b = Bigstring.create size in

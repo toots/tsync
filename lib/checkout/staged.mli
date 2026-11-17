@@ -78,6 +78,14 @@ val body_size : t -> string -> int
 
 val body_links : t -> string -> int
 
+(** At most [len] bytes of a whole body from [off], fewer past its end, read by
+    position. *)
+val read_whole : t -> string -> off:int -> len:int -> Bigstring.t
+
+(** [read_whole] as a read-only view of the file, except on a network mount or
+    on Windows. *)
+val map_whole : t -> string -> off:int -> len:int -> Bigstring.t
+
 (** Bytes of a body, zeros past its end; CORRUPT when the body is missing. *)
 val read_body : t -> string -> off:int -> len:int -> Bigstring.t
 

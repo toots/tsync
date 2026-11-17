@@ -89,6 +89,16 @@ let () =
            ~exclusive:false ());
       p "the same bytes again take the new times: %b\n"
         (stat_times a "same.txt" = second);
+      (* security §7.3: a staging file with another name is kept as a copy. *)
+      let linked = staging "l" "linked" first in
+      let other = Filename.concat src "l-other" in
+      Unix.link linked other;
+      ignore (A.write_whole "linked.txt" ~src:linked ~exclusive:false ());
+      Out_channel.with_open_bin other (fun oc -> output_string oc "CHANGED");
+      let h = A.open_read "linked.txt" in
+      p "a write at the other name leaves the body: %S\n"
+        (Bigstring.to_string (A.read h ~off:0 ~len:16));
+      A.close_read h;
       A.drain ~grace:10. ();
       ignore (A.resync ());
       ignore (B.resync ());
