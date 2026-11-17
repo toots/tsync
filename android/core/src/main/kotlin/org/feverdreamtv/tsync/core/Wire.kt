@@ -140,6 +140,8 @@ data class Stats(
     val ownRam: Long? = null,
     /** The reply itself, for Copy report (activity §2.6). */
     val raw: String = "",
+    /** activity §1: no process reported the domain. */
+    val unanswered: Boolean = false,
 )
 
 data class CannotFollow(val entry: Int, val reason: String)
@@ -381,6 +383,7 @@ class Client(private val core: Core) {
             },
             ownRam = usage?.let { u -> if (u.has("anonymousBytes") && !u.isNull("anonymousBytes")) u.optLong("anonymousBytes") else u.takeIf { it.has("privateBytes") }?.optLong("privateBytes") },
             raw = reply.toString(2),
+            unanswered = body.optBoolean("unanswered", false),
         )
     }
 

@@ -323,6 +323,8 @@
     <string name="activity_on">On</string>
     <string name="activity_off">Off</string>
     <string name="activity_copy_report">Copy report</string>
+    <string name="activity_failed_saves">Failed saves</string>
+    <string name="activity_warnings">Warnings and errors</string>
     <plurals name="activity_to_upload">
         <item quantity="one">%1$d to upload</item>
         <item quantity="other">%1$d to upload</item>

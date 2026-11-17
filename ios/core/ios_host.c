@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -17,35 +18,75 @@
 #include "tsync_ios.h"
 
 static char *core_log, *core_old_log;
-static pthread_mutex_t core_log_lock = PTHREAD_MUTEX_INITIALIZER;
 static const off_t core_log_limit = 1 << 20;
 
-/* ios.md §4. One write per line, so that the app's and the extension's
-   lines do not interleave. */
+/* The log, opened for appending and locked against the other process. */
+static int open_core_log(void) {
+  int descriptor = open(core_log, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
+  if (descriptor >= 0 && flock(descriptor, LOCK_EX) != 0) {
+    close(descriptor);
+    return -1;
+  }
+  return descriptor;
+}
+
+/* Each line of [message] after [prefix]. */
+static char *prefixed_lines(const char *prefix, const char *message, size_t *size) {
+  char *text = NULL;
+  FILE *out = open_memstream(&text, size);
+  if (out == NULL)
+    return NULL;
+  const char *start = message;
+  do {
+    const char *newline = strchr(start, '\n');
+    int length = newline ? (int)(newline - start) : (int)strlen(start);
+    fprintf(out, "%s%.*s\n", prefix, length, start);
+    start = newline ? newline + 1 : NULL;
+  } while (start != NULL && *start != '\0');
+  fclose(out);
+  return text;
+}
+
+/* ios.md §4. One write per message under the log's flock, so that the
+   app's and the extension's lines do not interleave; the rotation renames
+   only the file still named tsync.log, so that a process that locked the
+   half just rotated does not rotate again. */
 static void append_core_log(int level, const char *message) {
   static const char *names[] = {"debug", "info", "warn", "err"};
+  char *prefix = NULL, *text = NULL;
+  size_t size = 0;
+  int descriptor = -1;
   if (core_log == NULL)
     return;
   time_t now = time(NULL);
   struct tm local;
   localtime_r(&now, &local);
-  char *line = NULL;
-  int length = asprintf(&line, "%02d:%02d:%02d %s %s[%d] %s\n",
-                        local.tm_hour, local.tm_min, local.tm_sec, names[level],
-                        getprogname(), getpid(), message);
-  if (length < 0)
-    return;
-  pthread_mutex_lock(&core_log_lock);
-  struct stat info;
-  if (stat(core_log, &info) == 0 && info.st_size >= core_log_limit)
+  if (asprintf(&prefix, "%02d:%02d:%02d %s %s[%d] ", local.tm_hour,
+               local.tm_min, local.tm_sec, names[level], getprogname(),
+               getpid()) < 0)
+    goto end;
+  text = prefixed_lines(prefix, message, &size);
+  if (text == NULL)
+    goto end;
+  descriptor = open_core_log();
+  if (descriptor < 0)
+    goto end;
+  struct stat opened, named;
+  if (fstat(descriptor, &opened) == 0 && opened.st_size >= core_log_limit &&
+      stat(core_log, &named) == 0 && named.st_ino == opened.st_ino &&
+      named.st_dev == opened.st_dev) {
     rename(core_log, core_old_log);
-  int fd = open(core_log, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
-  if (fd >= 0) {
-    write(fd, line, length);
-    close(fd);
+    close(descriptor);
+    descriptor = open_core_log();
+    if (descriptor < 0)
+      goto end;
   }
-  pthread_mutex_unlock(&core_log_lock);
-  free(line);
+  write(descriptor, text, size);
+end:
+  if (descriptor >= 0)
+    close(descriptor);
+  free(text);
+  free(prefix);
 }
 
 CAMLprim value tsync_ios_log_write(value _level, value _message) {

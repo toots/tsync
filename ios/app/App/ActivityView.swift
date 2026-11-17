@@ -23,6 +23,7 @@ struct ActivityView: View {
                         ) { await ask(entry.name) }
                     }
                 }
+                WarningsSection(lines: warnings)
             }
             .navigationTitle("Activity")
             .task { await poll() }
@@ -31,10 +32,26 @@ struct ActivityView: View {
 
     private func header(_ name: String) -> String { model.entries.count > 1 ? name : "" }
 
+    /// activity.md §3: the processes' warnings and errors, once, newest first.
+    private var warnings: [SelfReport.Line] {
+        var seen = Set<String>()
+        var lines: [SelfReport.Line] = []
+        for line in reports.values.flatMap({ $0.stats?.process?.recentErrors ?? [] }) {
+            guard line.level == "warn" || line.level == "err" else { continue }
+            let key = "\(line.t ?? 0) \(line.message ?? "")"
+            if seen.insert(key).inserted { lines.append(line) }
+        }
+        return lines.sorted { ($0.t ?? 0) > ($1.t ?? 0) }
+    }
+
     /// `.task` ends when the screen goes, which ends the polling.
     private func poll() async {
         while !Task.isCancelled {
-            for entry in model.entries where !model.turnedOff.contains(entry.name) { await ask(entry.name) }
+            await withTaskGroup(of: Void.self) { group in
+                for entry in model.entries where !model.turnedOff.contains(entry.name) {
+                    group.addTask { await ask(entry.name) }
+                }
+            }
             try? await Task.sleep(nanoseconds: Self.statusPoll)
         }
     }
@@ -61,6 +78,11 @@ struct ActivityReport {
             let (statusReply, statsReply) = try await (status, stats)
             var parsed: StatsReply = try decode(statsReply)
             parsed.domains = parsed.domains?.filter { $0.name == domain }
+            // activity.md §1: a domain the reply does not list, or lists unanswered, did not answer.
+            guard let body = parsed.domains?.first, body.unanswered != true else {
+                return ActivityReport(failure: "no process reported it", answeredAt: previous?.answeredAt)
+            }
+            parsed.domains = [body]
             return ActivityReport(
                 status: try decode(statusReply), stats: parsed,
                 raw: ["status": statusReply, "stats": statsReply], answeredAt: Date())
@@ -99,9 +121,9 @@ struct StatsReply: Decodable {
 
 struct SelfReport: Decodable {
     struct Line: Decodable {
-        var t: Double
-        var level: String
-        var message: String
+        var t: Double?
+        var level: String?
+        var message: String?
     }
     struct Usage: Decodable {
         var anonymousBytes: Int?
@@ -114,8 +136,8 @@ struct SelfReport: Decodable {
 struct DomainBody: Decodable {
     struct Sync: Decodable {
         struct CannotFollow: Decodable {
-            var entry: Int
-            var reason: String
+            var entry: Int?
+            var reason: String?
         }
         var pending: Int?
         var cannotFollow: CannotFollow?
@@ -138,6 +160,7 @@ struct DomainBody: Decodable {
         var extensions: [String]?
     }
     var name: String
+    var unanswered: Bool?
     var mainOffline: Bool?
     var setAside: Int?
     var sync: Sync?
@@ -165,8 +188,8 @@ struct Store: Decodable, Identifiable {
         var truncated: Bool?
     }
     struct Disk: Decodable {
-        var freeBytes: Int
-        var totalBytes: Int
+        var freeBytes: Int?
+        var totalBytes: Int?
     }
     struct Copies: Decodable {
         struct Job: Decodable {
@@ -266,8 +289,6 @@ struct DomainActivity: View {
         let parked = stats.queues?.parked ?? 0
         let setAside = stats.setAside ?? 0
         let stores = (stats.backends ?? []).filter(\.hasProblem)
-        let errors = ((report.stats?.process?.recentErrors) ?? [])
-            .filter { $0.level == "warn" || $0.level == "err" }.reversed() as [SelfReport.Line]
         if parked > 0 {
             ProblemRow(icon: "arrow.clockwise.circle", text: "\(parked) uploads waiting to be retried",
                        detail: stats.queues?.lastError)
@@ -282,13 +303,7 @@ struct DomainActivity: View {
                 detail: store.damagedChunks > 0 && !store.isDown && !store.isUnreachable
                     ? "\(store.damagedChunks) damaged chunks" : store.connection)
         }
-        ForEach(Array(errors.prefix(ActivityDetails.shownErrors).enumerated()), id: \.offset) { ErrorRow(line: $0.element) }
-        if errors.count > ActivityDetails.shownErrors {
-            NavigationLink("Show all \(errors.count)") {
-                List(Array(errors.enumerated()), id: \.offset) { ErrorRow(line: $0.element) }.navigationTitle("Warnings and errors")
-            }
-        }
-        if parked == 0 && setAside == 0 && stores.isEmpty && errors.isEmpty {
+        if parked == 0 && setAside == 0 && stores.isEmpty {
             Label("No problems", systemImage: "checkmark.circle").foregroundStyle(.secondary)
         }
     }
@@ -338,7 +353,7 @@ struct DomainState {
         } else if let failing = status.failing ?? stats.sync?.failing {
             (badge, sentence, tone) = ("Not syncing", "\(failing). Retried until it works.", .failure)
         } else if let stuck = stats.sync?.cannotFollow {
-            (badge, sentence, tone) = ("Not syncing", "Can't follow change \(stuck.entry): \(stuck.reason). Retried until it works.", .failure)
+            (badge, sentence, tone) = ("Not syncing", "Can't follow change \(stuck.entry ?? 0): \(stuck.reason ?? ""). Retried until it works.", .failure)
         } else if stats.mainOffline == true {
             (badge, sentence, tone) = ("Store offline", "Opening files and uploading wait for the main store.", .warning)
         } else if status.readOnly == true {
@@ -415,14 +430,32 @@ struct ProblemRow: View {
     }
 }
 
+/// activity.md §3: at most `shownErrors`, the rest behind Show all.
+struct WarningsSection: View {
+    let lines: [SelfReport.Line]
+
+    var body: some View {
+        if !lines.isEmpty {
+            Section("Warnings and errors") {
+                ForEach(Array(lines.prefix(ActivityDetails.shownErrors).enumerated()), id: \.offset) { ErrorRow(line: $0.element) }
+                if lines.count > ActivityDetails.shownErrors {
+                    NavigationLink("Show all \(lines.count)") {
+                        List(Array(lines.enumerated()), id: \.offset) { ErrorRow(line: $0.element) }.navigationTitle("Warnings and errors")
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct ErrorRow: View {
     let line: SelfReport.Line
 
     var body: some View {
         Label {
             VStack(alignment: .leading) {
-                Text(line.message).font(.footnote)
-                Text(Format.relative(Date(timeIntervalSince1970: line.t))).font(.caption).foregroundStyle(.secondary)
+                Text(line.message ?? "").font(.footnote)
+                Text(Format.relative(Date(timeIntervalSince1970: line.t ?? 0))).font(.caption).foregroundStyle(.secondary)
             }
         } icon: {
             Image(systemName: line.level == "err" ? "xmark.octagon" : "exclamationmark.triangle")
@@ -466,10 +499,9 @@ struct StoreCard: View {
                     .foregroundStyle(store.hasProblem ? .orange : .green)
             }
             Text(store.connection).font(.footnote).foregroundStyle(store.isDown || store.isUnreachable ? .red : .secondary)
-            if let disk = store.disk, disk.totalBytes > 0 {
-                let used = disk.totalBytes - disk.freeBytes
-                Meter(label: "Space", value: "\(Format.bytes(disk.freeBytes)) free of \(Format.bytes(disk.totalBytes))",
-                      used: used, total: disk.totalBytes)
+            if let free = store.disk?.freeBytes, let total = store.disk?.totalBytes, total > 0 {
+                Meter(label: "Space", value: "\(Format.bytes(free)) free of \(Format.bytes(total))",
+                      used: total - free, total: total)
             }
             if let copies = store.copies, let owed = copies.owed, owed > 0 {
                 Text("\(owed) to copy" + ((copies.jobsPerSec ?? 0) > 0 ? String(format: ", %.1f/s", copies.jobsPerSec ?? 0) : ""))

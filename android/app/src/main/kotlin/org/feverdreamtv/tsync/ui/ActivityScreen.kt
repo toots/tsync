@@ -44,6 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,24 +86,30 @@ private data class Snapshot(
     val backupEnabled: Boolean,
 )
 
-private fun snapshot(tsync: Tsync): Snapshot {
+/** activity §1: domains are asked concurrently, so a slow one delays no other. */
+private suspend fun snapshot(tsync: Tsync): Snapshot = coroutineScope {
     val backup = Backup(tsync.context)
-    return Snapshot(
-        domains = tsync.domains().map { domain ->
-            if (domain.boot != Boot.Ready) return@map DomainSnapshot(domain, false, null, null, null, false)
-            val status = runCatching { domain.ask { status() } }
-            DomainSnapshot(
-                domain = domain,
-                booted = true,
-                status = status.getOrNull(),
-                stats = runCatching { domain.ask { stats() } }.getOrNull(),
-                failure = status.exceptionOrNull()?.message,
-                offline = domain.offline.value,
-            )
-        },
+    Snapshot(
+        domains = tsync.domains().map { domain -> async { ask(domain) } }.awaitAll(),
         saves = tsync.ingest.pending(),
         backup = backup.statusLine(),
         backupEnabled = backup.prefs.settings.enabled,
+    )
+}
+
+private fun ask(domain: Served): DomainSnapshot {
+    if (domain.boot != Boot.Ready) return DomainSnapshot(domain, false, null, null, null, false)
+    val status = runCatching { domain.ask { status() } }
+    val stats = runCatching { domain.ask { stats() } }.getOrNull()
+    // activity §1: a domain the reply lists unanswered did not answer.
+    if (stats?.unanswered == true) return DomainSnapshot(domain, true, null, null, "no process reported it", domain.offline.value)
+    return DomainSnapshot(
+        domain = domain,
+        booted = true,
+        status = status.getOrNull(),
+        stats = stats,
+        failure = status.exceptionOrNull()?.message,
+        offline = domain.offline.value,
     )
 }
 
@@ -167,11 +176,17 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
         }
         val several = state.domains.size > 1
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            // The failed saves are the app's, not a domain's: shown once, under the first.
-            state.domains.forEachIndexed { index, entry ->
+            for (entry in state.domains) {
                 if (several) Text(entry.domain.name, Modifier.padding(top = 16.dp).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
-                DomainActivity(tsync, entry, if (index == 0) state.saves else emptyList(), ::run)
+                DomainActivity(entry, ::run)
             }
+
+            // activity §3: the app's and the process's, not a domain's.
+            if (state.saves.isNotEmpty()) {
+                Section(R.string.activity_failed_saves)
+                FailedSaves(tsync, state.saves)
+            }
+            Warnings(state.domains.flatMap { it.stats?.recentErrors.orEmpty() })
 
             Section(R.string.camera_backup)
             Text(state.backup)
@@ -183,7 +198,7 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
 }
 
 @Composable
-private fun DomainActivity(tsync: Tsync, entry: DomainSnapshot, saves: List<PendingSave>, run: (() -> String) -> Unit) {
+private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
     val context = LocalContext.current
     val domain = entry.domain
     if (!entry.booted) {
@@ -221,7 +236,7 @@ private fun DomainActivity(tsync: Tsync, entry: DomainSnapshot, saves: List<Pend
     }
 
     Section(R.string.problems)
-    Problems(tsync, stats, saves, run, domain)
+    Problems(stats, run, domain)
 
     val stores = stats?.stores.orEmpty()
     if (stores.isNotEmpty()) {
@@ -241,13 +256,11 @@ private fun DomainActivity(tsync: Tsync, entry: DomainSnapshot, saves: List<Pend
 }
 
 @Composable
-private fun Problems(tsync: Tsync, stats: Stats?, saves: List<PendingSave>, run: (() -> String) -> Unit, domain: Served) {
+private fun Problems(stats: Stats?, run: (() -> String) -> Unit, domain: Served) {
     val context = LocalContext.current
-    var all by rememberSaveable(domain.name) { mutableStateOf(false) }
     val parked = stats?.parked ?: 0
     val setAside = stats?.setAside ?: 0
     val stores = stats?.stores.orEmpty().filter { it.hasProblem }
-    val errors = stats?.recentErrors.orEmpty().filter { it.level == "warn" || it.level == "err" }.reversed()
     if (parked > 0) Row(verticalAlignment = Alignment.CenterVertically) {
         Problem(pluralStringResource(R.plurals.activity_parked, parked, parked), stats?.lastError, Modifier.weight(1f))
         TextButton(onClick = { run { domain.ask { retry() }.let { context.resources.getQuantityString(R.plurals.retried_changes, it, it) } } }) {
@@ -256,6 +269,12 @@ private fun Problems(tsync: Tsync, stats: Stats?, saves: List<PendingSave>, run:
     }
     if (setAside > 0) Problem(pluralStringResource(R.plurals.activity_set_aside, setAside, setAside), stringResource(R.string.activity_set_aside_text))
     stores.forEach { Problem(it.name, if (it.damagedChunks > 0 && !it.down && it.reachable != false) damaged(it) else connection(it)) }
+    if (parked == 0 && setAside == 0 && stores.isEmpty()) Text(stringResource(R.string.no_problems))
+}
+
+@Composable
+private fun FailedSaves(tsync: Tsync, saves: List<PendingSave>) {
+    val context = LocalContext.current
     for (save in saves) Row(verticalAlignment = Alignment.CenterVertically) {
         val intent = save.intent
         Problem(
@@ -277,11 +296,19 @@ private fun Problems(tsync: Tsync, stats: Stats?, saves: List<PendingSave>, run:
             }
         }) { Text(stringResource(R.string.retry)) }
     }
+}
+
+/** activity §3: the processes' warnings and errors, once, newest first. */
+@Composable
+private fun Warnings(lines: List<LogLine>) {
+    var all by rememberSaveable { mutableStateOf(false) }
+    val errors = lines.filter { it.level == "warn" || it.level == "err" }.distinctBy { it.time to it.message }.sortedByDescending { it.time }
+    if (errors.isEmpty()) return
+    Section(R.string.activity_warnings)
     (if (all) errors else errors.take(SHOWN_ERRORS)).forEach { ErrorLine(it) }
     if (errors.size > SHOWN_ERRORS) TextButton(onClick = { all = !all }) {
         Text(if (all) stringResource(R.string.activity_show_fewer) else stringResource(R.string.activity_show_all, errors.size))
     }
-    if (parked == 0 && setAside == 0 && stores.isEmpty() && saves.isEmpty() && errors.isEmpty()) Text(stringResource(R.string.no_problems))
 }
 
 @Composable
