@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct TsyncPhoneApp: App {
     @StateObject private var model = AppModel()
+    @StateObject private var vault = VaultModel()
 
     init() {
         Core.start(bounded: false)
@@ -13,15 +14,18 @@ struct TsyncPhoneApp: App {
     }
 
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(model) }
+        WindowGroup { RootView().environmentObject(model).environmentObject(vault) }
     }
 }
 
-/// ios-app.md §2: Setup until a config loads, then Files and Settings.
+/// ios-app.md §2: Setup until a config loads, then Files, Vault while a domain
+/// uses an extension, and Settings.
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var vault: VaultModel
     @Environment(\.scenePhase) private var phase
     @SceneStorage("destination") private var destination = "files"
+    @State private var opened: OpenedLink?
 
     var body: some View {
         Group {
@@ -32,18 +36,35 @@ struct RootView: View {
                     FilesView()
                         .tabItem { Label("Files", systemImage: "folder") }
                         .tag("files")
+                    if !vault.domains.isEmpty {
+                        VaultView()
+                            .tabItem { Label("Vault", systemImage: "lock.shield") }
+                            .tag("vault")
+                    }
                     NavigationStack { SettingsView() }
                         .tabItem { Label("Settings", systemImage: "gearshape") }
                         .tag("settings")
                 }
             }
         }
-        .onAppear { BackgroundRefresh.schedule() }
+        // ios-app.md §6: iOS cannot refuse a screenshot, so secrets stay out of
+        // the app switcher.
+        .overlay { if phase != .active { Color(uiColor: .systemBackground).ignoresSafeArea() } }
+        .onAppear {
+            BackgroundRefresh.schedule()
+            vault.refresh()
+        }
         .onChange(of: phase) { phase in
             if phase == .active {
                 model.reload()
+                vault.refresh()
                 BackgroundRefresh.schedule()
             }
+        }
+        .onOpenURL { url in if url.scheme == "otpauth" { opened = OpenedLink(url: url) } }
+        .sheet(item: $opened) { OpenedCode(uri: $0.url) }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification)) { _ in
+            vault.screenLocked()
         }
     }
 }
@@ -118,4 +139,10 @@ final class AppModel: ObservableObject {
         reload()
         return refusal
     }
+}
+
+/// A link handed to the app, as a sheet's item.
+struct OpenedLink: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
 }

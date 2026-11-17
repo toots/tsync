@@ -77,7 +77,7 @@ failure, never a failure reported as success.
 | Share link | all | share link; then the URL with its expiry, and Copy and Send. A paused or unreachable domain is shown with the reason. |
 | Make available offline | all not pinned | make available offline. For a folder the confirmation states how many files are available offline, and how many failed when any did. |
 | Keep offline longer | pinned files | make available offline again, which extends the pin. |
-| Remove download | all not *online only* | remove download, with counts for a folder. |
+| Make online-only | all not *online only* | remove download, with counts for a folder. |
 | Rename | all, when writable | A name prompt pre-filled with the current name; rename; a taken name is shown on the field. |
 | Move | all, when writable | Pick mode (§5) to choose the destination folder; then move. A taken name is shown with the reason. |
 | Delete | all, when writable | A confirmation naming the item, and for a folder saying that everything in it is deleted; then delete. |

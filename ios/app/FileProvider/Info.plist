@@ -22,6 +22,8 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>TsyncAppGroup</key>
     <string>$(TSYNC_APP_GROUP)</string>
+    <key>TsyncAppID</key>
+    <string>$(TSYNC_APP_ID)</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionFileProviderDocumentGroup</key>

@@ -12,6 +12,8 @@ enum OwnerFailure: Error, @unchecked Sendable {
     /// No answer from a connected owner: a broken connection or the client's
     /// own deadline. Treated as `internal`, never `unreachable` or `not_found`.
     case transport(String)
+    /// ios.md §5.4: the domain is turned off in Files, so no extension serves it.
+    case turnedOff
     case cancelled
 
     /// The code a client acts on: a missing or unknown one reads as `internal`.
@@ -19,7 +21,7 @@ enum OwnerFailure: Error, @unchecked Sendable {
         switch self {
         case .refused(let code, _, _):
             return OwnerFailure.knownCodes.contains(code) ? code : "internal"
-        case .noOwner: return "unreachable"
+        case .noOwner, .turnedOff: return "unreachable"
         case .transport: return "internal"
         case .cancelled: return "cancelled"
         }
@@ -29,6 +31,7 @@ enum OwnerFailure: Error, @unchecked Sendable {
         switch self {
         case .refused(_, let message, _): return message
         case .noOwner(let why), .transport(let why): return why
+        case .turnedOff: return "turned off in Files"
         case .cancelled: return "cancelled"
         }
     }

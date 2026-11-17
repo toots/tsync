@@ -41,22 +41,26 @@ The app has no owner of its own: the File Provider extension owns every domain
 ([ios.md §2](ios.md#2-processes-and-ownership)), and the app reaches a domain's files through the file
 system, as any app would, from the root the framework gives it for the domain. Every read and write
 goes through file coordination, which the system hands to the extension; it is never made on the
-main thread.
+main thread. What the file system cannot carry goes to the owner through the extension's service
+([ios.md §5.4](ios.md#54-the-service)), naming the item by `ref`: its File Provider identifier
+(`getIdentifierForUserVisibleFile`), which is the owner's reference
+([file-provider.md §6.1](file-provider.md#61-identifiers)).
 
 | Operation | Carried out by |
 |---|---|
-| list | the folder's contents with their resource values: kind, size, modification date, whether the bytes are downloaded, whether the item is uploaded |
+| list | the folder's contents with their resource values: kind, size, modification date, whether the bytes are downloaded, whether the item is uploaded; then `list_dir` of the folder through the service with `"pull":"never"`, whose `availability` and `pinnedUntil` give the *pinned* mark, matched to the rows by name, a folder's names being unique. A folder the service does not answer shows its rows without the mark |
 | refresh | the domain's working set signalled ([ios.md §5.1](ios.md#51-the-working-set)), which starts a refresh pass, and the folder read again once the system reports it changed, or after `refresh_patience` |
 | new folder | a coordinated create of the directory; a name already taken fails it |
 | upload | the system's document picker, copying; each file a coordinated write into the current folder, a taken name numbered as [android-app §5](android-app.md#5-talking-to-the-core) numbers one |
 | open | the system's preview of the file, read through coordination; its share control hands the file to another app |
-| remove download | the system's eviction of the item; one the system refuses (an open file, an edit not yet taken) is reported with its reason |
+| share link | `share` through the service |
+| make available offline | `restore` through the service; a folder's counts are the reply's. The owner keeps the bytes, so the system fetches the file from the extension with the store away |
+| remove download | `evict` through the service, which releases the owner's copy and its pin, then the system's eviction of the item; one the system refuses (an open file, an edit not yet taken) is reported with its reason. A folder's counts are `evict`'s |
 | rename, move | a coordinated move to the new place; a taken name fails it and changes nothing |
 | delete | a coordinated delete |
 
-- **Not offered** until the app can reach the extension's owner
-  ([ios.md §9](ios.md#9-not-yet-specified) item 1): share link, make available offline, keep offline
-  longer, the *pinned* mark, and pinned until in Details.
+- **Details** adds pinned until from the row `list_dir` gave, and nothing when the service did not
+  answer.
 - **Listing.** The system answers a folder whole, so there are no pages. A folder the system has
   not enumerated yet fails to read until the extension has answered: the app shows progress and
   reads again each second, up to `first_listing_patience`, then shows the failure with Retry.
@@ -67,7 +71,6 @@ main thread.
 - **Read-only.** A domain whose root is not writable.
 - **Domains.** A domain turned off in Files is not opened: its row says "Turned off in Files" and
   how to turn it on ([ios-app §4](ios-app.md#4-setup)).
-- **Counts.** Remove download of a folder is one eviction, so its confirmation has no counts.
 - **Trail.** Kept as paths from the domain's root, restored when the app is started again.
 - **No save into the domain** from other apps: the share extension is ios.md §9 item 2.
 

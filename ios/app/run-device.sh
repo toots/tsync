@@ -19,6 +19,8 @@ if (( $#missing )); then
   exit 1
 fi
 export TSYNC_TEAM_ID TSYNC_APP_ID TSYNC_APP_GROUP
+# 10 §5.6: only an upload needs it; a build installed from a Mac goes nowhere.
+export TSYNC_EXPORT_COMPLIANCE_CODE=${TSYNC_EXPORT_COMPLIANCE_CODE:-}
 # ios.md §3.1: a build installed from a Mac pushes through the sandbox.
 export TSYNC_APS_ENVIRONMENT=development
 

@@ -268,7 +268,7 @@ let rec unlock_dialogs ?sentence ~enrolled t d =
               let request =
                 Protocol.Vault_unlock
                   {
-                    passphrase;
+                    credential = `Passphrase passphrase;
                     secret_key =
                       (if secret_key = "" then None else Some secret_key);
                   }

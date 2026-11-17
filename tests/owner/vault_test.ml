@@ -142,6 +142,82 @@ let after_restart () =
           answer "unlock, with the secret key" (unlock ~secret_key passphrase);
           status "status"))
 
+(* vault §6.4: the caller derives, the owner unwraps. *)
+let derived () =
+  let passphrase = Fs.read_file passphrase_file
+  and secret_key = Fs.read_file secret_key_file in
+  let slots () =
+    let r =
+      Ipc.call socket
+        (`Assoc [("domain", `String "docs"); ("action", `String "vault_slots")])
+    in
+    p "%-34s %d slots, enrolled=%b" "slots"
+      (match member r "slots" with Some (`List l) -> List.length l | _ -> -1)
+      (member r "enrolled" <> None);
+    match member r "slots" with Some (`List l) -> l | _ -> []
+  in
+  let derive ?(secret_key = secret_key) passphrase =
+    match Tsync_owner.Vault.derive ~slots:(slots ()) ~secret_key passphrase with
+      | keks -> Ok keks
+      | exception e -> Error (Tsync_core.Fail.classify e).reason
+  in
+  let unlock_keks ?secret_key label keks =
+    let b64 =
+      Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+    in
+    answer label
+      (Ipc.call socket
+         (`Assoc
+            ([
+               ("domain", `String "docs");
+               ("action", `String "vault_unlock");
+               ( "keks",
+                 `Assoc (List.map (fun (id, k) -> (id, `String (b64 k))) keks)
+               );
+             ]
+            @ Option.fold ~none:[]
+                ~some:(fun k -> [("secretKey", `String k)])
+                secret_key)))
+  in
+  let keks_of label = function
+    | Ok keks -> keks
+    | Error reason ->
+        p "%-34s %s" label reason;
+        []
+  in
+  Owner.stop_on_signals ();
+  Rt.run_sync (fun () ->
+      with_owner (fun () ->
+          status "status";
+          ignore
+            (keks_of "derive, a wrong secret key"
+               (derive ~secret_key:"0000000000-0000000000-000000" passphrase));
+          let wrong =
+            keks_of "derive" (derive "a wrong passphrase, long enough")
+          in
+          unlock_keks ~secret_key "unlock, a wrong passphrase's" wrong;
+          unlock_keks ~secret_key "unlock, a slot the keyring lacks"
+            (List.map (fun (_, k) -> ("0123456789abcdef", k)) wrong);
+          unlock_keks ~secret_key "unlock, no keks" [];
+          unlock_keks ~secret_key "unlock, a short KEK"
+            (List.map (fun (id, k) -> (id, String.sub k 0 16)) wrong);
+          let keks = keks_of "derive" (derive passphrase) in
+          unlock_keks ~secret_key "unlock, enrolling" keks;
+          status "status";
+          answer "lock" (ask [("action", "vault_lock")]);
+          unlock_keks "unlock, enrolled" (keks_of "derive" (derive passphrase));
+          status "status";
+          answer "lock" (ask [("action", "vault_lock")]);
+          Tsync_owner.Vault.no_derivation ();
+          p "== an owner that cannot derive";
+          answer "unlock, the passphrase" (unlock passphrase);
+          answer "kit"
+            (ask [("action", "vault_kit"); ("passphrase", passphrase)]);
+          unlock_keks "unlock, keks derived elsewhere" keks;
+          answer "passphrase change"
+            (ask [("action", "vault_passphrase"); ("passphrase", passphrase)]);
+          status "status"))
+
 (* vault §6.1 against a keystore kept in files of ROOT, as a host's would
    survive the owner; [broken] refuses every write, [stuck] every delete, and reads fail until the
    file [up_marker] exists when [late]. *)
@@ -448,11 +524,14 @@ let () =
   match phase with
     | Some "first" -> first_owner ()
     | Some "restart" -> after_restart ()
+    | Some "derive" -> derived ()
     | Some phase -> keystore_phase phase
     | None ->
         child "first";
         p "== after a restart";
         child "restart";
+        p "== deriving in the caller";
+        child "derive";
         p "== with a keystore: unlock";
         child "ks-unlock";
         p "== with a keystore that comes up after the owner";

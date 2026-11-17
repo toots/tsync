@@ -39,6 +39,11 @@ val request : string -> string -> string
      "reason"}],"about"}], or [{"error"}] with the sentence to show. *)
 val setup_link : string -> string
 
+(** vault §6.4's derivation: [vault_slots]' reply with [passphrase] and
+    [secretKey] in, [{"keks"}] or [{"error"}] out. Owns nothing, takes no lock,
+    writes nothing. *)
+val vault_derive : string -> string
+
 val status : string -> string
 
 (** A handle > 0, or −errno; unique across domains, so the calls on a handle

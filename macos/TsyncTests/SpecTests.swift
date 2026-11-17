@@ -201,6 +201,7 @@ final class SpecTests: XCTestCase {
             switch f {
             case .refused(let code, _, _): label = code
             case .noOwner: label = "no owner"
+            case .turnedOff: label = "turned off"
             case .transport: label = "transport"
             case .cancelled: label = "cancelled"
             }

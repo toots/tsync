@@ -5,9 +5,25 @@ import Foundation
 enum Tsync {
     static let appBundleID = "org.feverdreamtv.tsync"
     #if os(iOS)
-    /// ios.md §3.1: a build setting, in each bundle's Info.plist.
+    /// ios.md §3.1: build settings, in each bundle's Info.plist.
     static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TsyncAppGroup") as? String ?? ""
+    static let appID = Bundle.main.object(forInfoDictionaryKey: "TsyncAppID") as? String ?? ""
+
+    /// ios-app.md §6: the domains whose last `vault_status` did not refuse
+    /// them for using no extension, kept by the app, in config order.
+    static func vaultDomainNames() -> [String] {
+        let kept = Set(UserDefaults(suiteName: appGroup)?.stringArray(forKey: vaultDomainsKey) ?? [])
+        return domainNames().filter(kept.contains)
+    }
+
+    static let vaultDomainsKey = "vaultDomains"
+
+    /// The domains AutoFill asks (passwords/ios §2).
+    static func passwordDomainNames() -> [String] { vaultDomainNames() }
     #else
+    /// The domains AutoFill asks (passwords/macos §2): every one the owner
+    /// serves, those using no passwords refusing.
+    static func passwordDomainNames() -> [String] { domainNames() }
     static let appGroup = "group.org.feverdreamtv.tsync"
     #endif
     static let serviceLabel = "org.feverdreamtv.tsync.daemon"

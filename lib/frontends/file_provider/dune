@@ -5,10 +5,7 @@
  (enabled_if
   (= %{system} macosx))
  (library_flags (-linkall))
- (libraries tsync_core tsync_config tsync_owner unix)
- (foreign_stubs
-  (language c)
-  (names keychain_stubs))
+ (libraries tsync_core tsync_config tsync_owner tsync_keychain unix)
  (foreign_stubs
   (language c)
   (names group_container_stubs local_auth_stubs)

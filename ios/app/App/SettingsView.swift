@@ -1,8 +1,11 @@
+import AuthenticationServices
 import SwiftUI
 
 /// ios-app.md §5.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var vault: VaultModel
+    @State private var autofillOff = false
     @State private var removing: Configs.Entry?
     @State private var message = ""
     @State private var adding = false
@@ -36,6 +39,16 @@ struct SettingsView: View {
                 default:
                     EmptyView()
                 }
+                // passwords/ios §1: while AutoFill is off for tsync and a vault is here.
+                if #available(iOS 17.0, *), autofillOff, !vault.domains.isEmpty {
+                    Button("Turn on AutoFill for tsync") {
+                        if #available(iOS 18.0, *) {
+                            ASSettingsHelper.requestToTurnOnCredentialProviderExtension { _ in readAutofill() }
+                        } else {
+                            ASSettingsHelper.openCredentialProviderAppSettings { _ in }
+                        }
+                    }
+                }
                 Button("Add a domain") { adding = true }
                 ForEach(model.passFailures, id: \.self) { Text($0).foregroundStyle(.red) }
                 if !message.isEmpty { Text(message).foregroundStyle(.red) }
@@ -49,6 +62,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("tsync")
+        .onAppear { readAutofill() }
         .sheet(isPresented: $adding) {
             NavigationStack { SetupView(dismissible: true) }
         }
@@ -61,6 +75,12 @@ struct SettingsView: View {
             }
         } message: { entry in
             Text("\(entry.name) leaves this iPhone and the Files app. Changes made in Files and not yet uploaded are lost.")
+        }
+    }
+
+    private func readAutofill() {
+        ASCredentialIdentityStore.shared.getState { state in
+            Task { @MainActor in autofillOff = !state.isEnabled }
         }
     }
 

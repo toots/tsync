@@ -75,6 +75,34 @@ val unlock :
     [ `Wrong_secret_key | `Wrong_passphrase | `Unusable of string list ] )
   result
 
+(** The [secret-key] slots as [vault_slots] answers them (§6.4): [id],
+    [secretKeyId] and [kdf]. *)
+val slots_to_json : t -> Yojson.Safe.t
+
+(** §6.4: one KEK per slot {!unlock} would derive for, from [vault_slots]'
+    slots, by slot id. Raises [Failure] or [Yojson.Safe.Util.Type_error] on a
+    slot that does not read. *)
+val derive :
+  Yojson.Safe.t list ->
+  secret_key:string ->
+  string ->
+  ( (string * string) list,
+    [ `Wrong_secret_key | `Unusable of string list ] )
+  result
+
+(** {!unlock} with the caller's KEKs (§6.4). [`Changed]: a KEK names no slot
+    this secret key would derive for, or there is none. *)
+val unlock_with_keks :
+  t ->
+  secret_key:string ->
+  (string * string) list ->
+  ( string,
+    [ `Wrong_secret_key
+    | `Wrong_passphrase
+    | `Unusable of string list
+    | `Changed ] )
+  result
+
 (** Whether a slot is keyed with this secret key: a machine holding it is
     enrolled (§6). *)
 val enrolls : t -> secret_key_id:string -> bool

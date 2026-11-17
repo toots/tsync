@@ -1,4 +1,3 @@
-import AppKit
 import AuthenticationServices
 import LocalAuthentication
 import os
@@ -6,31 +5,13 @@ import os
 /// §3: entry points and row counts only, never a value.
 private let trace = Logger(subsystem: "org.feverdreamtv.tsync.credentials", category: "requests")
 
-/// passwords/macos: the sheet macOS shows for tsync. Every completion follows a
-/// pick or an approval; nothing completes without the user (§3).
+/// passwords/macos, passwords/ios: the sheet the system shows for tsync. Every
+/// completion follows a pick or an approval; nothing completes without the user
+/// (§3). What it draws is the platform's `Sheet`.
 final class CredentialProviderViewController: ASCredentialProviderViewController {
-    private let stack = NSStackView()
-    private let heading = NSTextField(labelWithString: "tsync")
+    private let sheet = Sheet()
 
-    override func loadView() {
-        let root = NSView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
-        heading.lineBreakMode = .byTruncatingTail
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 400),
-            stack.topAnchor.constraint(equalTo: root.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
-        view = root
-    }
+    override func loadView() { view = sheet.root }
 
     // MARK: requests the system hands over
 
@@ -58,7 +39,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             passkeyList(
                 rpId: identity.relyingPartyIdentifier, hash: request.clientDataHash, verify: verify,
                 allow: [])
-        } else if #available(macOS 15.0, *), credentialRequest.type == .oneTimeCode {
+        } else if #available(macOS 15.0, iOS 18.0, *), credentialRequest.type == .oneTimeCode {
             prepareOneTimeCodeCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
         } else {
             prepareCredentialList(for: [credentialRequest.credentialIdentity.serviceIdentifier])
@@ -80,7 +61,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         finish { $0.completeRequest(withSelectedCredential: credential) }
     }
 
-    @available(macOS 15.0, *)
+    @available(macOS 15.0, iOS 18.0, *)
     override func prepareOneTimeCodeCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier])
     {
         trace.info("code list for \(serviceIdentifiers.count) services")
@@ -166,7 +147,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         else { return cancel(.failed) }
         let rpId = identity.relyingPartyIdentifier
         let title = "Save a passkey for \(identity.userName) on \(rpId)"
-        working(title)
+        sheet.working(title) { self.cancel(.userCanceled) }
         DispatchQueue.global().async {
             let target = Requests.creationDomain()
             DispatchQueue.main.async {
@@ -174,14 +155,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 case .locked(let domain):
                     self.lockedSheet(title, domain)
                 case .none:
-                    self.reset(title)
-                    self.add(self.note("No domain on this Mac uses passwords."))
-                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
+                    self.sheet.reset(title)
+                    self.sheet.note("No domain on this \(Sheet.device) uses passwords.")
+                    self.sheet.footer([.init("Close", .main) { self.cancel(.failed) }])
                 case .several(let domains):
-                    self.reset(title)
-                    self.add(self.note(
-                        "\(domains.joined(separator: ", ")) use passwords. Pick the one for new passkeys with tsync default-domain NAME."))
-                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
+                    self.sheet.reset(title)
+                    self.sheet.note(
+                        "\(domains.joined(separator: ", ")) use passwords. Pick the one for new passkeys with tsync default-domain NAME.")
+                    self.sheet.footer([.init("Close", .main) { self.cancel(.failed) }])
                 case .domain(let domain):
                     self.approve("\(title) in \(domain)?") {
                         try self.register(request, identity, in: domain)
@@ -204,7 +185,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             "algorithms": request.supportedAlgorithms.map { $0.rawValue },
             "clientDataHash": request.clientDataHash.base64URL,
         ]
-        if #available(macOS 15.0, *), let excluded = request.excludedCredentials, !excluded.isEmpty {
+        if #available(macOS 15.0, iOS 18.0, *), let excluded = request.excludedCredentials, !excluded.isEmpty {
             args["exclude"] = excluded.map { $0.credentialID.base64URL }
         }
         if verified { args["verified"] = true }
@@ -214,7 +195,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         do {
             reply = try Requests.call(domain, "passkey_create", args)
         } catch let failure as OwnerFailure where failure.code == "exists" {
-            if #available(macOS 15.0, *) { return cancel(.matchedExcludedCredential) }
+            if #available(macOS 15.0, iOS 18.0, *) { return cancel(.matchedExcludedCredential) }
             return cancel(.failed)
         }
         let credential = ASPasskeyRegistrationCredential(
@@ -234,9 +215,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     override func prepareInterfaceForExtensionConfiguration() {
-        reset("tsync fills logins and passkeys from your vault")
-        add(note("Unlock a domain's vault from the tsync menu."))
-        footer([defaultButton("Done") { self.finish { $0.completeExtensionConfigurationRequest() } }])
+        sheet.reset("tsync fills logins and passkeys from your vault")
+        sheet.note("Unlock a domain's vault \(Sheet.unlockPlace).")
+        sheet.footer([.init("Done", .main) { self.finish { $0.completeExtensionConfigurationRequest() } }])
     }
 
     // MARK: completing
@@ -264,135 +245,78 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         identifier.type == .URL ? identifier.identifier : "https://" + identifier.identifier
     }
 
-    private func reset(_ title: String) {
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        heading.stringValue = title
-        heading.lineBreakMode = .byTruncatingTail
-        add(heading)
-        stack.setCustomSpacing(16, after: heading)
-    }
-
-    /// Adds a row spanning the sheet between its margins.
-    private func add(_ row: NSView, stretched: Bool = true) {
-        stack.addArrangedSubview(row)
-        if stretched { fill(width: row) }
-    }
-
-    private func fill(width row: NSView) {
-        let margins = stack.edgeInsets.left + stack.edgeInsets.right
-        row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -margins).isActive = true
-    }
-
-    private func note(_ text: String) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.textColor = .secondaryLabelColor
-        return label
-    }
-
-    /// The sheet's buttons, right-aligned below its rows.
-    private func footer(_ buttons: [NSButton]) {
-        if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(20, after: last) }
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let bar = NSStackView(views: [spacer] + buttons)
-        bar.orientation = .horizontal
-        bar.spacing = 8
-        add(bar)
-    }
-
-    private func cancelButton() -> NSButton {
-        let cancel = button("Cancel") { self.cancel(.userCanceled) }
-        cancel.keyEquivalent = "\u{1b}"
-        return cancel
-    }
-
-    private func defaultButton(_ title: String, _ action: @escaping () -> Void) -> NSButton {
-        let button = button(title, action)
-        button.keyEquivalent = "\r"
-        return button
-    }
-
-    /// A sheet waiting on the owner: a spinner, and Cancel.
-    private func working(_ title: String) {
-        reset(title)
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.startAnimation(nil)
-        add(spinner, stretched: false)
-        footer([cancelButton()])
-    }
+    private var cancelButton: Sheet.Button { .init("Cancel", .cancel) { self.cancel(.userCanceled) } }
 
     /// Lists what `fetch` finds off the main queue; a pick runs `pick` off it too.
     private func show(
         _ title: String, fetch: @escaping () -> Listed, pick: @escaping (Choice) throws -> Void
     ) {
-        working(title)
+        sheet.working(title) { self.cancel(.userCanceled) }
         DispatchQueue.global().async {
             let listed = fetch()
             // vault §8.1: each row shows its vault's mark.
-            var looks: [String: NSImage] = [:]
+            var looks: [String: Sheet.Image] = [:]
             for domain in Set(listed.choices.map(\.domain)) { looks[domain] = VaultLook.image(domain: domain) }
             trace.info(
-                "listed \(listed.choices.count) rows, \(listed.locked.count) locked, \(listed.unanswered.count) unanswered")
+                "listed \(listed.choices.count) rows, \(listed.locked.count) locked, \(listed.unanswered.count) unanswered, \(listed.off.count) off")
             DispatchQueue.main.async {
                 guard !self.finished else { return }
-                self.reset(title)
-                if listed.choices.isEmpty && listed.locked.isEmpty && listed.unanswered.isEmpty {
-                    self.add(self.note("Nothing in tsync for this site."))
+                self.sheet.reset(title)
+                if listed.choices.isEmpty && listed.locked.isEmpty && listed.unanswered.isEmpty
+                    && listed.off.isEmpty
+                {
+                    self.sheet.note("Nothing in tsync for this site.")
                 }
                 for choice in listed.choices {
-                    self.add(
-                        RowButton(
-                            title: choice.title,
-                            detail: choice.passkey ? [choice.detail, "passkey"].filter { !$0.isEmpty }.joined(separator: " · ") : choice.detail,
-                            symbol: choice.passkey ? "person.badge.key" : "key", image: looks[choice.domain]
-                        ) { self.run(title) { try pick(choice) } })
+                    self.sheet.row(
+                        title: choice.title,
+                        detail: choice.passkey ? [choice.detail, "passkey"].filter { !$0.isEmpty }.joined(separator: " · ") : choice.detail,
+                        symbol: choice.passkey ? "person.badge.key" : "key", image: looks[choice.domain]
+                    ) { self.run(title) { try pick(choice) } }
                 }
-                for domain in listed.locked { self.add(self.lockedRow(domain)) }
-                for domain in listed.unanswered { self.add(self.unansweredRow(domain)) }
-                self.footer([self.cancelButton()])
+                for domain in listed.locked { self.lockedRow(domain) }
+                for domain in listed.unanswered { self.unansweredRow(domain) }
+                for domain in listed.off { self.offRow(domain) }
+                self.sheet.footer([self.cancelButton])
             }
         }
     }
 
     private func approve(_ question: String, _ action: @escaping () throws -> Void) {
-        reset(question)
-        heading.lineBreakMode = .byWordWrapping
-        footer([cancelButton(), defaultButton("Save") { self.run(question, action) }])
+        sheet.reset(question, wrapping: true)
+        sheet.footer([cancelButton, .init("Save", .main) { self.run(question, action) }])
     }
 
-    /// §6: a locked domain, pointing to the menu; it does nothing.
-    private func lockedRow(_ domain: String) -> NSView {
-        inertRow(title: "\(domain) is locked", detail: "Unlock it from the tsync menu", symbol: "lock")
+    /// §6: a locked domain, pointing to where it unlocks; it does nothing.
+    private func lockedRow(_ domain: String) {
+        sheet.inert(title: "\(domain) is locked", detail: "Unlock it \(Sheet.unlockPlace)", symbol: "lock")
     }
 
     /// §2: a domain whose owner did not answer, so its absence is not taken for
     /// an empty list.
-    private func unansweredRow(_ domain: String) -> NSView {
-        inertRow(
-            title: "\(domain) did not answer", detail: "Check that tsync is running",
+    private func unansweredRow(_ domain: String) {
+        sheet.inert(
+            title: "\(domain) did not answer", detail: Sheet.unansweredHint,
             symbol: "exclamationmark.triangle")
     }
 
-    private func inertRow(title: String, detail: String, symbol: String) -> NSView {
-        let row = RowButton(title: title, detail: detail, symbol: symbol) {}
-        row.isEnabled = false
-        return row
+    /// passwords/ios §2: no extension serves a domain turned off in Files.
+    private func offRow(_ domain: String) {
+        sheet.inert(title: "\(domain) is turned off in Files", detail: "", symbol: "folder.badge.minus")
     }
 
     private func lockedSheet(_ title: String, _ domain: String) {
-        reset(title)
-        add(lockedRow(domain))
-        footer([defaultButton("Close") { self.cancel(.userCanceled) }])
+        sheet.reset(title)
+        lockedRow(domain)
+        sheet.footer([.init("Close", .main) { self.cancel(.userCanceled) }])
     }
 
     /// Runs a pick or an approval off the main queue, the sheet waiting with
-    /// only Cancel, so a second click cannot run it again. A refusal is shown;
+    /// only Cancel, so a second tap cannot run it again. A refusal is shown;
     /// a verification the user cancelled cancels the request.
     private func run(_ title: String, _ action: @escaping () throws -> Void) {
         guard !finished else { return }
-        working(title)
+        sheet.working(title) { self.cancel(.userCanceled) }
         DispatchQueue.global().async {
             do {
                 try action()
@@ -402,9 +326,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                 let reason = (error as? OwnerFailure)?.message ?? error.localizedDescription
                 DispatchQueue.main.async {
                     guard !self.finished else { return }
-                    self.reset("tsync could not do it")
-                    self.add(self.note(reason))
-                    self.footer([self.defaultButton("Close") { self.cancel(.failed) }])
+                    self.sheet.reset("tsync could not do it")
+                    self.sheet.note(reason)
+                    self.sheet.footer([.init("Close", .main) { self.cancel(.failed) }])
                 }
             }
         }
@@ -429,81 +353,4 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         }
         return true
     }
-
-    private func button(_ title: String, _ action: @escaping () -> Void) -> NSButton {
-        let button = ClosureButton(title: title, target: nil, action: nil)
-        button.handler = action
-        button.target = button
-        button.action = #selector(ClosureButton.fire)
-        return button
-    }
-}
-
-/// An NSButton whose action is a closure.
-final class ClosureButton: NSButton {
-    var handler: () -> Void = {}
-    @objc func fire() { handler() }
-}
-
-/// A list row: an icon, the record's title, and its username below.
-final class RowButton: NSButton {
-    private let handler: () -> Void
-    private var hovered = false { didSet { needsDisplay = true } }
-
-    init(title: String, detail: String, symbol: String, image: NSImage? = nil, _ action: @escaping () -> Void) {
-        handler = action
-        super.init(frame: .zero)
-        isBordered = false
-        self.title = ""
-        target = self
-        self.action = #selector(fire)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-
-        // vault §8.1: the vault's mark when there is one, else the row's kind.
-        let icon = NSImageView(image: image ?? NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        if image == nil { icon.contentTintColor = .secondaryLabelColor }
-        let name = NSTextField(labelWithString: title)
-        name.font = .systemFont(ofSize: 13, weight: .medium)
-        name.lineBreakMode = .byTruncatingTail
-        let below = NSTextField(labelWithString: detail)
-        below.font = .systemFont(ofSize: 12)
-        below.textColor = .secondaryLabelColor
-        below.lineBreakMode = .byTruncatingTail
-        let text = NSStackView(views: detail.isEmpty ? [name] : [name, below])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 2
-        let row = NSStackView(views: [icon, text])
-        row.orientation = .horizontal
-        row.spacing = 10
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
-        NSLayoutConstraint.activate([
-            row.topAnchor.constraint(equalTo: topAnchor),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-        ])
-        setAccessibilityLabel(detail.isEmpty ? title : "\(title), \(detail)")
-        addTrackingArea(
-            NSTrackingArea(
-                rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-                owner: self))
-    }
-
-    required init?(coder: NSCoder) { fatalError("not from a nib") }
-
-    override func updateLayer() {
-        layer?.backgroundColor =
-            (hovered ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.18)
-                : NSColor.quaternaryLabelColor.withAlphaComponent(0.08)).cgColor
-    }
-
-    override var wantsUpdateLayer: Bool { true }
-    override func mouseEntered(with event: NSEvent) { hovered = true }
-    override func mouseExited(with event: NSEvent) { hovered = false }
-    @objc private func fire() { handler() }
 }

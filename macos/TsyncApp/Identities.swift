@@ -1,8 +1,9 @@
 import AuthenticationServices
 import Foundation
 
-/// passwords/macos §3.1, §4.1: the entries Safari names in its suggestions.
-@available(macOS 14.0, *)
+/// passwords/macos §3.1, §4.1, passwords/ios §4: the entries Safari names in its
+/// suggestions.
+@available(macOS 14.0, iOS 17.0, *)
 enum Identities {
     private static var written: [String]?
     private static let queue = DispatchQueue(label: "org.feverdreamtv.tsync.identities")
@@ -31,7 +32,7 @@ enum Identities {
     }
 
     private static func current() -> [ASCredentialIdentity] {
-        Tsync.domainNames().flatMap { domain -> [ASCredentialIdentity] in
+        Tsync.passwordDomainNames().flatMap { domain -> [ASCredentialIdentity] in
             guard
                 let reply = try? OwnerClient.call(["action": "passwords_list", "domain": domain, "use": false]),
                 let rows = reply["records"] as? [[String: Any]]
@@ -53,7 +54,7 @@ enum Identities {
                     credentialID: credentialID, userHandle: userHandle, recordIdentifier: record)
             ]
         case "login":
-            guard #available(macOS 15.0, *), row["code"] as? Bool == true else { return [] }
+            guard #available(macOS 15.0, iOS 18.0, *), row["code"] as? Bool == true else { return [] }
             let title = row["title"] as? String ?? ""
             let username = row["username"] as? String ?? ""
             let label = username.isEmpty ? title : "\(title) — \(username)"
