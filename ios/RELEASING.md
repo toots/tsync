@@ -75,3 +75,19 @@ git push origin <branch>:testflight
   **App Encryption Documentation** in App Store Connect, once Apple approves it;
   with it in the identifiers file and step 6 run again, every build declares
   it.
+
+## A new extension
+
+CI cannot make the first development profile of a new target: its archive
+fails with `Authentication failed` and `No profiles for '<id>'`. Build once on
+a Mac signed into the team's Xcode account, which registers the identifier and
+makes the profile; CI finds it from then on:
+
+```sh
+cd ios/app && source ~/.config/tsync/ios-identifiers
+xcodebuild -project TsyncPhone.xcodeproj -scheme TsyncPhone -configuration Release \
+  -destination generic/platform=iOS DEVELOPMENT_TEAM="$TSYNC_TEAM_ID" \
+  CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates build
+```
+
+Then add the identifier to [ios.md §3.1](../docs/spec/frontends/ios.md#31-identifiers).
