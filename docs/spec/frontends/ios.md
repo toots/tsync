@@ -120,8 +120,10 @@ process before the first call:
 
 The core log lets the app show what the extension's core said, which the unified log keeps from
 it. Each line is `HH:MM:SS <level> <process>[<pid>] <message>`, appended with `O_APPEND` by whichever
-process's core logs it; at 1 MiB the log is renamed to `tsync.old.log`, replacing the previous one,
-and a new log begins. A line the other process appends during a rename may be lost. Each core
+process's core logs it; a message of several lines gives each its prefix. At 1 MiB the log is renamed
+to `tsync.old.log`, replacing the previous one, and a new log begins. A process appends under an
+exclusive `flock` of the log, and renames only while the file it locked is still the one named
+`tsync.log`, so two processes never rotate twice and no line is lost. Each core
 logs `core started` when its process starts it, so the log shows when the system restarted the
 extension.
 

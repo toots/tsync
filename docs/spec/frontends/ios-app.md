@@ -42,7 +42,6 @@ domain**.
   in Files: Browse, then More, then Edit") and is asked nothing.
 - The recent warnings and errors are the extension process's: one the system ended takes them with
   it, and the core log (§5, Diagnostics) keeps them.
-- Camera backup's row is §8.6's status line with **Back up now**.
 - Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
   to the extension.
 

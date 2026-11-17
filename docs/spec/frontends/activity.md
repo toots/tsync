@@ -15,7 +15,9 @@ it lists for two replies through the owner, and builds every element below from 
   `backends[]`, `settings`) and the process's `self` (`recentErrors`, `process`).
 
 The app parses both and shows no JSON and no text report. A field it does not know is ignored; a
-field missing is a row not shown. Sizes, rates, durations, counts and times are formatted by the
+field missing or of another type is a row not shown, never a domain that did not answer. A `stats`
+reply that does not list the domain, or lists it as unanswered, is a domain that did not answer
+(§4). Domains are asked concurrently, so a slow one delays no other. Sizes, rates, durations, counts and times are formatted by the
 platform for the user's locale; times as relative ("2 min ago").
 
 ## 2. One domain
@@ -54,8 +56,6 @@ problems".
   (`retry`).
 - **Unreadable records set aside**: `setAside` > 0, "kept and never run".
 - **A store**: held down or unreachable, or holding corrupted chunks (§2.4), named.
-- **Recent warnings and errors**: `self.recentErrors` of level `warn` and `err`, newest first, at most
-  `shown_errors`, each with its relative time; more behind **Show all**.
 
 ### 2.4 Stores
 
@@ -81,11 +81,13 @@ A row that opens the domain's settings in force (`settings`): versioning, read-o
 and where each setting comes from, as labelled rows. It has **Copy report**, which copies both
 replies as indented JSON for a bug report; the JSON is never shown.
 
-## 3. Platform rows
+## 3. Below the domains
 
-Each app adds its own rows where its section says: Android its failed saves (to Problems) and
-camera backup; iOS a domain turned off in Files, and camera backup. Camera backup is the same on
-both: its status line and **Back up now**, below the domains.
+- **Recent warnings and errors**: `self.recentErrors` of level `warn` and `err`, newest first, at most
+  `shown_errors`, each with its relative time; more behind **Show all**. They are the process's, not
+  a domain's: shown once, from every answer's `self`, without duplicates (same time and message).
+- Each app's own rows, where its section says: Android's failed saves, and camera backup on an app
+  that has it: its status line and **Back up now**.
 
 ## 4. A domain that does not answer
 
