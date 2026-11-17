@@ -68,6 +68,8 @@ targets:
         embed: true
       - target: TsyncPhoneShare
         embed: true
+      - target: TsyncPhoneUpload
+        embed: true
 
   # file-provider.md: the macOS extension's callbacks, with the owner in
   # process instead of behind a socket.
@@ -76,6 +78,7 @@ targets:
     platform: iOS
     sources:
       - path: Shared
+        excludes: [CameraLibrary.swift]
       - path: FileProvider
       - path: ../../macos/Shared/Tsync.swift
       - path: ../../macos/Shared/OwnerFailure.swift
@@ -149,5 +152,29 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_ENTITLEMENTS: Share/Share.entitlements
         INFOPLIST_FILE: Share/Info.plist
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+
+  # ios-app.md §8.7: camera backup's files, sent by the system through
+  # PhotoKit's background upload extension.
+  TsyncPhoneUpload:
+    type: extensionkit-extension
+    platform: iOS
+    deploymentTarget: "26.4"
+    sources:
+      - path: Upload
+        excludes: [Info.plist]
+      - path: Shared/CameraLibrary.swift
+      - path: ../../macos/Shared/Tsync.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}.upload
+        IPHONEOS_DEPLOYMENT_TARGET: "26.4"
+        # It holds no core: it reads the config and the camera records.
+        "OTHER_LDFLAGS[sdk=iphoneos*]": ""
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]": ""
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        CODE_SIGN_ENTITLEMENTS: Upload/Upload.entitlements
+        INFOPLIST_FILE: Upload/Info.plist
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"

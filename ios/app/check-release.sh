@@ -17,17 +17,22 @@ share=$app/PlugIns/TsyncPhoneShare.appex
 [ -d "$appex" ] || fail "no File Provider extension in $app"
 [ -d "$credentials" ] || fail "no credential provider extension in $app"
 [ -d "$share" ] || fail "no share extension in $app"
+# ios-app §8.7: an ExtensionKit extension, under Extensions.
+upload=$app/Extensions/TsyncPhoneUpload.appex
+[ -d "$upload" ] || fail "no upload extension in $app"
+[ "$(value "$upload" EXAppExtensionAttributes.EXExtensionPointIdentifier)" = com.apple.photos.background-upload ] \
+  || fail "the upload extension is not a background upload extension"
 
 # passwords/ios §1, ios-app §7: the credential provider and the share extension hold no core.
 for bundle in "$app" "$appex"; do
   grep -q OCAMLRUNPARAM "$bundle/$(value "$bundle" CFBundleExecutable)" \
     || fail "$bundle does not hold the core"
 done
-for bundle in "$credentials" "$share"; do
+for bundle in "$credentials" "$share" "$upload"; do
   ! grep -q OCAMLRUNPARAM "$bundle/$(value "$bundle" CFBundleExecutable)" \
     || fail "$bundle holds the core"
 done
-for bundle in "$app" "$appex" "$credentials" "$share"; do
+for bundle in "$app" "$appex" "$credentials" "$share" "$upload"; do
   [ "$(value "$bundle" CFBundleVersion)" = "$BUILD_NUMBER" ] \
     || fail "$bundle is not build $BUILD_NUMBER"
   [ "$(value "$bundle" CFBundleShortVersionString)" = "$(value "$app" CFBundleShortVersionString)" ] \
@@ -39,6 +44,7 @@ done
 [ "$(value "$credentials" CFBundleIdentifier)" = "$TSYNC_APP_ID.credentials" ] \
   || fail "credential provider identifier"
 [ "$(value "$share" CFBundleIdentifier)" = "$TSYNC_APP_ID.share" ] || fail "share extension identifier"
+[ "$(value "$upload" CFBundleIdentifier)" = "$TSYNC_APP_ID.upload" ] || fail "upload extension identifier"
 # 10 §5.6: the vault's ciphers are declared with the code App Store Connect
 # issued, and not at all before it is.
 if [ -n "$TSYNC_EXPORT_COMPLIANCE_CODE" ]; then
@@ -59,7 +65,7 @@ fi
 case $signing in
   signed)
     # The File Provider extension last: the push check reads its entitlements.
-    for bundle in "$credentials" "$share" "$app" "$appex"; do
+    for bundle in "$credentials" "$share" "$upload" "$app" "$appex"; do
       codesign --verify --strict "$bundle"
       codesign -dvv "$bundle" > "$work/signature" 2>&1
       grep -q '^Authority=Apple Distribution' "$work/signature" || fail "$bundle is not signed for distribution"

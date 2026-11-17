@@ -118,9 +118,12 @@ struct CameraBackupSection: View {
                     ForEach(model.entries) { Text($0.name).tag($0.name) }
                 }
                 Toggle("Only over wifi", isOn: Binding(get: { backup.wifiOnly }, set: { backup.wifiOnly = $0 }))
-                Toggle("Not when the battery is low", isOn: Binding(get: { backup.batteryOk }, set: { backup.batteryOk = $0 }))
-                Button(backup.running ? "Backing up…" : "Back up now") { backup.request(now: true) }
-                    .disabled(backup.running)
+                // ios-app §8.7: the system sends on its own power rules and schedule.
+                if !backup.bySystem {
+                    Toggle("Not when the battery is low", isOn: Binding(get: { backup.batteryOk }, set: { backup.batteryOk = $0 }))
+                    Button(backup.running ? "Backing up…" : "Back up now") { backup.request(now: true) }
+                        .disabled(backup.running)
+                }
             }
             Text(backup.status).font(.footnote).foregroundStyle(.secondary)
             if let refusal { Text(refusal).font(.footnote).foregroundStyle(.red) }
