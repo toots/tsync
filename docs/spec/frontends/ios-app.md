@@ -38,7 +38,7 @@ domain**.
 [activity.md](activity.md)'s screen, asked through the service
 ([ios.md §5.4](ios.md#54-the-service)), with these differences:
 
-- One section per configured domain, in config order. One turned off in Files says so ("Turned off
+- The picker lists every configured domain, in config order. One turned off in Files says so ("Turned off
   in Files: Browse, then More, then Edit") and is asked nothing.
 - The recent warnings and errors are the extension process's: one the system ended takes them with
   it, and the core log (§5, Diagnostics) keeps them.

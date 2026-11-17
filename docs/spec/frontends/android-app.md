@@ -386,8 +386,8 @@ Process death and configuration changes restore the destination and, in Files, t
 [activity.md](activity.md)'s screen, asked through the core's `status` and `stats`, with these
 differences:
 
-- Every line is per booted domain; a domain not booted is listed as such and asked nothing.
-- The failed saves, below the domains (they are the app's, not a domain's), with **Retry** (commit
+- The picker lists every domain; a domain not booted is shown as such and asked nothing.
+- The failed saves, below the domain (they are the app's, not a domain's), with **Retry** (commit
   the intent again) where a ready intent remains.
 - Camera backup's row is §11.8's status line with **Back up now**.
 

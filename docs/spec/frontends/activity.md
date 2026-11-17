@@ -6,8 +6,8 @@ and [ios-app §2.1](ios-app.md#21-activity) say what differs on each platform.
 
 ## 1. Sources
 
-While the screen is visible, every `status_poll`, and not at all otherwise, the app asks each domain
-it lists for two replies through the owner, and builds every element below from their fields:
+While the screen is visible, every `status_poll`, and not at all otherwise, the app asks the domain
+it shows (§2) for two replies through the owner, and builds every element below from their fields:
 
 - `status`: `paused`, `readOnly`, `failing`, `uploading[]` and `downloading[]` (`name`, `bytes`,
   `size`, `rate`), `pendingUploads`, `pendingDownloads`, `pendingBytes`.
@@ -17,12 +17,22 @@ it lists for two replies through the owner, and builds every element below from 
 The app parses both and shows no JSON and no text report. A field it does not know is ignored; a
 field missing or of another type is a row not shown, never a domain that did not answer. A `stats`
 reply that does not list the domain, or lists it as unanswered, is a domain that did not answer
-(§4). Domains are asked concurrently, so a slow one delays no other. Sizes, rates, durations, counts and times are formatted by the
-platform for the user's locale; times as relative ("2 min ago").
+(§4). Sizes, rates, durations, counts and times are formatted by the platform for the user's
+locale; times as relative ("2 min ago").
+
+The screen holds still between answers:
+
+- A failed answer leaves the last one on screen until `stale_after` has passed since it; only then
+  is the domain not answering (§4).
+- Transfer rates, store latencies and copy rates show an average, each new answer weighing
+  `smoothing` against the value shown, matched by file or store name; a new name shows its raw value.
+- Rows keep their place by name, not by position in the reply.
 
 ## 2. One domain
 
-Under a header naming the domain when more than one is listed, top to bottom:
+The screen shows one domain at a time. With more than one listed, a segmented picker of their names
+sits at the top; the choice is kept across visits, and a domain no longer listed falls back to the
+first. Under it, top to bottom:
 
 ### 2.1 State
 
@@ -81,17 +91,17 @@ A row that opens the domain's settings in force (`settings`): versioning, read-o
 and where each setting comes from, as labelled rows. It has **Copy report**, which copies both
 replies as indented JSON for a bug report; the JSON is never shown.
 
-## 3. Below the domains
+## 3. Below the domain
 
 - **Recent warnings and errors**: `self.recentErrors` of level `warn` and `err`, newest first, at most
   `shown_errors`, each with its relative time; more behind **Show all**. They are the process's, not
-  a domain's: shown once, from every answer's `self`, without duplicates (same time and message).
+  a domain's: the same whichever domain is picked, without duplicates (same time and message).
 - Each app's own rows, where its section says: Android's failed saves, and camera backup on an app
   that has it: its status line and **Back up now**.
 
 ## 4. A domain that does not answer
 
-Its section is its header and "Not answering: *reason*", with the last answer's time when there was
+Its page is "Not answering: *reason*", with the last answer's time when there was
 one; it is asked again at the next poll.
 
 ## 5. Parameters
@@ -99,6 +109,8 @@ one; it is asked again at the next poll.
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `status_poll` | 2 s | only while the screen is visible |
+| `stale_after` | 10 s | several `status_poll` |
+| `smoothing` | 0.3 | weight of the newest answer, in (0, 1] |
 | `shown_errors` | 5 | |
 
 ## 6. Conformance
@@ -109,4 +121,6 @@ one; it is asked again at the next poll.
 - A file uploading shows a progress bar that moves; Pause turns the badge to Paused and holds it;
   Resume lets it go.
 - A parked upload shows Retry now, and Retry now clears it once the store is back.
+- With two domains, the picker switches every section, Details included, to the chosen one.
+- Stopping the owner for less than `stale_after` changes nothing on screen.
 - Leaving the screen stops the polling: the owner's log shows no `status` request after it.
