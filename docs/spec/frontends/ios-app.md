@@ -443,7 +443,8 @@ it and no job is created until the app's next decision clears it.
   `&base=<content id>` when the part has one (a write again), signed as
   [http-proxy wire §5.7](../backends/http-proxy.md#57-whole-file-uploads) says with the domain's
   secret, from the config in the App Group, and an expiry `upload_signature_lifetime` ahead.
-- "Only over wifi": `allowsCellularAccess` false.
+- "Only over wifi": `allowsExpensiveNetworkAccess` and `allowsCellularAccess` false, the Gate's
+  expensive path of §8.6 (cellular, a personal hotspot).
   "Not when the battery is low" has no counterpart: the system decides when to send by its own
   power rules.
 
@@ -496,7 +497,7 @@ system's.
   uploads: Settings shows uploads by iOS; with Resource Upload Test Mode on (iOS 27), a photo taken
   with the app not running is in the domain without the app opened; a 1 GB video whose upload is cut
   by airplane mode resumes from where it stopped (the listener's log shows a `PATCH`); an edited photo
-  replaces the file; with "Only over wifi" nothing is sent over cellular; with the listener's
+  replaces the file; with "Only over wifi" nothing is sent over cellular or a personal hotspot; with the listener's
   `uploads` off, the app falls back to `files` at its next launch and the photos still arrive.
 - Save to tsync, on a device: three photos shared from Photos to a remembered folder appear there
   in the app and in the Files app, and upload; a photo shared again under a taken name is saved as

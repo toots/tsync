@@ -501,6 +501,7 @@ struct UploadTarget {
         guard let url = URL(string: url + target) else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.allowsExpensiveNetworkAccess = !wifiOnly
         request.allowsCellularAccess = !wifiOnly
         request.setValue(
             uploadSignature(target, expires: Int(Date().timeIntervalSince1970 + Self.signatureLifetime)),
