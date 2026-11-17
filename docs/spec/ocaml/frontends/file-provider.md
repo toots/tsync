@@ -22,10 +22,6 @@ Companion to the language-neutral spec [../../frontends/file-provider.md](../../
 
 - **Upload progress.** `status.uploading` lists the running uploads with `bytes = 0`: the upload
   queue does not count bytes per file, so the menu shows which files are uploading but not how far.
-- **Arrival durability.** An arrival (`Cycle.run_arrival`) writes its before-values and its
-  position after a `syncfs`, which macOS only schedules
-  ([pitfall B-1.12](../../pitfalls/B-implementation.md)): a crash right after the position can
-  lose mirror entries until the next arrival by state.
 - **File-id index wait.** Every mutation waits for the file-id index before the metadata hold, not
   only one naming an `i:` reference; it differs only while the index rebuilds after a crash. The
   test does not force a marker change during the build's walk, so the queue of changes made

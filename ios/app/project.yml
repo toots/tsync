@@ -1,0 +1,85 @@
+# The iOS app and its File Provider extension. Generate with xcodegen on a Mac
+# after ./build-core.sh has put the core's objects in core/. The identifiers
+# (ios.md §3.1) come from the environment at generation: run-device.sh checks
+# them.
+name: TsyncPhone
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    DEVELOPMENT_TEAM: ${TSYNC_TEAM_ID}
+    TSYNC_APP_GROUP: ${TSYNC_APP_GROUP}
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridge.h
+    HEADER_SEARCH_PATHS: "$(SRCROOT)/../core $(SRCROOT)/../../lib/frontends/android/jni"
+    # The core: the OCaml runtime and tsync as one object per SDK.
+    "OTHER_LDFLAGS[sdk=iphoneos*]": "$(SRCROOT)/core/iphoneos/libtsyncios.o -framework Network -framework Security"
+    "OTHER_LDFLAGS[sdk=iphonesimulator*]": "$(SRCROOT)/core/iphonesimulator/libtsyncios.o -framework Network -framework Security"
+    # The core is built for arm64 only.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    ENABLE_BITCODE: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+targets:
+  TsyncPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shared
+      - path: App
+        excludes: [Info.plist]
+      - path: ../../macos/Shared/Tsync.swift
+      - path: ../../macos/TsyncApp/Reconciler.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}
+        PRODUCT_NAME: tsync
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        # The commit About shows: run-device.sh passes TSYNC_COMMIT.
+        INFOPLIST_FILE: App/Info.plist
+        INFOPLIST_KEY_NSCameraUsageDescription: "tsync scans setup codes to join a domain."
+        INFOPLIST_KEY_CFBundleDisplayName: tsync
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - target: TsyncPhoneFileProvider
+        embed: true
+
+  # file-provider.md: the macOS extension's callbacks, with the owner in
+  # process instead of behind a socket.
+  TsyncPhoneFileProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Shared
+      - path: FileProvider
+      - path: ../../macos/Shared/Tsync.swift
+      - path: ../../macos/Shared/OwnerFailure.swift
+      - path: ../../macos/TsyncFileProvider/TsyncExtension.swift
+      - path: ../../macos/TsyncFileProvider/Enumerators.swift
+      - path: ../../macos/TsyncFileProvider/OwnerReply.swift
+      - path: ../../macos/TsyncFileProvider/Item.swift
+      - path: ../../macos/TsyncFileProvider/Row.swift
+      - path: ../../macos/TsyncFileProvider/Errors.swift
+      - path: ../../macos/TsyncFileProvider/Cursors.swift
+      - path: ../../macos/TsyncFileProvider/ChangeBatch.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${TSYNC_APP_ID}.fileprovider
+        CODE_SIGN_ENTITLEMENTS: FileProvider/FileProvider.entitlements
+        # ios.md §3.1: development from a Mac, production for TestFlight.
+        TSYNC_APS_ENVIRONMENT: ${TSYNC_APS_ENVIRONMENT}
+        INFOPLIST_FILE: FileProvider/Info.plist
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"

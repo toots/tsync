@@ -98,6 +98,10 @@ val durable_replace : ?perm:int -> string -> string -> unit
 (** Replace without the directory fsync: never torn, not yet durable. *)
 val replace : ?perm:int -> string -> string -> unit
 
+(** Replace with no fsync at all: after a crash the file may be lost or empty,
+    for data whose loss costs work, never correctness. *)
+val replace_unsynced : ?perm:int -> string -> string -> unit
+
 (** Durable create-if-absent by hard link (or no-replace rename). *)
 val create_if_absent : ?perm:int -> string -> string -> [ `Created | `Exists ]
 
@@ -172,7 +176,8 @@ val temp_in : string -> string
 
 (** Runs [write] on a new temporary in [dir], then fsyncs it; the temporary is
     removed when [write] raises. *)
-val write_temp_with : ?perm:int -> string -> (Unix.file_descr -> unit) -> string
+val write_temp_with :
+  ?sync:bool -> ?perm:int -> string -> (Unix.file_descr -> unit) -> string
 
 (** Write [data] to a new temporary in [dir] and fsync it. *)
 val write_temp : ?perm:int -> string -> string -> string
@@ -245,6 +250,10 @@ val map_fd : Unix.file_descr -> bigstring
     them. *)
 val map_range : Unix.file_descr -> off:int -> len:int -> bigstring
 
+(** Up to [len] bytes from [off], clamped to the file's size: a view of a
+    mapping with [~map], else a copy read by position. *)
+val read_range : map:bool -> Unix.file_descr -> off:int -> len:int -> bigstring
+
 (** After a body read with {!map_fd} has been used: its pages leave this
     process's resident set, a later read paging them back in from the file. A
     body that is not a mapping is left alone. The collector unmaps a mapping
@@ -272,3 +281,6 @@ val resolve_parent : string -> string
 (** Flushes the filesystem holding [dir], when it exists: many replaced files
     made durable at once. *)
 val syncfs : string -> unit
+
+(** Whether {!syncfs} returns once the files written before it are durable. *)
+val syncfs_is_barrier : bool

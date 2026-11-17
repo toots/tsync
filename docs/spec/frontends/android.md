@@ -127,6 +127,46 @@ process completed a pull of it less than `pull_freshness` ago, measured on the m
    ([conflict-resolution.md](../algorithms/conflict-resolution.md) R1). `evict` walks the mirror only.
 
 Concurrent pulls of one folder share one store read. `stat` never pulls: it answers from the mirror.
+A pull reads the log after the folder's position in pages of at most `pull_page` entries and merges
+each page as an arrival before reading the next: what a pull holds is bounded by a page, however far
+behind the folder is.
+
+**Refresh passes.** A `refresh` request starts a pass and is answered when the pass ends or
+after `refresh_patience`, whichever comes first; a pass still running then goes on in the
+background. The answer is `{}`, with `pass` when the pass ended in time: `held`, the number of held
+folders; `covered`, those it brought to the head; `merged`, those whose view changed; `entries`,
+the log entries it read; and `end`, how it ended: `head`, `stopped` (the breaker, below), `pruned`,
+`unreadable` when it met an entry no reader can follow that the tree head has passed, and so read
+each folder by state ([publication §4.3](../algorithms/publication.md)), leaving out a folder the pass's own pages removed or moved and stopping when the breaker opens, `fresh` when every held folder was fresh and no pass ran, or `failed`, with the reason as `error`. A host shows it in its diagnostics; nothing
+acts on it. A host that suspends its process once no request is pending (iOS) so keeps it running
+for the pass a change enumeration starts. A pass runs when a **held** folder (one with a pull
+marker, [04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)) is not fresh, and brings
+every held folder to the head, fresh ones too: its record stands for each folder pulled before it.
+Its store reads do not grow with how many folders are held, and it writes only the folders it merges
+and one record:
+
+1. Read the log once, in pages of `pull_page` entries, from the oldest position among those folders
+   to the head.
+2. Merge each page into each of those folders its entries concern, taking only the entries after the
+   folder's position, as a pull would. A folder no entry concerns has the same view at the head as
+   at its position: it is not merged.
+3. At the end, every folder the pass covered stands at the head and is stamped fresh. No file is
+   written per folder for it: the pass writes the pass record
+   ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)), with no sync barrier, and a
+   folder it merged has its position written by the merge. A lost record costs the next pass a
+   longer read, never a wrong view.
+4. A folder whose position the log no longer holds is pulled by state, on its own, after the read.
+
+**What a pass reads.** A process keeps its held folders in memory: each one's path, folder id,
+position and pull-marker time. It learns them from one walk of the mirror at its first pass, and
+every marker or position it writes updates the list. A folder moved or removed in the mirror drops
+the whole list, and the next pass walks again. A folder moved during the walk starts the walk over;
+a third walk that one lands in fails the pass `local`, and the next refresh walks again. The files stay the record: the list is never written,
+so a process that starts walks once.
+
+A `refresh` made while a pass runs waits for the pass after it, one for every refresh made meanwhile, so it reads what landed after the running pass read the log. A pass ends early when the store's health breaker
+opens; a process that dies mid-pass loses nothing, since the next pass reads from the positions
+written. Each merge sends its notices as any pull does.
 
 **The listing says how fresh it is.** On a pulled tree a `list_dir` reply carries `pulledAt` (epoch
 seconds of the pull its rows reflect; absent for a folder never pulled) and `outdated: true` when the
@@ -198,9 +238,10 @@ showed an offline state clears it and re-lists what it displays.
 
 ### 3.4 What is left out
 
-- The background cycle, `sync`, and the change feed with its generation (`changes_since`,
-  `list_all`, `cursor`, `full_resync`): a lazy tree holds only the folders it pulled, so there is no
-  whole tree to list or to diff. The host re-lists what it displays on notices (§4.2).
+- The background cycle, `sync` and `full_resync`. The change feed is kept, over the held folders
+  only (§6), for a host whose platform learns of changes from it (the iOS working set,
+  [ios.md §5.1](ios.md#51-the-working-set)); the Android host does not read it and re-lists what it
+  displays on notices (§4.2).
 - Subscriptions: there is no socket. The notice sink carries the same events (§4.2).
 - Symlinks: the platform's document model has none, so the host creates none. Its config leaves
   `symlinks` out and takes the policy its main states ([05](../05-ops-config.md) §2.1): a value of
@@ -215,9 +256,11 @@ Before the core initialises:
 
 1. **Home**: a private directory of the host. The config and cache locations derive from it, as on
    Linux with no XDG overrides.
-2. **Trust store**: the path of a PEM bundle of certificate authorities. The core's TLS client uses
-   it for every connection ([security-model.md §9](../algorithms/security-model.md#9-tls)). Boot
-   fails, naming the trust store, when the file is missing or holds no certificate.
+2. **Trust store**, optional: the path of a PEM bundle of certificate authorities. The core's TLS
+   client uses it for every connection ([security-model.md §9](../algorithms/security-model.md#9-tls)).
+   Boot fails, naming the trust store, when the file is missing or holds no certificate; an empty
+   path is a path, and fails so. A host gives none by passing no path at all, and has connections verified against the system's store, which only a platform TLS
+   implementation reads ([security-model.md §9.2](../algorithms/security-model.md#92-implementation-per-host)); iOS gives none.
 3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`.
 4. **A notice sink** (§4.2).
 5. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
@@ -259,7 +302,9 @@ The host calls the core from threads it owns (binder threads, descriptor callbac
 threads). The core MUST accept calls from threads it did not create, MUST block only the calling
 thread, and MUST apply the per-domain serialisation of
 [08 §3.5](../08-frontends.md#35-rules-the-handler-enforces) whatever thread a call arrives on. Every
-piece of state a call touches, the handle table included, is touched only on the scheduler.
+piece of state a call touches, the handle table included, is touched only on the scheduler. A call
+leaves nothing of the core on its thread once it returns: a host MAY make each call from a new
+thread that then ends, as the iOS File Provider does for every callback.
 
 ## 5. The bridge
 
@@ -297,8 +342,19 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 The actions are [08 §3.3](../08-frontends.md#33-actions)'s. What differs here:
 
 - `list_dir` takes `pull?` and answers `pulledAt?` and `outdated?` (§3.2).
-- `changes_since`, `list_all`, `cursor`, `full_resync`, `sync` and `subscribe` are refused `invalid`,
-  naming the pulled tree.
+- `full_resync`, `sync` and `subscribe` are refused `invalid`, naming the pulled tree.
+- `changes_since` and `cursor` are [08 §3.6](../08-frontends.md#36-change-feed-changes_since)'s.
+  Every pull's merge appends its changes to the applied log, the first pull of a folder (by state)
+  included, so the feed names what peers changed in held folders as well as this client's own
+  changes. A folder that leaves the view by the move rule of
+  [publication §4.11](../algorithms/publication.md#411-the-lazy-tree) is reported as removed.
+- `list_all` walks the mirror only and never pulls. The mirror holds what pulls brought and this
+  client's own changes, so a folder never pulled is served as a row with nothing under it but what
+  this client put there. The walk is written to the kept walk file as it goes
+  and never held whole, depth first with each folder's children in bytewise order of names, which
+  needs no sort: its order is that one, not 08 §3.7's order of paths. What it holds at once is
+  bounded by the widest folder's names.
+- `refresh` starts a refresh pass (§3.2).
 - `evict` and `restore` on a folder walk its subtree and answer counts, as
   [08 §3.4](../08-frontends.md#34-evict-and-restore) specifies, with the pulls of §3.2 rule 4.
 - Hooks: `changed` and `on_upload_done` become `changed` notices; `reannounce` and `on_stop` do
@@ -340,7 +396,9 @@ input ends it. Framing is by count, never by delimiter.
 |---|---|---|
 | `pull_freshness` | 5 s | the window in which a folder is listed again without asking the store |
 | `view_max_age` | 10 days | how old a view no pin holds may be and still be answered while the store is silent |
+| `refresh_patience` | 20 s | < `REQUEST_DEADLINE`; how long a `refresh` waits for its pass |
 | `pull_patience` | 2 s | < `REQUEST_DEADLINE`; how long an answer the mirror can give waits for the store |
+| `pull_page` | 256 entries | ≥ 1; how many log entries a pull or a refresh pass reads and merges at a time |
 
 ## 9. Conformance
 
@@ -356,6 +414,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
   naming a domain not booted is refused as §5 says.
 - Every bridge entry is total, before boot included; a non-JSON request is answered with the exact
   `invalid JSON` reply.
+- A thousand calls, each from a new thread that then ends, leave the process's memory where one
+  thread's would.
 - Concurrent reads from foreign threads return exact bytes; a read after close is −EBADF; an open of
   an absent reference is −ENOENT; a handle keeps serving the version it opened after the file is
   rewritten.

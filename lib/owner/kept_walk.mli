@@ -10,9 +10,11 @@ type entry = {
   mtime : int;  (** nanoseconds since the epoch *)
 }
 
-(** Replaces the kept walk with [entries], already sorted; answers its stamp,
-    never the stamp of the walk it replaces. *)
-val write : string -> skipped:int -> entry list -> string
+(** Replaces the kept walk with the entries [produce] emits, in their order, and
+    answers its stamp, never the stamp of the walk it replaces. [produce]
+    answers how many items it skipped. Entries go to disk as they are emitted.
+*)
+val write : string -> ((entry -> unit) -> int) -> string
 
 (** The cursor of the walk's first entry. *)
 val first_cursor : string -> string option

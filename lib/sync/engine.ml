@@ -446,7 +446,7 @@ module Make (C : Engine_ctx.S) = struct
     Option.bind (Fs.read_file_opt path) (fun s ->
         Option.map (fun ms -> ms /. 1000.) (float_of_string_opt (String.trim s)))
 
-  let pulled_at dir = read_seconds (pulled_marker dir)
+  let pulled_at dir = Option.map (fun ms -> ms /. 1000.) (pulled_ms dir)
   let view_hold dir = read_seconds (hold_marker dir)
 
   let created_here dir =
@@ -470,7 +470,7 @@ module Make (C : Engine_ctx.S) = struct
   let pulling_m = Mutex.create ()
 
   (* Concurrent pulls of one folder share one store read. *)
-  let pull dir =
+  let pull ?page dir =
     let running, mine =
       Mutex.protect pulling_m (fun () ->
           match Hashtbl.find_opt pulling dir with
@@ -481,13 +481,13 @@ module Make (C : Engine_ctx.S) = struct
                 (p, true))
     in
     if mine then (
-      let outcome = try Ok (pull_folder dir) with e -> Error e in
+      let outcome = try Ok (pull_folder ?page dir) with e -> Error e in
       Mutex.protect pulling_m (fun () -> Hashtbl.remove pulling dir);
       ignore (Rt.Promise.try_resolve_result running outcome));
     Rt.Promise.await running
 
   (* android §3.2 rule 3: a file's current version is its folder's view. *)
-  let refresh_file path = ignore (pull (Names.parent_of path))
+  let refresh_file ?page path = ignore (pull ?page (Names.parent_of path))
 
   type handle = Local_ops.handle
 

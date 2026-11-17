@@ -5,10 +5,18 @@ type params = {
   pull_freshness : float;
   view_max_age : float;
   pull_patience : float;
+  refresh_patience : float;
+  pull_page : int;
 }
 
 let default =
-  { pull_freshness = 5.; view_max_age = 10. *. 86400.; pull_patience = 2. }
+  {
+    pull_freshness = 5.;
+    view_max_age = 10. *. 86400.;
+    pull_patience = 2.;
+    refresh_patience = 20.;
+    pull_page = 256;
+  }
 
 type t = {
   params : params;
@@ -22,6 +30,15 @@ type t = {
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
   offline : bool Atomic.t;
+  passes : passes;
+  passes_m : Mutex.t;
+}
+
+(* android §3.2: the pass running, and the one that follows it for the
+   refreshes made meanwhile. *)
+and passes = {
+  mutable running : Protocol.pass_summary option Rt.Promise.t option;
+  mutable queued : Protocol.pass_summary option Rt.Promise.t option;
 }
 
 type view = { pulled_at : float option; outdated : bool }
@@ -37,6 +54,8 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
     offline = Atomic.make false;
+    passes = { running = None; queued = None };
+    passes_m = Mutex.create ();
   }
 
 let note_unreachable t = Atomic.set t.offline true
@@ -50,14 +69,13 @@ let key t dir =
   let (module E : Engine.S) = t.engine in
   Option.map Folder_id.to_string (E.folder_id dir)
 
-let is_fresh t dir =
-  match key t dir with
-    | None -> false
-    | Some k ->
-        Mutex.protect t.m (fun () ->
-            match Hashtbl.find_opt t.fresh k with
-              | Some at -> Rt.now () -. at < t.params.pull_freshness
-              | None -> false)
+let fresh_key t k =
+  Mutex.protect t.m (fun () ->
+      match Hashtbl.find_opt t.fresh k with
+        | Some at -> Rt.now () -. at < t.params.pull_freshness
+        | None -> false)
+
+let is_fresh t dir = Option.fold ~none:false ~some:(fresh_key t) (key t dir)
 
 (* Detached: a waiter that gives up leaves the pull running. *)
 let start t dir =
@@ -66,7 +84,7 @@ let start t dir =
   let done_ = Rt.Promise.create () in
   Rt.spawn ~name:"pull" (fun () ->
       let outcome =
-        match E.pull dir with
+        match E.pull ~page:t.params.pull_page dir with
           | differs ->
               let owed =
                 Mutex.protect t.m (fun () ->
@@ -165,9 +183,110 @@ let before_open t path =
   Rt.spawn ~name:"refresh" (fun () ->
       ignore
         (Rt.Promise.try_resolve_result done_
-           (match E.refresh_file path with
+           (match E.refresh_file ~page:t.params.pull_page path with
              | () ->
                  succeeded t;
                  Ok ()
              | exception e -> Error e)));
   ignore (wait_patiently t done_)
+
+let stamp_fresh t dirs =
+  let now = Rt.now () in
+  let keys = List.filter_map (key t) dirs in
+  Mutex.protect t.m (fun () ->
+      List.iter (fun k -> Hashtbl.replace t.fresh k now) keys;
+      List.filter
+        (fun dir ->
+          let owed = Hashtbl.mem t.owed_notice dir in
+          Hashtbl.remove t.owed_notice dir;
+          owed)
+        dirs)
+
+let summary (pass : Engine_intf.pass) : Protocol.pass_summary =
+  {
+    held = pass.held;
+    covered = List.length pass.covered;
+    merged = List.length pass.changed;
+    entries = pass.entries;
+    ended =
+      (match pass.ended with
+        | `Head -> "head"
+        | `Stopped -> "stopped"
+        | `Pruned -> "pruned"
+        | `Unreadable -> "unreadable"
+        | `Fresh -> "fresh");
+    error = None;
+  }
+
+let run_pass t : Protocol.pass_summary =
+  let (module E : Engine.S) = t.engine in
+  match
+    E.pull_pass ~page:t.params.pull_page ~stop:t.silent
+      ~fresh:(fun id -> fresh_key t (Folder_id.to_string id))
+      ()
+  with
+    | pass ->
+        let owed = stamp_fresh t pass.covered in
+        if pass.covered <> [] then succeeded t;
+        let notice = List.sort_uniq String.compare (pass.changed @ owed) in
+        if notice <> [] then (try t.changed notice with _ -> ());
+        summary pass
+    | exception e when not (Rt.is_cancelled e) ->
+        Log.info "refresh pass failed: %s" (Printexc.to_string e);
+        {
+          held = 0;
+          covered = 0;
+          merged = 0;
+          entries = 0;
+          ended = "failed";
+          error = Some (Printexc.to_string e);
+        }
+
+(* Each pass resolves its promise, then starts the queued one, if any. *)
+let rec start_pass t mine =
+  Rt.spawn ~name:"refresh pass" (fun () ->
+      let next = ref None in
+      Fun.protect
+        ~finally:(fun () ->
+          ignore (Rt.Promise.try_resolve mine None);
+          Option.iter (start_pass t) !next)
+        (fun () ->
+          let result =
+            try Some (run_pass t)
+            with e ->
+              (* A cancelled pass gives up its successor too. *)
+              Mutex.protect t.passes_m (fun () ->
+                  Option.iter
+                    (fun q -> ignore (Rt.Promise.try_resolve q None))
+                    t.passes.queued;
+                  t.passes.running <- None;
+                  t.passes.queued <- None);
+              raise e
+          in
+          Mutex.protect t.passes_m (fun () ->
+              t.passes.running <- t.passes.queued;
+              next := t.passes.queued;
+              t.passes.queued <- None);
+          ignore (Rt.Promise.try_resolve mine result)))
+
+(* A refresh made while a pass runs waits for the next one, which reads what
+   landed after the running one read the log. *)
+let refresh t =
+  let pass, starts =
+    Mutex.protect t.passes_m (fun () ->
+        match t.passes with
+          | { running = None; _ } ->
+              let p = Rt.Promise.create () in
+              t.passes.running <- Some p;
+              (p, true)
+          | { queued = Some q; _ } -> (q, false)
+          | { queued = None; _ } ->
+              let q = Rt.Promise.create () in
+              t.passes.queued <- Some q;
+              (q, false))
+  in
+  if starts then start_pass t pass;
+  (* ios §5.1: the host is kept running while this request is pending. *)
+  try
+    Rt.with_timeout t.params.refresh_patience (fun () -> Rt.Promise.await pass)
+  with Rt.Timeout -> None

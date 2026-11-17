@@ -4,7 +4,12 @@ import Foundation
 /// Changing any of them orphans existing installations.
 enum Tsync {
     static let appBundleID = "org.feverdreamtv.tsync"
+    #if os(iOS)
+    /// ios.md §3.1: a build setting, in each bundle's Info.plist.
+    static let appGroup = Bundle.main.object(forInfoDictionaryKey: "TsyncAppGroup") as? String ?? ""
+    #else
     static let appGroup = "group.org.feverdreamtv.tsync"
+    #endif
     static let serviceLabel = "org.feverdreamtv.tsync.daemon"
 
     /// The identifier scheme this build registers domains under (§9.1 step 6).
@@ -16,8 +21,12 @@ enum Tsync {
         {
             return url
         }
+        #if os(macOS)
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Group Containers/\(appGroup)")
+        #else
+        fatalError("the app group \(appGroup) is not in the entitlements")
+        #endif
     }
 
     static var configFile: URL { groupContainer.appendingPathComponent("config.json") }

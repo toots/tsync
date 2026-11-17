@@ -101,8 +101,12 @@ Companion to [../04-checkout-cache.md](../04-checkout-cache.md). Not normative. 
   was saved removes the snapshot; a failed build returns to `Unbuilt` (A-11.19).
 - **A bulk pass writes without a fsync each.** `Mirror` writes take `~durable:false`;
   `Cycle.run_arrival` then calls `Fs.syncfs` once on the mirror root, before the before-values,
-  the position and the feed lines claim the result. A non-durable write still fsyncs its data,
-  so an entry is never torn (B-1.12).
+  the position and the feed lines claim the result: a group commit
+  ([durable-queue.md](../algorithms/durable-queue.md) §3). Where `Fs.syncfs` is a barrier
+  (`Fs.syncfs_is_barrier`), a non-durable write and the directories it creates are not flushed
+  one by one: a crash before the barrier leaves the arrival record, and recovery redoes its
+  steps. Elsewhere a non-durable write still fsyncs its data,
+  so an entry is never torn (B-1.12, B-8.24).
 - **A reader's deadline does not cancel the fetch.** `Cache.within_deadline` runs the work in a
   spawned fiber resolving a promise; the reader waits on the promise with `Rt.with_timeout` and
   fails DEADLINE, and the fetch lands for the next reader.

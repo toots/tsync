@@ -15,6 +15,7 @@ formats and operations are mapped in [../04-checkout-cache.md](../04-checkout-ca
 | Folder entry, folder and name markers | a directory, `.tsync-dir`, `.tsync-name` | `Mirror`; marker JSON by `Folder` |
 | File-id index snapshot and record | `<C>/file-ids-index`, `<C>/file-ids-complete` | `Mirror.save_file_ids`, `load_file_ids`, `backfill_file_ids` |
 | Pull marker, view hold (lazy tree) | `.tsync-pulled`, `.tsync-view-hold` in the folder | `Engine`: `pulled_at`, `view_hold`, `hold_views` |
+| Pass record (lazy tree) | `.tsync-pass` in the mirror's root | `Cycle`: `pull_pass`, `folder_position`, `pulled_at` |
 | Reverse entry, removed-id record (§3.2) | `<C>/folders/<id>`, `<C>/folders/by-path/<md5>` | `Mirror`: `key_of_id`, `lookup_id_removed`, `whereabouts`, `rebuild_index`, `sweep_removed_records` |
 | Cache body, partial body, pin (§3.3, §3.4) | `<C>/chunks/<shard>/<group key>`, `.partial`, `.pin` | `Cache` |
 | Staged manifest, set-aside (§3.5) | `<C>/staged/manifests/<escaped path>`, `.tsync-bad-…` | `Staged` |

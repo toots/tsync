@@ -186,7 +186,7 @@ class WireTest {
     fun refusalsCarryTheirCodes() {
         assertEquals("""{"ok":false,"code":"invalid","error":"invalid JSON"}""", core.request("not json").trim())
         assertEquals(Code.INVALID, assertFailsWith<CoreException> { client.call(JSONObject().put("action", "no_such_action")) }.code)
-        assertEquals(Code.INVALID, assertFailsWith<CoreException> { client.call(JSONObject().put("action", "changes_since").put("arg", "|")) }.code)
+        assertTrue(client.call(JSONObject().put("action", "changes_since").put("arg", "no separator")).getBoolean("stale"))
         assertEquals(Code.INVALID, assertFailsWith<CoreException> { client.stat("tsync/Wire Suite/x") }.code)
         val outside = Files.createTempFile("outside", "").toFile()
         val denied = assertFailsWith<CoreException> { client.writeChild(Parameters.ROOT, "x", outside.path, null, true) }

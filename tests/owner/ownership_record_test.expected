@@ -1,0 +1,7 @@
+free: acquired
+record: this test
+again in this process: refused, held by this process
+released, record left: false
+held by a live process: refused, held by a live process
+held by a dead process: acquired
+record: this test

@@ -38,6 +38,7 @@ let bucket ~function_on ~at_once ~markers_down (inner : Store.t) =
   {
     inner with
     local_path = None;
+    push_register = None;
     bucket_functions = true;
     capabilities = (fun p -> { (inner.capabilities p) with verified = false });
     list_prefix =

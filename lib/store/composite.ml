@@ -701,6 +701,8 @@ let make_store t ~source_only =
                 batch_reachable m;
                 f ps)
               m.store.list_many);
+      push_register =
+        (match t.mains with [m] -> m.store.push_register | _ -> None);
       bucket_functions = false;
       capabilities =
         (fun p ->

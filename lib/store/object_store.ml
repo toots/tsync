@@ -182,6 +182,7 @@ let make ~name ~admission ?share_url v =
       watch = (fun _ _ -> Stop.sleep Store.watch_interval);
       get_many = None;
       list_many = None;
+      push_register = None;
       bucket_functions = true;
       capabilities = (fun _ -> { Store.no_caps with share_url });
       fast_read = Fun.const false;

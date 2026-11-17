@@ -1,0 +1,15 @@
+  boot                               ""
+== the phone holds root and sub, not other
+  root                               [a.txt, other/, sub/] read the store
+  sub                                [deep.txt] read the store
+  list_all                           [a.txt, other/, sub/, deep.txt] no read
+== a peer changes held and unheld folders
+  before any pull                    []
+  root                               [other/, sub/] read the store
+  sub                                [deep.txt, new.txt] read the store
+  after pulling root and sub         [delete a.txt in root, put new.txt in d:<folder1>]
+== a change of the phone's own
+  mkdir mine                         ok
+  write in mine                      ok
+  after mkdir and write              [mkdir mine in root, put own.txt in d:<folder2>]
+  list_all again                     [mine/, own.txt (not uploaded), other/, sub/, deep.txt, new.txt] no read

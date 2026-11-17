@@ -17,6 +17,10 @@
   tsync_setup_link
   unix
   base64
+  digestif
+  mirage-crypto-ec
+  mirage-crypto-rng.unix
+  x509
   yojson))
 
 (rule

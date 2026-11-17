@@ -8,10 +8,10 @@ build:
 test:
 	cd .. && dune build @runtest
 
-# With FUSE and both TLS implementations, as the packages ship.
+# With FUSE, both TLS implementations and pushes, as the packages ship.
 install-opam:
 	cd .. && opam pin -ny .
-	opam install tsync tsync-fuse tsync-tls tsync-ssl
+	opam install tsync tsync-fuse tsync-tls tsync-ssl tsync-push
 	$(MAKE) install-completion
 
 # The scripts are cmdliner's own, and the tool answers its protocol already, so
@@ -45,4 +45,4 @@ uninstall:
 	rm -f ~/.config/systemd/user/tsync.service
 	-systemctl --user daemon-reload
 	rm -f ~/.local/bin/tsync
-	-opam remove -y tsync tsync-tls tsync-ssl tsync-fuse
+	-opam remove -y tsync tsync-tls tsync-ssl tsync-fuse tsync-push

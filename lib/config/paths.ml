@@ -40,7 +40,7 @@ let group () =
   Filename.concat (home ())
     "Library/Group Containers/group.org.feverdreamtv.tsync"
 
-let config_file () =
+let default_config_file () =
   if Fs.is_macos then Filename.concat (group ()) "config.json"
   else if Sys.win32 then (
     match absolute_env "XDG_CONFIG_HOME" with
@@ -50,6 +50,11 @@ let config_file () =
     Filename.concat
       (Filename.concat (env_dir "XDG_CONFIG_HOME" ".config") "tsync")
       "config.json"
+
+let config_file () =
+  match absolute_env "TSYNC_CONFIG_FILE" with
+    | Some path -> path
+    | None -> default_config_file ()
 
 let data_dir () =
   if Fs.is_macos then Filename.concat (group ()) "tsync"

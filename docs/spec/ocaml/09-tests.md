@@ -41,7 +41,7 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 
 | Directory | Subject |
 |---|---|
-| `tests/unit` | the runtime (`rt_test`, `rt_fd_test`, `rt_class_test`, `rt_configure_test`), core codecs (`core_test`), `dqueue_test`, `dqueue_raise_test`, cache group states, shared outcomes, the uplink budget, law and modes, mapped pages, whole staged body reads (`staged_whole_test`); `hash` and `gc_job` are golden files |
+| `tests/unit` | the runtime (`rt_test`, `rt_fd_test`, `rt_class_test`, `rt_configure_test`), core codecs (`core_test`), `dqueue_test`, `dqueue_raise_test`, cache group states, shared outcomes, the uplink budget, law and modes, mapped pages, whole staged body reads (`staged_whole_test`), whole cache bodies read as mappings (`cache_mapped_test`); `hash` and `gc_job` are golden files |
 | `tests/store` | the store contract over each driver, the composite, the copy memo, the chunk spaces, the proxy wire, watches, share serving, the share preview image |
 | `tests/remote` | manifest and marker codecs, the folder index, the remote layer, the projection of log entries (`projection_test`) |
 | `tests/sync` | the merge, enumerated (`algebra_test`), every row of conflict-resolution §8.3 (`rows_test`), the cycle against a faulty main (`cycle_test`), the persistent formats (`formats_test`), the change feed, file ids, import, export, rsync and their plans |

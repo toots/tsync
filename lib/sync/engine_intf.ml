@@ -47,6 +47,15 @@ type synced = {
   pending : int;
 }
 
+(** android §3.2: what a refresh pass did. *)
+type pass = {
+  held : int;  (** the folders with a pull marker *)
+  covered : string list;  (** the folders it brought to the head *)
+  changed : string list;  (** those whose children changed *)
+  entries : int;  (** the log entries it read *)
+  ended : [ `Head | `Stopped | `Pruned | `Unreadable | `Fresh ];
+}
+
 module type S = sig
   (** Holds the metadata lock across [f]; every operation called inside joins
       the same hold. *)
@@ -273,10 +282,22 @@ module type S = sig
   (** The lazy tree (04 §3.5, publication §4.11): an arrival for one folder;
       whether its children changed. UNPREPARED for a folder with no id here; a
       failed pull changes nothing. Concurrent pulls of one folder share one
-      read. *)
-  val pull : string -> bool
+      read. The log is read and merged [page] entries at a time (android §8
+      [pull_page], 256 by default). *)
+  val pull : ?page:int -> string -> bool
 
-  (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
+  (** android §3.2, a refresh pass over every folder with a pull marker, unless
+      [fresh] says each is: the log read once, a page at a time, ending early
+      when [stop] says so. *)
+  val pull_pass :
+    ?page:int ->
+    stop:(unit -> bool) ->
+    fresh:(Folder_id.t -> bool) ->
+    unit ->
+    pass
+
+  (** When the folder's last pull completed, by its pull marker and the pass
+      record (04 §2.3). *)
   val pulled_at : string -> float option
 
   (** Whether this client created the folder and has not published it: then the
@@ -291,7 +312,7 @@ module type S = sig
 
   (** Pulls the file's folder, so the file is at its current version (android
       §3.2 rule 3). *)
-  val refresh_file : string -> unit
+  val refresh_file : ?page:int -> string -> unit
 
   val mirror : Mirror.t
 end

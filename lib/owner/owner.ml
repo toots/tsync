@@ -11,8 +11,14 @@ type holder = {
   socket : string option;
 }
 
-type lock = Unix.file_descr
+type lock = Kernel of Unix.file_descr | Record of Domain_name.t
 
+(* ios §2: a host whose system kills a suspended process holding a file lock
+   keeps the holder record alone. *)
+let records_only = Atomic.make false
+let use_records () = Atomic.set records_only true
+let recorded = Mutex.create ()
+let recorded_here : (string, unit) Hashtbl.t = Hashtbl.create 4
 let owner_held = 75
 let housekeeping_interval = 60.
 
@@ -49,31 +55,55 @@ let holder_of_string s =
 let holder d =
   Option.bind (Fs.read_file_opt (Paths.ownership_lock d)) holder_of_string
 
+let record ?socket ~role ~what () =
+  Yojson.Safe.to_string (holder_json { pid = Pid.self (); role; what; socket })
+
+(* ios §2: a record naming a live process holds the domain, this one
+   included. *)
+let acquire_record ?socket ~role ~what d =
+  let name = Domain_name.to_string d in
+  Mutex.protect recorded @@ fun () ->
+  match holder d with
+    | Some h
+      when Hashtbl.mem recorded_here name
+           || (h.pid <> Pid.self () && Pid.alive h.pid) ->
+        Error (Some h)
+    | _ ->
+        let path = Paths.ownership_lock d in
+        Fs.mkdir_p ~perm:0o700 (Filename.dirname path);
+        Fs.durable_replace ~perm:0o600 path (record ?socket ~role ~what ());
+        Hashtbl.replace recorded_here name ();
+        Ok (Record d)
+
 (* 07 §2.3: flock on a close-on-exec descriptor is released only by the
    holder's exit, never by an unrelated close. *)
 let acquire ?socket ~role ~what d =
-  match Fs.lifetime_lock (Paths.ownership_lock d) with
-    | None -> Error (holder d)
-    | Some fd -> (
-        (* Pitfall C-7.10: closing the descriptor releases the lock, which a
+  if Atomic.get records_only then acquire_record ?socket ~role ~what d
+  else (
+    match Fs.lifetime_lock (Paths.ownership_lock d) with
+      | None -> Error (holder d)
+      | Some fd -> (
+          (* Pitfall C-7.10: closing the descriptor releases the lock, which a
            failed record write must not keep. *)
-          match
-            let record =
-              Yojson.Safe.to_string
-                (holder_json { pid = Pid.self (); role; what; socket })
-            in
-            Unix.ftruncate fd 0;
-            ignore (Unix.lseek fd 0 SEEK_SET);
-            Fs.write_all fd record
-          with
-          | () -> Ok fd
-          | exception e ->
-              Fs.close fd;
-              raise e)
+            match
+              let record = record ?socket ~role ~what () in
+              Unix.ftruncate fd 0;
+              ignore (Unix.lseek fd 0 SEEK_SET);
+              Fs.write_all fd record
+            with
+            | () -> Ok (Kernel fd)
+            | exception e ->
+                Fs.close fd;
+                raise e))
 
-let release fd =
-  Fs.funlock fd;
-  Unix.close fd
+let release = function
+  | Kernel fd ->
+      Fs.funlock fd;
+      Unix.close fd
+  | Record d ->
+      Mutex.protect recorded (fun () ->
+          Hashtbl.remove recorded_here (Domain_name.to_string d);
+          Fs.unlink_quiet (Paths.ownership_lock d))
 
 let stop_on_signals ?second () =
   let stop what =

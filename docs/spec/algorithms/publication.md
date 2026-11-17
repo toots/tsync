@@ -245,6 +245,12 @@ FETCH() → entries | PRUNED:
 - An entry that does not decode, or whose version this client does not know
   ([03](../03-journal-sync.md) §2.4), cannot be merged. If the tree head has passed it, the client
   arrives by state (§4.7). Otherwise it stops fetching and pushing, and reports the entry.
+  - Every reader that merges entries does this, whatever it reads them for: an arrival, a pull of
+    one folder of a lazy tree (§4.11), or one read shared by several folders, each of which then
+    reads its folder by state. An entry is never passed over: what it held is unknown, so going
+    past it can lose any change, in any folder.
+  - It guards against an entry damaged in the store or by a faulty writer, and against an entry of
+    a later version.
 - **A voided entry.** An entry that does not decode and whose void object exists
   ([03](../03-journal-sync.md) §2.6) reads, for every reader of the log (a fetch, a state read, a
   projection, a collection), as an entry with no command and no author. A client stopped at an

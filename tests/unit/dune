@@ -276,6 +276,28 @@
   (diff file_times_test.expected file_times_test.output)))
 
 (executable
+ (name cache_mapped_test)
+ (modules cache_mapped_test)
+ (libraries test_support tsync_core tsync_checkout unix))
+
+; The mapping is read from /proc/self/maps, which only Linux has.
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   cache_mapped_test.output
+   (run ./cache_mapped_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff cache_mapped_test.expected cache_mapped_test.output)))
+
+(executable
  (name staged_whole_test)
  (modules staged_whole_test)
  (libraries tsync_core tsync_checkout unix))

@@ -237,6 +237,10 @@ let build_info () =
   say "extensions: %s" (String.concat ", " Config.extension_names);
   say "share previews: %s"
     (if Share_preview.available () then "ffmpeg" else "none");
+  say "push: %s"
+    (match Tsync_http.Http2.implementation () with
+      | Some (name, _) -> name
+      | None -> "none");
   say "service log: %s" (String.concat " " (log_reader ()));
   say "config: %s" (Paths.config_file ());
   say "data: %s" (Paths.data_dir ());
