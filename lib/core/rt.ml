@@ -81,10 +81,20 @@ let scheduler : execution Duppy.scheduler =
     ~rank ~classify:Fun.id ()
 
 let start_lock = Mutex.create ()
+let workers = ref (max 2 (min 8 (Domain.recommended_domain_count ())))
+let max_blocking = ref 256
+
+let configure ?workers:w ?max_blocking:b () =
+  if w <> None || b <> None then
+    Mutex.protect start_lock (fun () ->
+        if Duppy.started scheduler then
+          invalid_arg "Rt.configure: the scheduler has started";
+        Option.iter (fun n -> workers := n) w;
+        Option.iter (fun n -> max_blocking := n) b)
 
 (* Started lazily: spawning domains makes fork fail, so nothing may start them
-   before a process has finished daemonizing. The pool starts on two domains
-   and keeps those a burst adds; the blocking threads a burst starts exit once
+   before a process has finished daemonizing. The pool starts on two domains,
+   or [workers] if fewer, and keeps those a burst adds; the blocking threads a burst starts exit once
    unused, down to one per domain. *)
 let ensure_started () =
   if not (Duppy.started scheduler) then
@@ -92,9 +102,8 @@ let ensure_started () =
         if not (Duppy.started scheduler) then (
           Memtrace_hook.start ();
           Duppy.start
-            ~pool:
-              (`Growing (2, max 2 (min 8 (Domain.recommended_domain_count ()))))
-            ~max_blocking:256 scheduler))
+            ~pool:(`Growing (min 2 !workers, !workers))
+            ~max_blocking:!max_blocking scheduler))
 
 let now = Duppy.time
 

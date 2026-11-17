@@ -41,3 +41,11 @@ val release : unit -> unit
     only a compaction does, and a heap growing with live data has none to give.
 *)
 val release_if_fragmented : ?free:int -> unit -> unit
+
+(** The growth {!compact_if_grown} allows: 64 MiB unless the host set it
+    (android §4.1 item 7). *)
+val set_release_growth : int -> unit
+
+(** {!release} when the heap grew past the release growth since the last
+    {!release}, else nothing: cheap enough to follow every request. *)
+val compact_if_grown : unit -> unit

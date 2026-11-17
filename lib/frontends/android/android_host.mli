@@ -4,10 +4,20 @@
 
 open Tsync_owner
 
-(** What the host provides before the core initialises (android §4.1): its trust
-    store and its one transfer root. Marks this process as an embedding host,
-    which refuses cleartext to anything but loopback. *)
-val init : trust_store:string -> transfer_root:string -> unit
+(** A host's resource bounds (android §4.1 item 7); [None] keeps the default.
+    [release_growth] is in bytes. *)
+type bounds = {
+  workers : int option;
+  may_block : int option;
+  release_growth : int option;
+}
+
+(** What the host provides before the core initialises (android §4.1): its
+    bounds, trust store and one transfer root. Marks this process as an
+    embedding host, which refuses cleartext to anything but loopback. Raises
+    [Invalid_argument] when bounds come after the scheduler started. *)
+val init :
+  ?bounds:bounds -> trust_store:string -> transfer_root:string -> unit -> unit
 
 (** [""] when the config, or the [candidate] text in its place, loads and names
     the domain ([""]: its only one). Starts nothing and takes no lock. *)

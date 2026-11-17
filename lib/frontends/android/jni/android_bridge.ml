@@ -21,8 +21,18 @@ let with_domain f arg =
   f domain (Option.value ~default:"" rest)
 
 let () =
-  Callback.register "tsync_init" (fun trust_store transfer_root ->
-      try Android_host.init ~trust_store ~transfer_root with _ -> ());
+  Callback.register "tsync_init"
+    (fun trust_store transfer_root workers may_block release_growth ->
+      let given n = if n > 0 then Some n else None in
+      let bounds =
+        {
+          Android_host.workers = given workers;
+          may_block = given may_block;
+          release_growth = given release_growth;
+        }
+      in
+      try Android_host.init ~bounds ~trust_store ~transfer_root ()
+      with e -> Tsync_core.Log.warn "init: %s" (Printexc.to_string e));
   Callback.register "tsync_check_config"
     (text (fun arg ->
          let domain, candidate = split arg in

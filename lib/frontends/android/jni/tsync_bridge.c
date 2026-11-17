@@ -94,13 +94,17 @@ char *tsync_bridge_text(const char *name, const char *arg, size_t arg_length,
   return text;
 }
 
-void tsync_bridge_init(const char *trust_store, const char *transfer_root) {
+void tsync_bridge_init(const char *trust_store, const char *transfer_root,
+                       long workers, long may_block, long release_growth) {
   enter_ocaml();
   CAMLparam0();
-  CAMLlocal2(_trust_store, _transfer_root);
-  _trust_store = caml_copy_string(trust_store);
-  _transfer_root = caml_copy_string(transfer_root);
-  caml_callback2_exn(*entry("init"), _trust_store, _transfer_root);
+  CAMLlocalN(_arguments, 5);
+  _arguments[0] = caml_copy_string(trust_store);
+  _arguments[1] = caml_copy_string(transfer_root);
+  _arguments[2] = Val_long(workers);
+  _arguments[3] = Val_long(may_block);
+  _arguments[4] = Val_long(release_growth);
+  caml_callbackN_exn(*entry("init"), 5, _arguments);
   CAMLdrop;
   leave_ocaml();
 }
