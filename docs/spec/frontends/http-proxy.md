@@ -158,6 +158,8 @@ With the `push_*` options set, the listener tells the iOS clients of a domain wh
   `push_registration_max_age`.
 - **Trigger.** When a create under the domain's log prefix is won, beside the answer and never
   awaited by it, every registration of the domain except the entry's `author`'s is due a push.
+  An upload that commits a write ([§A4.8](#a48-whole-file-uploads)) makes every registration of the domain due
+  one, the uploading phone's included: no File Provider of its wrote the file.
 - **Coalescing.** A registration gets at most one push per `push_coalesce`. A push due inside that
   interval is sent at its end, once, however many entries were won meanwhile.
 - **Sending.** An HTTP/2 POST to `https://api.push.apple.com/3/device/<token>`, or

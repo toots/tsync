@@ -16,8 +16,14 @@ type route = {
 
 type t
 
-(** [routes]: every domain the listener serves. [count] adds to a tally. *)
-val create : dir:string -> count:(string -> int -> unit) -> route list -> t
+(** [routes]: every domain the listener serves. [count] adds to a tally. [wrote]
+    follows a commit that wrote the domain. *)
+val create :
+  dir:string ->
+  count:(string -> int -> unit) ->
+  wrote:(Domain_name.t -> unit) ->
+  route list ->
+  t
 
 val max_upload_size : int
 

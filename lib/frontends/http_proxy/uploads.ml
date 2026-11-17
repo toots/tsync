@@ -33,13 +33,21 @@ type t = {
   dir : string;
   routes : route list;
   count : string -> int -> unit;
+  wrote : Domain_name.t -> unit;
   receiving : (string, unit) Hashtbl.t;
   lock : Mutex.t;
 }
 
-let create ~dir ~count routes =
+let create ~dir ~count ~wrote routes =
   Fs.mkdir_p ~perm:0o700 dir;
-  { dir; routes; count; receiving = Hashtbl.create 8; lock = Mutex.create () }
+  {
+    dir;
+    routes;
+    count;
+    wrote;
+    receiving = Hashtbl.create 8;
+    lock = Mutex.create ();
+  }
 
 let takes t domain =
   List.exists (fun r -> r.takes && Domain_name.equal r.domain domain) t.routes
@@ -257,6 +265,7 @@ let commit t route id r =
                    await = false;
                  })
           in
+          t.wrote route.domain;
           match w.aside with Some row -> at row.name | None -> r.path)
   in
   let c = { content_id = h1; path; size } in

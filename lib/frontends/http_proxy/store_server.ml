@@ -139,7 +139,12 @@ let create ?max_concurrent ?listener ?push ?uploads routes =
     }
   in
   t.push <- Option.map (fun make -> make (count t)) push;
-  t.uploads <- Option.map (fun make -> make (add t)) uploads;
+  t.uploads <-
+    Option.map
+      (fun make ->
+        make (add t) (fun domain ->
+            Option.iter (fun p -> Push.changed p domain) t.push))
+      uploads;
   t
 
 let text = Server.text
@@ -703,7 +708,7 @@ let changed push domain body =
   match Yojson.Safe.from_string (Bigstring.to_string body) with
     | `Assoc l -> (
         match List.assoc_opt "author" l with
-          | Some (`String author) -> Push.changed push domain ~author
+          | Some (`String author) -> Push.changed ~author push domain
           | _ -> ())
     | _ | (exception Yojson.Json_error _) -> ()
 
@@ -1588,8 +1593,8 @@ let run config =
                    bindings
                then
                  Some
-                   (fun count ->
-                     Uploads.create ~count
+                   (fun count wrote ->
+                     Uploads.create ~count ~wrote
                        ~dir:
                          (Filename.concat
                             (Tsync_config.Paths.data_dir ())

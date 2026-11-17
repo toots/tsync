@@ -315,7 +315,7 @@ let due t domain (r : registration) =
             Some (Float.max 0. (p.last +. t.params.coalesce -. now)))
   |> Option.iter send_after
 
-let changed t domain ~author =
+let changed ?author t domain =
   let domain = Domain_name.to_string domain in
   let now = Unix.gettimeofday () in
   let live, stale =
@@ -323,7 +323,7 @@ let changed t domain ~author =
         Hashtbl.fold
           (fun _ r (live, stale) ->
             if now -. r.registered > t.params.max_age then (live, r :: stale)
-            else if r.client = author then (live, stale)
+            else if Some r.client = author then (live, stale)
             else (r :: live, stale))
           (clients t domain) ([], []))
   in

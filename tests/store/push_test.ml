@@ -265,6 +265,11 @@ let () =
       commit (List.hd others);
       Rt.sleep 0.2;
       p "pushed to: %s\n" (tokens (take ()));
+      p "\n== a change by no client: an upload's\n";
+      Rt.sleep 0.6;
+      Push.changed push d;
+      Rt.sleep 0.2;
+      p "pushed to: %s\n" (tokens (take ()));
       p "\n== a token APNs says is gone\n";
       Hashtbl.replace answers
         (token (List.nth others 1))
