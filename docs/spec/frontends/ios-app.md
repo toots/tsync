@@ -42,6 +42,8 @@ domain**.
   in Files: Browse, then More, then Edit") and is asked nothing.
 - The recent warnings and errors are the extension process's: one the system ended takes them with
   it, and the core log (§5, Diagnostics) keeps them.
+- Camera backup's row ([activity §3](activity.md#3-below-the-domains)) is §8.6's status line with
+  **Back up now**.
 - Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
   to the extension.
 
@@ -313,7 +315,8 @@ again: the extension's content-addressed chunks send none of them twice.
 android-app §11.5's names: `Camera Uploads/<yyyy>/<yyyy-MM-dd HH.mm.ss>[ (n)]<.ext>`, time =
 `creationDate` in the phone's time zone at first sight, frozen with the record. The extension is the
 main resource's `originalFilename`'s by §11.5's rule, frozen too: a later edit is written under the
-same name. A stem is taken when a record holds it in that domain or a file is at either of its names;
+same name, and a Live Photo video an asset gains after it was recorded is not written, having no
+name. A stem is taken when a record holds it in that domain or a file is at either of its names;
 `(n)` runs up to `max_name_attempts`.
 
 ### 8.6 Access, controls, schedule and gate
@@ -326,6 +329,8 @@ same name. A stem is taken when a record holds it in that domain or a file is at
   on); "Not when the battery is low" (default on); "Back up now". Enabling asks "Everything" or
   "From now on", then for access; backup is on only once access is granted. "From now on" first
   runs a baseline full discovery (§8.3); if it cannot complete, backup stays off and says why.
+  "Everything" turns every `BASELINE` record back to `PENDING`, so an earlier "From now on" leaves
+  nothing out.
   Turning backup off cancels the pass. A target domain the config no longer names asks for another
   and writes nothing until one is picked.
 - **Schedule**. One pass at a time, process-wide; a pass asked for during one is run after it.
