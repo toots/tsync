@@ -133,10 +133,9 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
                 try records.delete(record.id)
                 continue
             }
-            // §8.5: a Live Photo video the asset gained after it was recorded has no name.
-            var parts = [("main", main)]
-            if let paired, record.pairedExt != nil { parts.append(("paired", paired)) }
-            var made: [(String, String)] = []
+            var parts = [(CameraRecords.Record.Part.main, main)]
+            if let paired, record.name(.paired) != nil { parts.append((.paired, paired)) }
+            var made: [(String, CameraRecords.Record.Part)] = []
             do {
                 try library.performChangesAndWait {
                     for (part, resource) in parts {
@@ -162,12 +161,11 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
     }
 
     private func destination(
-        _ record: CameraRecords.Record, part: String, asset: PHAsset, _ target: UploadTarget
+        _ record: CameraRecords.Record, part: CameraRecords.Record.Part, asset: PHAsset, _ target: UploadTarget
     ) -> URLRequest? {
-        let ext = part == "paired" ? record.pairedExt ?? "" : record.ext
-        let base = record.written ? (part == "paired" ? record.pairedContentId : record.contentId) : nil
+        guard let path = record.name(part) else { return nil }
         return target.destination(
-            path: record.stem + (ext.isEmpty ? "" : "." + ext), created: asset.creationDate, base: base,
+            path: path, created: asset.creationDate, base: record.written ? record.contentId(part) : nil,
             wifiOnly: CameraPreferences.wifiOnly)
     }
 }

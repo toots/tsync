@@ -260,13 +260,12 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     private func fillContentIds(_ domain: String) async {
         guard let records = try? CameraRecords() else { return }
         for record in records.writtenWithoutContent() where record.domain == domain {
-            func contentId(_ ext: String?) async -> String? {
-                guard let ext else { return nil }
-                let path = record.stem + (ext.isEmpty ? "" : "." + ext)
+            func contentId(_ part: CameraRecords.Record.Part) async -> String? {
+                guard let path = record.name(part) else { return nil }
                 return (try? await FileStore.owner(domain, "stat", ["rel": path]))?["contentId"] as? String
             }
-            guard let main = await contentId(record.ext) else { continue }
-            try? records.setContent(record.id, contentId: main, pairedContentId: await contentId(record.pairedExt))
+            guard let main = await contentId(.main) else { continue }
+            try? records.setContent(record.id, contentId: main, pairedContentId: await contentId(.paired))
         }
     }
 

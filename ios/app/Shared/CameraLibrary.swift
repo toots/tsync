@@ -19,12 +19,22 @@ final class CameraRecords {
         /// §8.7: each file's content as last uploaded, the base of a write again.
         let contentId: String?
         let pairedContentId: String?
+
+        enum Part: String { case main, paired }
+
+        /// §8.5: nil for a Live Photo video the asset gained after it was recorded.
+        func name(_ part: Part) -> String? {
+            guard let ext = part == .main ? ext : pairedExt else { return nil }
+            return ext.isEmpty ? stem : "\(stem).\(ext)"
+        }
+
+        func contentId(_ part: Part) -> String? { part == .main ? contentId : pairedContentId }
     }
 
     /// §8.7: a job the system holds.
     struct Job {
         let asset: String
-        let part: String
+        let part: Record.Part
         /// The asset's modification date when the job was made.
         let modified: Int64
         let retries: Int64
@@ -177,13 +187,13 @@ final class CameraRecords {
 
     func uploading(_ id: String) throws { try exec("UPDATE asset SET state = 'UPLOADING' WHERE id = ?", [id]) }
 
-    func addJob(_ id: String, asset: String, part: String, modified: Int64) throws {
-        try exec("INSERT OR REPLACE INTO job (id, asset, part, modified) VALUES (?, ?, ?, ?)", [id, asset, part, modified])
+    func addJob(_ id: String, asset: String, part: Record.Part, modified: Int64) throws {
+        try exec("INSERT OR REPLACE INTO job (id, asset, part, modified) VALUES (?, ?, ?, ?)", [id, asset, part.rawValue, modified])
     }
 
     func job(_ id: String) -> Job? {
         rows("SELECT asset, part, modified, retries FROM job WHERE id = ?", [id]).first.map {
-            Job(asset: $0[0] as! String, part: $0[1] as! String, modified: $0[2] as! Int64, retries: $0[3] as! Int64)
+            Job(asset: $0[0] as! String, part: Record.Part(rawValue: $0[1] as! String) ?? .main, modified: $0[2] as! Int64, retries: $0[3] as! Int64)
         }
     }
 
@@ -194,7 +204,7 @@ final class CameraRecords {
     /// A part committed: its content id kept; the asset's last part makes it
     /// `DONE`, or `PENDING` again when it changed since its jobs were made.
     func committed(job id: String, _ job: Job, contentId: String) throws {
-        let column = job.part == "paired" ? "paired_content_id" : "content_id"
+        let column = job.part == .paired ? "paired_content_id" : "content_id"
         try exec("UPDATE asset SET \(column) = ? WHERE id = ?", [contentId, job.asset])
         try exec("DELETE FROM job WHERE id = ?", [id])
         guard rows("SELECT 1 FROM job WHERE asset = ?", [job.asset]).isEmpty else { return }
