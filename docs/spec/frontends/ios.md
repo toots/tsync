@@ -4,8 +4,8 @@ Scope: tsync on iOS: which process owns a domain, where its files live, what the
 core, how the File Provider framework is served from Android's lazy tree, and the service through
 which the app and the credential provider reach a domain's owner (§5.4). The app's screens, the
 vault's included, are [ios-app.md](ios-app.md)'s; AutoFill is
-[passwords/ios.md](../extensions/passwords/ios.md)'s; the rest (Save to tsync, camera backup) is
-[§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
+[passwords/ios.md](../extensions/passwords/ios.md)'s; Save to tsync is
+[ios-app §7](ios-app.md#7-save-to-tsync)'s; camera backup is [§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
 ([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
 
 This page is a delta. What it does not restate is owned by:
@@ -41,6 +41,7 @@ So:
 | File Provider extension | the system, on any use of a domain | yes, each domain at the first callback naming it | every callback, by direct calls ([android.md §5](android.md#5-the-bridge)) |
 | App | the user | never | `check_config` with a candidate, `setup_link` and `vault_derive`, which take no lock and write nothing; everything else through the service (§5.4) |
 | Credential provider extension | the system, on an AutoFill request | never | nothing: every request through the service (§5.4) |
+| Share extension | the user, from a share sheet ([ios-app §7](ios-app.md#7-save-to-tsync)) | never | nothing: it writes through the file system, which reaches the File Provider extension |
 
 - Ownership follows [android.md §2](android.md#2-ownership-and-process-model): held for the life of
   the process; no stop and no drain; process death is a crash-stop and the next boot recovers.
@@ -74,6 +75,7 @@ So:
 | App | `TSYNC_APP_ID` |
 | File Provider extension | `$(TSYNC_APP_ID).fileprovider` |
 | Credential provider extension | `$(TSYNC_APP_ID).credentials` |
+| Share extension | `$(TSYNC_APP_ID).share` |
 | Keychain access group | `$(TSYNC_TEAM_ID).$(TSYNC_APP_ID)`, held by the app and the File Provider extension (§4.1) |
 | App Group | `TSYNC_APP_GROUP` |
 | Push environment | `TSYNC_APS_ENVIRONMENT`: `development` for a build installed from a Mac, `production` for a TestFlight or App Store build ([10 §5.6](../10-delivery.md#56-ios-signing-and-testflight)) |
@@ -339,9 +341,8 @@ addition:
 
 Each becomes a section above before its code.
 
-1. The share extension (Save to tsync).
-2. A screen lock while the app is not running, for a vault whose policy sets `onScreenLock` (§4.1).
-3. Camera backup with PhotoKit's change tracking.
-4. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
+1. A screen lock while the app is not running, for a vault whose policy sets `onScreenLock` (§4.1).
+2. Camera backup with PhotoKit's change tracking.
+3. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
-5. Open on a device: the extension's limit on the oldest supported device.
+4. Open on a device: the extension's limit on the oldest supported device.

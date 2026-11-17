@@ -11,7 +11,7 @@ This page is a delta on [android-app.md](android-app.md). It applies:
 
 - §10.8, the Vault screen, as §6 says.
 
-Nothing else of android-app.md applies. Activity, Saving into the domain, Camera backup and
+Nothing else of android-app.md applies. Saving into the domain is §7; Activity, Camera backup and
 Storage are [ios.md §9](ios.md#9-not-yet-specified).
 
 ---
@@ -171,7 +171,34 @@ service ([ios.md §5.4](ios.md#54-the-service)). What differs:
   `vault_lock` with `reason: "screen"` to every domain that uses an extension
   ([vault §6.2](../extensions/vault.md#62-auto-lock)).
 
-## 7. Conformance
+## 7. Save to tsync
+
+A share extension, labelled "Save to tsync", that saves what another app shares into a domain. It
+writes through the file system, as Files' own Save to Files does, so it links no core and keeps no
+queue: the system hands each file to the domain's File Provider extension as a new item, and keeps
+it until that extension has taken it.
+
+- **What it accepts**: one to 100 items the sharing app offers as files, images or movies. Text and
+  web pages alone do not offer it.
+- **The sheet**: the domain (a picker when several are configured and turned on in Files), the folder,
+  and for a single item its name, editable. The folder is the last one saved to in that domain,
+  kept in the App Group's shared defaults by its path, else the domain's root; **Choose folder**
+  lists folders from the root down, with **New folder**. A remembered folder that no longer exists
+  falls back to the root. **Save** and **Cancel**.
+- **Writing**: each item is copied, with a coordinated write, to the folder's user-visible URL
+  (`NSFileProviderManager.getUserVisibleURL`) under its name; a name already taken there gets the
+  first free one, as the app's upload picks it ([android-app §5](android-app.md#5-talking-to-the-core)):
+  `report (1).pdf`. An item the sharing app offers only as data is written from that
+  data. The sheet completes the request only once every write has returned: the system then holds
+  the bytes, and a kill of either extension loses nothing.
+- **Failure**: a write refused (the domain turned off in Files, no space) is shown with its reason
+  and the item's name; the others are kept, and **Done** closes the sheet. Nothing is retried by
+  the extension.
+- **Afterwards**: the files appear in the folder at once, waiting to upload as any new file does;
+  the share extension does not wait for the upload.
+- It holds no secret and logs no file name at a level the system keeps.
+
+## 8. Conformance
 
 - With no config, only Setup is shown; a config that does not load shows Setup and the core's
   message. With a config, the app opens on Files.
@@ -202,3 +229,6 @@ service ([ios.md §5.4](ios.md#54-the-service)). What differs:
 - Files, on a device: share link answers a URL that downloads the file; make available offline
   marks the file *pinned*, and with the server away the file still opens; remove download clears
   the mark and the file is *online only*.
+- Save to tsync, on a device: three photos shared from Photos to a remembered folder appear there
+  in the app and in the Files app, and upload; a photo shared again under a taken name is saved as
+  its first free name; with the domain turned off in Files the sheet says so and saves nothing.

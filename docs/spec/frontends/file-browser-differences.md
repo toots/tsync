@@ -72,7 +72,7 @@ main thread. What the file system cannot carry goes to the owner through the ext
 - **Domains.** A domain turned off in Files is not opened: its row says "Turned off in Files" and
   how to turn it on ([ios-app §4](ios-app.md#4-setup)).
 - **Trail.** Kept as paths from the domain's root, restored when the app is started again.
-- **No save into the domain** from other apps: the share extension is ios.md §9 item 2.
+- **Save into the domain** from other apps is the share extension of [ios-app §7](ios-app.md#7-save-to-tsync), not the browser's.
 
 | Parameter | Default | Note |
 |---|---|---|
