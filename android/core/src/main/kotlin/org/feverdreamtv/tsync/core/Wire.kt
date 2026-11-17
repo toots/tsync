@@ -96,7 +96,7 @@ data class Counts(val done: Int, val failed: Int)
 
 data class ShareLink(val url: String, val expires: Long)
 
-data class Upload(val name: String, val size: Long?)
+data class Upload(val name: String, val size: Long?, val bytes: Long = 0, val rate: Double = 0.0)
 
 data class Download(val name: String, val bytes: Long, val size: Long, val rate: Double)
 
@@ -109,6 +109,10 @@ data class Status(
     val uploading: List<Upload>,
     val downloading: List<Download>,
     val pendingBytes: Long,
+    /** Why the domain is not syncing, when it is not. */
+    val failing: String? = null,
+    /** The reply itself, for Copy report (activity §2.6). */
+    val raw: String = "",
 )
 
 /** What the owner's `stats` report says about this domain's local storage and stuck work. */
@@ -120,7 +124,82 @@ data class Stats(
     /** 05 §2.1 rule 5: in force, and whether they are the server's list. */
     val extensions: List<String> = emptyList(),
     val extensionsFromServer: Boolean = false,
+    val maxCache: Long? = null,
+    val mainOffline: Boolean = false,
+    val setAside: Int = 0,
+    val syncPending: Int = 0,
+    val syncFailing: String? = null,
+    val cannotFollow: CannotFollow? = null,
+    val versioning: Boolean? = null,
+    val readOnly: Boolean? = null,
+    val symlinks: String? = null,
+    val chunkSize: Long? = null,
+    val stores: List<StoreReport> = emptyList(),
+    val recentErrors: List<LogLine> = emptyList(),
+    /** The owner process's own RAM (status text's `own_ram`). */
+    val ownRam: Long? = null,
+    /** The reply itself, for Copy report (activity §2.6). */
+    val raw: String = "",
 )
+
+data class CannotFollow(val entry: Int, val reason: String)
+
+data class LogLine(val time: Double, val level: String, val message: String)
+
+/** One of the domain's stores as `stats` reports it (activity §2.4). */
+data class StoreReport(
+    val name: String,
+    val role: String?,
+    val reachable: Boolean?,
+    val latencyMs: Double?,
+    val unreachable: String?,
+    val down: Boolean,
+    val heldForSeconds: Double,
+    val failures: Int,
+    val downReason: String?,
+    val damagedChunks: Int,
+    val damagedTruncated: Boolean,
+    val freeBytes: Long?,
+    val totalBytes: Long?,
+    val copiesOwed: Int,
+    val copiesRate: Double,
+    val copying: String?,
+    val copyChecked: Int,
+    val copyChunks: Int,
+) {
+    val hasProblem: Boolean get() = down || reachable == false || damagedChunks > 0
+
+    internal companion object {
+        fun of(o: JSONObject): StoreReport {
+            val reach = o.optJSONObject("reach")
+            val health = o.optJSONObject("health")
+            val corrupted = o.optJSONObject("corrupted")
+            val disk = o.optJSONObject("disk")
+            val copies = o.optJSONObject("copies")
+            val job = copies?.optJSONObject("current")
+            return StoreReport(
+                name = o.optString("name", ""),
+                role = text(o, "role"),
+                reachable = reach?.takeIf { it.has("reachable") }?.optBoolean("reachable"),
+                latencyMs = reach?.takeIf { it.has("latencyMs") }?.optDouble("latencyMs"),
+                unreachable = reach?.let { text(it, "error") },
+                down = health?.optString("state") == "down",
+                heldForSeconds = health?.optDouble("heldForSeconds", 0.0) ?: 0.0,
+                failures = health?.optInt("failures", 0) ?: 0,
+                downReason = health?.let { text(it, "reason") },
+                damagedChunks = if (corrupted?.optBoolean("checked", false) == true) corrupted.optInt("chunks", 0) else 0,
+                damagedTruncated = corrupted?.optBoolean("truncated", false) ?: false,
+                freeBytes = disk?.takeIf { it.has("freeBytes") }?.optLong("freeBytes"),
+                totalBytes = disk?.takeIf { it.has("totalBytes") }?.optLong("totalBytes"),
+                copiesOwed = copies?.optInt("owed", 0) ?: 0,
+                copiesRate = copies?.optDouble("jobsPerSec", 0.0) ?: 0.0,
+                copying = job?.let { text(it, "path") ?: text(it, "job") },
+                copyChecked = job?.optInt("checked", 0) ?: 0,
+                copyChunks = job?.optInt("chunks", 0) ?: 0,
+            )
+        }
+    }
+}
 
 /** android §3.2 rule 1; [BACKGROUND] answers the last view at once. */
 enum class Pull(val wire: String?) { DEFAULT(null), NOW("now"), NEVER("never"), BACKGROUND("background") }
@@ -257,11 +336,15 @@ class Client(private val core: Core) {
             paused = reply.optBoolean("paused", false),
             pendingUploads = reply.optInt("pendingUploads", 0),
             pendingDownloads = reply.optInt("pendingDownloads", 0),
-            uploading = objects(reply.optJSONArray("uploading")).map { Upload(it.optString("name", ""), if (it.has("size")) it.optLong("size") else null) },
+            uploading = objects(reply.optJSONArray("uploading")).map {
+                Upload(it.optString("name", ""), if (it.has("size")) it.optLong("size") else null, it.optLong("bytes", 0), it.optDouble("rate", 0.0))
+            },
             downloading = objects(reply.optJSONArray("downloading")).map {
                 Download(it.optString("name", ""), it.optLong("bytes", 0), it.optLong("size", 0), it.optDouble("rate", 0.0))
             },
             pendingBytes = reply.optLong("pendingBytes", 0),
+            failing = text(reply, "failing")?.takeIf { it.isNotEmpty() },
+            raw = reply.toString(2),
         )
     }
 
@@ -272,6 +355,9 @@ class Client(private val core: Core) {
         val queues = body.optJSONObject("queues")
         val settings = body.optJSONObject("settings")
         val extensions = settings?.optJSONArray("extensions")
+        val sync = body.optJSONObject("sync")
+        val self = reply.optJSONObject("self")
+        val usage = self?.optJSONObject("process")
         return Stats(
             cacheBytes = cache?.takeIf { it.has("bytes") }?.optLong("bytes"),
             pinnedBytes = cache?.takeIf { it.has("pinnedBytes") }?.optLong("pinnedBytes"),
@@ -279,6 +365,22 @@ class Client(private val core: Core) {
             lastError = queues?.let { text(it, "lastError") }?.takeIf { it.isNotEmpty() },
             extensions = if (extensions == null) emptyList() else (0 until extensions.length()).map { extensions.optString(it) },
             extensionsFromServer = settings?.optJSONObject("domainWide")?.optString("extensions") == "main",
+            maxCache = cache?.takeIf { it.has("maxCache") && !it.isNull("maxCache") }?.optLong("maxCache"),
+            mainOffline = body.optBoolean("mainOffline", false),
+            setAside = body.optInt("setAside", 0),
+            syncPending = sync?.optInt("pending", 0) ?: 0,
+            syncFailing = sync?.let { text(it, "failing") }?.takeIf { it.isNotEmpty() },
+            cannotFollow = sync?.optJSONObject("cannotFollow")?.let { CannotFollow(it.optInt("entry"), it.optString("reason")) },
+            versioning = settings?.takeIf { it.has("versioning") }?.optBoolean("versioning"),
+            readOnly = settings?.takeIf { it.has("readOnly") }?.optBoolean("readOnly"),
+            symlinks = settings?.let { text(it, "symlinks") },
+            chunkSize = settings?.takeIf { it.has("chunkSize") }?.optLong("chunkSize"),
+            stores = objects(body.optJSONArray("backends")).map(StoreReport::of),
+            recentErrors = objects(self?.optJSONArray("recentErrors")).map {
+                LogLine(it.optDouble("t", 0.0), it.optString("level", ""), it.optString("message", ""))
+            },
+            ownRam = usage?.let { u -> if (u.has("anonymousBytes") && !u.isNull("anonymousBytes")) u.optLong("anonymousBytes") else u.takeIf { it.has("privateBytes") }?.optLong("privateBytes") },
+            raw = reply.toString(2),
         )
     }
 

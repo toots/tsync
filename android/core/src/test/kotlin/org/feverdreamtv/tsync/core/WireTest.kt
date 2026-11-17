@@ -170,7 +170,16 @@ class WireTest {
         assertEquals("Wire Suite", status.domain)
         assertFalse(status.readOnly)
         client.retry()
-        client.stats()
+        val stats = client.stats()
+        // activity §1: the fields the Activity screen draws come out of a real reply.
+        assertEquals(listOf("store"), stats.stores.map { it.name })
+        assertEquals(true, stats.stores.single().reachable)
+        assertFalse(stats.stores.single().hasProblem)
+        assertNotNull(stats.cacheBytes)
+        assertNotNull(stats.versioning)
+        assertNotNull(stats.ownRam)
+        assertTrue(stats.raw.contains("\"backends\""))
+        assertTrue(status.raw.contains("\"pendingUploads\""))
         assertTrue(core.status().isNotBlank())
     }
 

@@ -89,7 +89,6 @@
     <string name="channel_open_files">Open files</string>
     <string name="channel_problems">Problems</string>
     <string name="state_connected">Connected</string>
-    <string name="state_offline">Offline</string>
     <string name="state_paused">Paused</string>
     <string name="state_read_only">Read-only</string>
     <string name="state_unknown">State unknown</string>
@@ -97,9 +96,6 @@
     <string name="resume">Resume</string>
     <string name="paused">Paused</string>
     <string name="resumed">Resumed</string>
-    <string name="uploads">Uploads</string>
-    <string name="downloads">Downloads</string>
-    <string name="no_downloads">Nothing is downloading</string>
     <string name="download_progress">%1$s of %2$s, %3$s/s</string>
     <string name="problems">Problems</string>
     <string name="no_problems">No problems</string>
@@ -186,10 +182,6 @@
     <plurals name="uploads_waiting">
         <item quantity="one">%1$d more waiting, %2$s to upload</item>
         <item quantity="other">%1$d more waiting, %2$s to upload</item>
-    </plurals>
-    <plurals name="parked_changes">
-        <item quantity="one">%1$d change could not be published</item>
-        <item quantity="other">%1$d changes could not be published</item>
     </plurals>
     <plurals name="retried_changes">
         <item quantity="one">%1$d change retried</item>
@@ -295,4 +287,68 @@
     <string name="passkey_not_offered">tsync offers passkeys to the browsers it knows only.</string>
     <string name="passkey_sign_in">Sign in to %1$s</string>
     <string name="passkey_save">Save a passkey for %1$s</string>
+    <string name="activity_paused_text">Changes stay on this phone until you resume.</string>
+    <string name="activity_not_syncing">Not syncing</string>
+    <string name="activity_retried">%1$s. Retried until it works.</string>
+    <string name="activity_cannot_follow">Can\'t follow change %1$d: %2$s. Retried until it works.</string>
+    <string name="activity_store_offline">Store offline</string>
+    <string name="activity_store_offline_text">Opening files and uploading wait for the main store.</string>
+    <string name="activity_read_only_text">This domain can\'t be changed from this phone.</string>
+    <string name="activity_syncing">Syncing</string>
+    <string name="activity_up_to_date">Up to date</string>
+    <string name="activity_not_answering">Not answering: %1$s</string>
+    <string name="activity_transfers">Transfers</string>
+    <string name="activity_nothing_to_transfer">Nothing to transfer</string>
+    <string name="activity_set_aside_text">Kept and never run.</string>
+    <string name="activity_show_all">Show all %1$d</string>
+    <string name="activity_show_fewer">Show fewer</string>
+    <string name="activity_stores">Stores</string>
+    <string name="activity_connected_latency">Connected, %1$d ms</string>
+    <string name="activity_unreachable">Unreachable: %1$s</string>
+    <string name="activity_held_down">Paused after %1$d failures, for %2$s: %3$s</string>
+    <string name="activity_space">Space</string>
+    <string name="activity_space_value">%1$s free of %2$s</string>
+    <string name="activity_copy_rate">%1$.1f/s</string>
+    <string name="activity_this_device">This phone</string>
+    <string name="activity_cache">Cache</string>
+    <string name="activity_cache_value">%1$s of %2$s</string>
+    <string name="activity_kept_offline">%1$s kept offline</string>
+    <string name="activity_memory">tsync uses %1$s of memory</string>
+    <string name="activity_settings_in_force">Settings in force</string>
+    <string name="activity_versioning">Versioning</string>
+    <string name="activity_symlinks">Symbolic links</string>
+    <string name="activity_chunk_size">Chunk size</string>
+    <string name="activity_extensions">Extensions</string>
+    <string name="activity_none">None</string>
+    <string name="activity_on">On</string>
+    <string name="activity_off">Off</string>
+    <string name="activity_copy_report">Copy report</string>
+    <plurals name="activity_to_upload">
+        <item quantity="one">%1$d to upload</item>
+        <item quantity="other">%1$d to upload</item>
+    </plurals>
+    <plurals name="activity_to_download">
+        <item quantity="one">%1$d to download</item>
+        <item quantity="other">%1$d to download</item>
+    </plurals>
+    <plurals name="activity_more_waiting">
+        <item quantity="one">%1$d more waiting</item>
+        <item quantity="other">%1$d more waiting</item>
+    </plurals>
+    <plurals name="activity_parked">
+        <item quantity="one">%1$d upload waiting to be retried</item>
+        <item quantity="other">%1$d uploads waiting to be retried</item>
+    </plurals>
+    <plurals name="activity_set_aside">
+        <item quantity="one">%1$d unreadable record set aside</item>
+        <item quantity="other">%1$d unreadable records set aside</item>
+    </plurals>
+    <plurals name="activity_damaged">
+        <item quantity="one">%1$d damaged chunk</item>
+        <item quantity="other">%1$d damaged chunks</item>
+    </plurals>
+    <plurals name="activity_to_copy">
+        <item quantity="one">%1$d to copy</item>
+        <item quantity="other">%1$d to copy</item>
+    </plurals>
 </resources>
