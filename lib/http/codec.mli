@@ -32,6 +32,16 @@ val read_body :
   [ `Length of int | `Chunked | `Eof ] ->
   Tsync_core.Bigstring.t
 
+(** The same body handed to [emit] a piece at a time, each piece a view valid
+    only until [emit] returns. *)
+val stream_body :
+  ?timeout:float ->
+  limit:int ->
+  reader ->
+  [ `Length of int | `Chunked | `Eof ] ->
+  (Tsync_core.Bigstring.t -> unit) ->
+  unit
+
 (** How a message with these headers delimits its body. *)
 val framing : headers -> [ `Length of int | `Chunked | `Eof ]
 

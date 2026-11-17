@@ -235,6 +235,36 @@ Some clients are less privileged than the owner process (the sandboxed macOS ext
 - A listener serving plaintext MUST bind only loopback addresses unless its `bind` option names another address explicitly (a TLS terminator on another host). The operator accepts that hop.
 - A TLS listener loads its certificate and key at start; a missing or unreadable file is fatal to the listener.
 
+### 9.1 TLS implementations
+
+The core's HTTP client ([01 §10](../01-core.md#10-http-request-discipline)) makes every request decision: the requests, pooling, the redial, the stall timeout, retries, pacing, digests and signatures. A **TLS implementation** only carries bytes between that client and a verified peer. It is one of two kinds:
+
+- **over a core connection**: the core resolves the name and connects; the implementation runs the handshake and the session over the socket the core gives it;
+- **a platform connection**: the core gives the host, the port and the trust (system store or `ca_certificate` anchors); the platform resolves, connects and handshakes, and answers a byte stream to a verified peer.
+
+Both kinds hand the core the same stream: reads that wait for bytes, writes that wait until the bytes are accepted, and a close; the core can cancel either wait. Whichever the kind:
+
+- It MUST apply this section's trust rules: the system store by default, `ca_certificate` alone when a backend names one (so every implementation accepts custom anchors), hostname verification always, TLS 1.2 at least.
+- It carries only TLS. A plain connection is the core's own, and the cleartext rule above (with Android's loopback-only refusal) is checked by the core before any implementation is asked.
+- Connection setup is bounded by the core ([01 §10](../01-core.md#10-http-request-discipline)); on expiry the implementation's attempt is cancelled and its socket closed.
+- It maps its failures onto two answers: a certificate that does not verify (no trusted chain, a wrong name, an expired certificate) is REFUSED/other, since a retry will not change it; every other failure of resolution, connection, handshake or session is TRANSIENT/link ([failure-model §4.2](failure-model.md#42-http-object-stores)).
+- It need only be a client. Listeners use an implementation of the first kind that can serve.
+
+### 9.2 Implementation per host
+
+The default is the host's platform implementation. Its code and trust store are the platform's, shared by every process, so a client parses no CA bundle and keeps no handshake state of its own: on a host that bounds a process's memory well below the core's needs, that is what lets the core fit. Trust then follows the platform's own rules (managed roots, user trust settings, roots fetched on demand, revocation where the platform checks it).
+
+| Host | Platform implementation | Kind |
+|---|---|---|
+| iOS, macOS | Network.framework | a platform connection |
+| Android | none: the implementation's own, with the trust store the host gives ([android §4.1](../frontends/android.md#41-what-the-host-provides)) | over a core connection |
+| Windows | SChannel, MAY be absent; then OpenSSL reading the Windows root stores | over a core connection |
+| Linux and other Unix | OpenSSL with the system's CA bundle | over a core connection |
+
+The platform's own requirements on a server certificate apply under a private CA too. On Apple hosts a certificate issued after 1 July 2019 must be valid for 825 days at most and name `serverAuth` in its extended key usage, or it is refused however it chains.
+
+A desktop build MAY also carry an implementation that does not depend on the platform (an OpenSSL build, or one in the implementation's own language); the `tls` option ([05 §2](../05-ops-config.md)) selects among those a build has. An iOS build carries only its platform implementation.
+
 ---
 
 ## 10. Secret handling
@@ -262,7 +292,7 @@ The status page keeps the secret in page memory only, never in web storage, and 
 
 ### 10.5 Who realises what
 
-These general rules are realised by the hosts, which link here: the vault keystore (§10.6) by every host that has one; staging and destination confinement with exclusive `dest` creation (§7.3) by every host with sandboxed clients; cleartext refusal and trust-store refresh (§9) by every client host, Android included; backup exclusion (§10.2) by every host with a platform backup; `default_permissions` with read-only `allowOther` (§8) by the FUSE host; socket modes and peer checks (§7) by every IPC server; config written 0600 from creation (§10.2) by every config writer; share token rules and revoke (§6.1) by the share operation.
+These general rules are realised by the hosts, which link here: the vault keystore (§10.6) by every host that has one; staging and destination confinement with exclusive `dest` creation (§7.3) by every host with sandboxed clients; cleartext refusal and trust-store refresh (§9) by every client host, Android included; the platform TLS implementation (§9.2) by every host that has one; backup exclusion (§10.2) by every host with a platform backup; `default_permissions` with read-only `allowOther` (§8) by the FUSE host; socket modes and peer checks (§7) by every IPC server; config written 0600 from creation (§10.2) by every config writer; share token rules and revoke (§6.1) by the share operation.
 
 ### 10.6 Vault keys and passphrases
 
@@ -363,6 +393,7 @@ An implementation MUST exhibit:
 - With `allowOther`, another user can read and cannot create, write, rename or delete.
 - A client refuses a non-loopback `http://` URL; a plaintext listener binds loopback unless told otherwise.
 - On Android, a server certificate chaining only to a user-installed CA is refused; one chaining to a configured `ca_certificate` is accepted.
+- Over every TLS implementation a build carries: a certificate for another name, an expired one, and one chaining to no trusted root fail REFUSED/other; one chaining to a configured `ca_certificate` is accepted, and the system store is then not consulted for that backend; a peer that accepts the connection and never answers the handshake fails TRANSIENT/link within `CONNECT_TIMEOUT + HANDSHAKE_TIMEOUT`.
 - The config is never observable with a mode wider than 0600; unknown fields are masked.
 - A request body larger than its limit is refused before it is read; a connection that stops sending is closed after the idle timeout.
 - `/stats` signed with one domain's secret mentions no other domain.

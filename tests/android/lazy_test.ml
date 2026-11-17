@@ -67,8 +67,8 @@ let () =
     {
       local with
       create =
-        (fun ~domain ~admission ~name fields ->
-          gated (local.create ~domain ~admission ~name fields));
+        (fun ?spill ~domain ~admission ~name fields ->
+          gated (local.create ?spill ~domain ~admission ~name fields));
     }
 
 let d = Domain_name.v "docs"

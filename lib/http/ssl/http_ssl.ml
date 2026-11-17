@@ -74,7 +74,7 @@ let of_ssl fd s =
     in
     try go 0 with Ssl.Write_error _ -> broken "write"
   in
-  Transport.make ~fd ~read ~write ~close:(fun () ->
+  Transport.make ~read ~write ~close:(fun () ->
       (try ignore (Ssl.close_notify s) with _ -> ());
       try Unix.close fd with _ -> ())
 
@@ -92,21 +92,22 @@ let openssl fd ({ host; ca_file } : Transport.tls) =
 let () =
   Transport.register Openssl
     {
-      client = openssl;
+      client = `Over_socket openssl;
       server =
-        (fun ~certificate ~key ->
-          if not (Atomic.exchange ssl_initialised true) then Ssl.init ();
-          let ctx = Ssl.create_context Ssl.TLSv1_2 Ssl.Server_context in
-          Ssl.set_min_protocol_version ctx Ssl.TLSv1_2;
-          (match Ssl.use_certificate ctx certificate key with
-            | () -> ()
-            | exception e ->
-                Fail.raise_ Fail.Invalid "TLS certificate %s or key %s: %s"
-                  certificate key (Printexc.to_string e));
-          fun fd ->
-            let s = Ssl.embed_socket fd ctx in
-            (try ssl_retry fd (fun () -> Ssl.accept s)
-             with Ssl.Accept_error _ ->
-               Transport.tls_failure "client" "handshake failed");
-            of_ssl fd s);
+        Some
+          (fun ~certificate ~key ->
+            if not (Atomic.exchange ssl_initialised true) then Ssl.init ();
+            let ctx = Ssl.create_context Ssl.TLSv1_2 Ssl.Server_context in
+            Ssl.set_min_protocol_version ctx Ssl.TLSv1_2;
+            (match Ssl.use_certificate ctx certificate key with
+              | () -> ()
+              | exception e ->
+                  Fail.raise_ Fail.Invalid "TLS certificate %s or key %s: %s"
+                    certificate key (Printexc.to_string e));
+            fun fd ->
+              let s = Ssl.embed_socket fd ctx in
+              (try ssl_retry fd (fun () -> Ssl.accept s)
+               with Ssl.Accept_error _ ->
+                 Transport.tls_failure "client" "handshake failed");
+              of_ssl fd s);
     }

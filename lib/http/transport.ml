@@ -1,10 +1,11 @@
 open Tsync_core
 
-type tls_impl = Openssl | Native
+type tls_impl = System | Openssl | Native
 
 let tls_impl = Atomic.make None
 
 let tls_impl_of_string = function
+  | "system" -> Some System
   | "openssl" -> Some Openssl
   | "native" | "ocaml-tls" -> Some Native
   | _ -> None
@@ -12,7 +13,6 @@ let tls_impl_of_string = function
 type tls = { host : string; ca_file : string option }
 
 type t = {
-  fd : Unix.file_descr;
   read : ?timeout:float -> Bigstring.t -> int -> int -> int;
   write : ?timeout:float -> Bigstring.t -> unit;
   close : unit -> unit;
@@ -47,21 +47,23 @@ let plain fd =
     in
     go 0
   in
-  { fd; read; write; close = (fun () -> try Unix.close fd with _ -> ()) }
+  { read; write; close = (fun () -> try Unix.close fd with _ -> ()) }
 
 let of_fd fd =
   Unix.set_nonblock fd;
   plain fd
 
-let make ~fd ~read ~write ~close = { fd; read; write; close }
+let make ~read ~write ~close = { read; write; close }
 let tls_failure host what = Fail.raise_ Fail.Link "TLS with %s: %s" host what
 
 (* A certificate that does not verify will not verify on a retry either. *)
 let untrusted host what = Fail.raise_ Fail.Refused "TLS with %s: %s" host what
 
 type backend = {
-  client : Unix.file_descr -> tls -> t;
-  server : certificate:string -> key:string -> Unix.file_descr -> t;
+  client :
+    [ `Over_socket of Unix.file_descr -> tls -> t
+    | `Platform of host:string -> port:int -> tls -> t ];
+  server : (certificate:string -> key:string -> Unix.file_descr -> t) option;
 }
 
 let backends = Atomic.make []
@@ -72,11 +74,27 @@ let rec register impl b =
     register impl b
 
 let available () = List.map fst (Atomic.get backends)
-let impl_name = function Openssl -> "openssl" | Native -> "native"
 
-(* 05 §2 [tls]: unset is the build's default, OpenSSL when it was built. *)
+let impl_name = function
+  | System -> "system"
+  | Openssl -> "openssl"
+  | Native -> "native"
+
+let impl_names =
+  String.concat ", " (List.map impl_name [System; Openssl; Native])
+
+(* security-model §9.2: [System] is OpenSSL on a host that registers no
+   platform implementation of its own, or the OCaml one in a build without
+   OpenSSL. *)
+let built impl =
+  let find impl = List.assoc_opt impl (Atomic.get backends) in
+  match impl with
+    | System -> List.find_map find [System; Openssl; Native]
+    | impl -> find impl
+
+(* 05 §2 [tls]: unset is the platform implementation, else OpenSSL, else the
+   OCaml one. *)
 let backend () =
-  let built impl = List.assoc_opt impl (Atomic.get backends) in
   match Atomic.get tls_impl with
     | Some impl -> (
         match built impl with
@@ -85,9 +103,9 @@ let backend () =
               Fail.raise_ Fail.Invalid "this build has no %s TLS"
                 (impl_name impl))
     | None -> (
-        match (built Openssl, built Native) with
-          | Some b, _ | None, Some b -> b
-          | None, None -> Fail.raise_ Fail.Invalid "this build has no TLS")
+        match built System with
+          | Some b -> b
+          | None -> Fail.raise_ Fail.Invalid "this build has no TLS")
 
 (* An unroutable address family must not hold the next address back. *)
 let connect_timeout = 10.
@@ -158,23 +176,43 @@ let cleartext_loopback_only = Atomic.make false
 let connect ?(handshake_timeout = connect_timeout) ?tls ~host ~port () =
   if tls = None && Atomic.get cleartext_loopback_only && not (is_loopback host)
   then Fail.raise_ Fail.Refused "%s: cleartext connections are refused" host;
-  let fd = connect_fd ~host ~port in
   match tls with
-    | None -> plain fd
+    | None -> plain (connect_fd ~host ~port)
     | Some tls -> (
-        try
-          bounded_handshake ~host:tls.host handshake_timeout (fun () ->
-              (backend ()).client fd tls)
-        with e ->
-          (try Unix.close fd with _ -> ());
-          raise e)
+        match (backend ()).client with
+          | `Over_socket handshake -> (
+              let fd = connect_fd ~host ~port in
+              try
+                bounded_handshake ~host:tls.host handshake_timeout (fun () ->
+                    handshake fd tls)
+              with e ->
+                (try Unix.close fd with _ -> ());
+                raise e)
+          | `Platform open_connection ->
+              (* 01 §10: the platform's phases cannot be told apart. *)
+              bounded_handshake ~host:tls.host
+                (connect_timeout +. handshake_timeout) (fun () ->
+                  open_connection ~host ~port tls))
 
 type server_tls = Unix.file_descr -> t
 
-let server_tls ~certificate ~key = (backend ()).server ~certificate ~key
+(* security-model §9.1: a client-only platform implementation leaves the
+   listener to one that serves. *)
+let server_tls ~certificate ~key =
+  let serving =
+    match (backend ()).server with
+      | Some s -> Some s
+      | None ->
+          List.find_map
+            (fun impl -> Option.bind (built impl) (fun b -> b.server))
+            [Openssl; Native]
+  in
+  match serving with
+    | Some s -> s ~certificate ~key
+    | None -> Fail.raise_ Fail.Invalid "this build has no TLS that serves"
 
-let accept_tls ~timeout server t =
-  bounded_handshake ~host:"client" timeout (fun () -> server t.fd)
+let accept_tls ~timeout server fd =
+  bounded_handshake ~host:"client" timeout (fun () -> server fd)
 
 let read ?timeout t buf off len = t.read ?timeout buf off len
 let write ?timeout t b = t.write ?timeout b
@@ -183,11 +221,11 @@ let close t = t.close ()
 
 (* A connection leaves its server's list before its descriptor is closed, so
    this never reaches a reused descriptor. *)
-let shutdown t =
-  try Unix.shutdown t.fd SHUTDOWN_ALL with Unix.Unix_error _ -> ()
+let shutdown fd =
+  try Unix.shutdown fd SHUTDOWN_ALL with Unix.Unix_error _ -> ()
 
-let peer t =
-  match Unix.getpeername t.fd with
+let peer fd =
+  match Unix.getpeername fd with
     | ADDR_INET (a, p) -> Printf.sprintf "%s:%d" (Unix.string_of_inet_addr a) p
     | ADDR_UNIX p -> p
     | exception _ -> "?"

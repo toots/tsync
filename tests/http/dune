@@ -2,6 +2,7 @@
 
 (executable
  (name http_test)
+ (modules http_test)
  (optional)
  (libraries tsync_core tsync_http tsync_http_ssl tsync_http_native unix))
 
@@ -27,3 +28,57 @@
   (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
  (action
   (diff http_test.expected http_test.output)))
+
+; Linux only: a spilled body is told apart by its mapping in /proc/self/maps.
+
+(executable
+ (name spill_test)
+ (modules spill_test)
+ (libraries tsync_core tsync_http unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   spill_test.output
+   (run ./spill_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff spill_test.expected spill_test.output)))
+
+(executable
+ (name tls_trust_test)
+ (modules tls_trust_test apple_tls)
+ (optional)
+ (libraries
+  tsync_core
+  tsync_http
+  tsync_http_ssl
+  tsync_http_native
+  unix
+  (select
+   apple_tls.ml
+   from
+   (tsync_http_apple -> apple_tls.enabled.ml)
+   (-> apple_tls.disabled.ml))))
+
+(rule
+ (enabled_if
+  (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
+ (deps tls_cert.pem tls_key.pem tls_expired_cert.pem tls_expired_key.pem)
+ (action
+  (with-stdout-to
+   tls_trust_test.output
+   (run ./tls_trust_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
+ (action
+  (diff tls_trust_test.expected tls_trust_test.output)))

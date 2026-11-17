@@ -4,7 +4,7 @@
 ? uploads at once [4] -> 
 ? downloads at once [8] -> 
 ? govern uploads to the network's capacity [true] -> 
-? TLS implementation (openssl, native) [openssl] -> 
+? TLS implementation (system, openssl, native) [system] -> 
 ? domain name -> docs
 ? versioning [true] -> 
 ? read-only [false] -> 
@@ -456,7 +456,7 @@ the store holding the backend's bucket by default: would write
 ? uplink: queueing delay to hold, ms (-: unset) -> 80
 ? uplink: least bytes per second (-: unset) [64K] -> -
 ? uplink: most bytes per second (-: unset) -> 
-? TLS implementation (openssl, native) [openssl] -> 
+? TLS implementation (system, openssl, native) [system] -> 
   Domains:
     1. docs: 1 backends
 ? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w

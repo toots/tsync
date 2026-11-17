@@ -484,7 +484,7 @@ let endpoint_url ~region = function
       if String.ends_with ~suffix:"/" e then String.sub e 0 (String.length e - 1)
       else e
 
-let create ~domain ~admission ~name fields =
+let create ?spill ~domain ~admission ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)
@@ -498,7 +498,7 @@ let create ~domain ~admission ~name fields =
   let region = Option.value ~default:"us-east-1" (str "region") in
   if not (valid_region region) then
     Fail.invalid "backend %s: bad region %S" name region;
-  let api = Client.endpoint (endpoint_url ~region (str "endpoint")) in
+  let api = Client.endpoint ?spill (endpoint_url ~region (str "endpoint")) in
   if Client.base_path api <> "" then
     Fail.invalid "backend %s: an S3 endpoint takes no path" name;
   let t =
