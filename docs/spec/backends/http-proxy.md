@@ -229,6 +229,10 @@ authentic iff the secret of the domain it names verifies it, `expires` is in the
 than `upload_max_lifetime` away ([security §4.4](../algorithms/security-model.md#44-upload-signatures)).
 The target binds every parameter:
 
+Test vector: secret `s3cret`, `expires` `1727600000`, target
+`/upload?domain=docs&path=Camera%20Uploads/2026/2026-08-16%2014.31.04.jpg&created=1786890664000000000`:
+`1727600000.1849c7288db352b22e64d71c69d59e8d6016f2540b833a3d03eccb35e33365a6`.
+
 | Parameter | Rule |
 |---|---|
 | `domain` | the domain's name; it routes the request |

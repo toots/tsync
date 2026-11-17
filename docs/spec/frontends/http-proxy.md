@@ -56,7 +56,7 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
 | `shares` | bool, or a backend name | false | per domain | never inherited. `true`: serve `/s/` for this domain. A name: the domain's links are that member's (§A4.6), and `/s/` is not served for it. The name MUST be the domain's main or one of its replicas, whose capabilities give a `share_url`: never a backfill, which is not guaranteed to be in sync, nor an archive, which is never written. Otherwise startup fails naming the option |
 | `readOnly` | bool | false | per domain | never inherited |
-| `uploads` | bool | false | per domain | never inherited. Take whole-file uploads into the domain (§A4.8). Startup fails naming the option when no owner of the domain is configured on this host |
+| `uploads` | bool | false | per domain | never inherited. Take whole-file uploads into the domain (§A4.8), committed through the domain's owner on this host |
 | `projectCommits` | bool | true | per domain | *advanced*; never inherited. The serving host's owner of the domain projects the entries created through this listener ([publication §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)): the listener states that owner as the domain's projector and wakes its cycle when a create of a log entry is won. `false` leaves each entry to its author. With it on, every writer of the domain's main MUST reach it through this listener: the serving owner then projects every entry of the domain |
 | `maxEntryCommands` | int ≥ 1 | 4096 with `projectCommits` on a domain whose main is a local store, else the domain's | per domain | *advanced*; never inherited. The entry size the listener states to its clients ([05 §2.1](../05-ops-config.md#21-schema-and-validation), domain-wide settings): a projection that crosses no network takes thousands of commands in the time a remote one takes a few hundred |
 
@@ -212,8 +212,9 @@ still writes no local domain state, and the owner chunks, stages and uploads the
 
   The owner is reached on its socket ([07 §4.1](../07-daemon-cli.md#41-sockets)). Not answering, or a
   transient failure, is 503 with the spool kept complete: the next append of 0 bytes, or a new
-  creation, commits it. The owner declares `<data dir>/uploads` the store server's staging root
-  ([security §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)).
+  creation, commits it. The spool lies under the owner's staging root
+  ([security §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)), the
+  user's home where the host declares no other.
 - A read-only domain refuses the creation 403.
 - The listener counts uploads started, resumed, committed and refused, and bytes received (§A12).
 
