@@ -204,6 +204,7 @@ neither the core nor a service, and is far inside the time the system gives it.
 - Runs are asked for whether or not a domain's server pushes: a push lost or a server without push
   leaves the runs to catch up.
 - Each run appends `app: background refresh` to the footprint log (§7).
+- A run also runs a camera backup pass ([ios-app §8.6](ios-app.md#86-access-controls-schedule-and-gate)).
 
 | Parameter | Recommended | Constraint |
 |---|---|---|
@@ -356,3 +357,6 @@ Each becomes a section above before its code.
 2. Registering an `ios` frontend: domains are configured with the `android` frontend, whose rules
    this page extends.
 3. Open on a device: the extension's limit on the oldest supported device.
+4. Camera backup through PhotoKit's background upload extension (iOS 26.1), in which the system
+   uploads each photo to an HTTP request of the app's: it needs a store endpoint that takes a
+   whole file into a domain, which no store has.

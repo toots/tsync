@@ -332,18 +332,24 @@ same name. A stem is taken when a record holds it in that domain or a file is at
   - While the app is in front: at launch, on returning to the foreground, and `trigger_delay` after
     the library's change observer last fired. Going to the background, the pass finishes the asset
     it is on (`beginBackgroundTask`) and stops.
-  - In the background: a `BGProcessingTask` (`requiresNetworkConnectivity`) asked for at the end of
-    every pass that left work, and on going to the background while work is left. Its expiration
-    cancels the pass between assets.
+  - In the background, two ways, since iOS wakes no app for a change to the photo library:
+    - each background refresh run ([ios.md §5.2](ios.md#52-in-the-background)) also runs a pass,
+      stopped between assets after `refresh_pass_budget`. Writing an asset is a local copy and the
+      extension uploads it in its own process, so a short run moves several photos;
+    - a `BGProcessingTask`, asked for at the end of every pass that left work and on going to the
+      background while work is left, which the system runs at a time of its choosing (often
+      overnight on power). Its expiration cancels the pass between assets.
   - **Back up now** runs a pass in front, ignoring the gate.
 - **Gate**, before each asset: "Only over wifi" set and the path expensive or absent (`NWPath`) →
   "waiting for wifi"; "Not when the battery is low" set, not charging, and the level below
   `battery_floor` or Low Power Mode on → "battery low".
-- **Status line** and outcome: android-app §11.8's, under the section's switch.
+- **Status line** and outcome: android-app §11.8's, under the section's switch and as Activity's
+  camera backup row (§2.1).
 
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `trigger_delay` | 10 s | |
+| `refresh_pass_budget` | 20 s | inside the system's ~30 s for a refresh run |
 | `staged_bytes_budget` | 512 MiB | |
 | `free_space_floor` | 1 GiB | |
 | `retry_backoff(n)` | min(15 min × 2^(n−1), 6 h) | bounded |
