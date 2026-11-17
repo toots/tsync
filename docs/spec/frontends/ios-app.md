@@ -454,7 +454,7 @@ system's.
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `upload_signature_lifetime` | 29 days | below `upload_max_lifetime` ([security §4.4](../algorithms/security-model.md#44-upload-signatures)), with a day for a clock ahead of the listener's |
-| `upload_reachability_url` | `https://github.com` | a host every working network reaches |
+| `upload_reachability_url` | `https://github.com/toots/tsync` | the project's page, on a host every working network reaches |
 | `upload_jobs_max` | 20 | jobs in flight at once |
 | `upload_failure_limit` | 3 | assets failed in a row before uploads are suspended |
 

@@ -32,6 +32,6 @@
     <!-- ios-app §8.7: upload_reachability_url. It names no upload server: each
          job's destination is its domain's listener. -->
     <key>BackgroundUploadURLBase</key>
-    <string>https://github.com</string>
+    <string>https://github.com/toots/tsync</string>
 </dict>
 </plist>
