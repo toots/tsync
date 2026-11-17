@@ -52,6 +52,7 @@ targets:
         # The commit About shows: run-device.sh passes TSYNC_COMMIT.
         INFOPLIST_FILE: App/Info.plist
         INFOPLIST_KEY_NSCameraUsageDescription: "tsync scans setup codes to join a domain, and codes to add to your vault."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "tsync backs up your photos and videos to the domain you choose."
         INFOPLIST_KEY_NSFaceIDUsageDescription: "tsync checks it is you before it signs in with a passkey."
         INFOPLIST_KEY_CFBundleDisplayName: tsync
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

@@ -111,6 +111,47 @@ enum FileStore {
         }
     }
 
+    /// ios-app.md §8.4 step 4: `<stem>.<ext>` for each file, under `root`. A
+    /// first write takes the first stem free at every name and not `claimed`;
+    /// a write again replaces. The stem written to.
+    static func placeCameraFiles(
+        _ files: [(URL, String)], stem: String, under root: URL, replacing: Bool, claimed: (String) -> Bool
+    ) throws -> String {
+        func target(_ stem: String, _ ext: String) -> URL { root.appendingPathComponent(ext.isEmpty ? stem : "\(stem).\(ext)") }
+        try coordinatedWrite(target(stem, "").deletingLastPathComponent(), options: []) {
+            try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+        }
+        if replacing {
+            for (file, ext) in files {
+                try coordinatedWrite(target(stem, ext), options: .forReplacing) { to in
+                    if FileManager.default.fileExists(atPath: to.path) {
+                        _ = try FileManager.default.replaceItemAt(to, withItemAt: file)
+                    } else {
+                        try FileManager.default.copyItem(at: file, to: to)
+                    }
+                }
+            }
+            return stem
+        }
+        for n in 0...maxNameAttempts {
+            let candidate = n == 0 ? stem : "\(stem) (\(n))"
+            guard !claimed(candidate),
+                files.allSatisfy({ !FileManager.default.fileExists(atPath: target(candidate, $0.1).path) })
+            else { continue }
+            do {
+                for (file, ext) in files {
+                    try coordinatedWrite(target(candidate, ext), options: .forReplacing) {
+                        try FileManager.default.copyItem(at: file, to: $0)
+                    }
+                }
+                return candidate
+            } catch where isTaken(error) {
+                continue
+            }
+        }
+        throw failure("no name left for \(stem)")
+    }
+
     /// A picked file copied in, under the first name not taken; the name it
     /// was given.
     static func upload(_ source: URL, into folder: URL) throws -> String {
