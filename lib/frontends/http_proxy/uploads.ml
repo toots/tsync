@@ -120,9 +120,19 @@ let interop (r : Server.request) =
 
 let answer ?(headers = []) status = { Server.status; headers; body = Empty }
 
+(* wire §5.7: the system's uploader sees only headers, so every refusal but a
+   503 names its kind. *)
 let refused t status msg =
   t.count "uploadRefused" 1;
-  Server.text status msg
+  let kind =
+    match status with
+      | 401 -> ["denied"]
+      | 400 | 413 -> ["invalid"]
+      | 404 -> ["unprepared"]
+      | 403 -> ["read_only"]
+      | _ -> []
+  in
+  Server.text ~headers:(List.map (fun k -> ("x-tsync-kind", k)) kind) status msg
 
 let offset_headers n complete =
   [
@@ -151,7 +161,7 @@ let hold t id f =
           `Held))
   in
   match taken with
-    | `Busy -> refused t 409 "upload in progress"
+    | `Busy -> refused t 503 "upload in progress"
     | `Full -> refused t 503 "busy"
     | `Held ->
         Fun.protect
