@@ -18,15 +18,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -44,9 +49,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,6 +71,12 @@ import org.feverdreamtv.tsync.core.StoreReport
 /** activity §2.3: at most this many warnings before Show all. */
 private const val SHOWN_ERRORS = 5
 
+/** activity §1: how long a failed answer leaves the last one on screen. */
+private const val STALE_AFTER_MS = 10_000L
+
+/** activity §1: the newest answer's weight in a shown rate or latency. */
+private const val SMOOTHING = 0.3
+
 /** One domain as last asked; [status] and the rest are null for a domain not booted, which is asked nothing. */
 private class DomainSnapshot(
     val domain: Served,
@@ -77,20 +85,25 @@ private class DomainSnapshot(
     val stats: Stats?,
     val failure: String?,
     val offline: Boolean,
+    val answeredAt: Long = 0,
 )
 
 private data class Snapshot(
-    val domains: List<DomainSnapshot>,
+    val names: List<String>,
+    val shown: DomainSnapshot?,
     val saves: List<PendingSave>,
     val backup: String,
     val backupEnabled: Boolean,
 )
 
-/** activity §1: domains are asked concurrently, so a slow one delays no other. */
-private suspend fun snapshot(tsync: Tsync): Snapshot = coroutineScope {
+/** activity §2: only the picked domain is asked; a pick no longer listed falls back to the first. */
+private fun snapshot(tsync: Tsync, picked: String, previous: DomainSnapshot?): Snapshot {
+    val domains = tsync.domains()
+    val domain = domains.firstOrNull { it.name == picked } ?: domains.firstOrNull()
     val backup = Backup(tsync.context)
-    Snapshot(
-        domains = tsync.domains().map { domain -> async { ask(domain) } }.awaitAll(),
+    return Snapshot(
+        names = domains.map { it.name },
+        shown = domain?.let { steady(ask(it), previous?.takeIf { old -> old.domain.name == it.name }) },
         saves = tsync.ingest.pending(),
         backup = backup.statusLine(),
         backupEnabled = backup.prefs.settings.enabled,
@@ -110,7 +123,27 @@ private fun ask(domain: Served): DomainSnapshot {
         stats = stats,
         failure = status.exceptionOrNull()?.message,
         offline = domain.offline.value,
+        answeredAt = if (status.isSuccess) System.currentTimeMillis() else 0,
     )
+}
+
+/** activity §1: a failure shows once the last answer is [STALE_AFTER_MS] old; rates and latencies are averaged by name. */
+private fun steady(new: DomainSnapshot, old: DomainSnapshot?): DomainSnapshot {
+    val status = new.status
+    if (old?.status == null || !new.booted) return new
+    if (status == null) return if (System.currentTimeMillis() - old.answeredAt < STALE_AFTER_MS) old else new
+    fun average(value: Double, previous: Double?) = if (previous == null) value else previous + SMOOTHING * (value - previous)
+    val smoothed = status.copy(
+        uploading = status.uploading.map { up -> up.copy(rate = average(up.rate, old.status.uploading.firstOrNull { it.name == up.name }?.rate)) },
+        downloading = status.downloading.map { down -> down.copy(rate = average(down.rate, old.status.downloading.firstOrNull { it.name == down.name }?.rate)) },
+    )
+    val stats = new.stats?.let { stats ->
+        stats.copy(stores = stats.stores.map { store ->
+            val before = old.stats?.stores?.firstOrNull { it.name == store.name }
+            store.copy(latencyMs = store.latencyMs?.let { average(it, before?.latencyMs) }, copiesRate = average(store.copiesRate, before?.copiesRate))
+        })
+    }
+    return DomainSnapshot(new.domain, true, smoothed, stats, new.failure, new.offline, new.answeredAt)
 }
 
 private enum class Tone { NEUTRAL, GOOD, WARNING, FAILURE }
@@ -141,19 +174,22 @@ private fun state(status: Status, stats: Stats?, offline: Boolean): State {
     }
 }
 
-/** What the app is doing and what went wrong (activity.md), per booted domain, polled only while visible. */
+/** What the app is doing and what went wrong (activity.md), for the picked domain, polled only while visible. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
     val context = LocalContext.current
     var visible by remember { mutableStateOf(false) }
     var shown by remember { mutableStateOf<Snapshot?>(null) }
+    var picked by rememberSaveable { mutableStateOf("") }
     LifecycleResumeEffect(Unit) {
         visible = true
         onPauseOrDispose { visible = false }
     }
-    LaunchedEffect(visible) {
+    LaunchedEffect(visible, picked) {
         while (visible) {
-            shown = withContext(Dispatchers.IO) { snapshot(tsync) }
+            val previous = shown?.shown
+            shown = withContext(Dispatchers.IO) { snapshot(tsync, picked, previous) }
             delay(Parameters.STATUS_POLL_MS)
         }
     }
@@ -174,19 +210,25 @@ fun ActivityScreen(tsync: Tsync, outer: PaddingValues) {
             Loading(padding)
             return@Screen
         }
-        val several = state.domains.size > 1
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            for (entry in state.domains) {
-                if (several) Text(entry.domain.name, Modifier.padding(top = 16.dp).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
-                DomainActivity(entry, ::run)
+            val entry = state.shown
+            if (state.names.size > 1) SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                state.names.forEachIndexed { index, name ->
+                    SegmentedButton(
+                        selected = name == entry?.domain?.name,
+                        onClick = { picked = name },
+                        shape = SegmentedButtonDefaults.itemShape(index, state.names.size),
+                    ) { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
             }
+            if (entry != null) DomainActivity(entry, ::run)
 
             // activity §3: the app's and the process's, not a domain's.
             if (state.saves.isNotEmpty()) {
                 Section(R.string.activity_failed_saves)
                 FailedSaves(tsync, state.saves)
             }
-            Warnings(state.domains.flatMap { it.stats?.recentErrors.orEmpty() })
+            Warnings(entry?.stats?.recentErrors.orEmpty())
 
             Section(R.string.camera_backup)
             Text(state.backup)
@@ -224,13 +266,13 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
 
     Section(R.string.activity_transfers)
     val waiting = (status.pendingUploads - status.uploading.size).coerceAtLeast(0)
-    status.uploading.forEach { Transfer("↑ " + it.name, it.bytes, it.size ?: 0, it.rate) }
+    status.uploading.forEach { key("↑", it.name) { Transfer("↑ " + it.name, it.bytes, it.size ?: 0, it.rate) } }
     if (waiting > 0) Text(
         if (status.pendingBytes > 0) pluralStringResource(R.plurals.uploads_waiting, waiting, waiting, size(status.pendingBytes))
         else pluralStringResource(R.plurals.activity_more_waiting, waiting, waiting),
         style = MaterialTheme.typography.bodySmall,
     )
-    status.downloading.forEach { Transfer("↓ " + it.name, it.bytes, it.size, it.rate) }
+    status.downloading.forEach { key("↓", it.name) { Transfer("↓ " + it.name, it.bytes, it.size, it.rate) } }
     if (status.uploading.isEmpty() && status.downloading.isEmpty() && waiting == 0 && status.pendingDownloads == 0) {
         Text(stringResource(R.string.activity_nothing_to_transfer))
     }

@@ -1,42 +1,53 @@
 import SwiftUI
 import UIKit
 
-/// activity.md: each domain's `status` and `stats`, parsed and shown as a
-/// screen, asked every `statusPoll` while it is visible.
+/// activity.md: the picked domain's `status` and `stats`, parsed and shown
+/// as a screen, asked every `statusPoll` while it is visible.
 struct ActivityView: View {
     @EnvironmentObject private var model: AppModel
+    @SceneStorage("activity-domain") private var picked = ""
     @State private var reports: [String: ActivityReport] = [:]
     private static let statusPoll: UInt64 = 2_000_000_000
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(model.entries) { entry in
-                    if model.turnedOff.contains(entry.name) {
-                        Section(header(entry.name)) {
+                if model.entries.count > 1 {
+                    Picker("Domain", selection: Binding { shown ?? "" } set: { picked = $0 }) {
+                        ForEach(model.entries) { Text($0.name).tag($0.name) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+                if let domain = shown {
+                    if model.turnedOff.contains(domain) {
+                        Section {
                             Label("Turned off in Files: Browse, then More, then Edit", systemImage: "eye.slash")
                                 .foregroundStyle(.orange)
                         }
                     } else {
-                        DomainActivity(
-                            domain: entry.name, title: header(entry.name), report: reports[entry.name]
-                        ) { await ask(entry.name) }
+                        DomainActivity(domain: domain, report: reports[domain]) { await ask(domain) }
+                            .id(domain)
                     }
+                    WarningsSection(lines: warnings(domain))
                 }
-                WarningsSection(lines: warnings)
             }
             .navigationTitle("Activity")
-            .task { await poll() }
+            .task(id: shown) { await poll() }
         }
     }
 
-    private func header(_ name: String) -> String { model.entries.count > 1 ? name : "" }
+    /// activity.md §2: a pick no longer listed falls back to the first.
+    private var shown: String? {
+        model.entries.first { $0.name == picked }?.name ?? model.entries.first?.name
+    }
 
-    /// activity.md §3: the processes' warnings and errors, once, newest first.
-    private var warnings: [SelfReport.Line] {
+    /// activity.md §3: the process's warnings and errors, newest first.
+    private func warnings(_ domain: String) -> [SelfReport.Line] {
         var seen = Set<String>()
         var lines: [SelfReport.Line] = []
-        for line in reports.values.flatMap({ $0.stats?.process?.recentErrors ?? [] }) {
+        for line in reports[domain]?.stats?.process?.recentErrors ?? [] {
             guard line.level == "warn" || line.level == "err" else { continue }
             let key = "\(line.t ?? 0) \(line.message ?? "")"
             if seen.insert(key).inserted { lines.append(line) }
@@ -44,14 +55,11 @@ struct ActivityView: View {
         return lines.sorted { ($0.t ?? 0) > ($1.t ?? 0) }
     }
 
-    /// `.task` ends when the screen goes, which ends the polling.
+    /// `.task` ends when the screen goes or the pick changes, which ends the polling.
     private func poll() async {
+        guard let domain = shown, !model.turnedOff.contains(domain) else { return }
         while !Task.isCancelled {
-            await withTaskGroup(of: Void.self) { group in
-                for entry in model.entries where !model.turnedOff.contains(entry.name) {
-                    group.addTask { await ask(entry.name) }
-                }
-            }
+            await ask(domain)
             try? await Task.sleep(nanoseconds: Self.statusPoll)
         }
     }
@@ -63,6 +71,8 @@ struct ActivityView: View {
 
 /// The two replies, parsed (activity.md §1).
 struct ActivityReport {
+    static let staleAfter: TimeInterval = 10
+    static let smoothing = 0.3
     var status: StatusReply?
     var stats: StatsReply?
     var raw: [String: Any] = [:]
@@ -83,12 +93,52 @@ struct ActivityReport {
                 return ActivityReport(failure: "no process reported it", answeredAt: previous?.answeredAt)
             }
             parsed.domains = [body]
-            return ActivityReport(
+            var report = ActivityReport(
                 status: try decode(statusReply), stats: parsed,
                 raw: ["status": statusReply, "stats": statsReply], answeredAt: Date())
+            if let previous { report.smooth(since: previous) }
+            return report
         } catch {
             return ActivityReport(failure: error.localizedDescription, answeredAt: previous?.answeredAt)
+                .orStill(previous)
         }
+    }
+
+    /// activity.md §1: a failure shows only once the last answer is `staleAfter` old.
+    private func orStill(_ previous: ActivityReport?) -> ActivityReport {
+        guard let previous, previous.status != nil, let at = previous.answeredAt,
+              Date().timeIntervalSince(at) < Self.staleAfter else { return self }
+        return previous
+    }
+
+    /// activity.md §1: rates and latencies averaged against the previous answer, by name.
+    private mutating func smooth(since previous: ActivityReport) {
+        func average(_ new: Double?, _ old: Double?) -> Double? {
+            guard let new, let old else { return new }
+            return old + Self.smoothing * (new - old)
+        }
+        func transfers(_ new: [StatusReply.Transfer]?, _ old: [StatusReply.Transfer]?) -> [StatusReply.Transfer]? {
+            new?.map { transfer in
+                var transfer = transfer
+                transfer.rate = average(transfer.rate, old?.first { $0.name == transfer.name }?.rate)
+                return transfer
+            }
+        }
+        let uploading = transfers(status?.uploading, previous.status?.uploading)
+        let downloading = transfers(status?.downloading, previous.status?.downloading)
+        status?.uploading = uploading
+        status?.downloading = downloading
+        let oldStores = previous.body?.backends ?? []
+        let stores = body?.backends?.map { store in
+            var store = store
+            let old = oldStores.first { $0.name == store.name }
+            let latency = average(store.reach?.latencyMs, old?.reach?.latencyMs)
+            let copyRate = average(store.copies?.jobsPerSec, old?.copies?.jobsPerSec)
+            store.reach?.latencyMs = latency
+            store.copies?.jobsPerSec = copyRate
+            return store
+        }
+        stats?.domains?[0].backends = stores
     }
 
     private static func decode<T: Decodable>(_ reply: [String: Any]) throws -> T {
@@ -229,7 +279,6 @@ struct Store: Decodable, Identifiable {
 /// activity.md §2: one domain.
 struct DomainActivity: View {
     let domain: String
-    let title: String
     let report: ActivityReport?
     let refresh: () async -> Void
     @State private var message: String?
@@ -238,7 +287,7 @@ struct DomainActivity: View {
         if let report, let status = report.status, let stats = report.body {
             answered(report, status, stats)
         } else {
-            Section(title) {
+            Section {
                 if let failure = report?.failure {
                     Label("Not answering: \(failure)", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.secondary)
@@ -254,7 +303,7 @@ struct DomainActivity: View {
 
     @ViewBuilder
     private func answered(_ report: ActivityReport, _ status: StatusReply, _ stats: DomainBody) -> some View {
-        Section(title) {
+        Section {
             StateRow(state: DomainState(status, stats), paused: status.paused == true) {
                 act("pause", ["arg": status.paused == true ? "off" : "on"])
             }
@@ -274,12 +323,12 @@ struct DomainActivity: View {
     @ViewBuilder private func transfers(_ status: StatusReply) -> some View {
         let uploading = status.uploading ?? [], downloading = status.downloading ?? []
         let waiting = max((status.pendingUploads ?? 0) - uploading.count, 0)
-        ForEach(Array(uploading.enumerated()), id: \.offset) { TransferRow(verb: "arrow.up", transfer: $0.element) }
+        ForEach(uploading, id: \.name) { TransferRow(verb: "arrow.up", transfer: $0) }
         if waiting > 0 {
             Text("\(waiting) more waiting" + ((status.pendingBytes ?? 0) > 0 ? ", \(Format.bytes(status.pendingBytes)) to send" : ""))
                 .font(.footnote).foregroundStyle(.secondary)
         }
-        ForEach(Array(downloading.enumerated()), id: \.offset) { TransferRow(verb: "arrow.down", transfer: $0.element) }
+        ForEach(downloading, id: \.name) { TransferRow(verb: "arrow.down", transfer: $0) }
         if uploading.isEmpty && downloading.isEmpty && waiting == 0 && (status.pendingDownloads ?? 0) == 0 {
             Text("Nothing to transfer").foregroundStyle(.secondary)
         }
