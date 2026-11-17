@@ -93,6 +93,21 @@ The wire format is owned by [backends/http-proxy §3](../backends/http-proxy.md#
 
 Answers are not signed. Their integrity rests on TLS alone, which is why TLS is required off loopback (§9).
 
+### 4.4 Upload signatures
+
+A whole-file upload ([http-proxy §5.7](../backends/http-proxy.md#57-whole-file-uploads)) is signed
+when it is made and sent by the system when it chooses, so its signature differs from §4.1:
+
+- It carries an expiry instead of a timestamp, at most `upload_max_lifetime` (30 days) ahead; a
+  server refuses one past it or further ahead. The domain's secret is its only authority, as for any
+  write.
+- It does not cover the body, which its signer never holds. The body's integrity rests on TLS (§9),
+  as answers' do (§4.3).
+- Within its lifetime an observed upload can be replayed. That is harmless because it can only
+  carry the same bytes to the same path: committing content the path already holds writes nothing,
+  and a new file meeting other content is refused.
+- The resume URL's id is a capability for that one upload, as a share token is for its link (§6.1).
+
 ---
 
 ## 5. Domain confinement
@@ -359,6 +374,7 @@ Every limit below is enforced **before** the resource it guards is spent. Parame
 | Watch hold | 30 s | §4 of the wire | 204 |
 | Concurrent share responses | `max_share_responses` 64 | before headers | 503 |
 | ZIP member walk | `max_zip_members` 100 000 | while walking, before headers | 413 |
+| Whole-file upload | `max_upload_size`, `max_uploads`, `upload_free_floor` ([http-proxy §A4.8](../frontends/http-proxy.md#a48-whole-file-uploads)) | from the signature and `Content-Length`, before reading | 413 / 503 |
 
 Timestamp freshness (§4.2) and route resolution are checked before any body byte is read, so a stale or misrouted request costs no body buffering. Request bodies are then read into memory within the reservation, hashed, and verified before execution.
 
