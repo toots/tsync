@@ -1,0 +1,3 @@
+after -      [a b] next b
+after b      [d] next d
+after d      [e] next -
