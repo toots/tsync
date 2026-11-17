@@ -23,11 +23,13 @@ type route = {
 type t
 
 (** The request pipeline over prepared routes. [push] makes the listener's
-    pushes (§A4.7) from its counter. *)
+    pushes (§A4.7) from its counter, [uploads] its uploads (§A4.8) from its
+    tallies. *)
 val create :
   ?max_concurrent:int ->
   ?listener:Proxy_options.listener ->
   ?push:((string -> unit) -> Push.t) ->
+  ?uploads:((string -> int -> unit) -> Uploads.t) ->
   route list ->
   t
 

@@ -20,6 +20,7 @@ let fields =
       f ~default:"false" "shares" "Share links (yes, no, or a backend name)"
         Bool_or_string;
       f ~default:"false" "readOnly" "Read-only" Bool;
+      f ~default:"false" "uploads" "Whole-file uploads" Bool;
       f ~default:"true" "projectCommits" "Project the commits it receives" Bool;
       f "maxEntryCommands" "Changes in one log entry" Int;
       f "max_put_body" "Largest PUT body" Size;

@@ -22,6 +22,7 @@ type binding = {
   secret : string;
   shares : [ `Off | `Self | `Member of string ];
   read_only : bool;
+  uploads : bool;
   project_commits : bool;
   max_entry_commands : int option;
 }
@@ -177,6 +178,7 @@ let resolve (config : Config.t) =
                     else `Off);
             read_only =
               dom.read_only || bool (present (List.assoc_opt "readOnly" opts));
+            uploads = bool (present (List.assoc_opt "uploads" opts));
             project_commits =
               (match present (List.assoc_opt "projectCommits" opts) with
                 | None -> true

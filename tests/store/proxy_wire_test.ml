@@ -55,6 +55,41 @@ let () =
       ("non-decimal timestamp", "1.7e9");
       ("16 digits", "0001727600000000");
     ];
+  p "== upload signatures (§5.7)";
+  let upload =
+    "/upload?"
+    ^ W.canonical_query
+        [
+          ("domain", "docs");
+          ("path", "Camera Uploads/2026/2026-08-16 14.31.04.jpg");
+          ("created", "1786890664000000000");
+        ]
+  in
+  p "%s" upload;
+  let signed =
+    W.upload_signature ~secret:"s3cret" ~target:upload ~expires:1727600000
+  in
+  p "%s" signed;
+  List.iter
+    (fun (label, now, secret, target, header) ->
+      p "%-24s %b" label (W.upload_verifies ~now ~secret ~target header))
+    [
+      ("an hour before expiry", 1727596400., "s3cret", upload, signed);
+      ("at expiry", 1727600000., "s3cret", upload, signed);
+      ( "31 days before expiry",
+        1727600000. -. (31. *. 86400.),
+        "s3cret",
+        upload,
+        signed );
+      ("wrong secret", 1727596400., "other", upload, signed);
+      ("another path", 1727596400., "s3cret", upload ^ "x", signed);
+      ("no expiry", 1727596400., "s3cret", upload, String.sub signed 11 64);
+      ( "upper-case hex",
+        1727596400.,
+        "s3cret",
+        upload,
+        String.uppercase_ascii signed );
+    ];
   p "== canonical query (§3.2)";
   let q = W.canonical_query [("prefix", "a b,+&é"); ("k=", "v=")] in
   p "%s" q;

@@ -32,6 +32,7 @@ type binding = {
   secret : string;
   shares : [ `Off | `Self | `Member of string ];
   read_only : bool;
+  uploads : bool;  (** §A4.8 *)
   project_commits : bool;
   max_entry_commands : int option;
 }
