@@ -189,8 +189,8 @@ and commits each through the domain's owner on this host, as a frontend writes a
 still writes no local domain state, and the owner chunks, stages and uploads the file as any other.
 
 - **Spool.** An upload's bytes go to `<data dir>/uploads/<id>`, beside its record `<id>.json` (domain,
-  path, created, base, expiry of the signature, declared length, bytes received, and once committed
-  the commit's answer), both replaced atomically, the directory 0700. They survive a restart, so an
+  path, created, base, declared length, and once committed the commit's answer), the record replaced
+  atomically, the directory 0700. The bytes received are the spool file's size. They survive a restart, so an
   upload resumes across one. Bytes are written to disk as they arrive: an upload holds no body memory
   and no admission slot (§A5), since it does not touch a store.
 - **Limits**, checked before a creation reads its body: at most `max_uploads` uploads receiving at

@@ -5,13 +5,11 @@
 open Tsync_core
 
 type route = {
-  name : string;
   domain : Domain_name.t;
   secret : string;
   read_only : bool;
   takes : bool;  (** the domain's [uploads] option *)
   chunk : int;  (** the domain's chunk size, for the file's content id *)
-  owner : string;  (** the owner socket *)
 }
 
 type t

@@ -4,15 +4,15 @@ module W = Tsync_http_proxy_client.Proxy_wire
 module P = Tsync_owner.Protocol
 
 type route = {
-  name : string;
   domain : Domain_name.t;
   secret : string;
   read_only : bool;
   takes : bool;
   chunk : int;
-  owner : string;
 }
 
+let label route = Domain_name.to_string route.domain
+let socket route = Tsync_config.Paths.owner_socket route.domain
 let max_upload_size = 64 * 1024 * 1024 * 1024
 let max_uploads = 8
 let upload_free_floor = 2 * 1024 * 1024 * 1024
@@ -210,7 +210,7 @@ let content_id route path =
 
 let child route parent_ref name =
   match
-    P.call ~domain:route.name route.owner
+    P.call ~domain:(label route) (socket route)
       (P.Stat (P.Child { parent_ref; name }))
   with
     | row -> Some row
@@ -224,7 +224,7 @@ let folder route dirs =
         | Some { kind = `Dir; ref_; _ } -> ref_
         | Some _ -> Fail.raise_ Exists "%s is not a folder" name
         | None ->
-            (P.call ~domain:route.name route.owner
+            (P.call ~domain:(label route) (socket route)
                (P.Mkdir
                   {
                     at = { parent_ref; name };
@@ -253,7 +253,7 @@ let commit t route id r =
       | Some row when row.content_id = Some h1 -> r.path
       | _ -> (
           let w =
-            P.call ~bulk:true ~domain:route.name route.owner
+            P.call ~bulk:true ~domain:(label route) (socket route)
               (P.Write
                  {
                    at = P.Child { parent_ref; name };
@@ -284,7 +284,7 @@ let commit_answer t route id r =
         committed_answer c
     | exception e when not (Rt.is_cancelled e) ->
         let f = Fail.classify e in
-        Log.info "upload into %s: %s" route.name (Fail.to_string f);
+        Log.info "upload into %s: %s" (label route) (Fail.to_string f);
         if Fail.retryable f.kind || f.kind = Unexplained || f.kind = Deadline
         then refused t 503 f.reason
         else
@@ -301,7 +301,7 @@ let commit_answer t route id r =
 let valid_path p =
   p <> ""
   && List.for_all
-       (fun leaf -> leaf <> ".tsync-ext" && Names.valid_leaf leaf)
+       (fun leaf -> leaf <> Names.extension_root && Names.valid_leaf leaf)
        (String.split_on_char '/' p)
 
 (* security §11: the spool keeps [upload_free_floor] after every incomplete
@@ -335,7 +335,7 @@ let creation t (r : Server.request) =
   let param k = List.assoc_opt k params in
   let route =
     Option.bind (param "domain") (fun d ->
-        List.find_opt (fun route -> route.name = d) t.routes)
+        List.find_opt (fun route -> label route = d) t.routes)
   in
   let signed route =
     match header r "x-tsync-upload" with
@@ -377,7 +377,7 @@ let creation t (r : Server.request) =
                 let id = Ids.hex (Ids.urandom 16) in
                 let record =
                   {
-                    domain = route.name;
+                    domain = label route;
                     path;
                     created = Option.join created;
                     base;
@@ -409,7 +409,7 @@ let upload_id rest =
   else None
 
 let route_of t (r : record) =
-  List.find_opt (fun route -> route.name = r.domain) t.routes
+  List.find_opt (fun route -> label route = r.domain) t.routes
 
 let on_upload t (r : Server.request) id =
   match (load t id, Option.bind (load t id) (route_of t)) with

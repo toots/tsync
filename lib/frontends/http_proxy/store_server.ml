@@ -1602,13 +1602,11 @@ let run config =
                        (List.map2
                           (fun (b : Proxy_options.binding) (r : route) ->
                             {
-                              Uploads.name = r.name;
-                              domain = r.domain;
+                              Uploads.domain = r.domain;
                               secret = r.secret;
                               read_only = r.read_only;
                               takes = b.uploads;
                               chunk = r.domain_settings.chunk;
-                              owner = Tsync_config.Paths.owner_socket r.domain;
                             })
                           bindings routes))
                else None)
