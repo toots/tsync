@@ -19,7 +19,7 @@ struct TsyncPhoneApp: App {
 }
 
 /// ios-app.md §2: Setup until a config loads, then Files, Vault while a domain
-/// uses an extension, and Settings.
+/// uses an extension, Activity, and Settings.
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var vault: VaultModel
@@ -41,6 +41,9 @@ struct RootView: View {
                             .tabItem { Label("Vault", systemImage: "lock.shield") }
                             .tag("vault")
                     }
+                    ActivityView()
+                        .tabItem { Label("Activity", systemImage: "arrow.up.arrow.down") }
+                        .tag("activity")
                     NavigationStack { SettingsView() }
                         .tabItem { Label("Settings", systemImage: "gearshape") }
                         .tag("settings")

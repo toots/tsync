@@ -29,8 +29,21 @@ extension's service ([ios.md §5.4](ios.md#54-the-service)).
 
 Until a config exists, the app shows only Setup (§4). A config that does not load shows Setup with
 the core's message, as on Android. Otherwise the app has these destinations, reachable from every
-screen: **Files** (the start destination), **Vault** (§6) while a domain uses an extension, and
-**Settings** (§5), from which Setup is reached by **Add a domain**.
+screen, in this order: **Files** (the start destination), **Vault** (§6) while a domain uses an
+extension, **Activity** (§2.1), and **Settings** (§5), from which Setup is reached by **Add a
+domain**.
+
+### 2.1 Activity
+
+[activity.md](activity.md)'s screen, asked through the service
+([ios.md §5.4](ios.md#54-the-service)), with these differences:
+
+- The picker lists every configured domain, in config order. One turned off in Files says so ("Turned off
+  in Files: Browse, then More, then Edit") and is asked nothing.
+- The recent warnings and errors are the extension process's: one the system ended takes them with
+  it, and the core log (§5, Diagnostics) keeps them.
+- Android's failed saves have no counterpart: the system holds Save to tsync's writes and hands them
+  to the extension.
 
 The app is named **tsync** on the Home Screen and in Files. Its icon is `assets/tsync-app.svg` drawn
 square, one opaque 1024-pixel image whose corners the system rounds; `ios/app/make-icon.sh` renders
@@ -93,11 +106,12 @@ the framework's domain-change notification.
   [passwords/ios.md §1](../extensions/passwords/ios.md#1-the-component).
 - **Add a domain** opens Setup.
 - **About**: the app's version and the commit it was built from.
-- **Diagnostics**, a row at the end that opens a page of its own: the extension's footprint log
-  ([ios.md §7](ios.md#7-memory-and-observed-behaviour)), its last 60 lines, with **Refresh**, which
-  also copies it and its previous half (`footprint.old.log`) to the app's Documents for `devicectl`,
-  **Share**, which offers both files to the system's share sheet so a tester can attach them to a
-  report, and **Clear**. It is in every build: the log costs the extension one system call and one
+- **Diagnostics**, a row at the end that opens a page of its own with two logs: the core log
+  ([ios.md §4](ios.md#4-what-the-host-gives-the-core)) and the extension's footprint log
+  ([ios.md §7](ios.md#7-memory-and-observed-behaviour)), each its last 60 lines, with **Refresh**,
+  which also copies each log and its previous half (`tsync.old.log`, `footprint.old.log`) to the
+  app's Documents for `devicectl`, **Share**, which offers those files to the system's share sheet
+  so a tester can attach them to a report, and **Clear**. It is in every build: the log costs the extension one system call and one
   append per request (ios.md §7), and the rest runs only when asked.
 - A development build, one installed from a Mac (`run-device.sh` sets `TSYNC_DEVELOPMENT`), adds to
   that page the actions that write test data or load every server:
@@ -213,8 +227,11 @@ it until that extension has taken it.
 - A domain turned off in Files is shown so within a second of returning to the app, and the mark goes
   once it is turned on.
 - On a device without the live scanner, Scan setup code is not offered.
-- A build from TestFlight shows Domains, About and the Diagnostics row, whose page holds the log and
-  its three actions only; Share hands over both halves of the log.
+- A build from TestFlight shows Domains, About and the Diagnostics row, whose page holds the two
+  logs and their three actions only; Share hands over both halves of each.
+- Activity, on a device: a file saved to tsync is listed under Uploads until it is uploaded; with
+  the server away the state line gives the reason and the core log has the failure; Pause holds the
+  uploads and Resume lets them go; a domain turned off in Files is shown so and not asked.
 - With Background App Refresh turned off for tsync, Settings says so; turned on, it says nothing.
 - Removing a domain and joining it again with a different server says the new settings may wait for
   a restart; joining it again from the same link says nothing.

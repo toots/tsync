@@ -134,15 +134,15 @@ enum SelfTest {
     @discardableResult
     static func copyLogsToDocuments() -> [URL] {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        var footprint: [URL] = []
-        for source in [log, Footprint.oldLog, Footprint.log] {
+        var shared: [URL] = []
+        for source in [log, Core.oldLog, Core.log, Footprint.oldLog, Footprint.log] {
             let copy = documents.appendingPathComponent(source.lastPathComponent)
             try? FileManager.default.removeItem(at: copy)
             if (try? FileManager.default.copyItem(at: source, to: copy)) != nil, source != log {
-                footprint.append(copy)
+                shared.append(copy)
             }
         }
-        return footprint
+        return shared
     }
 
     /// The system creates the item only once the extension has taken the

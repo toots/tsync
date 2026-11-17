@@ -16,12 +16,16 @@ enum Core {
     /// directory in the extension, where the callbacks stage and fetch.
     static var transferRoot: URL { FileManager.default.temporaryDirectory }
 
+    /// ios.md §4: what both processes' cores say from info up, for the app to show.
+    static var log: URL { Tsync.groupContainer.appendingPathComponent("tsync.log") }
+    static var oldLog: URL { Tsync.groupContainer.appendingPathComponent("tsync.old.log") }
+
     /// The File Provider extension's bounds (ocaml/memory.md §M.5); the app
     /// keeps the core's defaults. Only the first call of a process counts.
     static func start(bounded: Bool) {
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         tsync_ios_start(
-            home.path, Tsync.configFile.path, transferRoot.path, bounded ? 32 << 10 : 0,
+            home.path, Tsync.configFile.path, log.path, transferRoot.path, bounded ? 32 << 10 : 0,
             bounded ? 1 : 0, bounded ? 4 : 0, bounded ? 1 << 20 : 0)
     }
 
