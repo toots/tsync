@@ -396,6 +396,10 @@ access granted, the app enables the extension (`setUploadJobExtensionEnabled(tru
 pass of its own; otherwise it disables it. Turning to `files` cancels the jobs not yet sent and turns
 `UPLOADING` records back to `PENDING`.
 
+Turning to `system`, a record written through the file system has no content id to send as a write
+again's `base`: the app takes it from the domain (`stat` of each file), so an edit of a photo backed
+up before replaces it instead of meeting it as a taken name.
+
 **The build.** The extension's `Info.plist` declares `BackgroundUploadURLBase`, which the system
 requires "for network access validation". It names no upload server: every job's destination is
 its own domain's listener. It is `upload_reachability_url`, a host the phone reaches whenever it
