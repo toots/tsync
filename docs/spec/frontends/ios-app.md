@@ -129,6 +129,8 @@ the framework's domain-change notification.
     local test domain as **Add a local test domain** does, and starts once the app's registration
     pass has registered it. It never registers the domain itself: on a fresh install, a pass that
     has not yet recorded the identity scheme removes every domain it finds;
+  - launching it with `-camerabackup` turns camera backup on with "Everything" (§8.6) and runs a
+    pass, for checking §8 in the simulator without its dialogs;
   - **Walk every domain**, which lists every folder of every domain through the file system, so
     that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
     thousands of held folders. It leaves out the system's `.Trash`, which the extension does not
@@ -249,7 +251,8 @@ CREATE TABLE asset (
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt INTEGER,               -- epoch seconds, set with 'FAILED'
   last_error TEXT,
-  created INTEGER NOT NULL);          -- capture time, epoch seconds: the processing order
+  created INTEGER NOT NULL,           -- capture time, epoch seconds: the processing order
+  written INTEGER NOT NULL DEFAULT 0); -- 1 once its files were written: a write again replaces them
 CREATE UNIQUE INDEX asset_stem ON asset(domain, stem);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
 ```
@@ -289,11 +292,11 @@ record.
 3. Export each resource (`PHAssetResourceManager.writeData`) into the app's temporary directory.
 4. Move each into the domain with a coordinated write to its user-visible URL
    (`<stem>.<ext>`, and `<stem>.<paired_ext>`): a first write after checking no file is at either
-   name, else the stem moves to its next sequence name (§8.5); a write again for a `DONE` record
-   over the files there, which the system sends as a change based on the version it holds, so a
+   name, else the stem moves to its next sequence name (§8.5); a write again, for a record already
+   written, over the files there, which the system sends as a change based on the version it holds, so a
    change made meanwhile on another device becomes the core's conflict copy
    ([conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)).
-5. Success → `DONE` with the modification date. Failure (an export, iCloud unreachable, a write
+5. Success → `DONE`, written, with the modification date. Failure (an export, iCloud unreachable, a write
    refused, the domain turned off in Files) → `FAILED`, attempts + 1, next attempt = now +
    `retry_backoff(attempts)`, last error. The temporary files are removed on every path.
 
