@@ -9,6 +9,7 @@ struct TsyncPhoneApp: App {
         Core.start(bounded: false)
         BackgroundRefresh.register()
         if Bundle.main.development, CommandLine.arguments.contains("-selftest") { Task.detached { await SelfTest.run() } }
+        if Bundle.main.development, CommandLine.arguments.contains("-browsertest") { Task.detached { await BrowserTest.run() } }
     }
 
     var body: some Scene {
@@ -16,17 +17,25 @@ struct TsyncPhoneApp: App {
     }
 }
 
-/// ios-app.md §2: Setup until a config loads, then Settings.
+/// ios-app.md §2: Setup until a config loads, then Files and Settings.
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var phase
+    @SceneStorage("destination") private var destination = "files"
 
     var body: some View {
-        NavigationStack {
+        Group {
             if model.loadFailure != nil || !model.configured {
-                SetupView(failure: model.loadFailure)
+                NavigationStack { SetupView(failure: model.loadFailure) }
             } else {
-                SettingsView()
+                TabView(selection: $destination) {
+                    FilesView()
+                        .tabItem { Label("Files", systemImage: "folder") }
+                        .tag("files")
+                    NavigationStack { SettingsView() }
+                        .tabItem { Label("Settings", systemImage: "gearshape") }
+                        .tag("settings")
+                }
             }
         }
         .onAppear { BackgroundRefresh.schedule() }
@@ -50,7 +59,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var passFailures: [String] = []
     @Published private(set) var refreshStatus = UIBackgroundRefreshStatus.available
 
-    private let reconciler = Reconciler()
+    private let reconciler = Reconciler.shared
     private var observer: NSObjectProtocol?
 
     init() {

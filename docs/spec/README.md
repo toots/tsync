@@ -172,6 +172,7 @@ nothing depends on them except the CLI and the request handler.
 | [gcs](backends/gcs.md) | Google Cloud Storage | [http-proxy](frontends/http-proxy.md) | the store server, share links and status page |
 | [object-store-common](backends/object-store-common.md) | what s3 and gcs share, and the bucket-side functions | [android](frontends/android.md), [android-app](frontends/android-app.md) | the owner embedded in the Android app; the app itself |
 | | | [ios](frontends/ios.md), [ios-app](frontends/ios-app.md) | the owner embedded in the iOS File Provider extension; the app |
+| | | [file-browser](frontends/file-browser.md), [its differences](frontends/file-browser-differences.md) | the apps' Files destination, and how Android and iOS carry it out |
 | [http-proxy](backends/http-proxy.md) | another tsync machine; owns the wire protocol | [cloud-files](frontends/cloud-files.md) | the Windows host: Cloud Files sync roots, the platform layer, the tray |
 
 Clients of the owner that are not frontends:

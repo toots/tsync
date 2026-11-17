@@ -1,30 +1,33 @@
 # The iOS application
 
 Scope: the app's screens and what the app does with the File Provider. The process model, the host
-layout and the extension are [ios.md](ios.md).
+layout and the extension are [ios.md](ios.md). Files is [file-browser.md](file-browser.md), carried
+out as [file-browser-differences.md §2](file-browser-differences.md#2-ios) says.
 
 This page is a delta on [android-app.md](android-app.md). It applies:
 - §6.1, the config the app writes, except where §5 says otherwise;
 - §10.1, the interface principles;
 - §10.7's Setup as written, with the scanner of §4.
 
-Nothing else of android-app.md applies. Files and item actions are the Files app's; Activity, Saving
-into the domain, Vault, Camera backup and Storage are [ios.md §9](ios.md#9-not-yet-specified).
+Nothing else of android-app.md applies. Activity, Saving into the domain, Vault, Camera backup and
+Storage are [ios.md §9](ios.md#9-not-yet-specified).
 
 ---
 
 ## 1. Problem
 
 The app cannot reach a domain's owner: the extension owns it, and the service that would carry
-requests to it is not yet specified. So the app does only what the config and the File Provider
-framework let it do alone: join and remove domains, register them, tell the user which ones the
-Files app shows, and wake the working sets.
+requests to it is not yet specified. So the app does only what the config, the File Provider
+framework and the file system let it do alone: join and remove domains, register them, tell the user
+which ones the Files app shows, wake the working sets, and browse and change the domains' files
+through the file system, which the extension serves.
 
 ## 2. Structure
 
 Until a config exists, the app shows only Setup (§4). A config that does not load shows Setup with
-the core's message, as on Android. Otherwise the app has one screen, Settings (§5), from which Setup
-is reached by **Add a domain**.
+the core's message, as on Android. Otherwise the app has two destinations, reachable from every
+screen: **Files** (the start destination) and **Settings** (§5), from which Setup is reached by
+**Add a domain**.
 
 The app is named **tsync** on the Home Screen and in Files. Its icon is `assets/tsync-app.svg` drawn
 square, one opaque 1024-pixel image whose corners the system rounds; `ios/app/make-icon.sh` renders
@@ -98,6 +101,15 @@ the framework's domain-change notification.
   - **Add the test server domain**, when the build is also given a test server from a file outside
     the repository;
   - **Run self-test**, the test that [ios.md §8](ios.md#8-conformance) runs on a device;
+  - **Run browser test**, which carries out Files' operations through the browser's own code in the
+    local test domain, in a folder of its own that it deletes at the end: a new folder and the same
+    name again, two uploads of one file (the second numbered), a rename onto a taken name and one
+    that succeeds, a move into a subfolder, a remove download and a delete. Each step's outcome
+    and the verdict go to `browsertest.log` in the App Group, copied to the app's Documents like
+    the footprint log. Launching a development build with `-browsertest` runs it too. It adds the
+    local test domain as **Add a local test domain** does, and starts once the app's registration
+    pass has registered it. It never registers the domain itself: on a fresh install, a pass that
+    has not yet recorded the identity scheme removes every domain it finds;
   - **Walk every domain**, which lists every folder of every domain through the file system, so
     that the extension pulls and then holds them all, for ios.md §8's check of a refresh pass over
     thousands of held folders. It leaves out the system's `.Trash`, which the extension does not
@@ -111,7 +123,10 @@ the framework's domain-change notification.
 ## 6. Conformance
 
 - With no config, only Setup is shown; a config that does not load shows Setup and the core's
-  message.
+  message. With a config, the app opens on Files.
+- Files meets [file-browser.md §6](file-browser.md#6-conformance), but for what
+  [file-browser-differences.md §2](file-browser-differences.md#2-ios) leaves out; a folder listed
+  in the app and in the Files app shows the same items.
 - A launch with domains already registered under the current identity scheme removes and adds none.
 - A domain removed from the config is removed from the framework at the next pass; a domain the
   framework refuses to remove is not deleted from the config.

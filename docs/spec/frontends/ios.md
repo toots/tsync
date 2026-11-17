@@ -3,7 +3,8 @@
 Scope: tsync on iOS: which process owns a domain, where its files live, what the host gives the
 core, and how the File Provider framework is served from Android's lazy tree. The app's screens are
 [ios-app.md](ios-app.md)'s; the rest of the app (Save to tsync, camera backup, vault, credentials) is
-[§9](#9-not-yet-specified). There is no in-app browser: the Files app is the browser.
+[§9](#9-not-yet-specified). The app's file browser reaches the files through the file system
+([file-browser-differences.md §2](file-browser-differences.md#2-ios)).
 
 This page is a delta. What it does not restate is owned by:
 - the embedded owner, the lazy tree, the bridge and notices: [android.md](android.md), which applies
@@ -244,6 +245,9 @@ addition:
 - A thousand callbacks, each on a new thread, leave the extension's footprint where one thread's
   would.
 - The self-test passes with the extension below its memory limit on a device.
+- The browser test ([ios-app §5](ios-app.md#5-settings)) passes in the simulator and on a device:
+  a taken name changes nothing, a second upload of a name is numbered, a moved file is listed in
+  its new folder with its contents and no longer in the old one.
 - On a desktop, through `tsync android request`: after a peer commits into a held folder, a
   `refresh` followed by `changes_since` names the change; `list_all` makes no store request and
   lists files this client wrote in a folder it created; `refresh` while a pass runs starts none.
