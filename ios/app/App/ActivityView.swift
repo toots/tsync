@@ -32,6 +32,7 @@ struct ActivityView: View {
                     }
                     WarningsSection(lines: warnings(domain))
                 }
+                CameraBackupRow()
             }
             .navigationTitle("Activity")
             .task(id: shown) { await poll() }
@@ -615,5 +616,21 @@ enum Format {
         formatter.unitsStyle = .abbreviated
         formatter.maximumUnitCount = 2
         return formatter.string(from: seconds ?? 0) ?? ""
+    }
+}
+
+/// ios-app.md §2.1: camera backup's status line, below the domains.
+struct CameraBackupRow: View {
+    @ObservedObject private var backup = CameraBackup.shared
+
+    var body: some View {
+        Section("Camera backup") {
+            Text(backup.status).font(.footnote)
+            if backup.enabled {
+                Button(backup.running ? "Backing up…" : "Back up now") { backup.request(now: true) }
+                    .disabled(backup.running)
+            }
+        }
+        .onAppear { backup.refreshStatus() }
     }
 }

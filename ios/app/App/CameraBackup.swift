@@ -185,6 +185,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     static let shared = CameraBackup()
     nonisolated static let taskIdentifier = (Bundle.main.bundleIdentifier ?? "") + ".camera"
     static let triggerDelay: UInt64 = 10_000_000_000
+    static let refreshPassBudget: TimeInterval = 20
     static let stagedBytesBudget = 512 << 20
     static let freeSpaceFloor: Int64 = 1 << 30
     static let batteryFloor: Float = 0.15
@@ -198,6 +199,8 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     private var pass: Task<Void, Never>?
     private var again = false
     private var stopping = false
+    /// A background refresh run's end: the pass stops between assets after it.
+    private var deadline: Date?
     private var trigger: Task<Void, Never>?
     private var observing = false
 
@@ -269,6 +272,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         observe()
         guard pass == nil else { return again = true }
         stopping = false
+        deadline = nil
         running = true
         pass = Task {
             repeat {
@@ -278,6 +282,18 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
             pass = nil
             running = false
             refreshStatus()
+        }
+    }
+
+    /// §8.6: a background refresh run's pass, within `refreshPassBudget`.
+    func refreshPass() async {
+        guard enabled else { return }
+        request()
+        deadline = Date(timeIntervalSinceNow: Self.refreshPassBudget)
+        await withTaskCancellationHandler {
+            await pass?.value
+        } onCancel: {
+            Task { @MainActor in self.stopping = true }
         }
     }
 
@@ -310,7 +326,6 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
 
     private func schedule() {
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
-        request.requiresNetworkConnectivity = true
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
@@ -332,7 +347,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
             try await Task.detached { try Self.discover(records, domain: domain, baseline: false) }.value
             var uploaded = 0, failed = 0, more = false
             for record in records.due(now: Self.now()) {
-                if stopping || Task.isCancelled { more = true; break }
+                if stopping || Task.isCancelled || deadline.map({ Date() > $0 }) == true { more = true; break }
                 if !now, let hold = gate() { more = true; status = hold; break }
                 if let stop = await budget(record.domain) { more = true; outcome(stop); break }
                 do {
