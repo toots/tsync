@@ -112,6 +112,13 @@ struct CameraBackupSection: View {
             Toggle("Back up photos and videos", isOn: Binding(
                 get: { backup.enabled },
                 set: { on in if on { asking = true } else { backup.disable() } }))
+            // An alert, not a confirmation dialog: on iPad a dialog from this
+            // row is a popover that never shows.
+            .alert("Back up which photos?", isPresented: $asking) {
+                Button("Everything") { enable(everything: true) }
+                Button("From now on") { enable(everything: false) }
+                Button("Cancel", role: .cancel) {}
+            }
             if backup.enabled {
                 Picker("Back up to", selection: Binding(get: { backup.domain ?? "" }, set: { backup.domain = $0 })) {
                     if backup.domain == nil { Text("Choose").tag("") }
@@ -129,10 +136,6 @@ struct CameraBackupSection: View {
             if let refusal { Text(refusal).font(.footnote).foregroundStyle(.red) }
         }
         .onAppear { backup.refreshStatus() }
-        .confirmationDialog("Back up which photos?", isPresented: $asking, titleVisibility: .visible) {
-            Button("Everything") { enable(everything: true) }
-            Button("From now on") { enable(everything: false) }
-        }
     }
 
     private func enable(everything: Bool) {
