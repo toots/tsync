@@ -59,7 +59,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
-        MARKETING_VERSION: "0.1"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
     dependencies:
       - target: TsyncPhoneFileProvider
@@ -97,7 +97,7 @@ targets:
         # ios.md §3.1: development from a Mac, production for TestFlight.
         TSYNC_APS_ENVIRONMENT: ${TSYNC_APS_ENVIRONMENT}
         INFOPLIST_FILE: FileProvider/Info.plist
-        MARKETING_VERSION: "0.1"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
 
   # passwords/ios.md: the AutoFill credential provider, the macOS one's
@@ -128,7 +128,7 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_ENTITLEMENTS: Credentials/Credentials.entitlements
         INFOPLIST_FILE: Credentials/Info.plist
-        MARKETING_VERSION: "0.1"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
 
   # ios-app.md §7: Save to tsync, writing through the file system.
@@ -152,7 +152,7 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_ENTITLEMENTS: Share/Share.entitlements
         INFOPLIST_FILE: Share/Info.plist
-        MARKETING_VERSION: "0.1"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
 
   # ios-app.md §8.7: camera backup's files, sent by the system through
@@ -176,5 +176,5 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: ""
         CODE_SIGN_ENTITLEMENTS: Upload/Upload.entitlements
         INFOPLIST_FILE: Upload/Info.plist
-        MARKETING_VERSION: "0.1"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
