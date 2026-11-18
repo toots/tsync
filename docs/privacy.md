@@ -2,7 +2,7 @@
 
 tsync collects nothing. It has no account, no server of its own, no analytics and no crash reporting. Your files and your vault go only to the storage you configure: your bucket, your disk, or a tsync server you run.
 
-This applies to every part of tsync: the `tsync` program, the macOS app, the Windows client, the Android app and the browser extension.
+This applies to every part of tsync: the `tsync` program, the macOS app, the Windows client, the Android and iOS apps and the browser extension.
 
 ## What goes where
 
@@ -28,6 +28,13 @@ This applies to every part of tsync: the `tsync` program, the macOS app, the Win
 - **Camera backup**, when you turn it on, reads your photos and videos and uploads them to your tsync server.
 - **Autofill** reads the fields of the app or page you are filling, to offer your logins. To match an app with a website, it fetches that website's public `/.well-known/assetlinks.json`.
 - **Scanning a QR code** uses Google Play services' code scanner, which processes the camera image on the phone.
+
+## The iOS app
+
+- **Camera backup**, when you turn it on, reads your photos and videos and uploads them to your tsync server. On iOS 26.4 or later, iOS sends them for the app in the background, to that server only.
+- **Change notifications** come from your tsync server through Apple's push service. They carry no file names or contents, only which tsync location to refresh.
+- **AutoFill** reads the fields of the app or page you are filling, to offer your logins and passkeys. Face ID or your passcode confirms it is you before a passkey is used; tsync never sees your face data.
+- **Scanning a QR code** uses the camera, on the phone, to read setup and two-factor codes.
 
 ## Other requests tsync makes
 
