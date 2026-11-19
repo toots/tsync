@@ -279,7 +279,7 @@ let dangling ids totp =
    https sites of these logins the app is verified for. *)
 let app_sites args site logins =
   match (Passwords.site_of_string site, arg args "certs") with
-    | Ok s, Some (`List certs) when String.starts_with ~prefix:"android://" s ->
+    | Ok s, Some (`List certs) when Passwords.app_package s <> None ->
         let certs =
           List.filter_map (function `String c -> Some c | _ -> None) certs
         in
@@ -531,12 +531,127 @@ let edit ~domain ~engine ~lazy_tree t args =
   write ctx ~exclusive:false id (checked record);
   []
 
+let app_packages urls = List.filter_map Passwords.app_package urls
+
+let web_hosts urls =
+  List.filter_map
+    (fun u ->
+      if Passwords.app_package u = None then Some (Passwords.host_of u)
+      else None)
+    urls
+
+(* §4.3: one of the sites is an app's, another one of its candidates. *)
+let union a b =
+  List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [x]) a b
+
+(* §10.1, §10.2: distinct non-empty notes in order, a blank line between. *)
+let join_notes notes =
+  String.concat "\n\n" (union [] (List.filter (( <> ) "") notes))
+
+(* §2: a login's sites. *)
+let max_sites = 32
+
+(* Rows agree on a seed when its code fields do; a URI that does not parse is
+   compared as written, and the import reports it as a dropped seed. *)
+let seed_key uri =
+  match Totp.of_uri ~now:0 uri with
+    | Ok r -> Totp.code_fields r
+    | Error _ -> uri
+
+type import_member = {
+  row : Passwords.row;
+  packages : string list;
+  hosts : string list;
+}
+
+type import_group = {
+  mutable members : import_member list;  (** newest first *)
+  mutable sites : string list;
+}
+
+(* §10.1: an app's row and its candidates' rows of one username, password and
+   seed are one login, up to §2's sites; a row of that username with another
+   password or seed stays apart and its line is named. *)
+let fold_app_rows (rows : Passwords.row list) =
+  let verdicts = Hashtbl.create 64 in
+  let candidate package host =
+    match Hashtbl.find_opt verdicts (package, host) with
+      | Some verdict -> verdict
+      | None ->
+          let verdict = Tsync_vault.Asset_links.candidate ~package host in
+          Hashtbl.replace verdicts (package, host) verdict;
+          verdict
+  in
+  let linked a b =
+    let one_way x y =
+      List.exists
+        (fun package -> List.exists (candidate package) y.hosts)
+        x.packages
+    in
+    one_way a b || one_way b a
+  in
+  let seeds members =
+    List.sort_uniq compare
+      (List.filter_map
+         (fun m ->
+           if m.row.otpauth = "" then None else Some (seed_key m.row.otpauth))
+         members)
+  in
+  let by_username = Hashtbl.create 64 and all = ref [] and apart = ref [] in
+  List.iter
+    (fun (row : Passwords.row) ->
+      let m =
+        { row; packages = app_packages row.urls; hosts = web_hosts row.urls }
+      in
+      let groups =
+        Option.value ~default:[] (Hashtbl.find_opt by_username row.username)
+      in
+      let linked_to g = List.exists (fun x -> linked x m) g.members in
+      let agrees g =
+        List.for_all (fun x -> x.row.password = row.password) g.members
+        && List.length (seeds (m :: g.members)) <= 1
+      in
+      let fits g = List.length (union g.sites row.urls) <= max_sites in
+      match
+        List.find_opt (fun g -> linked_to g && agrees g && fits g) groups
+      with
+        | Some g ->
+            g.members <- m :: g.members;
+            g.sites <- union g.sites row.urls
+        | None ->
+            if List.exists (fun g -> linked_to g && not (agrees g)) groups then
+              apart := row.line :: !apart;
+            let g = { members = [m]; sites = row.urls } in
+            Hashtbl.replace by_username row.username (groups @ [g]);
+            all := g :: !all)
+    rows;
+  let merged =
+    List.map
+      (fun g ->
+        let members = List.rev_map (fun m -> m.row) g.members in
+        let first_set f =
+          Option.value ~default:""
+            (List.find_opt (( <> ) "") (List.map f members))
+        in
+        {
+          (List.hd members) with
+          Passwords.title = first_set (fun (r : Passwords.row) -> r.title);
+          urls = g.sites;
+          notes =
+            join_notes (List.map (fun (r : Passwords.row) -> r.notes) members);
+          otpauth = first_set (fun (r : Passwords.row) -> r.otpauth);
+        })
+      (List.rev !all)
+  in
+  (merged, List.sort compare !apart)
+
 (* §10.1: rows added, rows skipped by line, seeds added and dropped. *)
 let import ~domain ~engine ~lazy_tree t args =
   let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   match Passwords.import_csv (required args "text") with
     | Error reason -> Fail.invalid "%s" reason
     | Ok (rows, skipped) ->
+        let rows, apart = fold_app_rows rows in
         let seeds_added = ref 0 and seeds_dropped = ref 0 and added = ref 0 in
         let skipped = ref skipped in
         List.iter
@@ -588,6 +703,7 @@ let import ~domain ~engine ~lazy_tree t args =
                  (List.sort compare !skipped)) );
           ("seedsAdded", `Int !seeds_added);
           ("seedsDropped", `Int !seeds_dropped);
+          ("apart", `List (List.map (fun l -> `Int l) apart));
         ]
 
 (* §10: the passphrase guards the export, as totp's; passkeys stay. *)
@@ -852,11 +968,14 @@ let save ~domain ~engine ~lazy_tree t args =
         let ctx = context ~writing:(not check) ~domain ~engine ~lazy_tree t in
         let ok, _ = records ctx in
         (* §8: a save is about the site exactly; a parent site's login that
-           also matches it by suffix is never updated from a subdomain. *)
+           also matches it by suffix is never updated from a subdomain. An
+           app's save also finds the login of a website it is verified for. *)
+        let verified = app_sites args site (logins ok) in
         let same =
           List.filter
             (fun (_, (l : Passwords.login)) ->
-              l.username = username && List.mem site l.urls)
+              l.username = username
+              && List.exists (fun u -> u = site || List.mem u verified) l.urls)
             (logins ok)
         in
         let unchanged =
@@ -880,8 +999,18 @@ let save ~domain ~engine ~lazy_tree t args =
                   (edit ~domain ~engine ~lazy_tree t
                      [("id", `String id); ("password", `String password)]);
                 [("saved", `Bool true); ("id", `String id)]
-            | [(id, _)], _ -> [("saved", `Bool false); ("update", `String id)]
-            | _ ->
+            | _ :: _, _ ->
+                (* An app's login and its website's both match: the newer
+                   one is the likelier current. *)
+                let newest =
+                  List.fold_left
+                    (fun (id, (l : Passwords.login))
+                         (id', (l' : Passwords.login)) ->
+                      if l'.modified > l.modified then (id', l') else (id, l))
+                    (List.hd same) (List.tl same)
+                in
+                [("saved", `Bool false); ("update", `String (fst newest))]
+            | [], _ ->
                 add ~domain ~engine ~lazy_tree t
                   [
                     ("title", `String site);
@@ -917,6 +1046,276 @@ let generate_password ~domain:_ ~engine:_ ~lazy_tree:_ _ args =
         (generated (Option.value ~default:(`Assoc []) (arg args "generate"))) );
   ]
 
+(* §10.2: the TOTP records the logins link, by id in argument order, with the
+   record each opens to; a dangling link is none. *)
+let linked_codes ~domain ~engine ~lazy_tree t
+    (merged : (string * Passwords.login) list) =
+  if not (uses_totp ~domain ~engine) then []
+  else (
+    let ctx = Totp_verbs.context ~domain ~engine ~lazy_tree t in
+    List.fold_left
+      (fun acc (_, (l : Passwords.login)) ->
+        if l.totp = "" || List.mem_assoc l.totp acc then acc
+        else (
+          match Totp_verbs.find ctx l.totp with
+            | r -> acc @ [(l.totp, r)]
+            | exception Fail.E { kind = Absent; _ } -> acc))
+      [] merged)
+
+let distinct_codes linked =
+  List.sort_uniq compare (List.map (fun (_, r) -> Totp.code_fields r) linked)
+
+let code_rows ~domain ~engine ~lazy_tree t merged linked =
+  List.map
+    (fun (id, (r : Totp.t)) ->
+      let c = Totp_verbs.code ~domain ~engine ~lazy_tree t id in
+      `Assoc
+        [
+          ("id", `String id);
+          ("issuer", `String r.issuer);
+          ("account", `String r.account);
+          ( "logins",
+            `List
+              (List.filter_map
+                 (fun (lid, (l : Passwords.login)) ->
+                   if l.totp = id then Some (`String lid) else None)
+                 merged) );
+          ("code", `String c.code);
+          ("secondsLeft", `Int c.seconds_left);
+        ])
+    linked
+
+(* §10.2: the link the kept login takes, and the TOTP records to remove. *)
+let resolve_codes ~chosen ~kept linked =
+  match (distinct_codes linked, chosen) with
+    | [], None -> Ok (kept.Passwords.totp, [])
+    | [_], None ->
+        let link =
+          if List.mem_assoc kept.totp linked then kept.totp
+          else fst (List.hd linked)
+        in
+        Ok (link, List.filter (( <> ) link) (List.map fst linked))
+    | _, Some id when List.mem_assoc id linked ->
+        Ok (id, List.filter (( <> ) id) (List.map fst linked))
+    | _, Some id -> Fail.invalid "%s is no code these logins link" id
+    | _ :: _ :: _, None -> Error ()
+
+let merged_login (kept : Passwords.login) (others : Passwords.login list) =
+  let all = kept :: others in
+  let fields =
+    List.fold_left
+      (fun acc (f : Passwords.field) ->
+        if
+          List.exists
+            (fun (g : Passwords.field) ->
+              g.name = f.name && g.value = f.value && g.secret = f.secret)
+            acc
+        then acc
+        else acc @ [f])
+      []
+      (List.concat_map (fun (l : Passwords.login) -> l.fields) all)
+  in
+
+  {
+    kept with
+    urls =
+      List.fold_left (fun acc (l : Passwords.login) -> union acc l.urls) [] all;
+    fields;
+    notes = join_notes (List.map (fun (l : Passwords.login) -> l.notes) all);
+    modified = now ();
+  }
+
+let merge_logins ~domain ~engine ~lazy_tree t args =
+  let check = flag args "check" in
+  let id = required args "id"
+  and other_ids = Option.value ~default:[] (strings args "others") in
+  if other_ids = [] then Fail.invalid "a merge names another login";
+  let ids = id :: other_ids in
+  if List.length (List.sort_uniq compare ids) <> List.length ids then
+    Fail.invalid "a login is named twice";
+  let ctx = context ~writing:(not check) ~domain ~engine ~lazy_tree t in
+  let login_of i =
+    match find ctx i with
+      | Passwords.Login l -> (i, l)
+      | _ -> Fail.invalid "%s is no login" i
+  in
+  let kept = snd (login_of id) and others = List.map login_of other_ids in
+  List.iter
+    (fun (i, (l : Passwords.login)) ->
+      if l.username <> kept.username then
+        Fail.invalid "%s has another username" i)
+    others;
+  let merged = (id, kept) :: others in
+  let record = checked (Login (merged_login kept (List.map snd others))) in
+  let urls = match record with Login l -> l.urls | _ -> [] in
+  let linked = linked_codes ~domain ~engine ~lazy_tree t merged in
+  let differing =
+    List.filter_map
+      (fun (i, (l : Passwords.login)) ->
+        if l.password <> kept.password then Some (`String i) else None)
+      others
+  in
+  let ok, _ = records ctx in
+  (* A TOTP record a login outside the merge links stays. *)
+  let linked_elsewhere totp =
+    List.exists
+      (fun (i, (l : Passwords.login)) -> l.totp = totp && not (List.mem i ids))
+      (logins ok)
+  in
+  match resolve_codes ~chosen:(str args "totp") ~kept linked with
+    | Error () when check ->
+        [
+          ("urls", `List (List.map (fun u -> `String u) urls));
+          ("differing", `List differing);
+          ("codes", `List (code_rows ~domain ~engine ~lazy_tree t merged linked));
+        ]
+    | Error () ->
+        Fail.invalid
+          "these logins link different codes (%s): choose one with totp"
+          (String.concat ", " (List.map fst linked))
+    | Ok (link, removed) ->
+        let removed = List.filter (fun r -> not (linked_elsewhere r)) removed in
+        if not check then (
+          (match record with
+            | Login l ->
+                write ctx ~exclusive:false id (Login { l with totp = link })
+            | _ -> ());
+          List.iter
+            (fun (pid, (p : Passwords.passkey)) ->
+              if List.mem p.login other_ids then
+                write ctx ~exclusive:false pid
+                  (Passkey { p with login = id; modified = now () }))
+            (passkeys ok);
+          List.iter (fun (i, _) -> remove ~domain ~engine ~lazy_tree t i) others;
+          List.iter (Totp_verbs.remove ~domain ~engine ~lazy_tree t) removed);
+        [
+          ("urls", `List (List.map (fun u -> `String u) urls));
+          ("differing", `List differing);
+          ("removedCodes", `List (List.map (fun r -> `String r) removed));
+        ]
+
+(* §10.2.1: the registrable domains of a login's websites. *)
+let website_domains (l : Passwords.login) =
+  List.sort_uniq compare (List.filter_map Passwords.domain (web_hosts l.urls))
+
+let suggest_merges ~domain ~engine ~lazy_tree t =
+  let ctx = context ~domain ~engine ~lazy_tree t in
+  let all =
+    List.filter
+      (fun (_, (l : Passwords.login)) -> l.username <> "")
+      (logins (fst (records ctx)))
+  in
+  (* Logins alike, directly or through others, are one group. *)
+  let parent = Hashtbl.create 64 in
+  let rec root i =
+    match Hashtbl.find_opt parent i with
+      | Some j when j <> i ->
+          let r = root j in
+          Hashtbl.replace parent i r;
+          r
+      | _ -> i
+  in
+  let join i j =
+    if root i <> root j then Hashtbl.replace parent (root i) (root j)
+  in
+  (* By username: each website domain and the first login holding it. *)
+  let websites = Hashtbl.create 64 in
+  List.iter
+    (fun (i, (l : Passwords.login)) ->
+      let known =
+        Option.value ~default:[] (Hashtbl.find_opt websites l.username)
+      in
+      let known =
+        List.fold_left
+          (fun known d ->
+            match List.assoc_opt d known with
+              | Some j ->
+                  join i j;
+                  known
+              | None -> (d, i) :: known)
+          known (website_domains l)
+      in
+      Hashtbl.replace websites l.username known)
+    all;
+  List.iter
+    (fun (i, (l : Passwords.login)) ->
+      let known =
+        Option.value ~default:[] (Hashtbl.find_opt websites l.username)
+      in
+      List.iter
+        (fun package ->
+          List.iter
+            (fun (d, j) ->
+              if Tsync_vault.Asset_links.candidate ~package d then join i j)
+            known)
+        (app_packages l.urls))
+    all;
+  let groups = Hashtbl.create 16 in
+  List.iter
+    (fun (i, l) ->
+      let r = root i in
+      Hashtbl.replace groups r
+        ((i, l) :: Option.value ~default:[] (Hashtbl.find_opt groups r)))
+    all;
+  let has_https (l : Passwords.login) =
+    List.exists (String.starts_with ~prefix:"https://") l.urls
+  in
+  (* The newest first, a website's on a tie, then by id. *)
+  let keep_order (a, (x : Passwords.login)) (b, (y : Passwords.login)) =
+    match compare y.modified x.modified with
+      | 0 -> (
+          match compare (has_https y) (has_https x) with
+            | 0 -> compare a b
+            | order -> order)
+      | order -> order
+  in
+  let rows =
+    Hashtbl.fold
+      (fun _ members acc ->
+        if List.length members < 2 then acc
+        else (
+          let members = List.sort keep_order members in
+          let kept = snd (List.hd members) in
+          let linked = linked_codes ~domain ~engine ~lazy_tree t members in
+          `Assoc
+            [
+              ("keep", `String (fst (List.hd members)));
+              ( "logins",
+                `List
+                  (List.map
+                     (fun (i, (l : Passwords.login)) ->
+                       `Assoc
+                         [
+                           ("id", `String i);
+                           ("title", `String l.title);
+                           ("username", `String l.username);
+                           ("urls", `List (List.map (fun u -> `String u) l.urls));
+                         ])
+                     members) );
+              ( "passwordsEqual",
+                `Bool
+                  (List.for_all
+                     (fun (_, (l : Passwords.login)) ->
+                       l.password = kept.password)
+                     members) );
+              ("codesEqual", `Bool (List.length (distinct_codes linked) <= 1));
+            ]
+          :: acc))
+      groups []
+  in
+  let title = function
+    | `Assoc l -> (
+        match List.assoc_opt "logins" l with
+          | Some (`List (`Assoc m :: _)) -> List.assoc_opt "title" m
+          | _ -> None)
+    | _ -> None
+  in
+  [("groups", `List (List.sort (fun a b -> compare (title a) (title b)) rows))]
+
+let merge ~domain ~engine ~lazy_tree t args =
+  if flag args "suggest" then suggest_merges ~domain ~engine ~lazy_tree t
+  else merge_logins ~domain ~engine ~lazy_tree t args
+
 let act ~domain ~engine ~lazy_tree t ~action args =
   let verb =
     match action with
@@ -928,6 +1327,7 @@ let act ~domain ~engine ~lazy_tree t ~action args =
       | "passwords_suggest" -> suggest
       | "passwords_edit" -> edit
       | "passwords_remove" -> remove_record
+      | "passwords_merge" -> merge
       | "passwords_import" -> import
       | "passwords_export" -> export
       | "passwords_generate" -> generate_password

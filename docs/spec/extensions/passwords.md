@@ -138,10 +138,11 @@ when the site's Digital Asset Links statements (`https://<host>/.well-known/asse
 grant `delegate_permission/common.get_login_creds` to the app's package with the SHA-256 of a
 certificate the app is signed with, as the platform reports it.
 
-- **Which sites are checked:** only the `https` sites of the domain's logins whose host, its
-  labels reversed, is a prefix of the package name's labels (`github.com` for
-  `com.github.android`, `amazon.com` for `com.amazon.mShop.android.shopping`). The owner never
-  fetches statements for every saved site.
+- **Which sites are checked:** only the `https` sites of the domain's logins whose registrable
+  domain (§4.2), its labels reversed, is a prefix of the package name's labels (`github.com` for
+  `com.github.android`, `www.instagram.com` for `com.instagram.android`, `id.venmo.com` for
+  `com.venmo`). Such a site is the app's **candidate**. The owner never fetches statements for
+  every saved site.
 - **Fetching:** the owner fetches each over `https`, following no redirect to another host, at
   most 256 KiB, within 5 s. A verdict, granted or not, is kept per host and package for
   24 hours; a fetch that fails keeps nothing and is tried again at the next
@@ -337,10 +338,13 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
   unlock ([README §5](README.md#5-host-adapters)); it never fills from a cache.
 - A `save` whose site, username and password equal those of a record adds nothing. A `save`
   whose site and username equal one record's, with another password, asks whether to update it;
-  with several such records, it asks which one. Otherwise it adds a record. A `save` with `check`
+  with several such records, the most recently modified one. Otherwise it adds a record. A `save` with `check`
   writes nothing: it answers `unchanged`, whether a record of that site and username holds that
   password, and `logins`, the records of that site and username holding another one. The site is compared exactly, not by §4.2's suffix rule: a page on
   `login.example.com` never updates a login saved for `example.com`.
+- A `save` for an app's `android://` site also compares the records of its username holding an
+  `https` site the app is verified for (§4.3): an app and its website keep one login. A save that
+  updates such a record leaves its sites as they are.
 
 | action | request | answer |
 |---|---|---|
@@ -429,6 +433,7 @@ Every verb is of access class **owner**
 | `edit` / `passwords_edit` | `id`, any of `title`, `urls`, `username`, `password` or `generate`, `notes`, `fields`, `otpauth` or `totp` | replaces those fields and sets `modified`; `fields` replaces the whole list |
 | `generate` / `passwords_generate` | `generate` | prints a password (§5) and saves nothing; `--words N` for words |
 | `remove` / `passwords_remove` | `id` | removes the record, a login or a passkey; removing a login leaves its passkeys, whose link then dangles |
+| `merge` / `passwords_merge` | `id`, `others`, `totp?`, `check?`; or `suggest` alone | §10.2 |
 | `import` (CLI only) | a CSV file | §10.1 |
 | `export` (CLI only) | the passphrase, asked as `tsync totp export` asks it | prints every record as CSV with the columns `name,url,username,password,note,otpauth`, the last empty for a login with no code, one row per login, its first site in `url`; passkeys are not exported (§1.1), and their count is said on stderr |
 
@@ -462,11 +467,67 @@ password manager, and adds one record per row.
   A row without a title takes its first site's host as title.
 - A one-time-password seed that is an `otpauth://totp/` URI is added as a TOTP record and linked
   to the row's login (§6) when the domain lists `totp`, and counted as dropped otherwise.
+- Rows of one file with the same username, password and seed (or none), one for an `android://`
+  site and the others for its candidates (§4.3), are one login: its sites are theirs in file
+  order, up to §2's 32, a row past them starting another login; its title and seed are the first
+  row's that has one, and its notes joined as `merge` joins them (§10.2). Rows of that username
+  with another password or another seed stay separate, and the reply names their line numbers in
+  `apart`: a seed is never dropped by folding. Exports list an app and its website as two rows,
+  and statements are not fetched during an import.
 - Import adds; it never matches a row against an existing record. Importing a file twice gives
   each login twice.
 - The reply counts the records added, the rows skipped and the seeds added and dropped.
 
 The file is plaintext. tsync neither copies nor removes it.
+
+### 10.2 Merge
+
+`merge ID OTHER…` folds logins that are one account into the login `ID`, and removes the
+`OTHER`s: duplicates an earlier import or save left, an app's login and its website's.
+
+- Every id names a login, all distinct, all of one username; anything else is refused `invalid`
+  before anything is written.
+- The kept login keeps its title and password. Its `urls` become its own followed by each
+  other's in argument order, without repeats; its `fields` likewise, a field equal in name,
+  value and `secret` to one already kept being dropped. Distinct non-empty `notes` are joined in
+  argument order with a blank line between. More than 32 sites, or notes over 64 KiB, is refused
+  `invalid`.
+- **Codes.** The owner compares the TOTP records the logins link by their code fields
+  ([totp §2](totp.md#2-record)), inside the owner: no seed is answered.
+  - All linked records are one code: the kept login links its own, or the first other's when it
+    has none. Each other record of that code is removed, unless a login outside the merge links
+    it.
+  - Two or more codes: the merge is refused `invalid`, naming their TOTP record ids. A `check`
+    answers each one in `codes`, with its issuer, account, the logins that link it and its current
+    code, so the user can tell which one the site accepts; the CLI's `merge` checks first and
+    shows them. A request carrying `totp`, one of those ids, links that
+    one to the kept login and removes the records of every other code, unless a login outside the
+    merge links them. A seed is never dropped without that choice.
+- The passkeys filed with an `OTHER` are filed with the kept login.
+- The reply names the `OTHER`s whose password differed from the kept one, and the TOTP records
+  removed. With `check` it writes nothing and answers the same, plus the merged `urls`, or the
+  codes to choose from: the CLI's `--check` shows what a merge would do before it does it, and
+  `--totp ID` makes the choice.
+- The kept login is written, with `modified` set, before the `OTHER`s are removed, so an
+  interrupted merge leaves a duplicate and never a lost site. A removed body stays in the
+  domain's versions (§2). An `OTHER` edited concurrently on another machine survives the fold
+  (§3) and is merged again.
+
+#### 10.2.1 Suggestions
+
+`merge --suggest` lists the groups of logins that look like one account, for the user to merge;
+it writes nothing.
+
+- Two logins **look alike** when their usernames are equal and non-empty, and a site of one and a
+  site of the other share a registrable domain (§4.2), or are an `android://` site and one of its
+  candidates (§4.3). A group is the logins linked by that relation, directly or through others.
+  Statements are not fetched: a suggestion is a guess the user confirms.
+- Each group answers its ids, whether their passwords are all equal, whether their linked codes
+  are one code, and the login to keep: the most recently `modified`, the likeliest to hold the
+  current password, an `https` site's first on a tie. No password or seed is answered.
+- The CLI prints each group as the `merge` command that does it, kept login first, with its
+  sites and usernames, and marks a group whose passwords differ, or whose codes differ: there the
+  user checks which one is current, and the command needs `--totp`, before running it.
 
 ## 11. Conformance
 
@@ -482,6 +543,24 @@ The file is plaintext. tsync neither copies nor removes it.
   statement; the next offers the site's login too. A statement granting another certificate, a
   redirect to another host, or a login for `https://other.com` is never offered. Linking a login
   to the app by hand adds `android://com.example.app` to its sites.
+- A login for `https://www.example.com` is a candidate of `com.example.app`; one for
+  `https://example.org` is not.
+- With that login verified for the app, a `save` from the app with its username and another
+  password asks to update it and adds no `android://` record.
+- `merge A B` of a login A for `https://www.example.com` with password P and TOTP record T, and
+  B for `android://com.example.app` with password Q, a TOTP record U of T's code fields and a
+  passkey: A's sites become both, its password stays P, it links T, the passkey is filed with A,
+  B and U are removed, and the reply names B (another password) and U. With `check`, the same
+  reply and no record changes. With U linked by a third login too, U stays. `merge A A`, a note,
+  a passkey, or B with another username is refused `invalid` and changes nothing.
+- With U of another seed, `merge A B` is refused `invalid` naming T and U, and changes nothing;
+  `merge A B` with `totp` U links U to A and removes T.
+- With logins `me` for `android://com.example.app`, `me` for `https://id.example.com` and `me`
+  for `https://example.com`, all of password P, and `you` for `https://example.com`,
+  `merge --suggest` answers one group of the three `me` logins, passwords equal, keeping the
+  newest; `you` is in no group. With another password on one of the three, the group is marked.
+- An import of rows `android://com.example.app,me,P` and `https://www.example.com,me,P` adds one
+  login with both sites; with `Q` in the second row, it adds two and names the second row's line.
 
 - The store holds no title, username, site or password in plaintext after `add`. Two records
   whose plaintexts differ in length by less than 256 bytes before padding may have envelopes of

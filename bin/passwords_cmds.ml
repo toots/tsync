@@ -222,10 +222,10 @@ let list_cmd =
                     say "%s %s login %s %s %s" (dname d) (f "id") (f "title")
                       (f "username")
                       (match member row "dangling" with
-                        | Some (`Bool true) -> "(code link dangling)"
+                        | Some (`Bool true) -> "(OTP link dangling)"
                         | _ -> (
                             match member row "code" with
-                              | Some (`Bool true) -> "(code)"
+                              | Some (`Bool true) -> "(has OTP)"
                               | _ -> ""))
                   else if f "kind" = "note" then
                     say "%s %s note %s" (dname d) (f "id") (f "title")
@@ -369,6 +369,113 @@ let remove_cmd =
           0)
       $ id_arg)
 
+let strings_of j k =
+  match member j k with
+    | Some (`List l) ->
+        List.filter_map (function `String v -> Some v | _ -> None) l
+    | _ -> []
+
+(* §10.2.1: each group as the merge that does it, kept login first. *)
+let print_suggestions d reply =
+  List.iter
+    (fun group ->
+      let logins =
+        match member group "logins" with Some (`List l) -> l | _ -> []
+      in
+      let flag k = member group k = Some (`Bool false) in
+      say "tsync passwords merge -d %s %s%s" (dname d)
+        (String.concat " " (List.filter_map (fun l -> field l "id") logins))
+        (if flag "codesEqual" then " --totp ID" else "");
+      List.iter
+        (fun l ->
+          say "  %s %s %s"
+            (Option.value ~default:"" (field l "id"))
+            (String.concat "," (strings_of l "urls"))
+            (Option.value ~default:"" (field l "username")))
+        logins;
+      if flag "passwordsEqual" then
+        say "  passwords differ: the first login's is kept, check it is current";
+      if flag "codesEqual" then
+        say
+          "  codes differ: run with --check to see them, then choose one with \
+           --totp")
+    (match List.assoc_opt "groups" reply with Some (`List l) -> l | _ -> [])
+
+(* §10.2: what a merge does, or would do. *)
+let print_merge reply =
+  let j = `Assoc reply in
+  say "sites: %s" (String.concat " " (strings_of j "urls"));
+  (match strings_of j "differing" with
+    | [] -> ()
+    | ids -> say "another password, dropped: %s" (String.concat " " ids));
+  match strings_of j "removedCodes" with
+    | [] -> ()
+    | ids -> say "duplicate codes removed: %s" (String.concat " " ids)
+
+let print_codes reply =
+  say
+    "the logins link different codes; choose the one the site accepts with \
+     --totp ID:";
+  List.iter
+    (fun c ->
+      let f k = Option.value ~default:"" (field c k) in
+      say "  %s %s%s%s, code %s, linked by %s" (f "id") (f "issuer")
+        (if f "issuer" <> "" && f "account" <> "" then ":" else "")
+        (f "account") (f "code")
+        (String.concat " " (strings_of c "logins")))
+    (match List.assoc_opt "codes" reply with Some (`List l) -> l | _ -> [])
+
+let merge_cmd =
+  verb "merge"
+    ~doc:
+      "Fold logins of one account into the first ID and remove the others \
+       (§10.2), or list likely duplicates with --suggest."
+    Term.(
+      const (fun ids check totp suggest ?name config ->
+          if suggest then (
+            if ids <> [] || check || totp <> None then
+              Fail.invalid "--suggest takes no ID, --check or --totp";
+            List.iter
+              (fun (d, reply) -> print_suggestions d reply)
+              (each ?name config (fun d ->
+                   call d "merge" [("suggest", `Bool true)]));
+            0)
+          else (
+            match ids with
+              | [] | [_] ->
+                  Fail.invalid "give the login to keep and at least one other"
+              | id :: others ->
+                  let d = holder ?name config id in
+                  let request check =
+                    [
+                      ("id", s id);
+                      ("others", `List (List.map s others));
+                      ("check", `Bool check);
+                    ]
+                    @ optional [("totp", totp)]
+                  in
+                  let preview = call d "merge" (request true) in
+                  if List.mem_assoc "codes" preview then (
+                    print_codes preview;
+                    1)
+                  else if check then (
+                    print_merge preview;
+                    0)
+                  else (
+                    print_merge (call d "merge" (request false));
+                    0)))
+      $ Arg.(value & pos_all string [] & info [] ~docv:"ID")
+      $ Arg.(
+          value & flag
+          & info ["check"]
+              ~doc:"Show what the merge would do, and write nothing.")
+      $ opt_string "totp"
+          ~doc:"The TOTP record to keep when the logins link different codes."
+      $ Arg.(
+          value & flag
+          & info ["suggest"]
+              ~doc:"List the groups of logins that look like one account."))
+
 let import_cmd =
   verb "import" ~doc:"Add one login per row of a CSV export (§10.1)."
     Term.(
@@ -388,6 +495,14 @@ let import_cmd =
                          (Yojson.Safe.to_string (Option.get (member r "line")))
                          (Option.value ~default:"" (field r "reason"))))
                   rows
+            | _ -> ());
+          (match member j "apart" with
+            | Some (`List (_ :: _ as lines)) ->
+                prerr_endline
+                  (Printf.sprintf
+                     "tsync: lines %s: an app's login with another password \
+                      than its website's, added apart"
+                     (String.concat ", " (List.map Yojson.Safe.to_string lines)))
             | _ -> ());
           say "seeds added %s, dropped %s"
             (Yojson.Safe.to_string (Option.get (member j "seedsAdded")))
@@ -896,6 +1011,7 @@ let cmds =
         edit_cmd;
         generate_cmd;
         remove_cmd;
+        merge_cmd;
         import_cmd;
         export_cmd;
         browser_host_cmd;

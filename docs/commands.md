@@ -109,6 +109,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync passwords list [--site SITE] [--filter TEXT]` | Logins and passkeys, never a password |
 | `tsync passwords get ID` | A login's password alone |
 | `tsync passwords edit ID`, `tsync passwords remove ID` | Change or remove a login or passkey |
+| `tsync passwords merge [--check] [--totp ID] ID OTHER…`, `tsync passwords merge --suggest` | Fold duplicate logins of one account into the first; list likely duplicates |
 | `tsync passwords import FILE`, `tsync passwords export` | From a browser's CSV export; out as CSV, after the passphrase |
 
 **macOS only**

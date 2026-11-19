@@ -343,6 +343,10 @@ let asset_links () =
       ("com.github.android", "gitlab.com");
       ("com.example", "example");
       ("org.example.app", "com.example.org");
+      ("com.instagram.android", "www.instagram.com");
+      ("com.venmo", "id.venmo.com");
+      ("uk.co.example.app", "login.example.co.uk");
+      ("io.github.app", "alice.github.io");
     ];
   let statement ?(relation = "delegate_permission/common.get_login_creds")
       ?(namespace = "android_app") ?(package = "com.example.app")

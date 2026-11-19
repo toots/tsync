@@ -764,6 +764,9 @@ let host_of site =
     | Ok (Android package) -> package
     | Error _ -> ""
 
+let app_package site =
+  match parse site with Ok (Android package) -> Some package | _ -> None
+
 (* §10.1 *)
 let import_csv text =
   let* rows = parse_csv text in
