@@ -852,11 +852,14 @@ let save ~domain ~engine ~lazy_tree t args =
         let ctx = context ~writing:(not check) ~domain ~engine ~lazy_tree t in
         let ok, _ = records ctx in
         (* §8: a save is about the site exactly; a parent site's login that
-           also matches it by suffix is never updated from a subdomain. *)
+           also matches it by suffix is never updated from a subdomain. An
+           app's save also finds the login of a website it is verified for. *)
+        let verified = app_sites args site (logins ok) in
         let same =
           List.filter
             (fun (_, (l : Passwords.login)) ->
-              l.username = username && List.mem site l.urls)
+              l.username = username
+              && List.exists (fun u -> u = site || List.mem u verified) l.urls)
             (logins ok)
         in
         let unchanged =

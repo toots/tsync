@@ -94,9 +94,11 @@ class Passwords(private val client: Client) {
         client.call(action("save").put("site", site).put("username", username).put("suggested", id))
     }
 
-    fun save(site: String, username: String, password: String, update: String? = null): Saved {
+    /** [certs]: as for [list], so an app's save updates its verified website's login (passwords §8). */
+    fun save(site: String, username: String, password: String, update: String? = null, certs: List<String> = emptyList()): Saved {
         val request = action("save").put("site", site).put("username", username).put("password", password)
         update?.let { request.put("update", it) }
+        if (certs.isNotEmpty()) request.put("certs", JSONArray(certs))
         val reply = client.call(request)
         text(reply, "update")?.let { return Saved.Update(it) }
         return if (reply.optBoolean("saved")) Saved.Done(text(reply, "id")) else Saved.Unchanged

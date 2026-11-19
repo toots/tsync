@@ -66,7 +66,7 @@ object Saving {
             }
             val target = if (domain != null) tsync.domain(domain).takeIf { it.boot() == Boot.Ready } else tsync.using("passwords").firstOrNull()
             target ?: throw CoreException(Code.UNREACHABLE, context.getString(R.string.save_login_not_ready))
-            when (val saved = target.passwords.save(site, username, password, update)) {
+            when (val saved = target.passwords.save(site, username, password, update, Browsers.certificatesOf(context, site))) {
                 is Saved.Done -> {
                     tsync.vaultChanges.value++
                     Notifications.outcome(tsync, identity, context.getString(R.string.save_login_done, site), username)
