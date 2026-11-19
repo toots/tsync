@@ -470,7 +470,7 @@ password manager, and adds one record per row.
 - Rows of one file with the same username and password, one for an `android://` site and the
   others for its candidates (§4.3), are one login, whose sites are theirs in file order and whose
   title, notes and seed are the first row's that has one. Rows of that username with another
-  password stay separate, and the reply names their line numbers. Exports list an app and its
+  password stay separate, and the reply names their line numbers in `apart`. Exports list an app and its
   website as two rows, and statements are not fetched during an import.
 - Import adds; it never matches a row against an existing record. Importing a file twice gives
   each login twice.
@@ -495,9 +495,10 @@ The file is plaintext. tsync neither copies nor removes it.
   - All linked records are one code: the kept login links its own, or the first other's when it
     has none. Each other record of that code is removed, unless a login outside the merge links
     it.
-  - Two or more codes: the merge is refused `invalid`, its reply naming each code by a TOTP
-    record id with its issuer, account, the logins that link it and its current code, so the user
-    can tell which one the site accepts. A request carrying `totp`, one of those ids, links that
+  - Two or more codes: the merge is refused `invalid`, naming their TOTP record ids. A `check`
+    answers each one in `codes`, with its issuer, account, the logins that link it and its current
+    code, so the user can tell which one the site accepts; the CLI's `merge` checks first and
+    shows them. A request carrying `totp`, one of those ids, links that
     one to the kept login and removes the records of every other code, unless a login outside the
     merge links them. A seed is never dropped without that choice.
 - The passkeys filed with an `OTHER` are filed with the kept login.

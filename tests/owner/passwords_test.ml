@@ -843,6 +843,274 @@ let passkeys () =
     || Text.contains (Yojson.Safe.to_string got) "privateKey");
   listing "list, with passkeys"
 
+(* §4.3, §8, §10.1, §10.2: an app and its website keep one login. *)
+let merges () =
+  p "== an app and its website, merge";
+  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+      if host = "www.mergetest.com" && path = "/.well-known/assetlinks.json"
+      then
+        Some
+          {|[{"relation":["delegate_permission/common.get_login_creds"],
+              "target":{"namespace":"android_app","package_name":"com.mergetest.app",
+                        "sha256_cert_fingerprints":["AB:CD:EF"]}}]|}
+      else None);
+  let app = "android://com.mergetest.app" in
+  let add ?(username = "merger") ?(extra = []) url password =
+    Option.value ~default:""
+      (field
+         (ask
+            ([
+               ("action", s "passwords_add");
+               ("title", s url);
+               ("urls", `List [s url]);
+               ("username", s username);
+               ("password", s password);
+             ]
+            @ extra))
+         "id")
+  in
+  let seed1 = "otpauth://totp/Merge:merger?secret=JBSWY3DPEHPK3PXP"
+  and seed2 = "otpauth://totp/Merge:merger?secret=GEZDGNBVGY3TQOJQ" in
+  let get id = ask [("action", s "passwords_get"); ("id", s id)] in
+  let totp_of id = Option.value ~default:"" (field (get id) "totp") in
+  let web = add ~extra:[("otpauth", s seed1)] "https://www.mergetest.com" "P" in
+  let certs = ("certs", `List [s "abcdef"]) in
+  let verified () =
+    match
+      member
+        (ask [("action", s "passwords_list"); ("site", s app); certs])
+        "records"
+    with
+      | Some (`List l) -> List.exists (fun r -> field r "id" = Some web) l
+      | _ -> false
+  in
+  let rec until n =
+    verified ()
+    || n > 0
+       &&
+       (Rt.sleep 0.1;
+        until (n - 1))
+  in
+  p "%-40s %b" "the website verified for the app" (until 50);
+  let saved =
+    ask
+      [
+        ("action", s "passwords_save");
+        ("site", s app);
+        ("username", s "merger");
+        ("password", s "P2");
+        certs;
+      ]
+  in
+  p "%-40s %b" "save from the app, another password"
+    (field saved "update" = Some web);
+  let unchanged =
+    ask
+      [
+        ("action", s "passwords_save");
+        ("site", s app);
+        ("username", s "merger");
+        ("password", s "P");
+        certs;
+      ]
+  in
+  p "%-40s %s" "save from the app, the same password"
+    (Yojson.Safe.to_string (Option.get (member unchanged "saved")));
+  (* [modified] is in seconds: the app's login is the newer one. *)
+  Rt.sleep 1.1;
+  let app_login = add ~extra:[("otpauth", s seed1)] app "Q" in
+  let passkey =
+    Option.value ~default:""
+      (field
+         (ask
+            [
+              ("action", s "passwords_passkey_create");
+              ("origin", s "https://www.mergetest.com");
+              ("rpId", s "mergetest.com");
+              ("userHandle", s (b64 "merger"));
+              ("userName", s "merger");
+              ("algorithms", `List [`Int (-7)]);
+              ("clientDataHash", s (b64 (String.make 32 'm')));
+              ("login", s app_login);
+            ])
+         "id")
+  in
+  let other = add ~username:"someone" "https://elsewhere.example" "O" in
+  let groups () =
+    match
+      member
+        (ask [("action", s "passwords_merge"); ("suggest", `Bool true)])
+        "groups"
+    with
+      | Some (`List l) ->
+          List.filter
+            (fun g ->
+              match member g "logins" with
+                | Some (`List ls) ->
+                    List.exists (fun r -> field r "id" = Some web) ls
+                | _ -> false)
+            l
+      | _ -> []
+  in
+  (match groups () with
+    | [g] ->
+        p
+          "%-40s %d logins, keeps the app's %b, passwords equal %s, codes \
+           equal %s"
+          "suggest"
+          (match member g "logins" with
+            | Some (`List l) -> List.length l
+            | _ -> 0)
+          (field g "keep" = Some app_login)
+          (Yojson.Safe.to_string (Option.get (member g "passwordsEqual")))
+          (Yojson.Safe.to_string (Option.get (member g "codesEqual")))
+    | l -> p "suggest: %d groups" (List.length l));
+  let merge ?(extra = []) ids =
+    ask
+      ([
+         ("action", s "passwords_merge");
+         ("id", s (List.hd ids));
+         ("others", `List (List.map s (List.tl ids)));
+       ]
+      @ extra)
+  in
+  let strings r k =
+    match member r k with
+      | Some (`List l) ->
+          List.filter_map (function `String v -> Some v | _ -> None) l
+      | _ -> []
+  in
+  (* A refusal's record ids differ by run. *)
+  let answer label r =
+    let scrub text =
+      let hex c = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') in
+      let b = Buffer.create (String.length text) in
+      let rec go i =
+        if i < String.length text then (
+          let j = ref i in
+          while !j < String.length text && hex text.[!j] do
+            incr j
+          done;
+          if !j - i = 32 then (
+            Buffer.add_string b "<id>";
+            go !j)
+          else (
+            Buffer.add_char b text.[i];
+            go (i + 1)))
+      in
+      go 0;
+      Buffer.contents b
+    in
+    match field r "error" with
+      | Some e -> p "%-40s %s: %s" label (Option.get (field r "code")) (scrub e)
+      | None -> p "%-40s ok" label
+  in
+  let report label r =
+    match field r "error" with
+      | Some _ -> answer label r
+      | None ->
+          p
+            "%-40s sites %d, another password %b, codes removed %d, to choose \
+             %d"
+            label
+            (List.length (strings r "urls"))
+            (strings r "differing" = [app_login])
+            (List.length (strings r "removedCodes"))
+            (match member r "codes" with
+              | Some (`List l) -> List.length l
+              | _ -> 0)
+  in
+  let duplicate = totp_of app_login in
+  report "merge, check" (merge ~extra:[("check", `Bool true)] [web; app_login]);
+  ignore
+    (ask
+       [("action", s "passwords_edit"); ("id", s other); ("totp", s duplicate)]);
+  report "  its code linked elsewhere"
+    (merge ~extra:[("check", `Bool true)] [web; app_login]);
+  p "%-40s %b" "  nothing written" (field (get app_login) "password" = Some "Q");
+  answer "merge, one login named twice" (merge [web; web]);
+  answer "merge, another username" (merge [web; other]);
+  answer "merge, alone" (merge [web]);
+  report "merge" (merge [web; app_login]);
+  let w = get web in
+  p "%-40s sites %d, password P %b, its own code %b" "  the kept login"
+    (List.length (strings w "urls"))
+    (field w "password" = Some "P")
+    (field w "totp" <> Some duplicate);
+  answer "  the other login" (get app_login);
+  p "%-40s %b" "  the passkey filed with it"
+    (field (get passkey) "login" = Some web);
+  p "%-40s %b" "  the code linked elsewhere stays"
+    (field (ask [("action", s "totp_code"); ("id", s duplicate)]) "error" = None);
+  let another = add ~extra:[("otpauth", s seed2)] app "P" in
+  let theirs = totp_of another in
+  answer "merge, different codes" (merge [web; another]);
+  report "  check" (merge ~extra:[("check", `Bool true)] [web; another]);
+  (* The CLI checks first, and shows the codes rather than merging. *)
+  let cli args =
+    let out_r, out_w = Unix.pipe ~cloexec:true () in
+    let pid =
+      Unix.create_process Sys.argv.(1)
+        (Array.of_list (Sys.argv.(1) :: args))
+        Unix.stdin out_w Unix.stderr
+    in
+    Unix.close out_w;
+    let ic = Unix.in_channel_of_descr out_r in
+    let lines = In_channel.input_lines ic in
+    close_in ic;
+    let status =
+      match snd (Unix.waitpid [] pid) with Unix.WEXITED n -> n | _ -> -1
+    in
+    (status, lines)
+  in
+  let status, lines = cli ["passwords"; "merge"; "-d"; "pw"; web; another] in
+  p "%-40s exit %d, %d codes shown, %s" "  the CLI's merge" status
+    (List.length lines - 1)
+    (match lines with first :: _ -> first | [] -> "nothing");
+  p "%-40s %b" "  nothing written" (totp_of another = theirs);
+  let _, lines = cli ["passwords"; "merge"; "-d"; "pw"; "--suggest"] in
+  p "%-40s %b" "  the CLI's suggestion asks for --totp"
+    (List.exists
+       (fun l ->
+         String.starts_with ~prefix:"tsync passwords merge -d pw " l
+         && Text.contains l web
+         && String.ends_with ~suffix:" --totp ID" l)
+       lines);
+  answer "  a code they do not link"
+    (merge ~extra:[("totp", s duplicate)] [web; another]);
+  report "  choosing the app's"
+    (merge ~extra:[("totp", s theirs)] [web; another]);
+  p "%-40s %b" "  the kept login links it" (totp_of web = theirs);
+  let csv =
+    "name,url,username,password\n\
+     App,android://com.mergetest.app,merger2,R\n\
+     Site,https://www.mergetest.com,merger2,R\n\
+     Stale,android://com.mergetest.app,merger2,S\n"
+  in
+  let r = ask [("action", s "passwords_import"); ("text", s csv)] in
+  p "%-40s added %s, apart %s" "import, an app and its website"
+    (Yojson.Safe.to_string (Option.get (member r "added")))
+    (Yojson.Safe.to_string (Option.get (member r "apart")));
+  let imported =
+    match
+      member
+        (ask [("action", s "passwords_list"); ("filter", s "merger2")])
+        "records"
+    with
+      | Some (`List l) -> l
+      | _ -> []
+  in
+  p "%-40s %s" "  their sites"
+    (String.concat " "
+       (List.sort compare
+          (List.map
+             (fun r -> string_of_int (List.length (strings r "urls")))
+             imported)));
+  List.iter
+    (fun id -> ignore (ask [("action", s "passwords_remove"); ("id", s id)]))
+    ([web; other; passkey] @ List.filter_map (fun r -> field r "id") imported);
+  Tsync_owner.Asset_links_cache.reset ()
+
 let () =
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
@@ -1040,6 +1308,7 @@ let () =
                   ignore (ask [("action", s "passwords_remove"); ("id", s id)])
               | _ -> p "  save, suggested: no reply")
         | _ -> p "  suggest: no reply");
+      merges ();
       p "== the store";
       List.iter
         (fun needle -> p "%-40s %b" ("holds " ^ needle) (store_holds needle))

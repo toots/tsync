@@ -74,6 +74,8 @@ tsync passwords get ID --field PIN            # one custom field's value
 
 `list` marks a login with a linked code `(has OTP)`, and one whose code was removed `(OTP link dangling)`. `tsync passwords edit ID` changes any field (the same options as `add`), and `tsync passwords remove ID` removes a login or a passkey.
 
+**Duplicates.** An app and its website usually share one login. `tsync passwords merge --suggest` lists the logins that look like one account, each as the command that merges them, the most recently changed login first. `tsync passwords merge ID OTHER…` keeps the first login's title and password, gathers every site, note and field into it, moves the others' passkeys to it and removes the others; `--check` shows what it would do first. When the logins carry different two-factor codes, it stops and shows each one with its current code: pick the one the site accepts with `--totp ID`. A removed login stays in the domain's versions.
+
 **Passkeys** are made and used by your browser or apps, through tsync's AutoFill on macOS, its Chrome extension and its autofill on Android: there is no command to create one. `list` shows them by site and user name, and `edit ID --login LOGIN_ID` files one with the login it belongs to. A passkey never leaves the vault: it signs inside tsync, and `tsync passwords export` leaves it out. A [vault export](vault.md#exporting-and-importing) carries it, sealed.
 
 Two machines editing the same login at once keep the newer edit; a login whose password was changed on both sides keeps both, the second labelled `(conflicted copy from <machine>)`.
