@@ -72,7 +72,7 @@ tsync passwords get ID --field PIN            # one custom field's value
 
 **Notes and custom fields.** A note keeps what is not a login, a door code or a recovery phrase: `tsync passwords add --note --title "Wi-Fi" --notes "…"`. Logins and notes take extra fields, `--field NAME=VALUE`, or `--secret-field NAME` to type the value without echo; on `edit`, the fields given replace the list. `get` of a note prints its notes, and `--field` one field. Notes are never offered to fill a form, and `list` shows titles, never a field.
 
-`list` marks a login with a linked code `(code)`. `tsync passwords edit ID` changes any field (the same options as `add`), and `tsync passwords remove ID` removes a login or a passkey.
+`list` marks a login with a linked code `(has OTP)`, and one whose code was removed `(OTP link dangling)`. `tsync passwords edit ID` changes any field (the same options as `add`), and `tsync passwords remove ID` removes a login or a passkey.
 
 **Passkeys** are made and used by your browser or apps, through tsync's AutoFill on macOS, its Chrome extension and its autofill on Android: there is no command to create one. `list` shows them by site and user name, and `edit ID --login LOGIN_ID` files one with the login it belongs to. A passkey never leaves the vault: it signs inside tsync, and `tsync passwords export` leaves it out. A [vault export](vault.md#exporting-and-importing) carries it, sealed.
 

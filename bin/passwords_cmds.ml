@@ -222,10 +222,10 @@ let list_cmd =
                     say "%s %s login %s %s %s" (dname d) (f "id") (f "title")
                       (f "username")
                       (match member row "dangling" with
-                        | Some (`Bool true) -> "(code link dangling)"
+                        | Some (`Bool true) -> "(OTP link dangling)"
                         | _ -> (
                             match member row "code" with
-                              | Some (`Bool true) -> "(code)"
+                              | Some (`Bool true) -> "(has OTP)"
                               | _ -> ""))
                   else if f "kind" = "note" then
                     say "%s %s note %s" (dname d) (f "id") (f "title")
