@@ -1144,10 +1144,50 @@ let merges () =
           (List.map
              (fun r -> string_of_int (List.length (strings r "urls")))
              imported)));
+  let seed_a = "otpauth://totp/A:m?secret=JBSWY3DPEHPK3PXP"
+  and seed_b = "otpauth://totp/B:m?secret=GEZDGNBVGY3TQOJQ" in
+  let csv =
+    Printf.sprintf
+      "name,url,username,password,notes,otpauth\n\
+       App,android://com.mergetest.app,merger3,R,app note,%s\n\
+       Site,https://www.mergetest.com,merger3,R,site note,%s\n\
+       Login,https://login.mergetest.com,merger3,R,login note,%s\n"
+      seed_a seed_b seed_a
+  in
+  let r = ask [("action", s "passwords_import"); ("text", s csv)] in
+  p "%-40s added %s, apart %s, seeds added %s" "import, rows of two seeds"
+    (Yojson.Safe.to_string (Option.get (member r "added")))
+    (Yojson.Safe.to_string (Option.get (member r "apart")))
+    (Yojson.Safe.to_string (Option.get (member r "seedsAdded")));
+  let logins_of username =
+    match
+      member
+        (ask [("action", s "passwords_list"); ("filter", s username)])
+        "records"
+    with
+      | Some (`List l) -> List.filter_map (fun r -> field r "id") l
+      | _ -> []
+  in
+  p "%-40s %b" "  the folded login's notes"
+    (List.exists
+       (fun id -> field (get id) "notes" = Some "app note\n\nlogin note")
+       (logins_of "merger3"));
+  let csv =
+    "name,url,username,password\nApp,android://com.mergetest.app,merger4,R\n"
+    ^ String.concat ""
+        (List.init 33 (fun n ->
+             Printf.sprintf "Site,https://s%d.mergetest.com,merger4,R\n" n))
+  in
+  let r = ask [("action", s "passwords_import"); ("text", s csv)] in
+  p "%-40s added %s, skipped %s, apart %s" "import, an app and 33 websites"
+    (Yojson.Safe.to_string (Option.get (member r "added")))
+    (Yojson.Safe.to_string (Option.get (member r "skipped")))
+    (Yojson.Safe.to_string (Option.get (member r "apart")));
   List.iter
     (fun id -> ignore (ask [("action", s "passwords_remove"); ("id", s id)]))
     ([web; other; passkey; router1; router2; cased_app; cased_web]
-    @ List.filter_map (fun r -> field r "id") imported);
+    @ List.filter_map (fun r -> field r "id") imported
+    @ logins_of "merger3" @ logins_of "merger4");
   Tsync_owner.Asset_links_cache.reset ()
 
 let () =

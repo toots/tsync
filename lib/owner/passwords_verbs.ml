@@ -541,70 +541,109 @@ let web_hosts urls =
     urls
 
 (* §4.3: one of the sites is an app's, another one of its candidates. *)
-let app_and_website a b =
-  let one_way x y =
-    List.exists
-      (fun package ->
-        List.exists (Tsync_vault.Asset_links.candidate ~package) (web_hosts y))
-      (app_packages x)
-  in
-  one_way a b || one_way b a
-
 let union a b =
   List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [x]) a b
 
-(* §10.1: an app's row and its candidates' rows of one username and password
-   are one login; a row of that username with another password stays apart
-   and its line is named. *)
+(* §10.1, §10.2: distinct non-empty notes in order, a blank line between. *)
+let join_notes notes =
+  String.concat "\n\n" (union [] (List.filter (( <> ) "") notes))
+
+(* §2: a login's sites. *)
+let max_sites = 32
+
+(* Rows agree on a seed when its code fields do; a URI that does not parse is
+   compared as written, and the import reports it as a dropped seed. *)
+let seed_key uri =
+  match Totp.of_uri ~now:0 uri with
+    | Ok r -> Totp.code_fields r
+    | Error _ -> uri
+
+type import_member = {
+  row : Passwords.row;
+  packages : string list;
+  hosts : string list;
+}
+
+type import_group = {
+  mutable members : import_member list;  (** newest first *)
+  mutable sites : string list;
+}
+
+(* §10.1: an app's row and its candidates' rows of one username, password and
+   seed are one login, up to §2's sites; a row of that username with another
+   password or seed stays apart and its line is named. *)
 let fold_app_rows (rows : Passwords.row list) =
-  let alike (a : Passwords.row) (b : Passwords.row) =
-    a.username = b.username && app_and_website a.urls b.urls
+  let verdicts = Hashtbl.create 64 in
+  let candidate package host =
+    match Hashtbl.find_opt verdicts (package, host) with
+      | Some verdict -> verdict
+      | None ->
+          let verdict = Tsync_vault.Asset_links.candidate ~package host in
+          Hashtbl.replace verdicts (package, host) verdict;
+          verdict
   in
-  let first_set f group =
-    Option.value ~default:""
-      (List.find_opt (fun x -> x <> "") (List.map f group))
+  let linked a b =
+    let one_way x y =
+      List.exists
+        (fun package -> List.exists (candidate package) y.hosts)
+        x.packages
+    in
+    one_way a b || one_way b a
   in
-  let groups, apart =
-    List.fold_left
-      (fun (groups, apart) (row : Passwords.row) ->
-        let joins group = List.exists (fun m -> alike m row) group in
-        let same_password group =
-          List.for_all
-            (fun (m : Passwords.row) -> m.password = row.password)
-            group
-        in
-        let rec insert = function
-          | g :: rest when joins g && same_password g ->
-              Some ((g @ [row]) :: rest)
-          | g :: rest -> Option.map (List.cons g) (insert rest)
-          | [] -> None
-        in
-        match insert groups with
-          | Some groups -> (groups, apart)
-          | None ->
-              let apart =
-                if List.exists joins groups then row.line :: apart else apart
-              in
-              (groups @ [[row]], apart))
-      ([], []) rows
+  let seeds members =
+    List.sort_uniq compare
+      (List.filter_map
+         (fun m ->
+           if m.row.otpauth = "" then None else Some (seed_key m.row.otpauth))
+         members)
   in
+  let by_username = Hashtbl.create 64 and all = ref [] and apart = ref [] in
+  List.iter
+    (fun (row : Passwords.row) ->
+      let m =
+        { row; packages = app_packages row.urls; hosts = web_hosts row.urls }
+      in
+      let groups =
+        Option.value ~default:[] (Hashtbl.find_opt by_username row.username)
+      in
+      let linked_to g = List.exists (fun x -> linked x m) g.members in
+      let agrees g =
+        List.for_all (fun x -> x.row.password = row.password) g.members
+        && List.length (seeds (m :: g.members)) <= 1
+      in
+      let fits g = List.length (union g.sites row.urls) <= max_sites in
+      match
+        List.find_opt (fun g -> linked_to g && agrees g && fits g) groups
+      with
+        | Some g ->
+            g.members <- m :: g.members;
+            g.sites <- union g.sites row.urls
+        | None ->
+            if List.exists (fun g -> linked_to g && not (agrees g)) groups then
+              apart := row.line :: !apart;
+            let g = { members = [m]; sites = row.urls } in
+            Hashtbl.replace by_username row.username (groups @ [g]);
+            all := g :: !all)
+    rows;
   let merged =
     List.map
-      (fun group ->
-        let first = List.hd group in
+      (fun g ->
+        let members = List.rev_map (fun m -> m.row) g.members in
+        let first_set f =
+          Option.value ~default:""
+            (List.find_opt (( <> ) "") (List.map f members))
+        in
         {
-          first with
-          Passwords.title = first_set (fun (r : Passwords.row) -> r.title) group;
-          urls =
-            List.fold_left
-              (fun acc (r : Passwords.row) -> union acc r.urls)
-              [] group;
-          notes = first_set (fun (r : Passwords.row) -> r.notes) group;
-          otpauth = first_set (fun (r : Passwords.row) -> r.otpauth) group;
+          (List.hd members) with
+          Passwords.title = first_set (fun (r : Passwords.row) -> r.title);
+          urls = g.sites;
+          notes =
+            join_notes (List.map (fun (r : Passwords.row) -> r.notes) members);
+          otpauth = first_set (fun (r : Passwords.row) -> r.otpauth);
         })
-      groups
+      (List.rev !all)
   in
-  (merged, List.sort compare apart)
+  (merged, List.sort compare !apart)
 
 (* §10.1: rows added, rows skipped by line, seeds added and dropped. *)
 let import ~domain ~engine ~lazy_tree t args =
@@ -1076,17 +1115,13 @@ let merged_login (kept : Passwords.login) (others : Passwords.login list) =
       []
       (List.concat_map (fun (l : Passwords.login) -> l.fields) all)
   in
-  let notes =
-    union []
-      (List.filter (( <> ) "")
-         (List.map (fun (l : Passwords.login) -> l.notes) all))
-  in
+
   {
     kept with
     urls =
       List.fold_left (fun acc (l : Passwords.login) -> union acc l.urls) [] all;
     fields;
-    notes = String.concat "\n\n" notes;
+    notes = join_notes (List.map (fun (l : Passwords.login) -> l.notes) all);
     modified = now ();
   }
 

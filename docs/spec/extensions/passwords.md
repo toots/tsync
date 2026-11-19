@@ -467,11 +467,13 @@ password manager, and adds one record per row.
   A row without a title takes its first site's host as title.
 - A one-time-password seed that is an `otpauth://totp/` URI is added as a TOTP record and linked
   to the row's login (§6) when the domain lists `totp`, and counted as dropped otherwise.
-- Rows of one file with the same username and password, one for an `android://` site and the
-  others for its candidates (§4.3), are one login, whose sites are theirs in file order and whose
-  title, notes and seed are the first row's that has one. Rows of that username with another
-  password stay separate, and the reply names their line numbers in `apart`. Exports list an app and its
-  website as two rows, and statements are not fetched during an import.
+- Rows of one file with the same username, password and seed (or none), one for an `android://`
+  site and the others for its candidates (§4.3), are one login: its sites are theirs in file
+  order, up to §2's 32, a row past them starting another login; its title and seed are the first
+  row's that has one, and its notes joined as `merge` joins them (§10.2). Rows of that username
+  with another password or another seed stay separate, and the reply names their line numbers in
+  `apart`: a seed is never dropped by folding. Exports list an app and its website as two rows,
+  and statements are not fetched during an import.
 - Import adds; it never matches a row against an existing record. Importing a file twice gives
   each login twice.
 - The reply counts the records added, the rows skipped and the seeds added and dropped.
