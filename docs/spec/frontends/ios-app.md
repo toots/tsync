@@ -286,13 +286,20 @@ defaults, moved there from the app's at launch like the database.
    - an updated asset whose modification date differs from a `DONE` record's → `PENDING` (written
      again over the same names); a `PENDING` or `FAILED` record's → the new date;
    - a deleted asset → its record deleted. Its files stay in the domain.
+   Each change is its own transaction; a change cut short by a stop (below) keeps the token before
+   it and is read again by the next discovery.
 2. Without a token, or when the token has expired (`persistentChangeTokenExpired`): a full discovery
-   over every asset of §8.1, recording each asset without a record as step 1's insertion does, then
+   over every asset of §8.1, oldest capture first, recording each asset without a record as step 1's insertion does, then
    the library's current token. During a full discovery that is not a baseline pass, an asset without
    a record created before the oldest record's capture time is `BASELINE`: it predates backup.
 
-Every asset is recorded in the transaction that moves the token, so none is ever behind it without a
-record.
+A full discovery commits every `discovery_batch` assets, opening no transaction for a batch already
+recorded, and stores the token only once the walk is over, so no asset is ever behind the token
+without a record. Walking oldest first, a walk cut short leaves no unrecorded asset older than the
+oldest record. Either discovery stops between assets when the pass stops or reaches its budget
+(§8.6 Schedule): it commits what it recorded and ends without the token, and the next discovery
+skips the recorded assets. No write transaction on the database is open when iOS
+suspends the process, which ends a process holding a file lock (`0xdead10cc`).
 
 ### 8.4 Processing
 
@@ -340,7 +347,8 @@ name. A stem is taken when a record holds it in that domain or a file is at eith
   (one configured domain; a change applies to assets seen from then on); "Only over wifi" (default
   on); "Not when the battery is low" (default on); "Back up now". Enabling asks "Everything" or
   "From now on", then for access; backup is on only once access is granted. "From now on" first
-  runs a baseline full discovery (§8.3); if it cannot complete, backup stays off and says why.
+  runs a baseline full discovery (§8.3), in background time like a pass; if it cannot complete,
+  backup stays off and says why.
   "Everything" turns every `BASELINE` record back to `PENDING`, so an earlier "From now on" leaves
   nothing out.
   Turning backup off cancels the pass. A target domain the config no longer names asks for another
@@ -367,6 +375,7 @@ name. A stem is taken when a record holds it in that domain or a file is at eith
 |---|---|---|
 | `trigger_delay` | 10 s | |
 | `refresh_pass_budget` | 20 s | inside the system's ~30 s for a refresh run |
+| `discovery_batch` | 200 assets | commits within a few seconds on the slowest supported iPhone |
 | `staged_bytes_budget` | 512 MiB | |
 | `free_space_floor` | 1 GiB | |
 | `retry_backoff(n)` | min(15 min × 2^(n−1), 6 h) | bounded |

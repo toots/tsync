@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Network
+import os
 import Photos
 import UIKit
 
@@ -22,7 +23,9 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     private let network = NWPathMonitor()
     private var pass: Task<Void, Never>?
     private var again = false
-    private var stopping = false
+    private var stopping = false { didSet { let on = stopping; halted.withLock { $0 = on } } }
+    /// `stopping`, for discovery off the main actor.
+    nonisolated private let halted = OSAllocatedUnfairLock(initialState: false)
     /// A background refresh run's end: the pass stops between assets after it.
     private var deadline: Date?
     private var trigger: Task<Void, Never>?
@@ -79,7 +82,15 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         } else {
             do {
                 let target = domain ?? Tsync.domainNames().first ?? ""
-                try await Task.detached { try CameraLibrary.discover(try CameraRecords(), domain: target, baseline: true) }.value
+                // A pass that turning backup off stopped ends before the walk starts.
+                await pass?.value
+                stopping = false
+                let background = BackgroundTime()
+                background.begin { [weak self] in self?.stopping = true }
+                defer { background.end() }
+                guard try await discover(try CameraRecords(), domain: target, baseline: true) else {
+                    return "backup is not on: tsync left the screen before the library was read"
+                }
             } catch {
                 return "backup is not on: \(error.localizedDescription)"
             }
@@ -181,7 +192,7 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         defer { background.end() }
         do {
             let records = try CameraRecords()
-            try await Task.detached { try CameraLibrary.discover(records, domain: domain, baseline: false) }.value
+            try await discover(records, domain: domain, baseline: false)
             var uploaded = 0, failed = 0, more = false
             var hold: String?
             for record in records.due(now: CameraLibrary.now()) {
@@ -358,6 +369,19 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
             exported, stem: record.stem, under: root, replacing: record.written
         ) { $0 != record.stem && claimed.stemTaken(record.domain, $0) }
         return (record, modified)
+    }
+}
+
+extension CameraBackup {
+    /// §8.3, off the main actor, stopped between assets with the pass.
+    @discardableResult
+    fileprivate func discover(_ records: CameraRecords, domain: String, baseline: Bool) async throws -> Bool {
+        let halted = halted, until = deadline ?? .distantFuture
+        return try await Task.detached {
+            try CameraLibrary.discover(records, domain: domain, baseline: baseline) {
+                halted.withLock { $0 } || Date() > until
+            }
+        }.value
     }
 }
 
