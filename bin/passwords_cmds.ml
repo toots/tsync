@@ -375,8 +375,20 @@ let strings_of j k =
         List.filter_map (function `String v -> Some v | _ -> None) l
     | _ -> []
 
+let groups_of reply =
+  match List.assoc_opt "groups" reply with Some (`List l) -> l | _ -> []
+
+let group_ids group =
+  match member group "logins" with
+    | Some (`List l) -> List.filter_map (fun l -> field l "id") l
+    | _ -> []
+
+let group_safe group =
+  member group "passwordsEqual" = Some (`Bool true)
+  && member group "codesEqual" = Some (`Bool true)
+
 (* §10.2.1: each group as the merge that does it, kept login first. *)
-let print_suggestions d reply =
+let print_suggestions d groups =
   List.iter
     (fun group ->
       let logins =
@@ -399,7 +411,7 @@ let print_suggestions d reply =
         say
           "  codes differ: run with --check to see them, then choose one with \
            --totp")
-    (match List.assoc_opt "groups" reply with Some (`List l) -> l | _ -> [])
+    groups
 
 (* §10.2: what a merge does, or would do. *)
 let print_merge reply =
@@ -431,12 +443,35 @@ let merge_cmd =
       "Fold logins of one account into the first ID and remove the others \
        (§10.2), or list likely duplicates with --suggest."
     Term.(
-      const (fun ids check totp suggest ?name config ->
+      const (fun ids check totp suggest apply ?name config ->
+          if apply && not suggest then
+            Fail.invalid "--apply goes with --suggest";
           if suggest then (
             if ids <> [] || check || totp <> None then
               Fail.invalid "--suggest takes no ID, --check or --totp";
             List.iter
-              (fun (d, reply) -> print_suggestions d reply)
+              (fun (d, reply) ->
+                let groups = groups_of reply in
+                if not apply then print_suggestions d groups
+                else (
+                  let safe, unsafe = List.partition group_safe groups in
+                  List.iter
+                    (fun group ->
+                      match group_ids group with
+                        | id :: others ->
+                            let reply =
+                              call d "merge"
+                                [
+                                  ("id", s id);
+                                  ("others", `List (List.map s others));
+                                ]
+                            in
+                            say "merged %s into %s" (String.concat " " others)
+                              id;
+                            print_merge reply
+                        | [] -> ())
+                    safe;
+                  print_suggestions d unsafe))
               (each ?name config (fun d ->
                    call d "merge" [("suggest", `Bool true)]));
             0)
@@ -474,7 +509,13 @@ let merge_cmd =
       $ Arg.(
           value & flag
           & info ["suggest"]
-              ~doc:"List the groups of logins that look like one account."))
+              ~doc:"List the groups of logins that look like one account.")
+      $ Arg.(
+          value & flag
+          & info ["apply"]
+              ~doc:
+                "With --suggest, merge each group whose passwords and codes \
+                 are equal; list the others."))
 
 let import_cmd =
   verb "import" ~doc:"Add one login per row of a CSV export (§10.1)."

@@ -1114,6 +1114,17 @@ let merges () =
          && Text.contains l web
          && String.ends_with ~suffix:" --totp ID" l)
        lines);
+  let code, lines =
+    cli ["passwords"; "merge"; "-d"; "pw"; "--suggest"; "--apply"]
+  in
+  p "%-40s exit %d, merged the alike %b, the codes left to choose %b"
+    "  the CLI's suggestion, applied" code
+    (List.mem (Printf.sprintf "merged %s into %s" cased_app cased_web) lines
+    || List.mem (Printf.sprintf "merged %s into %s" cased_web cased_app) lines)
+    (List.exists
+       (fun l -> Text.contains l web && String.ends_with ~suffix:" --totp ID" l)
+       lines);
+  p "%-40s %b" "  one of the alike left" (group_ids cased_app = None);
   answer "  a code they do not link"
     (merge ~extra:[("totp", s duplicate)] [web; another]);
   report "  choosing the app's"

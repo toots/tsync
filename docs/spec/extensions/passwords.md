@@ -528,6 +528,10 @@ it writes nothing.
 - The CLI prints each group as the `merge` command that does it, kept login first, with its
   sites and usernames, and marks a group whose passwords differ, or whose codes differ: there the
   user checks which one is current, and the command needs `--totp`, before running it.
+- `merge --suggest --apply` runs the `merge` of each group whose passwords are equal and whose
+  codes are one code, and prints each one it ran with its reply as `merge` does. A group whose
+  passwords or codes differ is printed as without `--apply` and left as it is: the user's choice
+  is never guessed.
 
 ## 11. Conformance
 
