@@ -1260,10 +1260,14 @@ let suggest_merges ~domain ~engine ~lazy_tree t =
   let has_https (l : Passwords.login) =
     List.exists (String.starts_with ~prefix:"https://") l.urls
   in
+  (* The newest first, a website's on a tie, then by id. *)
   let keep_order (a, (x : Passwords.login)) (b, (y : Passwords.login)) =
-    compare
-      (-x.modified, not (has_https x), a)
-      (-y.modified, not (has_https y), b)
+    match compare y.modified x.modified with
+      | 0 -> (
+          match compare (has_https y) (has_https x) with
+            | 0 -> compare a b
+            | order -> order)
+      | order -> order
   in
   let rows =
     Hashtbl.fold

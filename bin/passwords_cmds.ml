@@ -433,7 +433,8 @@ let merge_cmd =
     Term.(
       const (fun ids check totp suggest ?name config ->
           if suggest then (
-            if ids <> [] then Fail.invalid "--suggest takes no ID";
+            if ids <> [] || check || totp <> None then
+              Fail.invalid "--suggest takes no ID, --check or --totp";
             List.iter
               (fun (d, reply) -> print_suggestions d reply)
               (each ?name config (fun d ->
