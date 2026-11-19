@@ -355,13 +355,20 @@ enum CameraPreferences {
 enum CameraLibrary {
     static let maxNameAttempts = 1000
 
-    static func discover(_ records: CameraRecords, domain: String, baseline: Bool) throws {
+    static let discoveryBatch = 200
+
+    /// False when `stop` ended a full discovery before its token.
+    @discardableResult
+    static func discover(
+        _ records: CameraRecords, domain: String, baseline: Bool, stop: () -> Bool = { false }
+    ) throws -> Bool {
         let library = PHPhotoLibrary.shared()
         if !baseline, let token = records.token() {
             do {
                 let changes = try library.fetchPersistentChanges(since: token)
                 try records.transaction {
                     for change in changes {
+                        if stop() { break }
                         let details = try change.changeDetails(for: .asset)
                         for asset in fetch(Array(details.insertedLocalIdentifiers)) where !records.has(asset.localIdentifier) {
                             try record(asset, records, domain, baseline: false)
@@ -377,7 +384,7 @@ enum CameraLibrary {
                         try records.setToken(change.changeToken)
                     }
                 }
-                return
+                return true
             } catch let error as PHPhotosError
                 where error.code == .persistentChangeTokenExpired || error.code == .persistentChangeDetailsUnavailable
             {}
@@ -385,21 +392,23 @@ enum CameraLibrary {
         // Taken first: a change during the walk is seen again by the next discovery.
         let token = library.currentChangeToken
         let oldest = records.oldestCapture()
-        try records.transaction {
-            var failure: Error?
-            assets().enumerateObjects { asset, _, stop in
-                guard !records.has(asset.localIdentifier) else { return }
-                let before = oldest.map { seconds(asset.creationDate) < $0 } ?? false
-                do {
+        let all = assets()
+        var next = 0
+        while next < all.count {
+            let batch = IndexSet(integersIn: next..<min(next + discoveryBatch, all.count))
+            next = batch.last! + 1
+            var stopped = false
+            try records.transaction {
+                for asset in all.objects(at: batch) where !records.has(asset.localIdentifier) {
+                    if stop() { stopped = true; break }
+                    let before = oldest.map { seconds(asset.creationDate) < $0 } ?? false
                     try record(asset, records, domain, baseline: baseline || before)
-                } catch {
-                    failure = error
-                    stop.pointee = true
                 }
             }
-            if let failure { throw failure }
-            try records.setToken(token)
+            if stopped { return false }
         }
+        try records.transaction { try records.setToken(token) }
+        return true
     }
 
     private static func assets() -> PHFetchResult<PHAsset> {

@@ -43,7 +43,7 @@ final class UploadExtension: PHBackgroundResourceUploadExtension {
         let (committed, settled) = try settle(records)
         progress = progress || settled
         if Self.stopped { return .processing }
-        try CameraLibrary.discover(records, domain: domain, baseline: false)
+        try CameraLibrary.discover(records, domain: domain, baseline: false) { Self.stopped }
         if CameraPreferences.suspended == nil, try create(records, target) { progress = true }
         let inFlight = records.jobsInFlight()
         CameraPreferences.lastOutcome = "\(committed) uploaded" + (inFlight > 0 ? ", \(inFlight) uploading" : "")

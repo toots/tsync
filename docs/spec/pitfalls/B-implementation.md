@@ -489,6 +489,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — An entry overwritten with bytes that do not decode: below the tree head, a lazy pull and a refresh pass read the folders by state and show the entry's change; above it, they fail naming the entry, as the full cycle does.
 - **Seen** — A test peer writing a manifest format the phone's build no longer read: its files never appeared, and every refresh pass reported nothing changed.
 
+### B-8.29 A library walk in one transaction
+- **Pitfall** — Camera backup's full discovery recorded the whole photo library in one SQLite write transaction on the App Group's database. A first pass over a real library takes minutes, the background time's expiry stopped only the upload loop, and iOS suspended the app with the write lock held and ended it (`0xdead10cc`).
+- **Check** — With backup turned on over a library of a few thousand photos, leaving the app during the first pass suspends it: no RUNNINGBOARD crash report, and the next pass carries on from the recorded assets.
+- **Seen** — ios-app 1.0 (140) on TestFlight, an iPhone SE (3rd generation) with iOS 26.2.1, five minutes into the first pass.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
