@@ -531,12 +531,94 @@ let edit ~domain ~engine ~lazy_tree t args =
   write ctx ~exclusive:false id (checked record);
   []
 
+let app_package urls =
+  List.find_map
+    (fun u ->
+      if String.starts_with ~prefix:"android://" u then
+        Some (Passwords.host_of u)
+      else None)
+    urls
+
+let web_hosts urls =
+  List.filter_map
+    (fun u ->
+      if String.starts_with ~prefix:"android://" u then None
+      else Some (Passwords.host_of u))
+    urls
+
+(* §4.3: one of the sites is an app's, another one of its candidates. *)
+let app_and_website a b =
+  let one_way x y =
+    match app_package x with
+      | Some package ->
+          List.exists (Tsync_vault.Asset_links.candidate ~package) (web_hosts y)
+      | None -> false
+  in
+  one_way a b || one_way b a
+
+let union a b =
+  List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [x]) a b
+
+(* §10.1: an app's row and its candidates' rows of one username and password
+   are one login; a row of that username with another password stays apart
+   and its line is named. *)
+let fold_app_rows (rows : Passwords.row list) =
+  let alike (a : Passwords.row) (b : Passwords.row) =
+    a.username = b.username && app_and_website a.urls b.urls
+  in
+  let first_set f group =
+    Option.value ~default:""
+      (List.find_opt (fun x -> x <> "") (List.map f group))
+  in
+  let groups, apart =
+    List.fold_left
+      (fun (groups, apart) (row : Passwords.row) ->
+        let joins group = List.exists (fun m -> alike m row) group in
+        let same_password group =
+          List.for_all
+            (fun (m : Passwords.row) -> m.password = row.password)
+            group
+        in
+        let rec insert = function
+          | g :: rest when joins g && same_password g ->
+              Some ((g @ [row]) :: rest)
+          | g :: rest -> Option.map (List.cons g) (insert rest)
+          | [] -> None
+        in
+        match insert groups with
+          | Some groups -> (groups, apart)
+          | None ->
+              let apart =
+                if List.exists joins groups then row.line :: apart else apart
+              in
+              (groups @ [[row]], apart))
+      ([], []) rows
+  in
+  let merged =
+    List.map
+      (fun group ->
+        let first = List.hd group in
+        {
+          first with
+          Passwords.title = first_set (fun (r : Passwords.row) -> r.title) group;
+          urls =
+            List.fold_left
+              (fun acc (r : Passwords.row) -> union acc r.urls)
+              [] group;
+          notes = first_set (fun (r : Passwords.row) -> r.notes) group;
+          otpauth = first_set (fun (r : Passwords.row) -> r.otpauth) group;
+        })
+      groups
+  in
+  (merged, List.sort compare apart)
+
 (* §10.1: rows added, rows skipped by line, seeds added and dropped. *)
 let import ~domain ~engine ~lazy_tree t args =
   let ctx = context ~writing:true ~domain ~engine ~lazy_tree t in
   match Passwords.import_csv (required args "text") with
     | Error reason -> Fail.invalid "%s" reason
     | Ok (rows, skipped) ->
+        let rows, apart = fold_app_rows rows in
         let seeds_added = ref 0 and seeds_dropped = ref 0 and added = ref 0 in
         let skipped = ref skipped in
         List.iter
@@ -588,6 +670,7 @@ let import ~domain ~engine ~lazy_tree t args =
                  (List.sort compare !skipped)) );
           ("seedsAdded", `Int !seeds_added);
           ("seedsDropped", `Int !seeds_dropped);
+          ("apart", `List (List.map (fun l -> `Int l) apart));
         ]
 
 (* §10: the passphrase guards the export, as totp's; passkeys stay. *)

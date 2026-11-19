@@ -389,6 +389,14 @@ let import_cmd =
                          (Option.value ~default:"" (field r "reason"))))
                   rows
             | _ -> ());
+          (match member j "apart" with
+            | Some (`List (_ :: _ as lines)) ->
+                prerr_endline
+                  (Printf.sprintf
+                     "tsync: lines %s: an app's login with another password \
+                      than its website's, added apart"
+                     (String.concat ", " (List.map Yojson.Safe.to_string lines)))
+            | _ -> ());
           say "seeds added %s, dropped %s"
             (Yojson.Safe.to_string (Option.get (member j "seedsAdded")))
             (Yojson.Safe.to_string (Option.get (member j "seedsDropped")));
