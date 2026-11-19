@@ -1,13 +1,18 @@
 let labels s = String.split_on_char '.' (String.lowercase_ascii s)
 
+let rec prefix = function
+  | [], _ -> true
+  | _, [] -> false
+  | a :: r, b :: s -> a = b && prefix (r, s)
+
+(* A sign-in host is often a subdomain of the one the package name reverses:
+   www.instagram.com for com.instagram.android. *)
 let candidate ~package host =
-  let reversed = List.rev (labels host) and pkg = labels package in
-  let rec prefix = function
-    | [], _ -> true
-    | _, [] -> false
-    | a :: r, b :: s -> a = b && prefix (r, s)
-  in
-  List.length reversed >= 2 && prefix (reversed, pkg)
+  match Passwords.registrable host with
+    | Some domain ->
+        let reversed = List.rev (labels domain) in
+        List.length reversed >= 2 && prefix (reversed, labels package)
+    | None -> false
 
 let fingerprint s =
   String.lowercase_ascii
