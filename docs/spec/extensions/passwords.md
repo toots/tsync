@@ -338,7 +338,7 @@ Every capability is optional ([README §5](README.md#5-host-adapters)).
   unlock ([README §5](README.md#5-host-adapters)); it never fills from a cache.
 - A `save` whose site, username and password equal those of a record adds nothing. A `save`
   whose site and username equal one record's, with another password, asks whether to update it;
-  with several such records, it asks which one. Otherwise it adds a record. A `save` with `check`
+  with several such records, the most recently modified one. Otherwise it adds a record. A `save` with `check`
   writes nothing: it answers `unchanged`, whether a record of that site and username holds that
   password, and `logins`, the records of that site and username holding another one. The site is compared exactly, not by §4.2's suffix rule: a page on
   `login.example.com` never updates a login saved for `example.com`.

@@ -935,6 +935,18 @@ let merges () =
             ])
          "id")
   in
+  let both =
+    ask
+      [
+        ("action", s "passwords_save");
+        ("site", s app);
+        ("username", s "merger");
+        ("password", s "P3");
+        certs;
+      ]
+  in
+  p "%-40s %b" "save from the app, both logins there"
+    (field both "update" = Some app_login);
   let other = add ~username:"someone" "https://elsewhere.example" "O" in
   let groups () =
     match

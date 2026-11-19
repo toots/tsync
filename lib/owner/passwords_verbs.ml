@@ -960,8 +960,18 @@ let save ~domain ~engine ~lazy_tree t args =
                   (edit ~domain ~engine ~lazy_tree t
                      [("id", `String id); ("password", `String password)]);
                 [("saved", `Bool true); ("id", `String id)]
-            | [(id, _)], _ -> [("saved", `Bool false); ("update", `String id)]
-            | _ ->
+            | _ :: _, _ ->
+                (* An app's login and its website's both match: the newer
+                   one is the likelier current. *)
+                let newest =
+                  List.fold_left
+                    (fun (id, (l : Passwords.login))
+                         (id', (l' : Passwords.login)) ->
+                      if l'.modified > l.modified then (id', l') else (id, l))
+                    (List.hd same) (List.tl same)
+                in
+                [("saved", `Bool false); ("update", `String (fst newest))]
+            | [], _ ->
                 add ~domain ~engine ~lazy_tree t
                   [
                     ("title", `String site);
