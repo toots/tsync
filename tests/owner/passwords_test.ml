@@ -965,6 +965,32 @@ let merges () =
           (Yojson.Safe.to_string (Option.get (member g "passwordsEqual")))
           (Yojson.Safe.to_string (Option.get (member g "codesEqual")))
     | l -> p "suggest: %d groups" (List.length l));
+  let group_ids id =
+    match
+      member
+        (ask [("action", s "passwords_merge"); ("suggest", `Bool true)])
+        "groups"
+    with
+      | Some (`List l) ->
+          List.find_map
+            (fun g ->
+              match member g "logins" with
+                | Some (`List ls) ->
+                    let ids = List.filter_map (fun r -> field r "id") ls in
+                    if List.mem id ids then Some ids else None
+                | _ -> None)
+            l
+      | _ -> None
+  in
+  let router1 = add ~username:"router" "https://192.168.1.1" "R1"
+  and router2 = add ~username:"router" "https://10.0.1.1" "R2" in
+  p "%-40s %b" "suggest, two IP addresses apart" (group_ids router1 = None);
+  let cased_app = add ~username:"cased" "android://com.MergeCase.app" "C"
+  and cased_web = add ~username:"cased" "https://www.mergecase.com" "C" in
+  p "%-40s %b" "suggest, a package name with capitals"
+    (match group_ids cased_app with
+      | Some ids -> List.mem cased_web ids
+      | None -> false);
   let merge ?(extra = []) ids =
     ask
       ([
@@ -1108,7 +1134,8 @@ let merges () =
              imported)));
   List.iter
     (fun id -> ignore (ask [("action", s "passwords_remove"); ("id", s id)]))
-    ([web; other; passkey] @ List.filter_map (fun r -> field r "id") imported);
+    ([web; other; passkey; router1; router2; cased_app; cased_web]
+    @ List.filter_map (fun r -> field r "id") imported);
   Tsync_owner.Asset_links_cache.reset ()
 
 let () =

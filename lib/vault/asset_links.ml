@@ -8,7 +8,7 @@ let rec prefix = function
 (* A sign-in host is often a subdomain of the one the package name reverses:
    www.instagram.com for com.instagram.android. *)
 let candidate ~package host =
-  match Passwords.registrable host with
+  match Passwords.domain host with
     | Some domain ->
         let reversed = List.rev (labels domain) in
         List.length reversed >= 2 && prefix (reversed, labels package)

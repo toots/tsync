@@ -279,7 +279,7 @@ let dangling ids totp =
    https sites of these logins the app is verified for. *)
 let app_sites args site logins =
   match (Passwords.site_of_string site, arg args "certs") with
-    | Ok s, Some (`List certs) when String.starts_with ~prefix:"android://" s ->
+    | Ok s, Some (`List certs) when Passwords.app_package s <> None ->
         let certs =
           List.filter_map (function `String c -> Some c | _ -> None) certs
         in
@@ -531,28 +531,22 @@ let edit ~domain ~engine ~lazy_tree t args =
   write ctx ~exclusive:false id (checked record);
   []
 
-let app_package urls =
-  List.find_map
-    (fun u ->
-      if String.starts_with ~prefix:"android://" u then
-        Some (Passwords.host_of u)
-      else None)
-    urls
+let app_packages urls = List.filter_map Passwords.app_package urls
 
 let web_hosts urls =
   List.filter_map
     (fun u ->
-      if String.starts_with ~prefix:"android://" u then None
-      else Some (Passwords.host_of u))
+      if Passwords.app_package u = None then Some (Passwords.host_of u)
+      else None)
     urls
 
 (* §4.3: one of the sites is an app's, another one of its candidates. *)
 let app_and_website a b =
   let one_way x y =
-    match app_package x with
-      | Some package ->
-          List.exists (Tsync_vault.Asset_links.candidate ~package) (web_hosts y)
-      | None -> false
+    List.exists
+      (fun package ->
+        List.exists (Tsync_vault.Asset_links.candidate ~package) (web_hosts y))
+      (app_packages x)
   in
   one_way a b || one_way b a
 
@@ -1155,23 +1149,9 @@ let merge_logins ~domain ~engine ~lazy_tree t args =
           ("removedCodes", `List (List.map (fun r -> `String r) removed));
         ]
 
-(* §10.2.1: the registrable domains of a login's websites, and those its apps'
-   package names reverse, which only a website's can meet. *)
-let website_keys (l : Passwords.login) =
-  List.filter_map Passwords.registrable (web_hosts l.urls)
-
-let app_keys (l : Passwords.login) =
-  List.concat_map
-    (fun u ->
-      if not (String.starts_with ~prefix:"android://" u) then []
-      else (
-        let labels = String.split_on_char '.' (Passwords.host_of u) in
-        List.init
-          (max 0 (List.length labels - 1))
-          (fun n ->
-            String.concat "."
-              (List.rev (List.filteri (fun i _ -> i <= n + 1) labels)))))
-    l.urls
+(* §10.2.1: the registrable domains of a login's websites. *)
+let website_domains (l : Passwords.login) =
+  List.sort_uniq compare (List.filter_map Passwords.domain (web_hosts l.urls))
 
 let suggest_merges ~domain ~engine ~lazy_tree t =
   let ctx = context ~domain ~engine ~lazy_tree t in
@@ -1193,22 +1173,37 @@ let suggest_merges ~domain ~engine ~lazy_tree t =
   let join i j =
     if root i <> root j then Hashtbl.replace parent (root i) (root j)
   in
+  (* By username: each website domain and the first login holding it. *)
   let websites = Hashtbl.create 64 in
   List.iter
     (fun (i, (l : Passwords.login)) ->
-      List.iter
-        (fun key ->
-          match Hashtbl.find_opt websites (l.username, key) with
-            | Some j -> join i j
-            | None -> Hashtbl.replace websites (l.username, key) i)
-        (website_keys l))
+      let known =
+        Option.value ~default:[] (Hashtbl.find_opt websites l.username)
+      in
+      let known =
+        List.fold_left
+          (fun known d ->
+            match List.assoc_opt d known with
+              | Some j ->
+                  join i j;
+                  known
+              | None -> (d, i) :: known)
+          known (website_domains l)
+      in
+      Hashtbl.replace websites l.username known)
     all;
   List.iter
     (fun (i, (l : Passwords.login)) ->
+      let known =
+        Option.value ~default:[] (Hashtbl.find_opt websites l.username)
+      in
       List.iter
-        (fun key ->
-          Option.iter (join i) (Hashtbl.find_opt websites (l.username, key)))
-        (app_keys l))
+        (fun package ->
+          List.iter
+            (fun (d, j) ->
+              if Tsync_vault.Asset_links.candidate ~package d then join i j)
+            known)
+        (app_packages l.urls))
     all;
   let groups = Hashtbl.create 16 in
   List.iter
