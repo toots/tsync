@@ -82,6 +82,8 @@ final class CameraBackup: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
         } else {
             do {
                 let target = domain ?? Tsync.domainNames().first ?? ""
+                // A pass that turning backup off stopped ends before the walk starts.
+                await pass?.value
                 stopping = false
                 let background = BackgroundTime()
                 background.begin { [weak self] in self?.stopping = true }
@@ -374,9 +376,11 @@ extension CameraBackup {
     /// §8.3, off the main actor, stopped between assets with the pass.
     @discardableResult
     fileprivate func discover(_ records: CameraRecords, domain: String, baseline: Bool) async throws -> Bool {
-        let halted = halted
+        let halted = halted, until = deadline ?? .distantFuture
         return try await Task.detached {
-            try CameraLibrary.discover(records, domain: domain, baseline: baseline) { halted.withLock { $0 } }
+            try CameraLibrary.discover(records, domain: domain, baseline: baseline) {
+                halted.withLock { $0 } || Date() > until
+            }
         }.value
     }
 }

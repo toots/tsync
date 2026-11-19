@@ -286,15 +286,19 @@ defaults, moved there from the app's at launch like the database.
    - an updated asset whose modification date differs from a `DONE` record's → `PENDING` (written
      again over the same names); a `PENDING` or `FAILED` record's → the new date;
    - a deleted asset → its record deleted. Its files stay in the domain.
+   Each change is its own transaction; a change cut short by a stop (below) keeps the token before
+   it and is read again by the next discovery.
 2. Without a token, or when the token has expired (`persistentChangeTokenExpired`): a full discovery
-   over every asset of §8.1, recording each asset without a record as step 1's insertion does, then
+   over every asset of §8.1, oldest capture first, recording each asset without a record as step 1's insertion does, then
    the library's current token. During a full discovery that is not a baseline pass, an asset without
    a record created before the oldest record's capture time is `BASELINE`: it predates backup.
 
-A full discovery commits every `discovery_batch` assets and stores the token only once the walk is
-over, so no asset is ever behind the token without a record. It stops between assets when the pass
-is told to stop (§8.6 Schedule): it commits what it recorded and ends without the token, and the
-next full discovery skips the recorded assets. No write transaction on the database is open when iOS
+A full discovery commits every `discovery_batch` assets, opening no transaction for a batch already
+recorded, and stores the token only once the walk is over, so no asset is ever behind the token
+without a record. Walking oldest first, a walk cut short leaves no unrecorded asset older than the
+oldest record. Either discovery stops between assets when the pass stops or reaches its budget
+(§8.6 Schedule): it commits what it recorded and ends without the token, and the next discovery
+skips the recorded assets. No write transaction on the database is open when iOS
 suspends the process, which ends a process holding a file lock (`0xdead10cc`).
 
 ### 8.4 Processing

@@ -357,7 +357,7 @@ enum CameraLibrary {
 
     static let discoveryBatch = 200
 
-    /// False when `stop` ended a full discovery before its token.
+    /// False when `stop` ended it before it reached the library's current token.
     @discardableResult
     static func discover(
         _ records: CameraRecords, domain: String, baseline: Bool, stop: () -> Bool = { false }
@@ -365,15 +365,17 @@ enum CameraLibrary {
         let library = PHPhotoLibrary.shared()
         if !baseline, let token = records.token() {
             do {
-                let changes = try library.fetchPersistentChanges(since: token)
-                try records.transaction {
-                    for change in changes {
-                        if stop() { break }
+                for change in try library.fetchPersistentChanges(since: token) {
+                    // A change cut short keeps the token before it, and is read again.
+                    var stopped = false
+                    try records.transaction {
                         let details = try change.changeDetails(for: .asset)
                         for asset in fetch(Array(details.insertedLocalIdentifiers)) where !records.has(asset.localIdentifier) {
+                            if stop() { stopped = true; return }
                             try record(asset, records, domain, baseline: false)
                         }
                         for asset in fetch(Array(details.updatedLocalIdentifiers)) {
+                            if stop() { stopped = true; return }
                             if records.has(asset.localIdentifier) {
                                 try records.updated(asset.localIdentifier, modified: seconds(asset.modificationDate))
                             } else {
@@ -383,6 +385,7 @@ enum CameraLibrary {
                         for id in details.deletedLocalIdentifiers { try records.delete(id) }
                         try records.setToken(change.changeToken)
                     }
+                    if stopped { return false }
                 }
                 return true
             } catch let error as PHPhotosError
@@ -397,10 +400,12 @@ enum CameraLibrary {
         while next < all.count {
             let batch = IndexSet(integersIn: next..<min(next + discoveryBatch, all.count))
             next = batch.last! + 1
+            let unrecorded = all.objects(at: batch).filter { !records.has($0.localIdentifier) }
+            if unrecorded.isEmpty { continue }
             var stopped = false
             try records.transaction {
-                for asset in all.objects(at: batch) where !records.has(asset.localIdentifier) {
-                    if stop() { stopped = true; break }
+                for asset in unrecorded {
+                    if stop() { stopped = true; return }
                     let before = oldest.map { seconds(asset.creationDate) < $0 } ?? false
                     try record(asset, records, domain, baseline: baseline || before)
                 }
@@ -416,6 +421,8 @@ enum CameraLibrary {
         options.includeAssetSourceTypes = .typeUserLibrary
         options.predicate = NSPredicate(
             format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
+        // Oldest first: a walk cut short leaves only later assets, none before the oldest record.
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         return PHAsset.fetchAssets(with: options)
     }
 
