@@ -3,7 +3,7 @@ GetLayout and GetAll answered while the status request to the silent owner is ou
 GetLayout and GetAll answered while the stats request to the silent owner is outstanding: yes
 GetLayout and GetAll answered while the pause request to the silent owner is outstanding: yes
 and while the call to a silent file manager is outstanding: yes
-the silent owner's row: quiet — not answering
+the silent owner's row: quiet — Not answering
 the hold switch reached the other owner: yes
 
 == one silent owner of 2
@@ -63,12 +63,13 @@ a property of no row: ""
 depth 0 gives no children: 0
 depth 1 gives the rows without theirs: true
 root properties: children-display
-row "photos — Downloading 1": enabled=true, visible=true
+row "photos — Syncing": enabled=true, visible=true
+row "    1 to download": enabled=true, visible=true
 row "    my__file__v2.txt": enabled=true, visible=true, icon-name=text-x-generic
 row "        1 B of 2 B": enabled=true, visible=true
 row "---": type=separator
 row "Stats": enabled=true, visible=true, children-display=submenu
-row "Hold changes": enabled=true, visible=true, toggle-type=checkmark, toggle-state=0
+row "Pause syncing": enabled=true, visible=true, toggle-type=checkmark, toggle-state=0
 row "---": type=separator
 row "Quit tsync tray": enabled=true, visible=true
 the revision increases: yes
@@ -95,19 +96,19 @@ the Stats row holds: box — owner | pid 7 · up 1h | --- | photos — versioned
 announced against the Stats row, with the menu open: true
 one opening announced twice: 1 stats requests
 content changing at every poll, menu open: 0 root updates
-the row list is still the one fetched at the opening: photos — Idle
+the row list is still the one fetched at the opening: photos — Up to date
 a row fetched at the opening is still clickable: yes
 after closed for the Stats row: 0 root updates
 after closed for the root the next layout is announced: yes
-and reads: photos — Uploading 1
+and reads: photos — Syncing
 the stats rows are still there after the redraw: yes
 and after two polls and a domain added above: yes
 the revision increases: yes
 
 == a host that reports no close
-held while open: photos — Idle
-the next opening of the root installs it at once: true, photos — Uploading 1
-held again: photos — Uploading 1
+held while open: photos — Up to date
+the next opening of the root installs it at once: true, photos — Syncing
+held again: photos — Syncing
 with no close ever sent, current by the first refresh after MENU_OPEN_BOUND: yes
 the revision increases: yes
 
@@ -155,7 +156,7 @@ a config that is not JSON shows no domains: yes
 repaired without a restart: yes
 a config that fails validation shows no domains: yes
 repaired without a restart: yes
-rewritten twice in quick succession: music — Idle
+rewritten twice in quick succession: music — Up to date
 one warning per distinct reason: 3
 
 == one-time codes

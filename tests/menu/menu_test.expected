@@ -166,6 +166,17 @@ tooltip tsync — Not syncing
         ---
         Quit tsync tray -> quit
 
+== a failing domain that is paused: no failure the rows do not explain
+icon    tsync-paused-symbolic
+tooltip tsync — Paused
+        media — Paused -> open media
+            Changes stay on this machine and downloads wait until you resume.
+        ---
+        Stats >
+        [x] Pause syncing -> pause false
+        ---
+        Quit tsync tray -> quit
+
 == two reachable domains, one paused
 icon    tsync-idle-symbolic
 tooltip tsync — Up to date
@@ -495,4 +506,4 @@ tooltip tsync — Syncing: 1 to download
         d
             ? (?)
 
-40 cases
+41 cases

@@ -211,6 +211,15 @@ let () =
          ("music", {|{"ok":true,"pendingUploads":1}|});
        ]);
 
+  case "a failing domain that is paused: no failure the rows do not explain";
+  show
+    (menu
+       [
+         ( "media",
+           {|{"ok":true,"paused":true,"failing":"the store refused the commit"}|}
+         );
+       ]);
+
   case "two reachable domains, one paused";
   show (menu [("photos", {|{"ok":true,"paused":true}|}); ("music", idle)]);
 

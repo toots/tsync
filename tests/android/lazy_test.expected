@@ -42,7 +42,7 @@
   delete a.txt                       ok
   root, pull now                     [mine.txt (not uploaded), sub/] read the store
   resume                             ok
-  notices                            {changed root}
+  notices                            {changed root, recovered}
 == refused on a pulled tree
   full_resync                        invalid (docs keeps a pulled tree, which has no full_resync)
   sync                               invalid (docs keeps a pulled tree, which has no sync)

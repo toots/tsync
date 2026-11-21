@@ -280,7 +280,11 @@ let render ?quit ?(codes = []) domains =
     (not all_unreachable) && List.for_all (fun s -> s.paused) reachable
   in
   let total f = List.fold_left (fun n s -> n + f s) 0 reachable in
-  let any_failing = List.exists (fun s -> s.failing <> None) reachable in
+  (* §4: the row of a paused domain says Paused, so its failure is not the
+     summary's. *)
+  let any_failing =
+    List.exists (fun s -> s.failing <> None && not s.paused) reachable
+  in
   let summary =
     if domains = [] then "No domains configured"
     else if all_unreachable then "Daemon not running"

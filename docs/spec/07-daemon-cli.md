@@ -211,7 +211,9 @@ machine, persistently:
   not hold fails with `paused` at its next request to the store
   ([read-path §4.5](algorithms/read-path-and-cache.md#45-whole-group-fetch-verification-and-install)).
   A request to the store already sent completes, so at most the chunks in flight arrive after
-  `pause` is acknowledged. Bytes the cache or a staged edit holds are served as before.
+  `pause` is acknowledged. Bytes the cache or a staged edit holds are served as before. A local
+  write that needs content the cache does not hold (part of a chunk of an online-only file) is
+  refused likewise, and a pin refused this way leaves no pin behind.
 
 It does not stop: reads the cache can serve, local operations (accepted and recorded; the
 pending set grows), local cache maintenance, requests from the store server's remote clients (their

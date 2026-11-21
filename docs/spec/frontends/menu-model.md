@@ -144,7 +144,9 @@ Only generic names are used: a specific name that a theme lacks draws nothing.
 
 **Icon**, first match:
 
-1. all unreachable (including no domains), or any domain failing → `tsync-error-symbolic`
+1. all unreachable (including no domains), or any domain failing → `tsync-error-symbolic`. Here and
+   in the summary a paused domain is not failing: its row reads `Paused` (§5), and the icon and the
+   summary never report a failure no row explains
 2. all paused → `tsync-paused-symbolic`
 3. any domain transferring → `tsync-sync-symbolic`
 4. else → `tsync-idle-symbolic`

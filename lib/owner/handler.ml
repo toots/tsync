@@ -44,6 +44,9 @@ let no_traffic : Tsync_status.Status_report.traffic =
   { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
 
 (* android §4.2: a pulled tree's [changed] event names the folders concerned. *)
+(* 08 §3.8: a host does not replay the fetches it holds for a paused domain. *)
+let paused_field paused = if paused then [("paused", `Bool true)] else []
+
 let folders_changed ~domain ~(engine : (module Engine.S)) ~publish dirs =
   let (module E) = engine in
   (* 01 §2.3: no notice names the reserved folder or anything in it. *)
@@ -61,12 +64,13 @@ let folders_changed ~domain ~(engine : (module Engine.S)) ~publish dirs =
         ignore
           (publish
              (`Assoc
-                [
-                  ("event", `String "changed");
-                  ("domain", `String domain);
-                  ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
-                  ("refs", `List (List.map (fun r -> `String r) refs));
-                ]))
+                ([
+                   ("event", `String "changed");
+                   ("domain", `String domain);
+                   ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
+                 ]
+                @ paused_field (E.is_paused ())
+                @ [("refs", `List (List.map (fun r -> `String r) refs))])))
 
 (* android §3.3: the breaker of every store that could answer a read is open. *)
 let silent (domain : Tsync_domain.Domain.t) () =
@@ -238,12 +242,14 @@ let sweep_copies t =
        (Format_merge.registered_folders t.formats))
 
 let event t name fields =
+  let (module E : Engine.S) = t.engine in
   `Assoc
     ([
        ("event", `String name);
        ("domain", `String (domain_name t));
        ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
      ]
+    @ paused_field (E.is_paused ())
     @ fields)
 
 let invalid fmt = Fail.invalid fmt
@@ -420,7 +426,8 @@ let fetching path f =
         Log.info "fetched %s: %s in %.1f s" path (Narrate.size item.size)
           (Rt.now () -. started);
         r
-    | exception e when not (Rt.is_cancelled e) ->
+    | exception e
+      when (not (Rt.is_cancelled e)) && (Fail.classify e).kind <> Fail.Paused ->
         Log.info "fetch of %s failed after %.1f s: %s" path
           (Rt.now () -. started)
           (Fail.to_string (Fail.classify e));
@@ -1067,9 +1074,10 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Poll -> Rt.spawn ~name:"poll" E.poll
     | Wake -> E.nudge ()
     | Pause on ->
+        let was = E.is_paused () in
         E.set_paused on;
         (* file-provider §6.10: the fetches a host held back while paused. *)
-        if not on then ignore (publish_event t Recovered);
+        if was && not on then ignore (publish_event t Recovered);
         E.is_paused ()
     | Retry -> E.rearm ()
     | Share r ->

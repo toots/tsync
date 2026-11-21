@@ -483,6 +483,10 @@ let () =
       show "fetch from the cache while paused" (fetch "paused-cached.txt");
       show "evict" (ask [("action", "evict"); ("ref", r)]);
       show "fetch from the store while paused" (fetch "paused-store.txt");
+      p "%-34s %b" "  it left a destination"
+        (Fs.exists (Filename.concat home "paused-store.txt"));
+      show "pin while paused" (ask [("action", "restore"); ("ref", r)]);
+      show "  and the file after" (ask [("action", "stat"); ("ref", r)]);
       show "resume" (ask [("action", "pause"); ("arg", "off")]);
       show "fetch from the store once resumed" (fetch "resumed.txt");
       p "== events";

@@ -447,9 +447,11 @@ error.
   error is signalled resolved; it is exactly "do not resend unchanged". The relay signals it resolved
   when the owner restarts (§8.2), which is when a configuration may have changed.
 - `serverUnreachable` makes the system back off until signalled; the relay signals it resolved on
-  every event and every acknowledgement, so it lasts until the owner answers again. It is produced
-  by the owner's `unreachable`, and by an owner that is not listening (restarting, or not started
-  yet): the relay's next acknowledgement is that owner coming back. Any other error is retried with
+  every event of the domain that is not marked `paused` ([08 §3.8](../08-frontends.md#38-events)),
+  so it lasts until the owner answers again, and through a pause until the resume. It is produced
+  by the owner's `unreachable`, by a read refused `paused`, and by an owner that is not listening
+  (restarting, or not started yet): the `recovered` each owner sends a new subscriber is that owner
+  coming back. Any other error is retried with
   the system's own backoff, which grows to tens of minutes and is not shortened by a signal; an
   owner restart reported that way left the working set unlisted for twenty minutes.
 - Everything else is retried by the system with its own backoff.

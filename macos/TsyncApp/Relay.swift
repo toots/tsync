@@ -62,11 +62,13 @@ final class Relay {
         }
     }
 
-    /// A configuration change takes effect here once the owner restarts.
+    /// A configuration change takes effect here once the owner restarts. The
+    /// `recovered` each domain's owner then sends resolves server-unreachable,
+    /// unless the domain is paused.
     private func acknowledged() {
         reconciler.request()
         for domain in registered() {
-            signal(domain, resolving: [.serverUnreachable, .cannotSynchronize])
+            signal(domain, resolving: [.cannotSynchronize])
         }
     }
 
@@ -77,7 +79,9 @@ final class Relay {
             reconciler.request()
         case "changed", "recovered":
             if let domain = registered(name) {
-                signal(domain, resolving: [.serverUnreachable])
+                // 08 §3.8: the fetches held for a paused domain stay held.
+                let paused = event["paused"] as? Bool == true
+                signal(domain, resolving: paused ? [] : [.serverUnreachable])
             }
         default:
             break

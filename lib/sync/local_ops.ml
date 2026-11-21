@@ -1811,6 +1811,8 @@ module Make (C : Engine_ctx.S) = struct
 
   let pin path ~keep =
     let pin_manifest (m : Manifest.t) =
+      (* A pin is durable before its fetch: one refused must leave none. *)
+      if Cache.availability cache m = `Online_only then unless_paused ();
       downloading path ~size:m.size (fun fetched ->
           Cache.pin ~fetched cache m ~until:(Unix.gettimeofday () +. keep))
     in
@@ -1850,24 +1852,31 @@ module Make (C : Engine_ctx.S) = struct
       ~finally:(fun () -> close_read h)
       (fun () ->
         let size = size_of path in
+        let write fd =
+          downloading path ~size (fun fetched ->
+              let step = 4 * 1024 * 1024 in
+              let rec go off =
+                if off < size then (
+                  let len = min step (size - off) in
+                  ensure_whole_range h ~off ~len;
+                  let s = read h ~off ~len in
+                  let n = Bigstring.length s in
+                  if n = 0 then Fail.corrupt "%s: short read at %d" path off;
+                  Fs.pwrite_all fd s ~boff:0 ~len:n ~off;
+                  fetched n;
+                  go (off + n))
+              in
+              go 0;
+              Fs.fsync fd)
+        in
         (* Lesson 8: the destination is closed whatever happens once it is
-           open. *)
-        Fs.with_fd (create_dest dst) (fun fd ->
-            downloading path ~size (fun fetched ->
-                let step = 4 * 1024 * 1024 in
-                let rec go off =
-                  if off < size then (
-                    let len = min step (size - off) in
-                    ensure_whole_range h ~off ~len;
-                    let s = read h ~off ~len in
-                    let n = Bigstring.length s in
-                    if n = 0 then Fail.corrupt "%s: short read at %d" path off;
-                    Fs.pwrite_all fd s ~boff:0 ~len:n ~off;
-                    fetched n;
-                    go (off + n))
-                in
-                go 0;
-                Fs.fsync fd));
+           open; a transfer that fails leaves none behind. *)
+        let fd = create_dest dst in
+        (match Fs.with_fd fd write with
+          | () -> ()
+          | exception e ->
+              Fs.unlink_quiet dst;
+              raise e);
         let st = stat path in
         try Fs.set_times dst st.times with _ -> ())
 

@@ -63,6 +63,9 @@ sync while paused                  {"ok":false,"code":"paused","error":"docs is 
 fetch from the cache while paused  {"ok":true,"localPath":"<root>/home/paused-cached.txt","item":{"ref":"i:<file-4>","parentRef":"root","name":"r.txt","kind":"file","size":5,"mtimeNs":"<t>","createdNs":"<t>","etag":"<id6>","isUploaded":true,"contentId":"<id6>","availability":"cached"}}
 evict                              {"ok":true,"evicted":1,"failed":0}
 fetch from the store while paused  {"ok":false,"code":"paused","error":"docs is paused"}
+  it left a destination            false
+pin while paused                   {"ok":true,"restored":0,"failed":1}
+  and the file after               {"ok":true,"ref":"i:<file-4>","parentRef":"root","name":"r.txt","kind":"file","size":5,"mtimeNs":"<t>","createdNs":"<t>","etag":"<id6>","isUploaded":true,"contentId":"<id6>","availability":"online-only"}
 resume                             {"ok":true,"paused":false}
 fetch from the store once resumed  {"ok":true,"localPath":"<root>/home/resumed.txt","item":{"ref":"i:<file-4>","parentRef":"root","name":"r.txt","kind":"file","size":5,"mtimeNs":"<t>","createdNs":"<t>","etag":"<id6>","isUploaded":true,"contentId":"<id6>","availability":"cached"}}
 == events
