@@ -4,7 +4,7 @@
 
 **Finder.** The domain is a location in the sidebar. A cloud badge marks files that are online-only. Right-click for *Make Available Offline*, *Make Online Only* and *Copy Share URL*. Finder's own *Download Now* and *Remove Download* work too, but they do not keep a file offline for you: the system may remove such a download when it wants space.
 
-**Menu bar.** The icon shows idle, transferring, paused or unreachable. The menu lists each domain with the files moving now; clicking a domain opens it and clicking a file reveals it in Finder. *Stats* is a short form of `tsync status`, and *Hold changes* is `tsync pause` for every domain. *One-time codes* copies a two-factor code from the [vault](passwords.md#two-factor-codes), and unlocks it when it is locked. With passwords in the vault, tsync also fills logins, codes and passkeys through [AutoFill](passwords.md#autofill-on-macos). There is no Quit: the app is what tells Finder about changes made elsewhere.
+**Menu bar.** The icon shows idle, transferring, paused or unreachable. The menu lists each domain with the files moving now; clicking a domain opens it and clicking a file reveals it in Finder. *Stats* is a short form of `tsync status`, and *Pause syncing* is `tsync pause` for every domain: uploads and downloads stop until you resume. *One-time codes* copies a two-factor code from the [vault](passwords.md#two-factor-codes), and unlocks it when it is locked. With passwords in the vault, tsync also fills logins, codes and passkeys through [AutoFill](passwords.md#autofill-on-macos). There is no Quit: the app is what tells Finder about changes made elsewhere.
 
 **Editing large files.** Finder hands tsync a whole file after an edit, so the whole file is read again. Only the chunks that changed are uploaded.
 
@@ -39,7 +39,7 @@ The tray shows an icon in the notification area, light or dark to suit the taskb
 
 - Clicking a domain opens its folder in Explorer. Clicking a file opens its folder with the file selected; it never opens the file.
 - *Stats* is a short form of `tsync status`, read when you open the menu.
-- *Hold changes* is `tsync pause` for every domain.
+- *Pause syncing* is `tsync pause` for every domain: uploads and downloads stop until you resume.
 - *One-time codes* appears for a domain that uses `totp`. Clicking a code copies it, marked so that clipboard history and the cloud clipboard keep no copy. A locked domain's *Locked — unlock…* asks for the passphrase in a small window, and for the vault's secret key the first time on this PC.
 - Messages, such as a code that could not be copied, appear as notifications from the icon.
 - *Quit* closes the tray only. Syncing continues.
@@ -66,7 +66,8 @@ Uninstall from *Settings → Apps → Installed apps → tsync*. Each folder is 
 `tsync-tray` shows an icon for idle, transferring, paused or unreachable, and a menu:
 
 ```
-photos — Uploading 1 · Downloading 2
+photos — Syncing
+    1 to upload, 2 to download
     out.raw
     holiday.mov
         752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
@@ -74,14 +75,14 @@ photos — Uploading 1 · Downloading 2
 1.2 GiB sent · 300.0 MiB to go
 ---
 Stats >
-[ ] Hold changes
+[ ] Pause syncing
 ---
 Quit tsync tray
 ```
 
 - Clicking a domain opens its folder. Clicking a file shows it in the file manager; it never opens the file.
 - *Stats* is a short form of `tsync status`, read when you open it.
-- *Hold changes* is `tsync pause` for every domain. The checkmark shows what the service reports, not what you clicked.
+- *Pause syncing* is `tsync pause` for every domain: uploads and downloads stop until you resume. The checkmark shows what the service reports, not what you clicked.
 - *One-time codes* appears for a domain that uses `totp`, whether its config lists it or the server it follows does, on Wayland with `wl-copy` (wl-clipboard) installed. It lists each code by `issuer — account`, with its vault's colour or icon; clicking one copies its current code, marked so Klipper keeps no history of it. A locked domain's *Locked — unlock…* asks for the passphrase in KDE's dialog (`kdialog`). Codes are added with `tsync totp add`.
 - *Quit* closes the tray only. Syncing continues.
 

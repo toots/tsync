@@ -33,7 +33,7 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync logs [-f] [-n N]` | Show the service log; the last 200 lines by default |
 | `tsync stop` | Stop it |
 | `tsync start [--mount PATH] [--tls system\|openssl\|native]` | Run in the foreground. `--mount` works with a single domain. |
-| `tsync pause`, `tsync resume` | Hold or release every change of a domain |
+| `tsync pause`, `tsync resume` | Hold or release every change and every download of a domain |
 | `tsync retry` | Run parked work again now |
 
 **Setup**
@@ -160,7 +160,7 @@ A healthy report is short. These lines appear only when there is something to sa
 
 | Line | Meaning | What to do |
 |---|---|---|
-| `PAUSED` | Changes are held | `tsync resume` |
+| `PAUSED` | Changes and downloads are held | `tsync resume` |
 | `uploads … pending` | Files waiting to upload, and how much | Nothing; it is working |
 | `MAIN OFFLINE` | No main answers. Reads use a replica if there is one; edits wait. | Bring the main back |
 | `HELD DOWN` | This backend failed repeatedly and is being left alone for the time shown | It is retried on its own |

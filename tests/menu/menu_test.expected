@@ -53,8 +53,9 @@ Makefile -> text-x-generic
 
 == the worked example of §5
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 1 · Downloading 2
-        photos — Uploading 1 · Downloading 2 -> open photos
+tooltip tsync — Syncing: 1 to upload, 2 to download
+        photos — Syncing -> open photos
+            1 to upload, 2 to download
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
                 752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
@@ -64,115 +65,135 @@ tooltip tsync — Uploading 1 · Downloading 2
         1000 B sent
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == two domains, one busy: rows sorted, traffic and rate summed
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 2
-        photos — Uploading 2 -> open photos
+tooltip tsync — Syncing: 2 to upload
+        photos — Syncing -> open photos
+            2 to upload
             a.jpg (image-x-generic) -> reveal photos:x/a.jpg
             b.jpg (image-x-generic) -> reveal photos:x/b.jpg
                 2.0 KiB
-        music — Idle -> open music
+        music — Up to date -> open music
         ---
         6.0 MiB sent · 1.0 MiB to go
         1.0 MiB/s · under a minute left
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == 5 MiB at 1 MiB/s and 3 MiB at 2 MiB/s, pending bytes in each
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 2
-        one — Uploading 1 -> open one
-        two — Uploading 1 -> open two
+tooltip tsync — Syncing: 2 to upload
+        one — Syncing -> open one
+            1 to upload
+        two — Syncing -> open two
+            1 to upload
         ---
         8.0 MiB sent · 180.0 MiB to go
         3.0 MiB/s · 1m left
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == nothing answering
 icon    tsync-error-symbolic
 tooltip tsync — Daemon not running
-        photos — not answering -> open photos
+        photos — Not answering -> open photos
         ---
         Stats >
-        [ ] Hold changes (disabled) -> pause true
+        [ ] Pause syncing (disabled) -> pause true
         ---
         Quit tsync tray -> quit
 
 == one domain paused, one unreachable
 icon    tsync-paused-symbolic
-tooltip tsync — Uploading 2 · paused
-        photos — Uploading 2 · paused -> open photos
-        music — not answering -> open music
+tooltip tsync — Paused
+        photos — Paused -> open photos
+            Changes stay on this machine and downloads wait until you resume.
+        music — Not answering -> open music
         ---
         Stats >
-        [x] Hold changes -> pause false
+        [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
 
 == a machine joined one vault, while an upload runs
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 1
-        docs — Uploading 1 -> open docs
+tooltip tsync — Syncing: 1 to upload
+        docs — Syncing -> open docs
+            1 to upload
             laptop joined the vault (computer)
             booky joined the vault (computer)
             a.txt (text-x-generic) -> reveal docs:a.txt
-        music — Idle -> open music
+        music — Up to date -> open music
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == one vault's scheduled backup is overdue
 icon    tsync-idle-symbolic
-tooltip tsync — Idle
-        docs — Idle -> open docs
+tooltip tsync — Up to date
+        docs — Up to date -> open docs
             laptop joined the vault (computer)
             The vault's backup is overdue
-        music — Idle -> open music
+        music — Up to date -> open music
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == one domain's sync failing with changes it cannot publish
 icon    tsync-error-symbolic
-tooltip tsync — Sync failing
-        media — Sync failing -> open media
-        music — Uploading 1 -> open music
+tooltip tsync — Not syncing
+        media — Not syncing -> open media
+            5 changes cannot be published: this domain is read-only. Retried until it works.
+        music — Syncing -> open music
+            1 to upload
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== a failing domain that is paused: no failure the rows do not explain
+icon    tsync-paused-symbolic
+tooltip tsync — Paused
+        media — Paused -> open media
+            Changes stay on this machine and downloads wait until you resume.
+        ---
+        Stats >
+        [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
 
 == two reachable domains, one paused
 icon    tsync-idle-symbolic
-tooltip tsync — Idle
+tooltip tsync — Up to date
         photos — Paused -> open photos
-        music — Idle -> open music
+            Changes stay on this machine and downloads wait until you resume.
+        music — Up to date -> open music
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == paused with more uploads than FILE_ROWS, rate zero
 icon    tsync-paused-symbolic
-tooltip tsync — Uploading 9 · paused
-        photos — Uploading 9 · paused -> open photos
+tooltip tsync — Paused
+        photos — Paused -> open photos
+            Changes stay on this machine and downloads wait until you resume.
             u0.bin (text-x-generic) -> reveal photos:d/u0.bin
             u1.bin (text-x-generic) -> reveal photos:d/u1.bin
             u2.bin (text-x-generic) -> reveal photos:d/u2.bin
@@ -183,47 +204,51 @@ tooltip tsync — Uploading 9 · paused
         0 B sent · 6.7 MiB to go
         ---
         Stats >
-        [x] Hold changes -> pause false
+        [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
 
 == a fetch count of nine above two download rows
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 2
-        photos — Downloading 2 -> open photos
+tooltip tsync — Syncing: 2 to download
+        photos — Syncing -> open photos
+            2 to download
             d0.bin (text-x-generic) -> reveal photos:d/d0.bin
             d1.bin (text-x-generic) -> reveal photos:d/d1.bin
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == a fetch count of zero above one download row
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 1
-        photos — Downloading 1 -> open photos
+tooltip tsync — Syncing: 1 to download
+        photos — Syncing -> open photos
+            1 to download
             d0.bin (text-x-generic) -> reveal photos:d/d0.bin
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == a fetch count with no row
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 3
-        photos — Downloading 3 -> open photos
+tooltip tsync — Syncing: 3 to download
+        photos — Syncing -> open photos
+            3 to download
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == more downloads than fit beside uploads
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 6 · Downloading 8
-        photos — Uploading 6 · Downloading 8 -> open photos
+tooltip tsync — Syncing: 6 to upload, 8 to download
+        photos — Syncing -> open photos
+            6 to upload, 8 to download
             u0.bin (text-x-generic) -> reveal photos:d/u0.bin
             u1.bin (text-x-generic) -> reveal photos:d/u1.bin
             u2.bin (text-x-generic) -> reveal photos:d/u2.bin
@@ -238,41 +263,44 @@ tooltip tsync — Uploading 6 · Downloading 8
             … and 3 more
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == figures absent
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 1
-        photos — Downloading 1 -> open photos
+tooltip tsync — Syncing: 1 to download
+        photos — Syncing -> open photos
+            1 to download
             a.bin (text-x-generic) -> reveal photos:a.bin
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == figures zero
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 1
-        photos — Downloading 1 -> open photos
+tooltip tsync — Syncing: 1 to download
+        photos — Syncing -> open photos
+            1 to download
             a.bin (text-x-generic) -> reveal photos:a.bin
                 0 B of 0 B
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
 == a name longer than LABEL_MAX with a known extension
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 1
-        docs — Downloading 1 -> open docs
+tooltip tsync — Syncing: 1 to download
+        docs — Syncing -> open docs
+            1 to download
             Compte rendu de la réunion générale extraordinaire du… (x-office-document) -> reveal docs:cr/Compte rendu de la réunion générale extraordinaire du comité élargi — version définitive.PDF
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -282,7 +310,7 @@ tooltip tsync — No domains configured
         tsync — No domains configured
         ---
         Stats >
-        [ ] Hold changes (disabled) -> pause true
+        [ ] Pause syncing (disabled) -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -292,26 +320,32 @@ tooltip tsync — No domains configured
         tsync — No domains configured
         ---
         Stats >
-        [ ] Hold changes (disabled) -> pause true
+        [ ] Pause syncing (disabled) -> pause true
 
 == one idle domain, without a quit label
 icon    tsync-idle-symbolic
-tooltip tsync — Idle
-        photos — Idle -> open photos
+tooltip tsync — Up to date
+        photos — Up to date -> open photos
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
 
 == the JSON form: every kind of entry and action
 {
   "icon": "tsync-paused-symbolic",
-  "tooltip": "tsync — Uploading 1 · Downloading 1 · paused",
+  "tooltip": "tsync — Paused",
   "entries": [
     {
-      "label": "photos — Uploading 1 · Downloading 1 · paused",
+      "label": "photos — Paused",
       "enabled": true,
       "indent": 0,
       "action": { "openFolder": "photos" }
+    },
+    {
+      "label": "Changes stay on this machine and downloads wait until you resume.",
+      "enabled": true,
+      "indent": 1,
+      "action": {}
     },
     {
       "label": "a.mkv",
@@ -331,7 +365,7 @@ tooltip tsync — Idle
       "submenu": true
     },
     {
-      "label": "Hold changes",
+      "label": "Pause syncing",
       "enabled": true,
       "indent": 0,
       "action": { "setPaused": false },
@@ -388,12 +422,12 @@ tooltip tsync — Idle
 
 == codes: a menu with code domains has the row, one without has not
 icon    tsync-idle-symbolic
-tooltip tsync — Idle
-        work — Idle -> open work
+tooltip tsync — Up to date
+        work — Up to date -> open work
         ---
         Stats >
         One-time codes >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -454,14 +488,15 @@ carries 000000: false
 
 == replies with fields of the wrong type, and an empty object
 icon    tsync-sync-symbolic
-tooltip tsync — Downloading 1
-        empty — not answering -> open empty
-        list — not answering -> open list
-        wrong — Downloading 1 -> open wrong
+tooltip tsync — Syncing: 1 to download
+        empty — Not answering -> open empty
+        list — Not answering -> open list
+        wrong — Syncing -> open wrong
+            1 to download
             ok.txt (text-x-generic) -> reveal wrong:ok.txt
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
         ? — ?
@@ -471,4 +506,4 @@ tooltip tsync — Downloading 1
         d
             ? (?)
 
-40 cases
+41 cases

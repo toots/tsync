@@ -476,7 +476,19 @@ let () =
         (ask ~domain:(Some "nope") [("action", "stat")]);
       show "pause" (ask [("action", "pause"); ("arg", "on")]);
       show "sync while paused" (ask [("action", "sync")]);
+      let fetch name =
+        let dest = Filename.concat home name in
+        ask [("action", "ensure_cached"); ("ref", r); ("dest", dest)]
+      in
+      show "fetch from the cache while paused" (fetch "paused-cached.txt");
+      show "evict" (ask [("action", "evict"); ("ref", r)]);
+      show "fetch from the store while paused" (fetch "paused-store.txt");
+      p "%-34s %b" "  it left a destination"
+        (Fs.exists (Filename.concat home "paused-store.txt"));
+      show "pin while paused" (ask [("action", "restore"); ("ref", r)]);
+      show "  and the file after" (ask [("action", "stat"); ("ref", r)]);
       show "resume" (ask [("action", "pause"); ("arg", "off")]);
+      show "fetch from the store once resumed" (fetch "resumed.txt");
       p "== events";
       let c = Ipc.Client.connect socket in
       show "subscribe"

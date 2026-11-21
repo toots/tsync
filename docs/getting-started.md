@@ -215,12 +215,12 @@ tsync logs -f         # follow the service log
 
 The report is quiet when things are fine. A line in capitals is something to look at; [the status report](commands.md#the-status-report) explains each.
 
-The tray icon on Linux and Windows and the menu bar item on macOS show the same thing at a glance: which files are moving, how much is left, and a *Hold changes* switch.
+The tray icon on Linux and Windows and the menu bar item on macOS show the same thing at a glance: which files are moving, how much is left, and a *Pause syncing* switch.
 
 ### Pause
 
 ```bash
-tsync pause     # hold every change of the domain
+tsync pause     # hold every change and every download of the domain
 tsync resume
 ```
 

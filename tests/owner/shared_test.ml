@@ -181,9 +181,10 @@ let () =
                            | _ -> None)))
                 ["docs"; "pics"]));
         (* Each domain's first rebuild ends with one [changed], whenever its
-           poller gets there: read both before provoking the next two. *)
-        p "after the first rebuilds: %s"
-          (String.concat ", " (List.sort compare (events 2)));
+           poller gets there, and each resume with one [recovered]: read the
+           four before provoking the next two. *)
+        p "after the first rebuilds and the resume: %s"
+          (String.concat ", " (List.sort compare (events 4)));
         show "notify_reset of pics"
           (call [("action", "notify_reset"); ("domain", "pics")]);
         show "full_resync of docs"

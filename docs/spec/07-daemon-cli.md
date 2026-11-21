@@ -193,7 +193,8 @@ progress rather than by a total deadline (§4.3):
 
 ### 2.6 Pause
 
-`pause` stops **everything that changes the domain** on this machine, persistently:
+`pause` stops **everything that changes the domain, and every transfer of file content**, on this
+machine, persistently:
 
 - the cycle: nothing is fetched, merged, pushed or projected
   ([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)), but for the entries
@@ -205,9 +206,16 @@ progress rather than by a total deadline (§4.3):
 - forwarding deferred work to replicas and backfills;
 - owner requests and jobs that change the domain's stores or run a cycle (`revert`, `share`, `sync`,
   `gc`, `expire`, `mirror`, `data-integrity --repair`, `import`, `rsync`): these refuse with
-  `paused` ([08 §3.3](08-frontends.md) marks them).
+  `paused` ([08 §3.3](08-frontends.md) marks them);
+- content fetches: a read, a materialisation, a prefetch or a pin that needs bytes the cache does
+  not hold fails with `paused` at its next request to the store
+  ([read-path §4.5](algorithms/read-path-and-cache.md#45-whole-group-fetch-verification-and-install)).
+  A request to the store already sent completes, so at most the chunks in flight arrive after
+  `pause` is acknowledged. Bytes the cache or a staged edit holds are served as before. A local
+  write that needs content the cache does not hold (part of a chunk of an online-only file) is
+  refused likewise, and a pin refused this way leaves no pin behind.
 
-It does not stop: reads and the fetches they cause, local operations (accepted and recorded; the
+It does not stop: reads the cache can serve, local operations (accepted and recorded; the
 pending set grows), local cache maintenance, requests from the store server's remote clients (their
 own changes, paused only on their own machines), `stop`.
 

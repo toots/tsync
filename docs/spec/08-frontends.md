@@ -363,7 +363,9 @@ The handler enforces these itself, whatever a frontend advertises:
 
 - **Read-only.** Actions marked M are refused with `read_only` on a read-only domain.
 - **Pause.** Actions marked P are refused with `paused` while the domain is paused. Other mutations
-  are accepted and stay pending.
+  are accepted and stay pending. `ensure_cached`, `fetch_range`, `read`, and a `write` into part of a
+  chunk, answer `paused` when they need bytes the cache does not hold; `restore` counts such a file as
+  failed ([07 §2.6](07-daemon-cli.md#26-pause)).
 - **Serialisation.** Resolving a reference and acting on it are one step under the owner's per-domain
   metadata serialisation, for every mutation. Otherwise a folder rename racing a create inside that
   folder resolves the create against the old path and files it where the folder no longer is. Reads
@@ -472,6 +474,11 @@ publishes, and when, is in its frontend spec. Every owner publishes:
   latched on that must clear). A client MUST treat it as clearing every latch it holds for the
   domain; it is delivered to every subscriber of the domain, including one that subscribed after
   the owner started.
+
+Every event of a paused domain carries `"paused":true`. A read refused `paused` is held until the
+domain resumes ([07 §2.6](07-daemon-cli.md#26-pause)), so a client MUST NOT take such an event as
+clearing what it holds for reads; the `recovered` the owner publishes when the domain resumes
+carries no such field and clears it.
 
 ## 4. What the hosts ask of the seam
 

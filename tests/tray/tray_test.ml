@@ -423,7 +423,7 @@ let calls w =
     ~status:
       {|{"ok":true,"downloading":[{"name":"my_file_v2.txt","rel":"a/my_file_v2.txt","bytes":1,"size":2}]}|};
   start_tray w;
-  ignore (shows w "photos — Downloading");
+  ignore (shows w "photos — Syncing");
   let item_path = "/StatusNotifierItem"
   and properties = "org.freedesktop.DBus.Properties" in
   let show title result = say w "%-52s %s" title (outcome result) in
@@ -551,7 +551,7 @@ let served w =
   locked w (fun () -> w.file_manager_answers <- false);
   own w file_manager;
   start_tray w;
-  ignore (shows w "busy — Idle");
+  ignore (shows w "busy — Up to date");
   let ask () =
     ignore (layout w);
     ignore
@@ -583,7 +583,7 @@ let served w =
   during "status" ignore;
   during "stats" (fun () -> ignore (menu w "AboutToShow" [Int32 0]));
   event w 0 "closed";
-  during "pause" (fun () -> click w (row w "Hold changes").id);
+  during "pause" (fun () -> click w (row w "Pause syncing").id);
   click w (row w "busy").id;
   ignore (wait_until (fun () -> shown w <> []));
   let answered = ask () in
@@ -633,9 +633,9 @@ let deadline ~silent count w =
   start_tray w;
   let current () =
     let labels = labels w in
-    List.length (List.filter (String.ends_with ~suffix:"not answering") labels)
+    List.length (List.filter (String.ends_with ~suffix:"Not answering") labels)
     = silent
-    && List.length (List.filter (String.ends_with ~suffix:"Uploading 1") labels)
+    && List.length (List.filter (String.ends_with ~suffix:"— Syncing") labels)
        = count - silent
   in
   say w "%d domains, %d silent: every row current: %s" count silent
@@ -651,7 +651,7 @@ let ids w =
   owner w "moving" ~status:(busy "a_b.bin" 1);
   own w file_manager;
   start_tray w;
-  ignore (shows w "moving — Uploading");
+  ignore (shows w "moving — Syncing");
   let stable = (row w "stable").id and moving = (row w "moving").id in
   let file = (row w "    a__b.bin").id in
   let settled = Rt.now () in
@@ -665,7 +665,7 @@ let ids w =
   check w "and no id changed"
     ((row w "stable").id = stable && (row w "moving").id = moving);
   write (script w "moving" "status") {|{"ok":true}|};
-  ignore (shows w "moving — Idle");
+  ignore (shows w "moving — Up to date");
   check w "the changed row has another id" ((row w "moving").id <> moving);
   check w "the unchanged row kept its id" ((row w "stable").id = stable);
   click w moving;
@@ -747,7 +747,7 @@ let open_menu w =
     {|{"ok":true,"self":{"server":{"hostname":"box","role":"owner","pid":7,"uptimeSeconds":3600}},"domains":[{"name":"photos","settings":{"versioning":true}}]}|};
   own w file_manager;
   start_tray w;
-  ignore (shows w "photos — Idle");
+  ignore (shows w "photos — Up to date");
   let stats () = row w "Stats" in
   say w "before any opening the Stats row holds: %s"
     (String.concat " | " (List.map label (stats ()).children));
@@ -800,7 +800,7 @@ let no_close w =
   configure w ["photos"];
   owner w "photos";
   start_tray w;
-  ignore (shows w "photos — Idle");
+  ignore (shows w "photos — Up to date");
   ignore (menu w "AboutToShow" [Int32 0]);
   write (script w "photos" "status") (busy "one.bin" 1);
   Rt.sleep (poll_interval +. status_deadline);
@@ -814,7 +814,7 @@ let no_close w =
   write (script w "photos" "status") {|{"ok":true}|};
   Rt.sleep (poll_interval +. status_deadline);
   say w "held again: %s" (label (row w "photos"));
-  let current () = label (row w "photos") = "photos — Idle" in
+  let current () = label (row w "photos") = "photos — Up to date" in
   let allowed =
     Layout.menu_open_bound +. poll_interval +. status_deadline +. margin
   in
@@ -841,11 +841,11 @@ let hold w =
   write (script w "willing" "pause") {|{"ok":true,"paused":true}|};
   owner ~mode:"silent" w "quiet";
   start_tray w;
-  ignore (shows w "willing — Idle");
+  ignore (shows w "willing — Up to date");
   let switch () =
-    List.assoc_opt "toggle-state" (row w "Hold changes").properties
+    List.assoc_opt "toggle-state" (row w "Pause syncing").properties
   in
-  click w (row w "Hold changes").id;
+  click w (row w "Pause syncing").id;
   check w
     "with one owner silent the others are asked, each before the tray gave up \
      on the silent one"
@@ -886,7 +886,7 @@ let nobody w =
   configure w ["quiet"];
   owner ~mode:"silent" w "quiet";
   start_tray w;
-  ignore (shows w "quiet — not answering");
+  ignore (shows w "quiet — Not answering");
   ignore (menu w "AboutToShow" [Int32 0]);
   ignore
     (wait_until (fun () ->
@@ -901,7 +901,7 @@ let nobody w =
      with
       | Ok [Variant (String s)] -> s
       | _ -> "?")
-    (match List.assoc_opt "enabled" (row w "Hold changes").properties with
+    (match List.assoc_opt "enabled" (row w "Pause syncing").properties with
       | Some (Bool b) -> string_of_bool b
       | _ -> "?")
 
@@ -910,7 +910,7 @@ let panel w =
   configure w ["photos"];
   owner w "photos";
   start_tray w;
-  ignore (shows w "photos — Idle");
+  ignore (shows w "photos — Up to date");
   let warnings () =
     List.length
       (List.filter
@@ -986,7 +986,7 @@ let session w =
   let bad = run_tray ~arguments:["--nope"] w in
   say w "a command-line error: exit %s"
     (match exit_status bad with Some c -> string_of_int c | None -> "none");
-  ignore (shows w "photos — Idle");
+  ignore (shows w "photos — Up to date");
   click w (row w "Quit tsync tray").id;
   say w "after Quit: exit %s"
     (match exit_status w.tray with Some c -> string_of_int c | None -> "none");
@@ -1008,7 +1008,7 @@ let config w =
   let header () = shows w "tsync — No domains configured" in
   let repaired names =
     configure w names;
-    shows w (List.hd names ^ " — Idle")
+    shows w (List.hd names ^ " — Up to date")
   in
   check w "with no config it runs and shows no domains" (header ());
   check w "the domains appear after it is written" (repaired ["photos"]);

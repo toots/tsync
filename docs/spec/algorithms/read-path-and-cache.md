@@ -141,6 +141,12 @@ within_deadline(work):
   on expiry: this reader fails with DEADLINE; the work continues and lands for later readers
 ```
 
+- **R0. The deadline is a demand reader's.** Writing a whole file out (`assemble_to`,
+  [04](../04-checkout-cache.md) §3.4) is a transfer with progress, not a read someone is blocked
+  in: it runs `ensure_whole(g)` on each group before reading it, outside `within_deadline`, and is
+  bounded by the store's stall rule and by its caller's cancellation. A group of slow chunks
+  therefore fails no transfer that is still receiving bytes. A file with a staged edit is the
+  exception: its inherited pieces are read as a demand reader's (§4.2).
 - **R1. A range read never waits for another's whole fetch.** A demand read on a slow store
   fetches its own range even while a whole-group fetch of the same group is in flight
   (typically prefetch). The duplicated bytes are bounded by the read and identical (A1).
@@ -211,6 +217,7 @@ ensure_whole(g, force = false):
   finally: remove in_flight[g]
 
 fetch_verified(member):
+  if the domain is paused: fail PAUSED         # 07 §2.6; range fills (§4.4) check likewise
   bytes := store.get(chunk)
   require |bytes| = member size and hash(bytes) = chunk key, else CORRUPT
   return bytes

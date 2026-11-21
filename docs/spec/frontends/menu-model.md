@@ -49,6 +49,7 @@ the model reads:
 | `uploads` | `pendingUploads` (integer) | 0 |
 | `downloads` | `pendingDownloads` (integer) | 0 |
 | `paused` | `paused` (boolean) | false |
+| `readOnly` | `readOnly` (boolean) | false |
 | `uploading` | `uploading`: list of `{name, rel, size?}` | empty |
 | `downloading` | `downloading`: list of `{name, rel, bytes?, size?, rate?}` | empty |
 | `pendingBytes` | `pendingBytes` (integer) | unknown |
@@ -143,7 +144,9 @@ Only generic names are used: a specific name that a theme lacks draws nothing.
 
 **Icon**, first match:
 
-1. all unreachable (including no domains), or any domain failing → `tsync-error-symbolic`
+1. all unreachable (including no domains), or any domain failing → `tsync-error-symbolic`. Here and
+   in the summary a paused domain is not failing: its row reads `Paused` (§5), and the icon and the
+   summary never report a failure no row explains
 2. all paused → `tsync-paused-symbolic`
 3. any domain transferring → `tsync-sync-symbolic`
 4. else → `tsync-idle-symbolic`
@@ -152,11 +155,12 @@ Only generic names are used: a specific name that a theme lacks draws nothing.
 
 1. no domains → `No domains configured`
 2. all unreachable → `Daemon not running`
-3. any domain failing → `Sync failing`
-4. with U = the sum of `uploads` and D = the sum of download counts, over reachable domains:
-   - U = 0 and D = 0 → `Paused` when all paused, else `Idle`
-   - else join with ` · `: `Uploading U` (when U > 0), `Downloading D` (when D > 0), `paused`
-     (when all paused)
+3. any domain failing → `Not syncing`
+4. all paused → `Paused`
+5. with U = the sum of `uploads` and D = the sum of download counts, over reachable domains:
+   - U = 0 and D = 0 → `Up to date`
+   - else `Syncing: <waiting>`, `<waiting>` being `U to upload` (when U > 0) and `D to download`
+     (when D > 0), joined with `, `
 
 **Tooltip**: `tsync — <summary>`.
 
@@ -166,11 +170,21 @@ In order:
 
 1. **Header**, only when there are no domains: `tsync — <summary>`.
 2. **Per domain**, in input order:
-   - the domain row: `<name> — <detail>`, action `OpenFolder(name)`. `<detail>` is, first match:
-     `not answering` (unreachable); `Sync failing` (failing); `Paused` (paused, nothing moving);
-     `Idle` (nothing moving);
-     else `Uploading U`, `Downloading D` or `Uploading U · Downloading D` from this domain's own
-     counts, followed by ` · paused` when the domain is paused;
+   - the domain row: `<name> — <state>`, action `OpenFolder(name)`, then, when the state has a
+     sentence, a row at indent 1 with it, action `Nothing`. The states are those of the mobile
+     apps ([activity.md §2.1](activity.md#21-state)), first match:
+
+     | state | when | sentence |
+     |---|---|---|
+     | `Not answering` | unreachable | — |
+     | `Paused` | `paused` | `Changes stay on this machine and downloads wait until you resume.` |
+     | `Not syncing` | `failing` | `<failing>. Retried until it works.` |
+     | `Read-only` | `readOnly` | `This domain can't be changed from this machine.` |
+     | `Syncing` | transferring | `<waiting>` (§4) from this domain's own counts |
+     | `Up to date` | otherwise | — |
+
+     A state says what the domain is doing in a user's words; the sentence says what that means
+     for them. A cause the owner reports is shown, never reduced to a word;
    - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
      icon `computer`, action `Nothing`: it says so until the machines are listed
      (`tsync vault machines`);
@@ -190,7 +204,7 @@ In order:
    domains that use `totp`, [extensions README §3](../extensions/README.md#3-opting-in), and whose codes this
    client can copy): label
    `One-time codes`, action `ShowCodes`, `submenu`.
-6. **Hold changes**: label `Hold changes`; `checked` = all paused; `enabled` unless all
+6. **Pause syncing**: label `Pause syncing`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that
    answers ([07 §2.6](../07-daemon-cli.md#26-pause) says what a pause holds).
 7. **Quit**, only when the caller gives a quit label: a separator, then a row with that label and
@@ -219,8 +233,9 @@ Worked example. Input: one domain `photos`, `pendingUploads` 1, `pendingDownload
 
 ```
 icon    tsync-sync-symbolic
-tooltip tsync — Uploading 1 · Downloading 2
-        photos — Uploading 1 · Downloading 2 -> open photos
+tooltip tsync — Syncing: 1 to upload, 2 to download
+        photos — Syncing -> open photos
+            1 to upload, 2 to download
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
                 752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
@@ -230,7 +245,7 @@ tooltip tsync — Uploading 1 · Downloading 2
         1000 B sent
         ---
         Stats >
-        [ ] Hold changes -> pause true
+        [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
 ```
@@ -240,10 +255,10 @@ Nothing answering, and no domains:
 ```
 icon    tsync-error-symbolic
 tooltip tsync — Daemon not running
-        photos — not answering -> open photos
+        photos — Not answering -> open photos
         ---
         Stats >
-        [ ] Hold changes (disabled)
+        [ ] Pause syncing (disabled)
         ---
         Quit tsync tray -> quit
 
@@ -252,7 +267,7 @@ tooltip tsync — No domains configured
         tsync — No domains configured
         ---
         Stats >
-        [ ] Hold changes (disabled)
+        [ ] Pause syncing (disabled)
         ---
         Quit tsync tray -> quit
 ```
@@ -262,12 +277,13 @@ and the click would resume.
 
 ```
 icon    tsync-paused-symbolic
-tooltip tsync — Uploading 2 · paused
-        photos — Uploading 2 · paused -> open photos
-        music — not answering -> open music
+tooltip tsync — Paused
+        photos — Paused -> open photos
+            Changes stay on this machine and downloads wait until you resume.
+        music — Not answering -> open music
         ---
         Stats >
-        [x] Hold changes -> pause false
+        [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
 ```
@@ -380,16 +396,17 @@ For a client that cannot evaluate the model. The menu:
 ```json
 {
   "icon": "tsync-sync-symbolic",
-  "tooltip": "tsync — Uploading 1 · Downloading 1",
+  "tooltip": "tsync — Syncing: 1 to upload, 1 to download",
   "entries": [
-    { "label": "photos — Uploading 1 · Downloading 1", "enabled": true, "indent": 0,
+    { "label": "photos — Syncing", "enabled": true, "indent": 0,
       "action": { "openFolder": "photos" } },
+    { "label": "1 to upload, 1 to download", "enabled": true, "indent": 1, "action": {} },
     { "label": "out.raw", "enabled": true, "indent": 1,
       "action": { "reveal": { "domain": "photos", "rel": "out.raw" } } },
     { "label": "1.1 MiB", "enabled": true, "indent": 2, "action": {} },
     { "separator": true },
     { "label": "Stats", "enabled": true, "indent": 0, "action": { "stats": true }, "submenu": true },
-    { "label": "Hold changes", "enabled": true, "indent": 0,
+    { "label": "Pause syncing", "enabled": true, "indent": 0,
       "action": { "setPaused": true }, "checked": false }
   ]
 }
@@ -422,9 +439,9 @@ someone agrees to; and both functions are total.
   the line reads the sum sent, and the time left is total pending over the summed rate;
 - nothing answering: no traffic or rate line, the switch disabled;
 - one domain paused and one unreachable: the switch checked, the paused icon, the unreachable
-  row `not answering`;
-- one domain failing with pending uploads beside one uploading: the error icon, `Sync failing` in
-  the tooltip and on the failing domain's row, the other domain's own count on its row;
+  row `Not answering`;
+- one domain failing with pending uploads beside one uploading: the error icon, `Not syncing` in
+  the tooltip and on the failing domain's row with its reason beneath, the other domain's own count on its row;
 - two reachable domains, one paused: the switch unchecked, the paused domain's own row says so;
 - paused with more uploads than `FILE_ROWS`: the overflow row, no rate line at rate zero;
 - a fetch count of nine above two download rows, then of zero above one row: the number equals

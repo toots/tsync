@@ -155,6 +155,7 @@ type status = {
   pending_uploads : count; [@key "pendingUploads"] [@default None]
   pending_downloads : count; [@key "pendingDownloads"] [@default None]
   paused : flag; [@default false]
+  read_only : flag; [@key "readOnly"] [@default false]
   uploading : transfer list; [@of_yojson items transfer_of_yojson] [@default []]
   downloading : transfer list;
       [@of_yojson items transfer_of_yojson] [@default []]
@@ -197,9 +198,27 @@ let download_count s =
 
 let moving s = uploads s > 0 || download_count s > 0
 
-let activity ~uploads ~downloads =
-  (if uploads > 0 then [Printf.sprintf "Uploading %d" uploads] else [])
-  @ if downloads > 0 then [Printf.sprintf "Downloading %d" downloads] else []
+let waiting ~uploads ~downloads =
+  String.concat ", "
+    ((if uploads > 0 then [Printf.sprintf "%d to upload" uploads] else [])
+    @ if downloads > 0 then [Printf.sprintf "%d to download" downloads] else []
+    )
+
+(* §5: a domain's state, and the sentence that says what it means. *)
+let state = function
+  | None -> ("Not answering", None)
+  | Some s when s.paused ->
+      ( "Paused",
+        Some "Changes stay on this machine and downloads wait until you resume."
+      )
+  | Some { failing = Some why; _ } ->
+      ("Not syncing", Some (why ^ ". Retried until it works."))
+  | Some s when s.read_only ->
+      ("Read-only", Some "This domain can't be changed from this machine.")
+  | Some s when moving s ->
+      ( "Syncing",
+        Some (waiting ~uploads:(uploads s) ~downloads:(download_count s)) )
+  | Some _ -> ("Up to date", None)
 
 let progress_row (t : transfer) =
   let amount =
@@ -237,30 +256,22 @@ let file_rows_of domain transfers =
   else []
 
 let domain_rows (name, status) =
-  let detail, files =
+  let label, sentence = state status in
+  let below =
     match status with
-      | None -> ("not answering", [])
+      | None -> []
       | Some s ->
-          ( (match s.failing with
-              | Some _ -> "Sync failing"
-              | None -> (
-                  match
-                    activity ~uploads:(uploads s) ~downloads:(download_count s)
-                  with
-                    | [] -> if s.paused then "Paused" else "Idle"
-                    | parts -> join (parts @ if s.paused then ["paused"] else [])
-                  )),
-            List.map
-              (fun m ->
-                row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
-              s.new_machines
-            @ (if s.vault_backup_overdue then
-                 [row ~indent:1 "The vault's backup is overdue"]
-               else [])
-            @ file_rows_of name s.uploading
-            @ file_rows_of name s.downloading )
+          List.map
+            (fun m -> row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
+            s.new_machines
+          @ (if s.vault_backup_overdue then
+               [row ~indent:1 "The vault's backup is overdue"]
+             else [])
+          @ file_rows_of name s.uploading
+          @ file_rows_of name s.downloading
   in
-  row ~action:(Open_folder name) (name ^ " — " ^ detail) :: files
+  row ~action:(Open_folder name) (name ^ " — " ^ label)
+  :: (Option.to_list (Option.map (row ~indent:1) sentence) @ below)
 
 let render ?quit ?(codes = []) domains =
   let reachable = List.filter_map snd domains in
@@ -269,17 +280,22 @@ let render ?quit ?(codes = []) domains =
     (not all_unreachable) && List.for_all (fun s -> s.paused) reachable
   in
   let total f = List.fold_left (fun n s -> n + f s) 0 reachable in
-  let any_failing = List.exists (fun s -> s.failing <> None) reachable in
+  (* §4: the row of a paused domain says Paused, so its failure is not the
+     summary's. *)
+  let any_failing =
+    List.exists (fun s -> s.failing <> None && not s.paused) reachable
+  in
   let summary =
     if domains = [] then "No domains configured"
     else if all_unreachable then "Daemon not running"
-    else if any_failing then "Sync failing"
+    else if any_failing then "Not syncing"
+    else if all_paused then "Paused"
     else (
       match
-        activity ~uploads:(total uploads) ~downloads:(total download_count)
+        waiting ~uploads:(total uploads) ~downloads:(total download_count)
       with
-        | [] -> if all_paused then "Paused" else "Idle"
-        | parts -> join (parts @ if all_paused then ["paused"] else []))
+        | "" -> "Up to date"
+        | counts -> "Syncing: " ^ counts)
   in
   let tooltip = "tsync — " ^ summary in
   let icon =
@@ -319,7 +335,7 @@ let render ?quit ?(codes = []) domains =
        else [row ~submenu:true ~action:Show_codes "One-time codes"])
     @ [
         row ~checked:all_paused ~enabled:(not all_unreachable)
-          ~action:(Set_paused (not all_paused)) "Hold changes";
+          ~action:(Set_paused (not all_paused)) "Pause syncing";
       ]
     @
       match quit with
