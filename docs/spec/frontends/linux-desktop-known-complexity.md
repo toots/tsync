@@ -371,7 +371,7 @@ Answered by: [linux-tray.md §5.1](linux-tray.md#51-the-bus-is-always-served) an
 - **How to tell** — Refuse the request at one owner: the checkmark after the click reflects what
   owners report. Binding: the state shown is read back, never assumed.
 
-Answered by: [linux-tray.md §6.2](linux-tray.md#62-hold-changes), [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (all paused, over reachable domains), [07 §2.6](../07-daemon-cli.md#26-pause) (what a pause holds).
+Answered by: [linux-tray.md §6.2](linux-tray.md#62-pause-syncing), [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (all paused, over reachable domains), [07 §2.6](../07-daemon-cli.md#26-pause) (what a pause holds).
 
 ### K22. A config that is missing or half written is not a reason to die
 

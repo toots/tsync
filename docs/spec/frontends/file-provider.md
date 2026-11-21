@@ -625,13 +625,14 @@ model's.
 ([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label:
 
 ```json
-{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Downloading 1",
-  "entries":[{"label":"Files — Downloading 1","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
+{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Syncing: 1 to download",
+  "entries":[{"label":"Files — Syncing","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
+             {"label":"1 to download","enabled":true,"indent":1,"action":{}},
              {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
              {"label":"1.5 GiB of 3.7 GiB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
              {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
-             {"label":"Hold changes","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
+             {"label":"Pause syncing","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
 
 `menu_stats` answers `{"ok":true,"entries":[…]}`: the stats rows of
@@ -646,7 +647,7 @@ submenu shows the model's placeholder row.
 - Icons are named as on the Linux panel (`tsync-idle|sync|paused|error-symbolic`); unknown → idle.
 - `openFolder` opens the domain's user-visible root (asked of the framework, never derived from the
   display name) in Finder; `reveal` selects the file and never opens it.
-- "Hold changes" toggles all domains through the owner (`pause`), with the semantics of
+- "Pause syncing" toggles all domains through the owner (`pause`), with the semantics of
   [07 §2.6](../07-daemon-cli.md#26-pause). The state shown is read back by the next poll.
 - The stats submenu is fetched with `menu_stats` when it opens, at most once per
   `menu_stats_interval`; a failure leaves the placeholder.

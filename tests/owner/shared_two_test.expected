@@ -1,6 +1,6 @@
 subscribe without a domain   {"ok":true}
 first events: recovered docs, recovered pics
-menu                         {"icon":"tsync-idle-symbolic","tooltip":"tsync — Idle","entries":[{"label":"docs — Idle","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Idle","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Hold changes","enabled":true,"indent":0,"action":{"setPaused":true},"checked":false}]}
+menu                         {"icon":"tsync-idle-symbolic","tooltip":"tsync — Up to date","entries":[{"label":"docs — Up to date","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Up to date","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":true},"checked":false}]}
 menu_stats row: pid
 menu_stats row: cpu
 menu_stats row: up
@@ -16,7 +16,7 @@ menu_stats row: queue 0 files · 0 B owed
 menu_stats row: extensions totp
 menu_stats row: main (main)
 pause every domain           {"ok":true,"paused":true}
-menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Hold changes","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
+menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
 resume                       {"ok":true,"paused":false}
 paused after resume: docs=false, pics=false
 after the first rebuilds: recovered docs, recovered pics

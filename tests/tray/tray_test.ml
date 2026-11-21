@@ -583,7 +583,7 @@ let served w =
   during "status" ignore;
   during "stats" (fun () -> ignore (menu w "AboutToShow" [Int32 0]));
   event w 0 "closed";
-  during "pause" (fun () -> click w (row w "Hold changes").id);
+  during "pause" (fun () -> click w (row w "Pause syncing").id);
   click w (row w "busy").id;
   ignore (wait_until (fun () -> shown w <> []));
   let answered = ask () in
@@ -843,9 +843,9 @@ let hold w =
   start_tray w;
   ignore (shows w "willing — Idle");
   let switch () =
-    List.assoc_opt "toggle-state" (row w "Hold changes").properties
+    List.assoc_opt "toggle-state" (row w "Pause syncing").properties
   in
-  click w (row w "Hold changes").id;
+  click w (row w "Pause syncing").id;
   check w
     "with one owner silent the others are asked, each before the tray gave up \
      on the silent one"
@@ -901,7 +901,7 @@ let nobody w =
      with
       | Ok [Variant (String s)] -> s
       | _ -> "?")
-    (match List.assoc_opt "enabled" (row w "Hold changes").properties with
+    (match List.assoc_opt "enabled" (row w "Pause syncing").properties with
       | Some (Bool b) -> string_of_bool b
       | _ -> "?")
 

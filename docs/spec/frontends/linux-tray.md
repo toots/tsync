@@ -315,7 +315,7 @@ announced twice.
 
 A click on the Stats row itself does nothing.
 
-### 6.2 Hold changes
+### 6.2 Pause syncing
 
 `SetPaused(p)`:
 
@@ -393,7 +393,7 @@ helper ever receives a secret in its arguments, which other processes can list.
 
 | situation | outcome |
 |---|---|
-| an owner socket is absent, refuses or is silent | that domain's row reads `not answering`; the others are unaffected |
+| an owner socket is absent, refuses or is silent | that domain's row reads `Not answering`; the others are unaffected |
 | every owner is silent | the error icon, `Daemon not running`, the hold switch disabled |
 | the config is missing or bad | no domains, the error icon, `No domains configured`, one warning; repaired without a restart |
 | the panel is not running at start | registration fails quietly; done when the watcher appears |
@@ -435,7 +435,7 @@ records calls, and none; a config as a file.
 - **One silent owner costs one deadline.** With N domains of which one is silent, the others' rows
   are current after one `TRAY_STATUS_DEADLINE`, for N = 2 and N = 20, and with every owner silent.
   **Binding:** every owner has received its request before the tray hangs up on any; the silent
-  domain reads `not answering`.
+  domain reads `Not answering`.
 - **Ids.** Fetch the layout, change one row, send a click with that row's old id: no action runs.
   Send a click with the old id of an unchanged row: its action runs. Refresh with unchanged
   content: no id changes and no `LayoutUpdated` is emitted. Over a long run with churning rows, no
