@@ -1151,6 +1151,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — The status carries the reason of a failing cycle until one runs (07 §5.5) and reports each domain-wide setting in force (05 §2.1). A check of settings in force uses the source that is in force; a number is finite; settings with one ill-formed field are not stated at all.
 - **Seen** — rewrite (review of the publication log).
 
+### A-12.14 Traffic the user cannot stop, see or explain
+- **Pitfall** — The host system held 51,000 queued whole-file fetches for a domain and replayed them after every restart and wake. `pause` left reads alone, so the only stop was killing the service. Each fetch read through the demand reader's 15 s deadline, which a 16 MiB group on a shared link cannot meet: over half failed, were retried, and their detached work went on downloading. The service log said nothing of 9 GiB fetched.
+- **Check** — `pause` stops every transfer of file content (07 §2.6), and a paused read tells the host to hold its queue, not to retry (file-provider §6.10). A whole-file transfer is not under a reader's deadline (read-path R0). Every whole-file fetch a host requests is logged with its file, size and outcome.
+- **Seen** — 2026-11-21, macOS, domain Files.
+
 ## Review checklist
 
 1. **Durability** — Is every before-value dropped, and every staged edit promoted, only after its entry exists? Is the before-value durable before any local effect? Does crash recovery complete a recorded result instead of computing it again? Is the new state present before the old is removed, at every crash point? Is every state file temp + fsync + rename, with the directory fsynced? Can any path publish zeros or empty for bytes it failed to read? Can eviction, an arrival by state or a temp sweep reach sole-copy data or user files?

@@ -134,11 +134,23 @@ module Make (C : Engine_ctx.S) = struct
 
   let upload_log = Dqueue.Records.open_ (log_dir "uploads-pending")
   let intents = Dqueue.Records.open_ (log_dir "intents-pending")
+  let paused = Atomic.make false
+
+  (* 07 §2.6: paused, no read asks the store for content. *)
+  let unless_paused () =
+    if Atomic.get paused then
+      Fail.raise_ Fail.Paused "%s is paused" (Domain_name.to_string d)
 
   let cache =
     Cache.create ~cache_root:C.cache_root ~domain:d ~cc:C.cache_chunk_size
-      ~fast:C.store.fast_read ~get_whole:R.get_chunk
-      ~get_range:R.get_chunk_range ~cap:C.max_cache
+      ~fast:C.store.fast_read
+      ~get_whole:(fun ck ->
+        unless_paused ();
+        R.get_chunk ck)
+      ~get_range:(fun ck off len ->
+        unless_paused ();
+        R.get_chunk_range ck off len)
+      ~cap:C.max_cache
 
   let () = Applied.load applied
 
@@ -701,21 +713,35 @@ module Make (C : Engine_ctx.S) = struct
     end_lineage path;
     h
 
+  let content_of h =
+    match h.ended with
+      | Some c -> c
+      | None -> (
+          match resolve h.path with
+            | Some c -> c
+            | None -> Fail.absent "%s: no such file" h.path)
+
   let read h ~off ~len =
-    let c =
-      match h.ended with
-        | Some c -> c
-        | None -> (
-            match resolve h.path with
-              | Some c -> c
-              | None -> Fail.absent "%s: no such file" h.path)
-    in
+    let c = content_of h in
     let s = read_content h.path c ~off ~len in
     (match c with
       | Published m when h.pos = off -> prefetch m (off + Bigstring.length s)
       | _ -> ());
     h.pos <- off + Bigstring.length s;
     s
+
+  (* read-path R0: a transfer waits for the groups of its next read outside
+     the reader's deadline. *)
+  let ensure_whole_range h ~off ~len =
+    match content_of h with
+      | Published m
+        when m.link = None && m.count > 0 && m.chunk_size > 0 && len > 0 ->
+          let cc = Cache.cc cache in
+          let group_at pos = Cache.group_index ~cc m (pos / m.chunk_size) in
+          for g = group_at off to group_at (off + len - 1) do
+            Cache.ensure_whole cache (Cache.group_of ~cc m g)
+          done
+      | _ -> ()
 
   let close_read h =
     let h =
@@ -1831,7 +1857,9 @@ module Make (C : Engine_ctx.S) = struct
                 let step = 4 * 1024 * 1024 in
                 let rec go off =
                   if off < size then (
-                    let s = read h ~off ~len:(min step (size - off)) in
+                    let len = min step (size - off) in
+                    ensure_whole_range h ~off ~len;
+                    let s = read h ~off ~len in
                     let n = Bigstring.length s in
                     if n = 0 then Fail.corrupt "%s: short read at %d" path off;
                     Fs.pwrite_all fd s ~boff:0 ~len:n ~off;

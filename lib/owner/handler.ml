@@ -411,6 +411,21 @@ let serving t path dest f =
   in
   go transfer_attempts
 
+(* A host's whole-file fetch is traffic nobody typed a command for: the log
+   says which file, and why one failed. *)
+let fetching path f =
+  let started = Rt.now () in
+  match f () with
+    | (_, (item : Protocol.row)) as r ->
+        Log.info "fetched %s: %s in %.1f s" path (Narrate.size item.size)
+          (Rt.now () -. started);
+        r
+    | exception e when not (Rt.is_cancelled e) ->
+        Log.info "fetch of %s failed after %.1f s: %s" path
+          (Rt.now () -. started)
+          (Fail.to_string (Fail.classify e));
+        raise e
+
 (* 08 §3.4: per-file failures are counted and do not stop the walk. *)
 let files_under t path =
   let (module E : Engine.S) = t.engine in
@@ -1053,6 +1068,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Wake -> E.nudge ()
     | Pause on ->
         E.set_paused on;
+        (* file-provider §6.10: the fetches a host held back while paused. *)
+        if not on then ignore (publish_event t Recovered);
         E.is_paused ()
     | Retry -> E.rearm ()
     | Share r ->
@@ -1128,7 +1145,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         Transfer.check_dest ~roots:t.dest_roots r.dest;
         refreshed path;
         let (), item =
-          serving t path r.dest (fun () -> E.assemble_to path r.dest)
+          fetching path (fun () ->
+              serving t path r.dest (fun () -> E.assemble_to path r.dest))
         in
         { Protocol.local_path = r.dest; item }
     | Fetch_range r ->

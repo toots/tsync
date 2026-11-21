@@ -22,7 +22,6 @@ module Make (C : Engine_ctx.S) = struct
 
   let log = Log_store.create d C.store
   let cycle_lock = Rt.Fmutex.create ()
-  let paused = Atomic.make false
   let asked = Atomic.make false
 
   (* Broadcast after every commit and every arrival. *)

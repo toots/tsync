@@ -439,7 +439,8 @@ error.
 | `not_empty` | `directoryNotEmpty` | Cocoa read-unknown |
 | `read_only`, `denied`, `invalid` | `cannotSynchronize`, carrying the owner's sentence | Cocoa read-no-permission for `denied`; read-unknown otherwise |
 | `unreachable`; no owner listening (nothing accepts the connection) | `serverUnreachable` | `serverUnreachable` |
-| `paused`, `busy`, `internal`, unknown or missing, another transport failure, client deadline | Cocoa write-unknown | Cocoa read-unknown |
+| `paused` | Cocoa write-unknown | `serverUnreachable`: the system holds its queued fetches until signalled, instead of retrying each |
+| `busy`, `internal`, unknown or missing, another transport failure, client deadline | Cocoa write-unknown | Cocoa read-unknown |
 | cancellation | Cocoa user-cancelled | Cocoa user-cancelled |
 
 - `cannotSynchronize` stops the system retrying that item until it is modified on disk again or the

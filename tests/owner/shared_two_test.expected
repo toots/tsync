@@ -19,7 +19,7 @@ pause every domain           {"ok":true,"paused":true}
 menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Hold changes","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
 resume                       {"ok":true,"paused":false}
 paused after resume: docs=false, pics=false
-after the first rebuilds: changed docs, changed pics
+after the first rebuilds: recovered docs, recovered pics
 notify_reset of pics         {"ok":true,"delivered":1}
 full_resync of docs          {"ok":true}
 then: changed docs, reset pics

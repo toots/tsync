@@ -35,7 +35,7 @@ enum Errors {
                 return NSError.fileProviderErrorForNonExistentItem(withIdentifier: missing) as NSError
             }
             return provider(.noSuchItem, failure)
-        case ("unreachable", _):
+        case ("unreachable", _), ("paused", .read):
             return provider(.serverUnreachable, failure)
         case ("exists", .mutation):
             if let occupant = occupant {

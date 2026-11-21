@@ -363,7 +363,8 @@ The handler enforces these itself, whatever a frontend advertises:
 
 - **Read-only.** Actions marked M are refused with `read_only` on a read-only domain.
 - **Pause.** Actions marked P are refused with `paused` while the domain is paused. Other mutations
-  are accepted and stay pending.
+  are accepted and stay pending. `ensure_cached`, `fetch_range`, `read` and `restore` answer `paused`
+  when they need bytes the cache does not hold ([07 §2.6](07-daemon-cli.md#26-pause)).
 - **Serialisation.** Resolving a reference and acting on it are one step under the owner's per-domain
   metadata serialisation, for every mutation. Otherwise a folder rename racing a create inside that
   folder resolves the create against the old path and files it where the folder no longer is. Reads

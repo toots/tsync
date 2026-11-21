@@ -158,8 +158,8 @@ final class SpecTests: XCTestCase {
             """)
     }
 
-    /// §6.10: every code to a Cocoa or File Provider error; only `unreachable`
-    /// gives server-unreachable.
+    /// §6.10: every code to a Cocoa or File Provider error; `unreachable`, and
+    /// a read refused `paused`, give server-unreachable.
     func testErrorMapping() {
         let failures: [OwnerFailure] = [
             .refused(code: "not_found", message: "m", item: nil),
@@ -215,7 +215,7 @@ final class SpecTests: XCTestCase {
             denied: mutation=cannotSynchronize read=read-no-permission
             invalid: mutation=cannotSynchronize read=read-unknown
             unreachable: mutation=serverUnreachable read=serverUnreachable
-            paused: mutation=write-unknown read=read-unknown
+            paused: mutation=write-unknown read=serverUnreachable
             busy: mutation=write-unknown read=read-unknown
             internal: mutation=write-unknown read=read-unknown
             frobnicated: mutation=write-unknown read=read-unknown
