@@ -113,8 +113,8 @@ A command of class owner, per domain ([07 §5.3](../07-daemon-cli.md#53-commands
      [http-proxy §A3](../frontends/http-proxy.md#a3-configuration) says. Without `--url`: exit 2,
      `<domain> is served by this machine; give the address clients reach it at with --url`;
    - else its `http-proxy` member with role `main`, else its first `http-proxy` member with role
-     `replica` in config order. A backfill or an archive is never shared: the joining machine makes
-     it its main.
+     `replica`, else with role `readOnly`, in config order. A backfill or an archive is never
+     shared: the joining machine makes it its main.
 
    A domain with neither is refused with exit 2: `<domain> is neither served by this machine nor
    reached through a tsync server`. `--url` given when no named domain is served here is refused
@@ -174,8 +174,13 @@ For each domain of the payload:
   (or this machine's clock off), or a server that cannot be reached is not added, with the
   driver's sentence; the others proceed.
 - **Built** as the wizard builds a new domain ([07 §5.9](../07-daemon-cli.md)), with no question
-  asked: its defaults for `versioning` and `maxCache`; the payload's backends, the first with role
-  `main` and the others `replica`; the frontends a new domain gets by default on this host, with
+  asked: its defaults for `versioning` and `maxCache`; the payload's backends, a backend whose
+  server states the domain read-only (its `read_only` capability,
+  [06 §2.3](../06-backends.md#23-capabilities)) with role `readOnly`, so the joining machine never
+  writes where every write is refused, the first of the others with role `main` and the rest
+  `replica`. Asking for the capability fails the domain as the served check does. The role
+  follows the server, not the sharer: a sharer that only reads a domain the server lets it write
+  hands out a secret that writes, and the joiner becomes a writer; the frontends a new domain gets by default on this host, with
   their options' defaults (a mount point, a sync root); no `extensions` key, so the domain follows
   its main ([05 §2.1](../05-ops-config.md#21-schema-and-validation) rule 5).
 

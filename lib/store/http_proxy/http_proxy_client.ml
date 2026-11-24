@@ -157,6 +157,22 @@ let call ?mode ?chunk ?headers t op ~meth ?query ?body path =
 
 let expect t op (r : answer) = if not (success r.status) then failure t ~op r
 
+(* §8.4: /domains lists every domain the secret verified, this one among them. *)
+let stated_read_only t = function
+  | Some (`Assoc l) -> (
+      match List.assoc_opt "domains" l with
+        | Some (`List ds) ->
+            List.exists
+              (function
+                | `Assoc d ->
+                    List.assoc_opt "name" d
+                    = Some (`String (Domain_name.to_string t.domain))
+                    && List.assoc_opt "readOnly" d = Some (`Bool true)
+                | _ -> false)
+              ds
+        | _ -> false)
+  | _ -> false
+
 let capability t prefix path =
   match
     request t ~meth:"GET" ~query:[("prefix", Key.prefix_to_string prefix)] path
@@ -210,10 +226,13 @@ let capabilities t prefix =
                   "/max-concurrency";
                   "/verified";
                   "/domain-settings";
+                  "/domains";
                 ])
         in
-        let share, conc, verified, settings =
-          match answers with [a; b; c; d] -> (a, b, c, d) | _ -> assert false
+        let share, conc, verified, settings, domains =
+          match answers with
+            | [a; b; c; d; e] -> (a, b, c, d, e)
+            | _ -> assert false
         in
         let domain_settings =
           Option.bind settings Store.domain_settings_of_json
@@ -243,6 +262,7 @@ let capabilities t prefix =
                 | Some (`Assoc l) ->
                     List.assoc_opt "verified" l = Some (`Bool true)
                 | _ -> false);
+            read_only = stated_read_only t domains;
           }
         in
         let rec keep () =

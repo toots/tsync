@@ -388,7 +388,7 @@ Keys read back from listings and frames are validated against the grammar before
 
 ### 8.4 Capabilities
 
-Four requests (§5.3), issued concurrently on first ask with the domain's prefix:
+Five requests (§5.3), issued concurrently on first ask with the domain's prefix:
 
 | Field | From | 404 or unreadable body |
 |---|---|---|
@@ -397,6 +397,7 @@ Four requests (§5.3), issued concurrently on first ask with the domain's prefix
 | `chunk_size`, `symlinks`, `projection`, `max_entry_commands`, `extensions`, `vault_lock` | from `/domain-settings`, all of them when every field is well-formed (`chunkSize` and `maxEntryCommands` positive integers; `projector` 32 lowercase hex or absent; `symlinks` one of the three policies; the timings numbers with `0 < lease < quarantine < settle`; `extensions` absent, read as `[]`, or an array of names, unknown names dropped; `vaultLock` absent, read as none, or an object of the members of [05 §2.1](../05-ops-config.md#21-schema-and-validation) within their ranges, unknown members dropped) | `None` all: settings with one ill-formed field state nothing |
 | `max_concurrency` | `maxConcurrency` when a positive integer | `None` |
 | `verified` | `verified == true` | `false` (a peer that cannot say has not said) |
+| `read_only` | from `/domains`, `readOnly == true` on the entry named as the domain | `false` |
 
 Any other non-2xx fails the call per §6.3. The result is memoised per prefix for the instance's life, shared by concurrent callers, and forgotten if it failed. The answers are fixed for the life of a server process.
 

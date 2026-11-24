@@ -119,6 +119,7 @@ type caps = {
   max_concurrency : int option;
   verified : bool;
   domain_settings : domain_settings option;
+  read_only : bool;
 }
 
 type claim = Won | Held of Bigstring.t
@@ -169,6 +170,7 @@ let no_caps =
     max_concurrency = None;
     verified = false;
     domain_settings = None;
+    read_only = false;
   }
 
 let new_traffic () = { uploaded = Atomic.make 0; downloaded = Atomic.make 0 }

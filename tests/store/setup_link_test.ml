@@ -17,12 +17,12 @@ let contains s sub =
 
 let result = function Ok _ -> "ok" | Error e -> e
 
-let route ?(share = `Off) ~secret name store =
+let route ?(share = `Off) ?(read_only = false) ~secret name store =
   {
     P.name;
     domain = Domain_name.v name;
     secret;
-    read_only = false;
+    read_only;
     domain_settings =
       {
         chunk = 4096;
@@ -78,6 +78,7 @@ let () =
           [
             route ~secret "photos" photos;
             route ~secret:other_secret "notes" (local "notes");
+            route ~secret ~read_only:true "films" (local "films");
             route ~secret "m" (local "m")
               ~share:
                 (`Member
@@ -107,6 +108,12 @@ let () =
         in
         (r.status, r.headers, Bigstring.to_string r.body)
       in
+      List.iter
+        (fun d ->
+          p "%s states read-only: %b" d
+            ((client d).capabilities (Key.domain_prefix (Domain_name.v d)))
+              .read_only)
+        ["photos"; "films"];
       let backend s : L.backend = { name = "server"; url; secret = s } in
       let about =
         [

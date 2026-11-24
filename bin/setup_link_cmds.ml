@@ -51,11 +51,13 @@ let shared_backend ~url bindings (d : Config.domain) =
                  it at with --url"
                 name)
     | None -> (
+        let proxy role (b : Config.backend) =
+          b.btype = "http-proxy" && b.role = role
+        in
         match
-          List.find_opt
-            (fun (b : Config.backend) ->
-              b.btype = "http-proxy" && (b.role = Main || b.role = Replica))
-            d.backends
+          List.find_map
+            (fun role -> List.find_opt (proxy role) d.backends)
+            [Main; Replica; Read_only]
         with
           | Some b -> (
               match (field "url" b, field "secret" b) with
@@ -243,6 +245,21 @@ let backend_json role (b : L.backend) =
       ("secret", `String b.secret);
     ]
 
+(* setup-link §6.2: a server refusing every write is never made a writer, and
+   the first that takes writes is the main. *)
+let joined_backends name backends =
+  let read_only (b : L.backend) =
+    ((proxy_store name b).capabilities (Key.domain_prefix name)).read_only
+  in
+  let _, json =
+    List.fold_left_map
+      (fun main_taken b ->
+        if read_only b then (main_taken, backend_json "readOnly" b)
+        else (true, backend_json (if main_taken then "replica" else "main") b))
+      false backends
+  in
+  json
+
 let same_server (existing : Config.domain) (d : L.domain) =
   List.exists
     (fun (b : Config.backend) ->
@@ -271,16 +288,11 @@ let consider current (entry : L.entry) =
                 name;
               Failed
           | None -> (
-              match List.iter (check_served d.name) d.backends with
-                | () ->
-                    Added
-                      (Config_wizard.joined_domain ~name
-                         (List.mapi
-                            (fun i b ->
-                              backend_json
-                                (if i = 0 then "main" else "replica")
-                                b)
-                            d.backends))
+              match
+                List.iter (check_served d.name) d.backends;
+                joined_backends d.name d.backends
+              with
+                | backends -> Added (Config_wizard.joined_domain ~name backends)
                 | exception Fail.E f ->
                     say "%s: %s" name f.reason;
                     Failed))
