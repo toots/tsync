@@ -44,6 +44,7 @@ type caps = {
   verified : bool;
       (** every chunk this store takes is checked, by someone known to run *)
   domain_settings : domain_settings option;
+  read_only : bool;  (** every write of this domain is refused *)
 }
 
 (** The answer to a conditional create: [Won] when the name holds exactly the

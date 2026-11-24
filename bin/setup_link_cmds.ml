@@ -51,11 +51,13 @@ let shared_backend ~url bindings (d : Config.domain) =
                  it at with --url"
                 name)
     | None -> (
+        let proxy role (b : Config.backend) =
+          b.btype = "http-proxy" && b.role = role
+        in
         match
-          List.find_opt
-            (fun (b : Config.backend) ->
-              b.btype = "http-proxy" && (b.role = Main || b.role = Replica))
-            d.backends
+          List.find_map
+            (fun role -> List.find_opt (proxy role) d.backends)
+            [Main; Replica; Read_only]
         with
           | Some b -> (
               match (field "url" b, field "secret" b) with
@@ -243,6 +245,13 @@ let backend_json role (b : L.backend) =
       ("secret", `String b.secret);
     ]
 
+(* setup-link §6.2: a server refusing every write is never made a writer. *)
+let joined_role name i (b : L.backend) =
+  if ((proxy_store name b).capabilities (Key.domain_prefix name)).read_only then
+    "readOnly"
+  else if i = 0 then "main"
+  else "replica"
+
 let same_server (existing : Config.domain) (d : L.domain) =
   List.exists
     (fun (b : Config.backend) ->
@@ -276,10 +285,7 @@ let consider current (entry : L.entry) =
                     Added
                       (Config_wizard.joined_domain ~name
                          (List.mapi
-                            (fun i b ->
-                              backend_json
-                                (if i = 0 then "main" else "replica")
-                                b)
+                            (fun i b -> backend_json (joined_role d.name i b) b)
                             d.backends))
                 | exception Fail.E f ->
                     say "%s: %s" name f.reason;

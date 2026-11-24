@@ -7,6 +7,8 @@ no fragment              This is not a tsync setup link
 short key                This is not a tsync setup link
 upper-case token         This is not a tsync setup link
 a share link             This is not a tsync setup link
+photos states read-only: false
+films states read-only: true
 
 == round trip (§3, §4, §6.1)
 link parses back: true

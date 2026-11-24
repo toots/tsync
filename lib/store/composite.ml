@@ -744,6 +744,10 @@ let make_store t ~source_only =
               && List.for_all
                    (fun (m, c) -> c.Store.verified || confirmed t m)
                    asked;
+            read_only =
+              Option.fold ~none:false
+                ~some:(fun (_, c) -> c.Store.read_only)
+                from_main;
           });
       (* The member a read reaches now: the first not held down. *)
       fast_read =
