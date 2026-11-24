@@ -55,7 +55,8 @@ caps = { share_url: string?;       -- base URL of the share endpoint serving thi
          projector: client uuid?;  -- who projects the entries created through this store (publication §4.6)
                                    -- with chunk_size, the domain-wide settings (05 §2.1)
          max_concurrency: int?;    -- object operations this store usefully serves at once
-         verified: bool }          -- every chunk this store takes is checked against its name
+         verified: bool;           -- every chunk this store takes is checked against its name
+         read_only: bool }         -- the store refuses every write of this domain
 ```
 
 `verified` is a claim that someone is looking, not that nothing was found. A store MUST NOT claim it unless the check is known to run. A store that checks files a corruption marker ([02 §2.13](02-remote-model.md#213-corruption-marker-verify-job-discard-job); lifecycle in [data-model/backend §2.15](data-model/backend.md#215-corruption-marker)) for each chunk whose bytes do not match its name or cannot be read. How each driver checks is in its own file.
@@ -192,7 +193,7 @@ A checksum identifies a body's content, so that two stores' copies of an object 
 
 ### 3.9 Capabilities, `fast_read`, `local_path`, `health`
 
-- `capabilities` of a single store never fails for want of an opinion: an unknown field is `none`, and `verified` is `false`.
+- `capabilities` of a single store never fails for want of an opinion: an unknown field is `none`, and `verified` and `read_only` are `false`.
 - A caller MUST NOT memoise a failed or partial answer. A caller that needs a value to proceed uses its own default, and asks again later.
 - `fast_read` is `true` only where reading more than asked costs about what the range does (a filesystem).
 - `local_path` is granted only by a store whose objects are files under one directory on this machine. The grant is to in-process code (collection by rename, disk-space reports), and anything done through it MUST keep §3.1's visibility and consistency rules.

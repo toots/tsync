@@ -113,7 +113,7 @@ A command of class owner, per domain ([07 §5.3](../07-daemon-cli.md#53-commands
      [http-proxy §A3](../frontends/http-proxy.md#a3-configuration) says. Without `--url`: exit 2,
      `<domain> is served by this machine; give the address clients reach it at with --url`;
    - else its `http-proxy` member with role `main`, else its first `http-proxy` member with role
-     `replica` in config order. A backfill or an archive is never shared: the joining machine makes
+     `replica`, else with role `readOnly`, in config order. A backfill or an archive is never shared: the joining machine makes
      it its main.
 
    A domain with neither is refused with exit 2: `<domain> is neither served by this machine nor
@@ -175,7 +175,9 @@ For each domain of the payload:
   driver's sentence; the others proceed.
 - **Built** as the wizard builds a new domain ([07 §5.9](../07-daemon-cli.md)), with no question
   asked: its defaults for `versioning` and `maxCache`; the payload's backends, the first with role
-  `main` and the others `replica`; the frontends a new domain gets by default on this host, with
+  `main` and the others `replica`, except that a backend whose server states the domain read-only
+  (its `read_only` capability, [06 §2.3](../06-backends.md#23-capabilities)) gets role `readOnly`, so the joining
+  machine never writes where every write is refused; the frontends a new domain gets by default on this host, with
   their options' defaults (a mount point, a sync root); no `extensions` key, so the domain follows
   its main ([05 §2.1](../05-ops-config.md#21-schema-and-validation) rule 5).
 

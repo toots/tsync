@@ -294,7 +294,7 @@ read(k, f):
 
 **`capabilities(prefix)`** asks every non-archive member that is not held, without probing:
 
-- `share_url` and `chunk_size` come from the main. A replica never decides the chunk size of new files.
+- `share_url`, `chunk_size` and `read_only` come from the main. A replica never decides the chunk size of new files.
 - `max_concurrency` is the minimum over the main and the replicas that answered.
 - `verified` is true only if the main and every replica and backfill answered `verified = true`.
 - If the main did not answer and the domain has one, the call fails UNREACHABLE. An empty merge would be memoised as fact.
