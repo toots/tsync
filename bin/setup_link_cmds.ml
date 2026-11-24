@@ -245,12 +245,20 @@ let backend_json role (b : L.backend) =
       ("secret", `String b.secret);
     ]
 
-(* setup-link §6.2: a server refusing every write is never made a writer. *)
-let joined_role name i (b : L.backend) =
-  if ((proxy_store name b).capabilities (Key.domain_prefix name)).read_only then
-    "readOnly"
-  else if i = 0 then "main"
-  else "replica"
+(* setup-link §6.2: a server refusing every write is never made a writer, and
+   the first that takes writes is the main. *)
+let joined_backends name backends =
+  let read_only (b : L.backend) =
+    ((proxy_store name b).capabilities (Key.domain_prefix name)).read_only
+  in
+  let _, json =
+    List.fold_left_map
+      (fun main_taken b ->
+        if read_only b then (main_taken, backend_json "readOnly" b)
+        else (true, backend_json (if main_taken then "replica" else "main") b))
+      false backends
+  in
+  json
 
 let same_server (existing : Config.domain) (d : L.domain) =
   List.exists
@@ -280,13 +288,11 @@ let consider current (entry : L.entry) =
                 name;
               Failed
           | None -> (
-              match List.iter (check_served d.name) d.backends with
-                | () ->
-                    Added
-                      (Config_wizard.joined_domain ~name
-                         (List.mapi
-                            (fun i b -> backend_json (joined_role d.name i b) b)
-                            d.backends))
+              match
+                List.iter (check_served d.name) d.backends;
+                joined_backends d.name d.backends
+              with
+                | backends -> Added (Config_wizard.joined_domain ~name backends)
                 | exception Fail.E f ->
                     say "%s: %s" name f.reason;
                     Failed))

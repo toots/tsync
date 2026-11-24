@@ -745,9 +745,9 @@ let make_store t ~source_only =
                    (fun (m, c) -> c.Store.verified || confirmed t m)
                    asked;
             read_only =
-              Option.fold ~none:false
-                ~some:(fun (_, c) -> c.Store.read_only)
-                from_main;
+              (match from_main with
+                | Some (_, c) -> c.Store.read_only
+                | None -> t.mains = []);
           });
       (* The member a read reaches now: the first not held down. *)
       fast_read =
