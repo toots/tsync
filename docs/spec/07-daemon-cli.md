@@ -648,7 +648,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `stop` | none | §5.4 |
 | `status [--json] [--totals [--exact] [--reload]] [-w S]` | none | §5.5 |
 | `logs [-f] [-n N]` | none | executes the platform log reader (default N = 200); explains what is missing if it cannot |
-| `pause` / `resume` | owner | §2.6; also spelled `pause-uploads` / `resume-uploads` |
+| `pause` / `resume` | owner | §2.6 |
 | `ls [PATH] [--deleted] [--frontend F]` | read | children sorted case-insensitively: `dir    name/`, or `<availability>  name  N bytes` (`pinned until <time>`); `--deleted` appends `deleted  name` rows |
 | `cache --evict\|--fetch [--keep DUR] PATH...` | owner | makes each path online only (`evict`) or available offline (`restore`) ([08 §3.4](08-frontends.md)), one bulk action per path, in order; a folder covers its subtree. One line per path on stdout, `<path>: <N> files online only` or `<path>: <N> files available offline`, followed by `, <F> failed` when any did; a refused path prints `tsync: <path>: <sentence>` and the others still run; exit 1 if any path failed or was refused. `--keep` (with `--fetch` only) default 10 days. Neither or both of `--evict` and `--fetch`, or `--keep` with `--evict`, is refused with exit 2 |
 | `cache --prune [--grace DUR]` | owner | runs every on-demand maintenance task (§6) in the owner (`prune`, a bulk action); prints per task files and bytes; `--grace` default 1 h |

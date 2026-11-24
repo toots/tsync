@@ -130,8 +130,6 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 
 **Exit status.** 0 on success. 1 when something failed or, for `data-integrity`, was found wrong; the reason is one sentence on stderr. 2 when the invocation itself is refused: arguments that contradict each other, paths naming two domains, a command that cannot apply to this domain. 124 for a mistake on the command line.
 
-`pause-uploads` and `resume-uploads` are older names for `pause` and `resume`.
-
 ## The status report
 
 ```

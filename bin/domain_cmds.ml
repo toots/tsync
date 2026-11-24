@@ -59,8 +59,6 @@ let cmds =
   [
     pause_cmd "pause" true;
     pause_cmd "resume" false;
-    pause_cmd "pause-uploads" true;
-    pause_cmd "resume-uploads" false;
     sync_cmd;
     retry_cmd;
   ]
