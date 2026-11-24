@@ -56,9 +56,4 @@ let retry_cmd =
     Term.(const retry $ domain_arg $ verbose)
 
 let cmds =
-  [
-    pause_cmd "pause" true;
-    pause_cmd "resume" false;
-    sync_cmd;
-    retry_cmd;
-  ]
+  [pause_cmd "pause" true; pause_cmd "resume" false; sync_cmd; retry_cmd]
