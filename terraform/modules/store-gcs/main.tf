@@ -191,7 +191,14 @@ resource "google_cloudfunctions2_function" "share" {
   }
 
   service_config {
-    available_memory      = "${var.share_memory_mb}M"
+    available_memory = "${var.share_memory_mb}M"
+    # Cloud Run caps memory per CPU: 4 GiB on 1, 8 GiB on 2, 16 GiB on 4, 24 GiB on 6, 32 GiB on 8.
+    available_cpu = tostring(
+      var.share_memory_mb <= 4096 ? 1 :
+      var.share_memory_mb <= 8192 ? 2 :
+      var.share_memory_mb <= 16384 ? 4 :
+      var.share_memory_mb <= 24576 ? 6 : 8
+    )
     timeout_seconds       = var.timeout_seconds
     service_account_email = google_service_account.share[0].email
     environment_variables = merge(
