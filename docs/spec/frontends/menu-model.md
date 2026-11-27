@@ -23,7 +23,7 @@ menu   = { icon, tooltip, entries }
 entry  = Separator | Item
 Item   = { label, enabled, icon?, checked?, indent, action, submenu }
 action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | ShowStats
-       | ShowCodes | CopyCode(domain, id) | Unlock(domain) | AddCode(domain)
+       | ShowCodes | CopyCode(domain, id) | Unlock(domain)
        | ShowPasswords | CopyPassword(domain, id)
        | SeenMachines(domain) | CopyReport | Quit
 ```
@@ -420,9 +420,6 @@ is never drawn stale and never travels in a menu.
     is not empty, ellipsised to `LABEL_MAX`; action `CopyCode(domain, id)`.
 - Records the reply lists as `corrupt` add one informational row
   `<n> unreadable — run tsync totp list`.
-- When the caller adds codes (the macOS menu does, the Linux tray does not), a domain that
-  answered with records, or with none, ends with a row `Add a code…`, action `AddCode(domain)`;
-  a locked, vault-less or silent domain has none.
 - Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
 
 Worked example, two code domains, one locked:
@@ -431,7 +428,6 @@ Worked example, two code domains, one locked:
         work
             ACME Co — john@example.com -> copy work:3f2a…
             GitHub — me -> copy work:9c1e…
-            Add a code… -> add work
         home
             Locked — unlock… -> unlock home
 ```
@@ -493,7 +489,7 @@ For a client that cannot evaluate the model. The menu:
 - `action` is an object with at most one key: `{}` (Nothing), `{"openFolder": <domain>}`,
   `{"reveal": {"domain", "rel"}}`, `{"setPaused": <bool>}`, `{"stats": true}`,
   `{"codes": true}`, `{"copyCode": {"domain", "id"}}`, `{"unlock": <domain>}`,
-  `{"addCode": <domain>}`, `{"seenMachines": <domain>}`, `{"copyReport": true}`, `{"passwords": true}`,
+  `{"seenMachines": <domain>}`, `{"copyReport": true}`, `{"passwords": true}`,
   `{"copyPassword": {"domain", "id"}}`, `{"quit": true}`.
 - `checked` and `submenu` are present only when set.
 - A row's `icon` is not sent: it is a freedesktop name, and a reader of this form has no such
@@ -538,8 +534,8 @@ someone agrees to; and both functions are total.
 - the details rows: full, sparse, an entry that cannot be followed, counts of one, two replies,
   a reply with nothing to show, nothing answering; with and without Copy report; no row carries a pid, a cpu figure or a
   chunk count;
-- the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable, the Add a code row only where the domain answered;
-  records, a label longer than `LABEL_MAX`; a caller that adds no codes gets no `Add a code…` row;
+- the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable;
+  records, a label longer than `LABEL_MAX`;
   no code domain gives no `One-time codes` row; no row
   of any menu carries a code;
 - the formatter tables of §3, the progress bar's included;

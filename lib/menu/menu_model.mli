@@ -11,7 +11,6 @@ type action =
   | Show_codes
   | Copy_code of { domain : string; id : string }
   | Unlock of string
-  | Add_code of string
   | Seen_machines of string  (** acknowledges the domain's new machines *)
   | Copy_report  (** the last [status] and [stats] replies onto the clipboard *)
   | Show_passwords
@@ -96,9 +95,8 @@ val codes_of_json : Yojson.Safe.t option -> codes
 val codes_placeholder : entry list
 
 (** The code domains in configuration order with their answers; never empty, and
-    no row carries a code. [add] (default [true]) ends each answering domain
-    with its Add a code row. *)
-val codes : ?add:bool -> (string * codes) list -> entry list
+    no row carries a code. *)
+val codes : (string * codes) list -> entry list
 
 (** {1 Passwords submenu (§7.1)} *)
 

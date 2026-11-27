@@ -205,27 +205,28 @@ let () =
                   ("rel", `String "f.txt");
                   ("dest", `String (Filename.concat link "out"));
                 ]));
-        (* file-provider §10.1: docs lists totp, pics does not. *)
+        (* file-provider §10.1: the panel asks each domain's totp_list through
+           the router. *)
         let codes label =
-          match call [("action", "menu_codes")] with
-            | `Assoc l -> (
-                match List.assoc_opt "entries" l with
+          match call [("action", "totp_list"); ("domain", "docs")] with
+            | `Assoc l as reply -> (
+                match List.assoc_opt "records" l with
                   | Some (`List rows) ->
                       List.iter
                         (fun row ->
-                          p "%s: %s%s" label
-                            (Option.value ~default:"---" (Ipc.field row "label"))
-                            (match row with
-                              | `Assoc r -> (
-                                  match List.assoc_opt "action" r with
-                                    | Some (`Assoc [(k, _)]) -> " -> " ^ k
-                                    | _ -> "")
-                              | _ -> ""))
-                        rows
-                  | _ -> p "%s: no entries" label)
+                          p "%s: %s — %s, a code of %d digits" label
+                            (Option.value ~default:"?" (Ipc.field row "issuer"))
+                            (Option.value ~default:"?" (Ipc.field row "account"))
+                            (String.length
+                               (Option.value ~default:"" (Ipc.field row "code"))))
+                        rows;
+                      if rows = [] then p "%s: no records" label
+                  | _ ->
+                      p "%s: refused %s" label
+                        (Option.value ~default:"?" (Ipc.field reply "code")))
             | _ -> p "%s: no reply" label
         in
-        codes "menu_codes, no vault";
+        codes "totp_list, no vault";
         ignore
           (call
              [
@@ -240,9 +241,9 @@ let () =
                ("domain", "docs");
                ("uri", "otpauth://totp/ACME:me?secret=JBSWY3DPEHPK3PXP");
              ]);
-        codes "menu_codes, one record";
+        codes "totp_list, one record";
         ignore (call [("action", "vault_lock"); ("domain", "docs")]);
-        codes "menu_codes, locked");
+        codes "totp_list, locked");
       Ipc.Client.close c;
       show "stop" (call [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner));

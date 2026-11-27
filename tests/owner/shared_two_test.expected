@@ -13,9 +13,8 @@ then: changed docs, reset pics
 write, no declared roots     {"ok":true,"size":5,"mtimeNs":"<x>","createdNs":"<x>","item":{"ref":"<x>","parentRef":"<x>","name":"f.txt","kind":"file","size":5,"mtimeNs":"<x>","createdNs":"<x>","etag":"<x>","isUploaded":false,"contentId":"<x>","availability":"cached"}}
 a dest that exists           {"ok":false,"code":"denied","error":"<dir>/taken: already exists"}
 a dest under a link          {"ok":false,"code":"denied","error":"<dir>/link/out: a component is not a directory"}
-menu_codes, no vault: No vault — run tsync vault init
-menu_codes, one record: ACME — me -> copyCode
-menu_codes, one record: Add a code… -> addCode
-menu_codes, locked: Locked — unlock… -> unlock
+totp_list, no vault: refused not_found
+totp_list, one record: ACME — me, a code of 6 digits
+totp_list, locked: refused locked
 stop                         {"ok":true}
 exit status 0

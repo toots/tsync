@@ -15,8 +15,6 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
     private let model = PanelModel()
     private let lock = NSLock()
     private var polling = false
-    /// The codes menu's last fetch: an older one's reply is dropped.
-    private var codesFetch = 0
     private var report = ReconcileReport()
     private var registrationProblem: String?
     private var domains: [String: NSFileProviderDomain] = [:]
@@ -37,7 +35,8 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
             self?.pause(paused)
             self?.poll()
         }
-        model.showCodes = { [weak self] in self?.showCodes() }
+        model.copyCode = { [weak self] domain, id in self?.copyCode(domain: domain, id: id) }
+        model.addCode = { [weak self] domain in self?.addCode(domain: domain, problem: nil) }
         model.copyPassword = { [weak self] domain, id in self?.copyPassword(domain: domain, id: id) }
         model.unlock = { [weak self] domain in self?.unlock(domain: domain, problem: nil) }
         model.openSettings = { [weak self] in self?.openAutofillSettings() }
@@ -133,12 +132,10 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
         let tooltip = menu?["tooltip"] as? String ?? "tsync: the service is unreachable"
         item.button?.toolTip = tooltip
         let entries = menu?["entries"] as? [[String: Any]] ?? []
-        let actions = entries.compactMap { $0["action"] as? [String: Any] }
         model.icon = icon
         model.reachable = menu != nil
         model.summary = menu == nil ? "The service is unreachable" : Self.summary(tooltip)
         model.allPaused = entries.contains { $0["checked"] as? Bool == true && ($0["action"] as? [String: Any])?["setPaused"] != nil }
-        model.hasCodes = actions.contains { $0["codes"] as? Bool == true }
     }
 
     /// menu-model §4: the tooltip is `tsync — <summary>`.
@@ -196,71 +193,6 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
         return lines
     }
 
-    /// §10.1: the codes menu, under the pointer; fetched each time it opens.
-    private func showCodes() {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(Self.placeholder())
-        fetchCodes(menu)
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-    }
-
-    private func menuItem(_ entry: [String: Any]) -> NSMenuItem {
-        if entry["separator"] as? Bool == true { return .separator() }
-        let title = entry["label"] as? String ?? ""
-        let item = NSMenuItem(title: title, action: #selector(act(_:)), keyEquivalent: "")
-        item.target = self
-        item.isEnabled = entry["enabled"] as? Bool ?? true
-        item.indentationLevel = entry["indent"] as? Int ?? 0
-        item.representedObject = entry["action"]
-        return item
-    }
-
-    private static func placeholder() -> NSMenuItem {
-        let placeholder = NSMenuItem(title: "Reading…", action: nil, keyEquivalent: "")
-        placeholder.isEnabled = false
-        return placeholder
-    }
-
-    /// The owner's rows for the code domains: labels only, a record's code is
-    /// asked for when it is clicked. A failure leaves the placeholder.
-    private func fetchCodes(_ menu: NSMenu) {
-        codesFetch += 1
-        let fetch = codesFetch
-        Thread.detachNewThread {
-            let reply = try? OwnerClient.call(["action": "menu_codes"])
-            guard let entries = reply?["entries"] as? [[String: Any]] else { return }
-            // vault §8.1: a header row names its vault and carries its mark; code rows carry none.
-            let domains = Set(entries.compactMap { $0["vault"] as? String })
-            var looks: [String: NSImage] = [:]
-            for domain in domains { looks[domain] = VaultLook.image(domain: domain) }
-            DispatchQueue.main.async {
-                guard fetch == self.codesFetch else { return }
-                menu.removeAllItems()
-                for entry in entries {
-                    let item = self.menuItem(entry)
-                    if let domain = entry["vault"] as? String { item.image = looks[domain] }
-                    menu.addItem(item)
-                }
-            }
-        }
-    }
-
-    @objc private func act(_ sender: NSMenuItem) {
-        guard let action = sender.representedObject as? [String: Any] else { return }
-        if let copy = action["copyCode"] as? [String: Any],
-            let domain = copy["domain"] as? String, let id = copy["id"] as? String
-        {
-            copyCode(domain: domain, id: id)
-        } else if let domain = action["unlock"] as? String {
-            unlock(domain: domain, problem: nil)
-        } else if let domain = action["addCode"] as? String {
-            addCode(domain: domain, problem: nil)
-        }
-    }
-
-    /// security-model §10.6: copied on the user's click, marked concealed so
-    /// clipboard managers and history skip it, never logged or kept.
     private func copyCode(domain: String, id: String) {
         copySecret(["action": "totp_code", "domain": domain, "id": id], field: "code",
                    failure: "Code not copied")

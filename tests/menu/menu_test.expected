@@ -478,14 +478,12 @@ tooltip tsync — Up to date
         ACME Co — john@example.com -> copy work:3f2a
         GitHub -> copy work:9c1e
         bob -> copy work:77aa
-        Add a code… -> add work
 
 == codes: two domains, one locked
         work
             ACME Co — john@example.com -> copy work:3f2a
             GitHub -> copy work:9c1e
             bob -> copy work:77aa
-            Add a code… -> add work
         home
             Locked — unlock… -> unlock home
 
@@ -498,29 +496,18 @@ tooltip tsync — Up to date
             not answering
         d
             No codes
-            Add a code… -> add d
         e
             No codes
             2 unreadable — run tsync totp list
-            Add a code… -> add e
         f
             LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… -> copy f:1
             1 unreadable — run tsync totp list
-            Add a code… -> add f
 
 == codes: no code domain at all
         No codes
 
-== codes: a caller that adds no codes gets no Add a code row
-        work
-            ACME Co — john@example.com -> copy work:3f2a
-            GitHub -> copy work:9c1e
-            bob -> copy work:77aa
-        d
-            No codes
-
 == codes: the JSON form, and no code in any row
-[{"label":"work","enabled":true,"indent":0,"action":{},"vault":"work"},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"Add a code…","enabled":true,"indent":1,"action":{"addCode":"work"}},{"label":"home","enabled":true,"indent":0,"action":{},"vault":"home"},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
+[{"label":"work","enabled":true,"indent":0,"action":{},"vault":"work"},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"home","enabled":true,"indent":0,"action":{},"vault":"home"},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
 the reply carries 123456: true
 carries 123456: false
 carries 654321: false
@@ -588,4 +575,4 @@ tooltip tsync — Syncing: 1 to download
         d
             ? (?)
 
-51 cases
+50 cases

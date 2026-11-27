@@ -245,7 +245,7 @@ struct DomainActivity: View {
     var reveal: ((String) -> Void)?
     /// file-provider §10.1, §10.2: the codes menu and the passwords page, where
     /// the app has them.
-    var codes: (() -> Void)?
+    var codes: (() -> AnyView)?
     var passwords: (() -> AnyView)?
     @State private var message: String?
 
@@ -311,7 +311,7 @@ struct DomainActivity: View {
                     NavigationLink { passwords() } label: { Label("Passwords", systemImage: "key") }
                 }
                 if showsCodes, let codes {
-                    Button(action: codes) { Label("One-time codes…", systemImage: "123.rectangle") }
+                    NavigationLink { codes() } label: { Label("One-time codes", systemImage: "123.rectangle") }
                 }
             } header: {
                 Label("Vault", systemImage: "lock.shield")

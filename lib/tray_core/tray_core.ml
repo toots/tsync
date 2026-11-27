@@ -239,8 +239,7 @@ let fetch_codes t domains =
              answers))
       t.platform.marks;
     t.platform.children Show_codes
-      (M.codes ~add:false
-         (List.map (fun (domain, codes, _) -> (domain, codes)) answers)))
+      (M.codes (List.map (fun (domain, codes, _) -> (domain, codes)) answers)))
 
 let opened t =
   let due =
@@ -417,7 +416,7 @@ let copy_report t =
     | Error reason -> t.platform.notify "The report was not copied" reason
 
 let run_action t : M.action -> unit = function
-  | Nothing | Show_stats | Show_codes | Show_passwords | Add_code _ -> ()
+  | Nothing | Show_stats | Show_codes | Show_passwords -> ()
   | Copy_password { domain; id } -> copy_password t domain id
   | Seen_machines domain -> seen_machines t domain
   | Copy_report -> copy_report t

@@ -262,31 +262,6 @@ let shared_router served action req =
                          ~codes:(List.map fst (code_domains served))
                          answers) );
                 ]))
-    | "menu_codes" ->
-        let answers =
-          List.map
-            (fun (name, s) ->
-              ( name,
-                Menu.codes_of_json
-                  (Some
-                     (match
-                        Handler.call s.handler
-                          (Totp_list { filter = None; pull = `Auto })
-                      with
-                       | listing ->
-                           Protocol.encode_reply
-                             (Totp_list { filter = None; pull = `Auto })
-                             listing
-                       | exception e -> Ipc.failure (Fail.classify e))) ))
-            (code_domains served)
-        in
-        Some
-          (Ipc.Reply
-             (Ipc.ok
-                [
-                  ( "entries",
-                    `List (List.map Menu.entry_to_json (Menu.codes answers)) );
-                ]))
     | "stop" ->
         Stop.request ();
         Some (Ipc.Reply (Ipc.ok []))

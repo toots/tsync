@@ -17,7 +17,6 @@ let action = function
   | Show_stats | Show_codes -> ""
   | Copy_code { domain; id } -> Printf.sprintf " -> copy %s:%s" domain id
   | Unlock d -> " -> unlock " ^ d
-  | Add_code d -> " -> add " ^ d
   | Seen_machines d -> " -> seen " ^ d
   | Copy_report -> " -> copy report"
   | Show_passwords -> ""
@@ -414,9 +413,9 @@ let () =
          "backends":[{"name":"gcs","role":"main","reach":{"reachable":true}}]}]}|};
     ];
 
-  let codes ?add answers =
+  let codes answers =
     List.iter entry
-      (M.codes ?add
+      (M.codes
          (List.map
             (fun (d, reply) ->
               (d, M.codes_of_json (Option.map Yojson.Safe.from_string reply)))
@@ -458,12 +457,6 @@ let () =
     ];
   case "codes: no code domain at all";
   codes [];
-  case "codes: a caller that adds no codes gets no Add a code row";
-  codes ~add:false
-    [
-      ("work", Some two_records);
-      ("d", Some {|{"ok":true,"records":[],"corrupt":[]}|});
-    ];
   case "codes: the JSON form, and no code in any row";
   let rows =
     M.codes

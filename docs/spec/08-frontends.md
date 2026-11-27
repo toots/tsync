@@ -329,7 +329,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 - `write` with `base` (a `contentId` the client read) declares the content the edit started from. What
   the owner does with it is
   [conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base).
-- A socket serving several domains adds host actions (`menu`, `menu_codes` on macOS,
+- A socket serving several domains adds host actions (`menu` on macOS,
   [file-provider.md](frontends/file-provider.md)) and routes every other action by `domain`; its own
   refusals carry codes ([07 §4.2](07-daemon-cli.md#42-envelopes)), and a domain it does not serve is
   refused `unreachable`.
@@ -485,7 +485,7 @@ carries no such field and clears it.
 | | macOS File Provider | Android |
 |---|---|---|
 | Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
-| Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_codes` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
+| Transport | one socket for all domains, routed by `domain`; adds `menu` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
 | Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | notices to the host in place of events ([android.md §4.2](frontends/android.md#42-notices)) |
 | Change feed | `changes_since` plus events | pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-background-cycle)); the feed over held folders is read on iOS only ([android.md §6](frontends/android.md#6-the-handler-on-a-pulled-tree)) |
 | Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |

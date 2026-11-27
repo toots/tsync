@@ -188,7 +188,7 @@ Requests are `{"action": <verb>, "domain": <display name>, …}`, routed as
   domain the running owner does not serve is answered `unreachable`; the owner's `recovered` notice
   clears it when it starts serving the domain.
 
-`menu` and `menu_codes` span domains and are answered by the router itself (§10).
+`menu` spans domains and is answered by the router itself (§10).
 
 ### 4.3 Client obligations
 
@@ -626,7 +626,7 @@ buttons, no row of text standing in for one.
 
 `menu` answers `{"ok":true,"menu":<menu JSON>}`, the model's JSON form
 ([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label. The app reads its
-`icon`, its `tooltip`, and whether its rows hold `One-time codes`; it draws none of its rows.
+`icon`, its `tooltip` and the `Pause syncing` row's `checked`; it draws none of its rows.
 
 ```json
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Syncing: 1 to download",
@@ -659,9 +659,8 @@ The panel, top to bottom:
    row reveals its file in Finder (selected, never opened) from its `rel`. **Copy report** writes
    both replies to the general pasteboard.
 4. **The warnings** of [activity.md §3](activity.md#3-below-the-domains), the owner's process's.
-5. **One-time codes** and **Passwords**, in the domain's Vault section (activity.md §2.7):
-   One-time codes, when the menu holds that row, opens the codes menu of §10.1 under it;
-   Passwords, for a domain that uses `passwords`, opens the page of §10.2.
+5. **One-time codes** and **Passwords**, in the domain's Vault section (activity.md §2.7): each
+   opens its page, §10.1 for a domain that uses `totp`, §10.2 for one that uses `passwords`.
 
 - The panel polls only while it is shown, every `status_poll` (activity.md §5); closing it stops
   the polling.
@@ -674,20 +673,22 @@ The panel, top to bottom:
 
 ### 10.1 One-time codes
 
-- The owner renders the `One-time codes` row with every domain that uses `totp` as a code
-  domain ([menu-model.md §5](menu-model.md#5-rows)).
-- A domain's header row, which the model names `vault` when there are several code domains,
-  shows its vault's appearance ([vault §8.1](../extensions/vault.md#81-appearance)): the vault's
-  icon, or the tsync glyph in the vault's colour, asked of `vault_status` once per domain at each
-  open. A record's row shows none.
-- `menu_codes` answers `{"ok":true,"entries":[…]}`: the rows of
-  [menu-model.md §7](menu-model.md#7-codes-submenu), built from each code domain's `totp_list`. It
-  is fetched each time the submenu opens, never cached: a record added on another machine shows at
-  the next open.
-- `copyCode` asks the owner `totp_code` for that record, then writes the code to the general
-  pasteboard as plain text together with the `org.nspasteboard.ConcealedType` marker, so clipboard
-  managers and history skip it. The code is never logged and never cached in the app. A refusal is
-  shown as a user notification carrying the reply's `error`; nothing is written.
+A page of the panel, opened from the Vault section, for one domain. The two pages of §10.1 and
+§10.2 look and behave alike: Back, a search field, one row per record with its icon, and a click on
+the row copies its secret.
+
+- It lists the domain's records from `totp_list`, with `filter` set to what is typed, asked again
+  as the text changes, each time the page opens, and when a shown code's `secondsLeft` runs out;
+  never cached.
+- Each row shows the record's issuer and account, its current code in large monospaced digits, and
+  the seconds it has left, drawn in warning colour for the last five.
+- A click on the row asks the owner `totp_code` for that record, so the code copied is current,
+  then writes it to the general pasteboard as plain text together with the
+  `org.nspasteboard.ConcealedType` marker, so clipboard managers and history skip it. The code is
+  never logged and never cached in the app beyond the page on screen. A refusal is shown as a user
+  notification carrying the reply's `error`; nothing is written.
+- The page ends with **Add a code…**. A locked vault shows `Locked` and **Unlock…**; a domain with
+  no vault says so; a failure shows the reply's `error`.
 - `unlock` opens a dialog with a secure text field for the passphrase (no echo, no autofill,
   paste accepted) and the domain's name, plus a second one for the secret key when status says
   this machine is not enrolled (vault §6). A status that fails is shown as the dialog's failure,
@@ -701,9 +702,7 @@ The panel, top to bottom:
   `otpauth://` is sent as `totp_add` with `uri`; anything else with `secret`, `issuer` and
   `account` (totp §5.3). A refusal reopens the dialog with the owner's sentence, the issuer and
   the account as typed and the secret field empty; success closes it, and the record appears at
-  the next open of the submenu. The secret field is a secure field, cleared after sending.
-- Each open of the codes menu shows the placeholder until the owner's rows arrive, and keeps
-  it when they do not: rows from an earlier open are never shown again.
+  the page's next listing. The secret field is a secure field, cleared after sending.
 - Each secure field of these dialogs has a `Show` checkbox under it that shows its value in clear
   while checked ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)),
   unchecked each time a dialog opens.
@@ -717,10 +716,10 @@ A page of the panel, opened from the Vault section, for one domain.
 - It starts with **Back** and a search field. It lists the domain's logins from `passwords_list`
   with `filter` set to what is typed, asked again as the text changes and each time the page
   opens, never cached; notes and passkeys are not listed.
-- Each login is a row with its title and username and two buttons: **Copy username**, and **Copy
-  password**, which asks `passwords_get` for that record and writes its `password` as §10.1 writes
-  a code: plain text with the concealed marker, never logged, never cached in the app. A refusal
-  is a user notification carrying the reply's `error`.
+- Each login is a row with its title and username. A click on the row asks `passwords_get` for
+  that record and writes its `password` as §10.1 writes a code: plain text with the concealed
+  marker, never logged, never cached in the app. A refusal is a user notification carrying the
+  reply's `error`. A **Copy username** button beside it copies the username, which is no secret.
 - A locked vault shows `Locked` and **Unlock…**, the dialog of §10.1; a domain with no vault says
   so; a failure shows the reply's `error`.
 

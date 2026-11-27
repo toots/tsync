@@ -7,14 +7,14 @@ final class PanelModel: ObservableObject {
     @Published var summary = "The service is unreachable"
     @Published var allPaused = false
     @Published var reachable = false
-    @Published var hasCodes = false
     @Published var notices: [String] = []
     @Published var autofillOff = false
     /// The registered domains, in config order.
     @Published var domains: [String] = []
 
     var pause: (Bool) -> Void = { _ in }
-    var showCodes: () -> Void = {}
+    var copyCode: (String, String) -> Void = { _, _ in }
+    var addCode: (String) -> Void = { _ in }
     var copyPassword: (String, String) -> Void = { _, _ in }
     var unlock: (String) -> Void = { _ in }
     var openSettings: () -> Void = {}
@@ -62,8 +62,8 @@ struct Panel: View {
                         refresh: { await ask(domain) },
                         open: { model.open(domain) },
                         reveal: { model.reveal(domain, $0) },
-                        codes: model.hasCodes ? model.showCodes : nil,
-                        passwords: { AnyView(PasswordsPage(domain: domain, model: model)) }
+                        codes: { AnyView(VaultPage(kind: .codes, domain: domain, model: model)) },
+                        passwords: { AnyView(VaultPage(kind: .passwords, domain: domain, model: model)) }
                     )
                     .id(domain)
                     WarningsSection(lines: reports[domain]?.warnings ?? [])
@@ -125,19 +125,27 @@ struct Panel: View {
     }
 }
 
-/// file-provider §10.2: one domain's logins, searched as typed; a password is
-/// asked of the owner only when its button is clicked.
-struct PasswordsPage: View {
-    struct Login: Identifiable {
+/// file-provider §10.1, §10.2: one domain's codes or logins, searched as
+/// typed. A click on a row copies its secret, asked of the owner then.
+struct VaultPage: View {
+    struct Item: Identifiable {
         let id: String
         let title: String
-        let username: String
+        let detail: String
+        /// A one-time code and when it runs out.
+        var code: String?
+        var expires: Date?
     }
 
+    enum Kind {
+        case codes, passwords
+    }
+
+    let kind: Kind
     let domain: String
     @ObservedObject var model: PanelModel
     @State private var filter = ""
-    @State private var logins: [Login] = []
+    @State private var items: [Item] = []
     @State private var locked = false
     @State private var problem: String?
     private static let typing: UInt64 = 250_000_000
@@ -154,58 +162,119 @@ struct PasswordsPage: View {
                     Button { model.unlock(domain) } label: { Label("Unlock…", systemImage: "lock.open") }
                 } else if let problem {
                     Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
-                } else if logins.isEmpty {
-                    Text("No passwords").foregroundStyle(.secondary)
+                } else if items.isEmpty {
+                    Text(kind == .codes ? "No codes" : "No passwords").foregroundStyle(.secondary)
                 }
-                ForEach(logins) { row($0) }
+                ForEach(items) { row($0) }
+            }
+            if kind == .codes && !locked {
+                Section {
+                    Button { model.addCode(domain) } label: { Label("Add a code…", systemImage: "plus") }
+                }
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Passwords")
+        .navigationTitle(kind == .codes ? "One-time codes" : "Passwords")
         .task(id: filter) {
             // A new keystroke cancels this task, so only a pause asks the owner.
             if !filter.isEmpty { try? await Task.sleep(nanoseconds: Self.typing) }
-            if !Task.isCancelled { await load() }
+            // §10.1: asked again when a shown code runs out.
+            while !Task.isCancelled {
+                await load()
+                guard let next = items.compactMap(\.expires).min() else { return }
+                let wait = max(next.timeIntervalSinceNow, 1)
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
         }
     }
 
-    private func row(_ login: Login) -> some View {
+    private func row(_ item: Item) -> some View {
         HStack {
-            Image(systemName: "key").foregroundStyle(.secondary)
-            VStack(alignment: .leading) {
-                Text(login.title.isEmpty ? login.username : login.title).lineLimit(1)
-                if !login.title.isEmpty && !login.username.isEmpty {
-                    Text(login.username).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Button { copy(item) } label: {
+                HStack {
+                    Image(systemName: kind == .codes ? "123.rectangle" : "key").foregroundStyle(.secondary)
+                    VStack(alignment: .leading) {
+                        Text(item.title).lineLimit(1)
+                        if !item.detail.isEmpty {
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    if let code = item.code { CodeView(code: code, expires: item.expires) }
                 }
+                .contentShape(Rectangle())
             }
-            Spacer()
-            if !login.username.isEmpty {
-                Button { Pasteboard.copy(login.username) } label: { Image(systemName: "person") }
+            .buttonStyle(.plain)
+            .help(kind == .codes ? "Copy the code" : "Copy the password")
+            if kind == .passwords && !item.detail.isEmpty {
+                Button { Pasteboard.copy(item.detail) } label: { Image(systemName: "person") }
                     .buttonStyle(.borderless).help("Copy username")
             }
-            Button { model.copyPassword(domain, login.id) } label: { Image(systemName: "doc.on.doc") }
-                .buttonStyle(.borderless).help("Copy password")
+        }
+    }
+
+    private func copy(_ item: Item) {
+        switch kind {
+        case .codes: model.copyCode(domain, item.id)
+        case .passwords: model.copyPassword(domain, item.id)
         }
     }
 
     private func load() async {
+        let action = kind == .codes ? "totp_list" : "passwords_list"
         do {
-            let reply = try await ownerAsk(domain, "passwords_list", filter.isEmpty ? [:] : ["filter": filter])
+            let reply = try await ownerAsk(domain, action, filter.isEmpty ? [:] : ["filter": filter])
             let records = reply["records"] as? [[String: Any]] ?? []
-            logins = records.compactMap { record in
-                guard record["kind"] as? String == "login", let id = record["id"] as? String else { return nil }
-                return Login(
-                    id: id, title: record["title"] as? String ?? "",
-                    username: record["username"] as? String ?? "")
-            }
+            items = records.compactMap(item)
             (locked, problem) = (false, nil)
         } catch let failure as OwnerFailure {
-            logins = []
+            items = []
             locked = failure.code == "locked"
             problem = failure.code == "not_found" ? "This domain has no vault" : failure.message
         } catch {
-            logins = []
+            items = []
             (locked, problem) = (false, error.localizedDescription)
+        }
+    }
+
+    /// Notes and passkeys hold no password; a code record is always listed.
+    private func item(_ record: [String: Any]) -> Item? {
+        guard let id = record["id"] as? String else { return nil }
+        switch kind {
+        case .passwords:
+            guard record["kind"] as? String == "login" else { return nil }
+            return labelled(id, record["title"], record["username"])
+        case .codes:
+            var item = labelled(id, record["issuer"], record["account"])
+            item.code = record["code"] as? String
+            item.expires = (record["secondsLeft"] as? Int).map { Date().addingTimeInterval(Double($0)) }
+            return item
+        }
+    }
+
+    private func labelled(_ id: String, _ first: Any?, _ second: Any?) -> Item {
+        let first = first as? String ?? "", second = second as? String ?? ""
+        return first.isEmpty
+            ? Item(id: id, title: second, detail: "")
+            : Item(id: id, title: first, detail: second)
+    }
+}
+
+/// A one-time code with the seconds it has left, warning for the last five.
+struct CodeView: View {
+    let code: String
+    let expires: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = max(Int((expires ?? context.date).timeIntervalSince(context.date).rounded(.up)), 0)
+            HStack(spacing: 6) {
+                Text(code).font(.title3.monospacedDigit().weight(.semibold))
+                if expires != nil {
+                    Text("\(left)s").font(.caption.monospacedDigit())
+                        .foregroundStyle(left <= 5 ? .orange : .secondary)
+                }
+            }
         }
     }
 }

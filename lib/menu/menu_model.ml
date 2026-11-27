@@ -7,7 +7,6 @@ type action =
   | Show_codes
   | Copy_code of { domain : string; id : string }
   | Unlock of string
-  | Add_code of string
   | Seen_machines of string
   | Copy_report
   | Show_passwords
@@ -711,7 +710,7 @@ let codes_placeholder = [row "Reading…"]
 let either_label first second =
   match (first, second) with "", s -> s | f, "" -> f | f, s -> f ^ " — " ^ s
 
-let domain_codes ~add ~indent (domain, codes) =
+let domain_codes ~indent (domain, codes) =
   match codes with
     | Answered { records; unreadable } ->
         (if records = [] then [row ~indent "No codes"] else [])
@@ -721,19 +720,16 @@ let domain_codes ~add ~indent (domain, codes) =
                 ~action:(Copy_code { domain; id = r.id })
                 (ellipsis (either_label r.issuer r.account)))
             records
-        @ (if unreadable > 0 then
-             [
-               row ~indent
-                 (Printf.sprintf "%d unreadable — run tsync totp list"
-                    unreadable);
-             ]
-           else [])
         @
-        if add then [row ~indent ~action:(Add_code domain) "Add a code…"]
+        if unreadable > 0 then
+          [
+            row ~indent
+              (Printf.sprintf "%d unreadable — run tsync totp list" unreadable);
+          ]
         else []
     | refused -> refused_rows ~indent domain refused
 
-let codes ?(add = true) = per_domain ~none:"No codes" (domain_codes ~add)
+let codes = per_domain ~none:"No codes" domain_codes
 
 type login = {
   id : string;
@@ -778,7 +774,6 @@ let action_to_yojson = function
       `Assoc
         [("copyCode", `Assoc [("domain", `String domain); ("id", `String id)])]
   | Unlock domain -> `Assoc [("unlock", `String domain)]
-  | Add_code domain -> `Assoc [("addCode", `String domain)]
   | Seen_machines domain -> `Assoc [("seenMachines", `String domain)]
   | Copy_report -> `Assoc [("copyReport", `Bool true)]
   | Show_passwords -> `Assoc [("passwords", `Bool true)]
