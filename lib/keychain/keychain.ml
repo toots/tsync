@@ -15,7 +15,7 @@ let keychain f =
    library must not reach the user's keychain. *)
 let register ~name ~service () =
   setup service;
-  Tsync_owner.Keystore.register
+  Tsync_vault.Keystore.register
     {
       name;
       put =

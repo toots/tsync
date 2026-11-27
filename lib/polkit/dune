@@ -4,4 +4,4 @@
  (name tsync_polkit)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_core tsync_owner tsync_dbus_dl unix))
+ (libraries tsync_core tsync_vault tsync_dbus_dl unix))

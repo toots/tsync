@@ -8,4 +8,4 @@
   (language c)
   (names credential_stubs))
  (c_library_flags (-ladvapi32))
- (libraries tsync_core tsync_owner))
+ (libraries tsync_core tsync_vault))

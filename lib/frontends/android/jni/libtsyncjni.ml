@@ -25,7 +25,7 @@ let keystore f =
 
 let () =
   Callback.register_exception "tsync_keystore_failure" (Keystore_failure "");
-  Tsync_owner.Keystore.register
+  Tsync_vault.Keystore.register
     {
       name = "the Android Keystore";
       put =

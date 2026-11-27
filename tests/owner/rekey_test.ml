@@ -10,7 +10,7 @@
 open Tsync_core
 open Tsync_ipc
 module Owner = Tsync_owner.Owner
-module Keystore = Tsync_owner.Keystore
+module Keystore = Tsync_vault.Keystore
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let phase = if Array.length Sys.argv = 3 then Some Sys.argv.(1) else None

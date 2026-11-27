@@ -1,6 +1,6 @@
 (* format-merge §2 rule 1: an arrival during a settling schedules one more, and
    only copies still there schedule anything. *)
-open Tsync_owner
+open Tsync_vault_verbs
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let copy = ".tsync-ext/totp/" ^ String.make 32 'a' ^ " (conflicted copy from b)"

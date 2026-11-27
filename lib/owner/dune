@@ -8,15 +8,20 @@
   tsync_config
   tsync_domain
   tsync_ipc
+  tsync_protocol
   tsync_menu
   unix
   threads.posix
   tsync_status
   tsync_gc
+  tsync_share
   tsync_remote
   tsync_vault
+  tsync_vault_verbs
   tsync_http
   base64
   yojson)
+ (flags
+  (:standard -open Tsync_protocol -open Tsync_vault_verbs))
  (preprocess
   (pps ppx_deriving_yojson)))

@@ -1,7 +1,7 @@
 open Tsync_core
 open Tsync_http
 module W = Tsync_http_proxy_client.Proxy_wire
-module P = Tsync_owner.Protocol
+module P = Tsync_protocol.Protocol
 
 type route = {
   domain : Domain_name.t;

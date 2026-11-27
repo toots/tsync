@@ -15,9 +15,9 @@ let follows (d : Config.domain) = d.extensions = None
    learned the main's statement. One whose owner cannot be asked, or has not
    learned it yet, stays a candidate, to be named by what it answers. *)
 let in_force ~extension d =
-  match Tsync_owner.Owner.ask d Tsync_owner.Protocol.Status with
+  match Tsync_owner.Owner.ask d Tsync_protocol.Protocol.Status with
     | s ->
-        (not s.Tsync_owner.Protocol.settings_learned)
+        (not s.Tsync_protocol.Protocol.settings_learned)
         || List.mem extension s.extensions
     | exception (Tsync_ipc.Ipc.Not_serving _ | Fail.E _) -> true
 

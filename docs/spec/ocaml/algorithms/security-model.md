@@ -12,7 +12,7 @@ Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite
 | §5.1 keys and names | `Key.t` and `Key.prefix` are private strings built only by the namers or by `Key.of_string` (`lib/core/key.ml`); the grammar is `Names.valid_key`, `valid_prefix`, `valid_leaf`, `valid_path`; `Domain_name.of_string` refuses reserved names (`Names.reserved_roots`) |
 | §5.2 route confinement | `within`, `route_for`, `writable`, `share_candidates` (`store_server.ml`) |
 | §5.3 filesystem stores | `Local_path.path`, `check_no_links`: no symbolic link between the root and the key; the local driver opens with `Fs.open_nofollow` |
-| §6 shares | `Share.Make` (`create`, `revoke`, `clear_cache`; `lib/gc/share.ml`), token from `Ids.token`, `Key.share` accepts 1 to 128 lowercase hex; served by `Share_server` (`claims`, `manifest_domain`, `handle`); expiry in `Retention` |
+| §6 shares | `Share.Make` (`create`, `revoke`, `clear_cache`; `lib/share/share.ml`), token from `Ids.token`, `Key.share` accepts 1 to 128 lowercase hex; served by `Share_server` (`claims`, `manifest_domain`, `handle`); expiry in `Retention` |
 | §7.1 socket directory and file | `Ipc.serve`: `check_dir` (0700, this uid), the socket bound under `umask 0o177` (`lib/ipc/ipc.ml`) |
 | §7.2 peer credentials | `Fs.peer_uid` (`SO_PEERCRED`, `getpeereid` in `sys_stubs.c`), checked per connection |
 | §7.3 paths over IPC | `Transfer.check_dest`, `check_staging` against the roots the host declares (`lib/owner/transfer.ml`); `Owner` defaults them to the user's home |

@@ -9,7 +9,7 @@
   tsync_config
   tsync_catalog
   tsync_ipc
-  tsync_owner
+  tsync_protocol
   tsync_menu
   threads.posix
   yojson))

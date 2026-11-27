@@ -3,6 +3,7 @@
 
 open Tsync_core
 open Tsync_owner
+open Tsync_protocol
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let root = Printf.sprintf "/tmp/tsync-list-pages-%d" (Unix.getpid ())

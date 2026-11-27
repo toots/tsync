@@ -7,6 +7,8 @@
   tsync_core
   tsync_config
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_sync
   tsync_ipc
   tsync_status

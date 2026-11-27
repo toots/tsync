@@ -7,6 +7,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_store
   tsync_remote
   unix
@@ -30,7 +32,7 @@
 (executable
  (name protocol_test)
  (modules protocol_test)
- (libraries tsync_core tsync_owner yojson))
+ (libraries tsync_core tsync_owner tsync_protocol tsync_vault_verbs yojson))
 
 (rule
  (with-stdout-to
@@ -51,6 +53,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   unix
   yojson))
 
@@ -86,6 +90,8 @@
   tsync_domain
   tsync_gc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_remote
   tsync_store
   unix))
@@ -130,6 +136,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_store
   tsync_remote
   tsync_checkout
@@ -156,6 +164,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_vault
   unix
   base64
@@ -180,6 +190,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_store
   tsync_remote
   tsync_checkout
@@ -214,7 +226,7 @@
 (executable
  (name format_merge_test)
  (modules format_merge_test)
- (libraries tsync_owner))
+ (libraries tsync_owner tsync_protocol tsync_vault_verbs))
 
 (rule
  (with-stdout-to
@@ -239,6 +251,8 @@
   tsync_sync
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_vault
   unix
   yojson
@@ -283,6 +297,8 @@
   tsync_sync
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_vault
   unix
   yojson
@@ -311,10 +327,13 @@
  (modules autolock_test)
  (libraries
   tsync_core
+  tsync_vault
   tsync_config
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   unix
   yojson))
 
@@ -338,10 +357,13 @@
  (modules rekey_test)
  (libraries
   tsync_core
+  tsync_vault
   tsync_config
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   unix
   yojson))
 
@@ -377,6 +399,8 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
   tsync_vault
   unix
   yojson
@@ -411,7 +435,14 @@
 (executable
  (name list_pages_test)
  (modules list_pages_test)
- (libraries tsync_core tsync_config tsync_catalog tsync_owner unix))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
+  unix))
 
 (rule
  (with-stdout-to
@@ -426,7 +457,13 @@
 (executable
  (name ownership_record_test)
  (modules ownership_record_test)
- (libraries tsync_core tsync_config tsync_owner unix))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_owner
+  tsync_protocol
+  tsync_vault_verbs
+  unix))
 
 ; It plants a holder that is a live child process, a sleep.
 

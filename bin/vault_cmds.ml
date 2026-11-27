@@ -1,7 +1,7 @@
 open Cmdliner
 open Tsync_core
 open Cli
-module P = Tsync_owner.Protocol
+module P = Tsync_protocol.Protocol
 
 (* extensions README §6: K lives in the owner's memory, so no command takes
    ownership for its run. *)

@@ -161,10 +161,10 @@ let job ?name verbose job =
                 "tsync: cancelling; the job stops at its next unit boundary";
               try
                 ignore
-                  (Tsync_owner.Owner.ask dom (Tsync_owner.Protocol.Cancel id))
+                  (Tsync_owner.Owner.ask dom (Tsync_protocol.Protocol.Cancel id))
               with e -> Log.warn "cannot cancel: %s" (Printexc.to_string e))
       | line -> Tsync_owner.Handler.print_line line)
-    (Tsync_owner.Protocol.Job { job; narrate = verbose })
+    (Tsync_protocol.Protocol.Job { job; narrate = verbose })
 
 (* Before the runtime starts, so every thread inherits the mask. *)
 let run_job ?name verbose j =

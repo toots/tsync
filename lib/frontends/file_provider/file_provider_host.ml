@@ -1,5 +1,6 @@
 open Tsync_core
 open Tsync_owner
+open Tsync_protocol
 
 (* file-provider §13 changed_debounce. *)
 let changed_debounce = 0.2

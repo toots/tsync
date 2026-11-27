@@ -87,7 +87,7 @@ let describe config (d : Config.domain) backend =
     else (
       match
         (Tsync_owner.Owner.request ~what:"tsync config share" config d
-           (Tsync_owner.Protocol.Vault_status `Never))
+           (Tsync_protocol.Protocol.Vault_status `Never))
           .appearance
       with
         | Some a -> Some { L.color = a.color; icon = a.icon }

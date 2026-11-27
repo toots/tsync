@@ -239,7 +239,7 @@ let delete c ~domain =
 
 let register () =
   if Dbus.available () then
-    Tsync_owner.Keystore.register
+    Tsync_vault.Keystore.register
       {
         name = "the Secret Service";
         put =

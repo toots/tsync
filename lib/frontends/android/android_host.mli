@@ -27,7 +27,7 @@ val check_config : ?candidate:string -> string -> string
 (** [""] once the domain is owned and its handler answers (android §3.1);
     idempotent per domain, concurrent callers wait for the first. A domain
     booted stays booted for the life of the process. *)
-val boot : ?pull_params:Pulls.params -> string -> string
+val boot : ?pull_params:Tsync_owner.Pulls.params -> string -> string
 
 (** [request], [status] and [open_] name a booted domain, and refuse one that is
     not as every entry does. *)

@@ -93,7 +93,7 @@ let check ~address =
 
 let register () =
   if Dbus.available () && Sys.file_exists action_file then
-    Tsync_owner.Verifier.register
+    Tsync_vault.Verifier.register
       {
         name = "polkit";
         verify =

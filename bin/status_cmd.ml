@@ -6,7 +6,7 @@ open Cli
 module R = Tsync_status.Status_report
 
 let answer socket domain =
-  match Tsync_owner.Protocol.call ?domain socket (Stats ["frontend"]) with
+  match Tsync_protocol.Protocol.call ?domain socket (Stats ["frontend"]) with
     | a -> Ok a
     | exception e -> Error (Fail.classify e).reason
 

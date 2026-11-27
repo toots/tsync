@@ -348,7 +348,7 @@ let vault_derive text =
         Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
       in
       let keks =
-        Vault.derive
+        Tsync_vault_verbs.Vault.derive
           ~slots:(to_list (member "slots" j))
           ~secret_key:(field "secretKey") (field "passphrase")
       in

@@ -1,6 +1,7 @@
 open Tsync_core
 open Tsync_config
 open Tsync_owner
+open Tsync_protocol
 open Tsync_ipc
 
 (* Bad usage: the arguments a verb takes, or what is wrong with one. *)

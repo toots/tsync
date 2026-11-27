@@ -5,4 +5,4 @@
  (name tsync_secret_service)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_core tsync_owner tsync_dbus_dl unix))
+ (libraries tsync_core tsync_vault tsync_dbus_dl unix))

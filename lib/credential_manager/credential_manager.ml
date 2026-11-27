@@ -39,5 +39,5 @@ let delete ~domain =
       List.iter (fun (_, _, target) -> delete_target target) (entries domain))
 
 let register () =
-  Tsync_owner.Keystore.register
+  Tsync_vault.Keystore.register
     { name = "Credential Manager"; put; get; delete }

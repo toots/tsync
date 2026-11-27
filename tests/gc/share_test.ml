@@ -4,7 +4,7 @@
 
 open Tsync_core
 open Tsync_store
-open Tsync_gc
+open Tsync_share
 
 let p fmt = Printf.printf fmt
 let d = Domain_name.v "d"

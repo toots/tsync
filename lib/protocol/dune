@@ -1,0 +1,5 @@
+(library
+ (name tsync_protocol)
+ (libraries tsync_core tsync_ipc tsync_status base64 yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))

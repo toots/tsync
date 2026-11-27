@@ -17,6 +17,7 @@
   tsync_domain
   tsync_sync
   tsync_owner
+  tsync_protocol
   tsync_status
   tsync_cloud_files_rules
   tsync_checkout

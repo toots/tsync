@@ -6,7 +6,7 @@
   (or
    (= %{system} macosx)
    (= %{system} ios)))
- (libraries tsync_core tsync_owner)
+ (libraries tsync_core tsync_vault)
  (foreign_stubs
   (language c)
   (names keychain_stubs))

@@ -1,6 +1,6 @@
 open Tsync_core
 open Tsync_config
-open Tsync_owner
+open Tsync_protocol
 
 (* file-provider §3.2, §13. *)
 let app_path = "/Applications/TsyncApp.app"

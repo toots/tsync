@@ -2,7 +2,7 @@ open Cmdliner
 open Tsync_core
 open Tsync_config
 open Cli
-module P = Tsync_owner.Protocol
+module P = Tsync_protocol.Protocol
 open Extension_cmds
 
 let write_domain ?name = write_domain ?name ~extension:"totp"

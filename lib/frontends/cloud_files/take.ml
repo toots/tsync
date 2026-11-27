@@ -1,5 +1,6 @@
 open Tsync_core
 open Tsync_owner
+open Tsync_protocol
 open Tsync_cloud_files_rules
 
 (* cloud-files §16 *)

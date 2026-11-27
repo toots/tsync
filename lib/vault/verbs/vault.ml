@@ -3,6 +3,7 @@ open Tsync_sync
 module Keyring = Tsync_vault.Keyring
 module Passphrase = Tsync_vault.Passphrase
 module Secret_key = Tsync_vault.Secret_key
+module Keystore = Tsync_vault.Keystore
 
 let ext = Names.extension_root
 let folder = Names.join ext "vault"
@@ -22,6 +23,13 @@ let backup_key_path = Names.join backup_folder "key"
 
 (* §6.2: when K was adopted, and last used for the user. *)
 type since = { unlocked_at : float; last_use : float }
+type view = { pulled_at : float option; outdated : bool }
+
+(* README §4.1: the owner's pull policy on a lazy tree, as the verbs use it. *)
+type reads = {
+  for_listing : pull:Protocol.pull -> string -> view;
+  before_mutation : string -> unit;
+}
 
 (* vault §6: K under its key id and the secret key under its id, in the owner's
    memory and, where the host has one, its keystore (§6.1). *)
@@ -41,11 +49,11 @@ type t = {
   keystore_error : string option Atomic.t;
   backup_error : string option Atomic.t;
       (** §8.3: why the last scheduled backup was not written *)
-  pulls : Pulls.t option;  (** on a lazy tree: reads answer the last view *)
-  view : Pulls.view Atomic.t;  (** of the last read *)
+  reads : reads option;  (** on a lazy tree: reads answer the last view *)
+  view : view Atomic.t;  (** of the last read *)
 }
 
-let create ?pulls () =
+let create ?reads () =
   {
     key = Atomic.make None;
     since = Atomic.make None;
@@ -57,8 +65,8 @@ let create ?pulls () =
     keystore_read = Atomic.make `Unread;
     keystore_error = Atomic.make None;
     backup_error = Atomic.make None;
-    pulls;
-    view = Atomic.make { Pulls.pulled_at = None; outdated = false };
+    reads;
+    view = Atomic.make { pulled_at = None; outdated = false };
   }
 
 (* README §4.5. *)
@@ -354,15 +362,15 @@ let refresh engine ~lazy_tree =
    read is what the reply says. *)
 let read_folders ?(pull = `Auto) engine t dirs =
   let (module E : Engine.S) = engine in
-  match t.pulls with
+  match t.reads with
     | None -> ()
-    | Some pulls ->
+    | Some reads ->
         let view =
           List.fold_left
-            (fun (acc : Pulls.view) dir ->
+            (fun (acc : view) dir ->
               if E.kind dir <> `Dir then acc
               else (
-                let v = Pulls.for_listing pulls ~pull dir in
+                let v = reads.for_listing ~pull dir in
                 E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
                 {
                   outdated = acc.outdated || v.outdated;
@@ -381,7 +389,7 @@ let read_current ?pull engine ~lazy_tree t =
 
 (* README §4.1: a record write proceeds on the last view, pushed later. *)
 let before_write t dir =
-  Option.iter (fun pulls -> Pulls.before_mutation pulls dir) t.pulls
+  Option.iter (fun reads -> reads.before_mutation dir) t.reads
 
 (* §4.3: every extension's folder, whether this client uses it or not. *)
 let extension_folders engine ~lazy_tree t =

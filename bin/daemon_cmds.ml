@@ -3,6 +3,7 @@ open Tsync_core
 open Tsync_ipc
 open Tsync_config
 open Tsync_owner
+open Tsync_protocol
 open Cli
 
 (* 07 §2.7: the service log. An agent registered through SMAppService cannot

@@ -6,6 +6,7 @@
 open Tsync_core
 open Tsync_ipc
 open Tsync_owner
+open Tsync_protocol
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let mode = Sys.argv.(1)

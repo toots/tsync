@@ -220,7 +220,7 @@ let ask_stats arg r =
     (fun d ->
       ( d,
         match
-          Tsync_owner.Protocol.call ~timeout:Ipc.client_deadline ~domain:d
+          Tsync_protocol.Protocol.call ~timeout:Ipc.client_deadline ~domain:d
             r.child.socket
             (Stats ("frontend" :: arg))
         with

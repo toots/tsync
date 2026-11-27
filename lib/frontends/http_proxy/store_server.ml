@@ -1014,7 +1014,7 @@ let collect t ~arg routes =
       (fun route ->
         ( route,
           match
-            Tsync_owner.Protocol.call ~timeout:Tsync_ipc.Ipc.request_deadline
+            Tsync_protocol.Protocol.call ~timeout:Tsync_ipc.Ipc.request_deadline
               ~domain:route.name
               (Tsync_config.Paths.owner_socket route.domain)
               (Stats ("frontend" :: arg))
@@ -1457,7 +1457,7 @@ let owner_wake (d : Domain_name.t) () =
 (* §A11: with [frontend], its own entries for the route named by [domain], or
    every route; otherwise, and for [status], the full report over every route. *)
 let control t stop req =
-  let module P = Tsync_owner.Protocol in
+  let module P = Tsync_protocol.Protocol in
   let routes =
     match Tsync_ipc.Ipc.field req "domain" with
       | Some d when List.exists (fun r -> r.name = d) t.routes ->
