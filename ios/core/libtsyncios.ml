@@ -22,6 +22,6 @@ let () =
   Callback.register "tsync_ios_owner_host" (fun service ->
       try
         Tsync_keychain.Keychain.register ~name:"the keychain" ~service ();
-        Tsync_owner.Vault.no_derivation ();
+        Tsync_vault_verbs.Vault.no_derivation ();
         ""
       with e -> Printexc.to_string e)
