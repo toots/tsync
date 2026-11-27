@@ -264,7 +264,7 @@ Answered by: [linux-tray.md §4.1](linux-tray.md#41-state), [§4.3](linux-tray.m
   row. Binding: never empty; content kept across redraws; the row is a submenu from the start;
   placeholder and failure text come from the model.
 
-Answered by: [linux-tray.md §2](linux-tray.md#2-startup) step 4, [§4.3](linux-tray.md#43-installing-a-layout), [menu-model.md §6](menu-model.md#6-stats-submenu), [menu-model.md §8](menu-model.md#8-json-form).
+Answered by: [linux-tray.md §2](linux-tray.md#2-startup) step 4, [§4.3](linux-tray.md#43-installing-a-layout), [menu-model.md §6](menu-model.md#6-details-submenu), [menu-model.md §8](menu-model.md#8-json-form).
 
 ### K15. Every call left unanswered costs the host its full timeout
 
@@ -471,7 +471,7 @@ Answered by: [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (d
   figure produces no row; the traffic line appears only when something was sent or is owed; under
   a minute is said in words.
 
-Answered by: [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (absent is not zero), [§3](menu-model.md#3-formatters) (time left), [§5](menu-model.md#5-rows), [§6](menu-model.md#6-stats-submenu).
+Answered by: [menu-model.md §2](menu-model.md#2-input-one-status-per-domain) (absent is not zero), [§3](menu-model.md#3-formatters) (time left), [§5](menu-model.md#5-rows), [§6](menu-model.md#6-details-submenu).
 
 ### K28. A property derived from a label that was shortened for display
 

@@ -633,12 +633,12 @@ model's.
              {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
              {"label":"1.5 GiB of 3.7 GiB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
-             {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
+             {"label":"Details","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
              {"label":"Pause syncing","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
 
 `menu_stats` answers `{"ok":true,"entries":[…]}`: the stats rows of
-[menu-model.md §6](menu-model.md#6-stats-submenu), in the same JSON form. Until it arrives the
+[menu-model.md §6](menu-model.md#6-details-submenu), in the same JSON form. Until it arrives the
 submenu shows the model's placeholder row.
 
 - Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its

@@ -304,6 +304,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             unlock(domain: domain, problem: nil)
         } else if let domain = action["addCode"] as? String {
             addCode(domain: domain, problem: nil)
+        } else if let domain = action["seenMachines"] as? String {
+            // vault §6.3: listing the machines acknowledges them.
+            Thread.detachNewThread {
+                _ = try? OwnerClient.call(["action": "vault_machines", "domain": domain])
+                self.poll()
+            }
         }
     }
 

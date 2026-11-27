@@ -66,9 +66,9 @@ root properties: children-display
 row "photos — Syncing": enabled=true, visible=true
 row "    1 to download": enabled=true, visible=true
 row "    my__file__v2.txt": enabled=true, visible=true, icon-name=text-x-generic
-row "        1 B of 2 B": enabled=true, visible=true
+row "        ▰▰▰▰▰▱▱▱▱▱ 50% · 1 B of 2 B": enabled=true, visible=true
 row "---": type=separator
-row "Stats": enabled=true, visible=true, children-display=submenu
+row "Details": enabled=true, visible=true, children-display=submenu
 row "Pause syncing": enabled=true, visible=true, toggle-type=checkmark, toggle-state=0
 row "---": type=separator
 row "Quit tsync tray": enabled=true, visible=true
@@ -92,7 +92,7 @@ the revision increases: yes
 == an open menu is not replaced; stats
 before any opening the Stats row holds: Reading…
 after the answers the rows are the model's: yes
-the Stats row holds: box — owner | pid 7 · up 1h | --- | photos — versioned
+the Stats row holds: photos — keeps versions | --- | Service for photos: running 1h | --- | Copy report
 announced against the Stats row, with the menu open: true
 one opening announced twice: 1 stats requests
 content changing at every poll, menu open: 0 root updates

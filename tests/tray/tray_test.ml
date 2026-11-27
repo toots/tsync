@@ -748,7 +748,7 @@ let open_menu w =
   own w file_manager;
   start_tray w;
   ignore (shows w "photos — Up to date");
-  let stats () = row w "Stats" in
+  let stats () = row w "Details" in
   say w "before any opening the Stats row holds: %s"
     (String.concat " | " (List.map label (stats ()).children));
   let stats_id = (stats ()).id and photos = (row w "photos").id in
@@ -890,9 +890,9 @@ let nobody w =
   ignore (menu w "AboutToShow" [Int32 0]);
   ignore
     (wait_until (fun () ->
-         List.map label (row w "Stats").children = ["No daemon answering"]));
+         List.map label (row w "Details").children = ["No daemon answering"]));
   say w "with no owner answering the Stats row holds: %s"
-    (String.concat " | " (List.map label (row w "Stats").children));
+    (String.concat " | " (List.map label (row w "Details").children));
   say w "icon %s, switch enabled %s"
     (match
        call_at w ~path:"/StatusNotifierItem"

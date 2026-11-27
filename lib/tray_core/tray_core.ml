@@ -37,6 +37,8 @@ type t = {
   mutable stats_started : float;
   mutable unlocking : bool;
   mutable code_domains : string list;  (** at the last refresh (§6.5) *)
+  mutable report : (string * Yojson.Safe.t) list;
+      (** the last [status] and [stats] replies, for Copy report *)
   refreshing : Rt.Fmutex.t;
   finished : int Rt.Promise.t;
 }
@@ -51,6 +53,7 @@ let create ~quit platform =
     stats_started = neg_infinity;
     unlocking = false;
     code_domains = [];
+    report = [];
     refreshing = Rt.Fmutex.create ();
     finished = Rt.Promise.create ();
   }
@@ -140,6 +143,14 @@ let refresh t =
   locked t (fun () ->
       t.domains <- domains;
       t.code_domains <- codes;
+      t.report <-
+        ( "status",
+          `Assoc
+            (List.map
+               (fun (d, reply, _) ->
+                 (d.name, Option.value ~default:`Null reply))
+               answers) )
+        :: List.remove_assoc "status" t.report;
       t.reported_mounts <-
         List.filter_map
           (fun (d, reply, status) ->
@@ -219,11 +230,14 @@ let opened t =
   in
   if due then (
     Rt.spawn ~name:"tray stats" (fun () ->
+        let replies =
+          List.filter_map snd (ask_all t ~deadline:stats_deadline (Stats []))
+        in
+        locked t (fun () ->
+            t.report <-
+              ("stats", `List replies) :: List.remove_assoc "stats" t.report);
         t.platform.children Show_stats
-          (M.stats
-             (List.filter_map
-                (fun (_, reply) -> Option.bind reply M.stats_of_json)
-                (ask_all t ~deadline:stats_deadline (Stats [])))));
+          (M.stats ~report:true (List.filter_map M.stats_of_json replies)));
     (* §6.5: rows from an earlier opening are never shown again, so they are
        gone before the platform can show the submenu. *)
     let domains = code_domains t in
@@ -337,8 +351,25 @@ let set_paused t paused =
     (ask_all t ~deadline:pause_deadline (Pause paused));
   refresh t
 
+(* vault §6.3: listing the machines acknowledges them. *)
+let seen_machines t domain =
+  Option.iter
+    (fun d ->
+      match ask_domain ~deadline:stats_deadline d (Vault_machines None) with
+        | Ok _ -> refresh t
+        | Error reason -> t.platform.notify "Not marked as seen" reason)
+    (domain_named t domain)
+
+let copy_report t =
+  let report = locked t (fun () -> t.report) in
+  match t.platform.copy (Yojson.Safe.pretty_to_string (`Assoc report)) with
+    | Ok () -> ()
+    | Error reason -> t.platform.notify "The report was not copied" reason
+
 let run_action t : M.action -> unit = function
   | Nothing | Show_stats | Show_codes | Add_code _ -> ()
+  | Seen_machines domain -> seen_machines t domain
+  | Copy_report -> copy_report t
   | Copy_code { domain; id } -> copy_code t domain id
   | Unlock domain -> unlock t domain
   | Quit -> ignore (Rt.Promise.try_resolve t.finished 0)

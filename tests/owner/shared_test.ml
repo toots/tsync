@@ -143,26 +143,23 @@ let () =
         p "first events: %s" (String.concat ", " (List.sort compare (events 2)));
         show "menu" (menu ());
         (* The owner's own stats reply through the model. Figures vary with
-           the run, so a row is cut at its first figure or health. *)
+           the run, so a row is cut at its first digit. *)
           (match call [("action", "menu_stats")] with
           | `Assoc l -> (
               match List.assoc_opt "entries" l with
-                | Some (`List (_ :: rows)) ->
+                | Some (`List rows) ->
                     List.iter
                       (fun row ->
                         p "menu_stats row: %s"
                           (match Ipc.field row "label" with
                             | Some label -> (
                                 match
-                                  ( String.index_opt label ' ',
-                                    Tsync_core.Text.find_from label " — r" 0 )
+                                  Seq.find
+                                    (fun i -> label.[i] >= '0' && label.[i] <= '9')
+                                    (Seq.init (String.length label) Fun.id)
                                 with
-                                  | _, Some i -> String.sub label 0 i
-                                  | Some i, _
-                                    when List.mem (String.sub label 0 i)
-                                           ["pid"; "cpu"; "up"] ->
-                                      String.sub label 0 i
-                                  | _ -> label)
+                                  | Some i -> String.sub label 0 i
+                                  | None -> label)
                             | None -> "---"))
                       rows
                 | _ -> p "menu_stats: no entries")

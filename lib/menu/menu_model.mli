@@ -12,6 +12,8 @@ type action =
   | Copy_code of { domain : string; id : string }
   | Unlock of string
   | Add_code of string
+  | Seen_machines of string  (** acknowledges the domain's new machines *)
+  | Copy_report  (** the last [status] and [stats] replies onto the clipboard *)
   | Quit
 
 type item = {
@@ -44,6 +46,7 @@ val duration : float -> string option
 val time_left : remaining:float -> rate:float -> string
 val ellipsis : string -> string
 val file_icon : string -> string
+val progress_bar : moved:int -> total:int -> string
 
 (** {1 The menu (§2, §4, §5)} *)
 
@@ -72,8 +75,9 @@ val stats_of_json : Yojson.Safe.t -> stats option
 (** The one row shown until the first answer. *)
 val stats_placeholder : entry list
 
-(** The rows for the processes that answered; never empty. *)
-val stats : stats list -> entry list
+(** The rows for the processes that answered; never empty. [report] (default
+    [false]) ends them with the Copy report row. *)
+val stats : ?report:bool -> stats list -> entry list
 
 (** {1 Codes submenu (§7)} *)
 

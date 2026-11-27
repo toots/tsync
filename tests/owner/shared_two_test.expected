@@ -1,22 +1,18 @@
 subscribe without a domain   {"ok":true}
 first events: recovered docs, recovered pics
-menu                         {"icon":"tsync-idle-symbolic","tooltip":"tsync — Up to date","entries":[{"label":"docs — Up to date","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics — Up to date","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":true},"checked":false}]}
-menu_stats row: pid
-menu_stats row: cpu
-menu_stats row: up
+menu                         {"icon":"tsync-idle-symbolic","tooltip":"tsync — Up to date","entries":[{"label":"docs — Up to date","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"Files and one-time codes","enabled":true,"indent":1,"action":{}},{"label":"pics — Up to date","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Details","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":true},"checked":false}]}
+menu_stats row: pics — keeps versions
+menu_stats row: Cache: 
+menu_stats row: main (main): connected, 
 menu_stats row: ---
-menu_stats row: pics — versioned
-menu_stats row: cache 0 chunks · 0 B
-menu_stats row: queue 0 files · 0 B owed
-menu_stats row: main (main)
+menu_stats row: docs — keeps versions
+menu_stats row: Cache: 
+menu_stats row: main (main): connected, 
 menu_stats row: ---
-menu_stats row: docs — versioned
-menu_stats row: cache 0 chunks · 0 B
-menu_stats row: queue 0 files · 0 B owed
-menu_stats row: extensions totp
-menu_stats row: main (main)
+menu_stats row: Service for pics, docs: just started · 
+menu_stats row: Sent 
 pause every domain           {"ok":true,"paused":true}
-menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
+menu while held              {"icon":"tsync-paused-symbolic","tooltip":"tsync — Paused","entries":[{"label":"docs — Paused","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"Files and one-time codes","enabled":true,"indent":1,"action":{}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"label":"pics — Paused","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"label":"Changes stay on this machine and downloads wait until you resume.","enabled":true,"indent":1,"action":{}},{"separator":true},{"label":"Details","enabled":true,"indent":0,"action":{"stats":true},"submenu":true},{"label":"One-time codes","enabled":true,"indent":0,"action":{"codes":true},"submenu":true},{"label":"Pause syncing","enabled":true,"indent":0,"action":{"setPaused":false},"checked":true}]}
 resume                       {"ok":true,"paused":false}
 paused after resume: docs=false, pics=false
 after the first rebuilds and the resume: changed docs, changed pics, recovered docs, recovered pics

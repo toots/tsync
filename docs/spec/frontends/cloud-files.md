@@ -665,7 +665,7 @@ the menu model ([menu-model.md](menu-model.md)), which it evaluates itself.
   when Explorer restarts). Icons are the four `tsync-*-symbolic` images, drawn for light and dark
   taskbars. The tooltip is the model's, cut to what the platform shows.
 - **Refresh, stats and hold** are those of the Linux tray: refresh
-  ([linux-tray §5.2](linux-tray.md#52-refresh)), stats ([§6.1](linux-tray.md#61-stats)), hold
+  ([linux-tray §5.2](linux-tray.md#52-refresh)), details ([§6.1](linux-tray.md#61-details)), hold
   changes ([§6.2](linux-tray.md#62-pause-syncing)), quit ([§6.4](linux-tray.md#64-quit)), with the
   same parameters. The config is read from §4.2.
 - **The interface thread never waits on an owner.** Requests run on other threads; the menu opens on

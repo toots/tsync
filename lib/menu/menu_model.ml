@@ -8,6 +8,8 @@ type action =
   | Copy_code of { domain : string; id : string }
   | Unlock of string
   | Add_code of string
+  | Seen_machines of string
+  | Copy_report
   | Quit
 
 type item = {
@@ -34,6 +36,7 @@ type t = { icon : state; tooltip : string; entries : entry list }
 
 let file_rows = 5
 let label_max = 64
+let bar_cells = 10
 
 let row ?(enabled = true) ?icon ?checked ?(indent = 0) ?(submenu = false)
     ?(action = Nothing) ?vault label =
@@ -85,6 +88,14 @@ let ellipsis text =
         | _ -> cut
     in
     String.sub text 0 cut ^ "…")
+
+let progress_bar ~moved ~total =
+  let share n = min n (n * moved / total) in
+  let filled = share bar_cells in
+  let cells n glyph = String.concat "" (List.init n (fun _ -> glyph)) in
+  Printf.sprintf "%s%s %d%%" (cells filled "▰")
+    (cells (bar_cells - filled) "▱")
+    (share 100)
 
 let icons =
   [
@@ -166,6 +177,8 @@ type status = {
   new_machines : string list;
       [@key "newMachines"] [@of_yojson items string_of_yojson] [@default []]
   vault_backup_overdue : flag; [@key "vaultBackupOverdue"] [@default false]
+  mount : text; [@default None]
+  extensions : string list; [@of_yojson items string_of_yojson] [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -221,6 +234,11 @@ let state = function
   | Some _ -> ("Up to date", None)
 
 let progress_row (t : transfer) =
+  let bar =
+    match (t.bytes, t.size) with
+      | Some moved, Some total when total > 0 -> [progress_bar ~moved ~total]
+      | _ -> []
+  in
   let amount =
     match (t.bytes, t.size) with
       | Some moved, Some total -> [size moved ^ " of " ^ size total]
@@ -234,7 +252,7 @@ let progress_row (t : transfer) =
           [time_left ~remaining:(float_of_int (total - moved)) ~rate:r]
       | _ -> []
   in
-  line ~indent:2 (amount @ speed @ left)
+  line ~indent:2 (bar @ amount @ speed @ left)
 
 let file_rows_of domain transfers =
   let sorted =
@@ -255,23 +273,56 @@ let file_rows_of domain transfers =
   if hidden > 0 then [row ~indent:1 (Printf.sprintf "… and %d more" hidden)]
   else []
 
+let english_list = function
+  | [] -> ""
+  | [one] -> one
+  | l ->
+      let rev = List.rev l in
+      String.concat ", " (List.rev (List.tl rev)) ^ " and " ^ List.hd rev
+
+(* §5: what the domain holds, and where. *)
+let contents_row s =
+  let has e = List.mem e s.extensions in
+  let extras =
+    (if has "passwords" then ["passwords"] else [])
+    @ (if has "totp" then ["one-time codes"] else [])
+    @
+    if has "vault" && not (has "passwords" || has "totp") then
+      ["an encrypted vault"]
+    else []
+  in
+  match (extras, s.mount) with
+    | [], None -> []
+    | _ -> [row ~indent:1 (join (english_list ("Files" :: extras) :: part ellipsis s.mount))]
+
+let machine_rows name s =
+  match s.new_machines with
+    | [] -> []
+    | machines ->
+        List.map
+          (fun m -> row ~indent:1 ~icon:"computer" (m ^ " can now unlock this vault"))
+          machines
+        @ [row ~indent:1 ~action:(Seen_machines name) "Mark as seen"]
+
 let domain_rows (name, status) =
   let label, sentence = state status in
-  let below =
+  let sentence = Option.to_list (Option.map (row ~indent:1) sentence) in
+  let rows =
     match status with
-      | None -> []
+      | None -> sentence
       | Some s ->
-          List.map
-            (fun m -> row ~indent:1 ~icon:"computer" (m ^ " joined the vault"))
-            s.new_machines
+          contents_row s @ sentence
+          @ machine_rows name s
           @ (if s.vault_backup_overdue then
-               [row ~indent:1 "The vault's backup is overdue"]
+               [
+                 row ~indent:1 ~icon:"dialog-warning"
+                   "The vault's backup is overdue";
+               ]
              else [])
           @ file_rows_of name s.uploading
           @ file_rows_of name s.downloading
   in
-  row ~action:(Open_folder name) (name ^ " — " ^ label)
-  :: (Option.to_list (Option.map (row ~indent:1) sentence) @ below)
+  row ~action:(Open_folder name) (name ^ " — " ^ label) :: rows
 
 let render ?quit ?(codes = []) domains =
   let reachable = List.filter_map snd domains in
@@ -330,7 +381,7 @@ let render ?quit ?(codes = []) domains =
     (if domains = [] then [row tooltip] else [])
     @ List.concat_map domain_rows domains
     @ traffic
-    @ [Separator; row ~submenu:true ~action:Show_stats "Stats"]
+    @ [Separator; row ~submenu:true ~action:Show_stats "Details"]
     @ (if codes = [] then []
        else [row ~submenu:true ~action:Show_codes "One-time codes"])
     @ [
@@ -369,12 +420,10 @@ type backend = {
 type settings = {
   read_only : flag; [@key "readOnly"] [@default false]
   versioning : flag; [@default false]
-  extensions : string list; [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
 type cache = {
-  chunks : count; [@default None]
   bytes : count; [@default None]
   max_cache : count; [@key "maxCache"] [@default None]
   pinned_bytes : count; [@key "pinnedBytes"] [@default None]
@@ -400,13 +449,6 @@ type sync = {
 }
 [@@deriving of_yojson { strict = false }]
 
-type frontend = {
-  mount : text; [@default None]
-  bytes_read : count; [@key "bytesRead"] [@default None]
-  bytes_written : count; [@key "bytesWritten"] [@default None]
-}
-[@@deriving of_yojson { strict = false }]
-
 type domain = {
   name : string;
   unanswered : flag; [@default false]
@@ -415,24 +457,14 @@ type domain = {
   cache : cache option; [@of_yojson lenient cache_of_yojson] [@default None]
   queues : queues option; [@of_yojson lenient queues_of_yojson] [@default None]
   sync : sync option; [@of_yojson lenient sync_of_yojson] [@default None]
-  frontends : frontend list; [@of_yojson items frontend_of_yojson] [@default []]
   backends : backend list; [@of_yojson items backend_of_yojson] [@default []]
 }
 [@@deriving of_yojson { strict = false }]
 
-type server = {
-  hostname : text; [@default None]
-  role : text; [@default None]
-  pid : count; [@default None]
-  uptime : number; [@key "uptimeSeconds"] [@default None]
-}
+type server = { uptime : number [@key "uptimeSeconds"] [@default None] }
 [@@deriving of_yojson { strict = false }]
 
-type usage = {
-  cpu_percent : number; [@key "cpuPercentAvg"] [@default None]
-  rss_bytes : count; [@key "rssBytes"] [@default None]
-  heap_bytes : count; [@key "heapBytes"] [@default None]
-}
+type usage = { rss_bytes : count [@key "rssBytes"] [@default None] }
 [@@deriving of_yojson { strict = false }]
 
 type self = {
@@ -460,97 +492,118 @@ let stats_of_json j =
 
 let stats_placeholder = [row "Reading…"]
 
+(* §6: a count and its noun, singular for one. *)
+let counted n noun = Printf.sprintf "%d %s%s" n noun (if n = 1 then "" else "s")
+
 let backend_row (b : backend) =
-  let health =
+  let role =
+    match b.role with
+      | Some "readOnly" -> "read-only"
+      | Some r -> r
+      | None -> "?"
+  in
+  let connection =
     match b.reach with
       | None -> ""
-      | Some { reachable = true; latency_ms = None; _ } -> " — reachable"
+      | Some { reachable = true; latency_ms = None; _ } -> ": connected"
       | Some { reachable = true; latency_ms = Some ms; _ } ->
-          Printf.sprintf " — reachable, %.0f ms" (Float.round ms)
-      | Some { error = None | Some ""; _ } -> " — unreachable"
-      | Some { error = Some e; _ } -> " — unreachable: " ^ ellipsis e
+          Printf.sprintf ": connected, %.0f ms" (Float.round ms)
+      | Some { error = None | Some ""; _ } -> ": unreachable"
+      | Some { error = Some e; _ } -> ": unreachable: " ^ ellipsis e
   in
-  let corrupt =
+  let damage =
     match b.corrupted with
-      | Some { checked = false; _ } -> ["not checked"]
-      | Some { chunks = Some n; _ } when n > 0 ->
-          [Printf.sprintf "%d corrupt — run tsync data-integrity" n]
+      | Some { checked = true; chunks = Some n } when n > 0 ->
+          [counted n "damaged chunk" ^ " — run tsync data-integrity"]
       | _ -> []
   in
   row ~indent:1
     (join
        (Printf.sprintf "%s (%s)%s"
           (Option.value ~default:"?" b.name)
-          (Option.value ~default:"?" b.role)
-          health
-       :: corrupt))
+          role connection
+       :: damage))
 
-let domain_stats (d : domain) =
+let domain_details (d : domain) =
   let traits =
     match d.settings with
       | None -> []
       | Some s ->
           (if s.read_only then ["read-only"] else [])
-          @ if s.versioning then ["versioned"] else []
+          @ if s.versioning then ["keeps versions"] else []
   in
+  let queued f = Option.bind d.queues f and sync f = Option.bind d.sync f in
   let cache =
     match d.cache with
-      | Some
-          { chunks = Some chunks; bytes = Some bytes; max_cache; pinned_bytes }
-        ->
+      | Some { bytes = Some bytes; max_cache; pinned_bytes } ->
           [
-            Printf.sprintf "cache %d chunks · %s%s" chunks (size bytes)
-              (match positive max_cache with
-                | Some max -> " of " ^ size max
-                | None -> "");
+            row ~indent:1
+              (Printf.sprintf "Cache: %s%s%s" (size bytes)
+                 (match positive max_cache with
+                   | Some max -> " of " ^ size max
+                   | None -> "")
+                 (match positive pinned_bytes with
+                   | Some p -> ", " ^ size p ^ " kept offline"
+                   | None -> ""));
           ]
-          @ part (fun p -> size p ^ " pinned") (positive pinned_bytes)
       | _ -> []
   in
-  let queued f = Option.bind d.queues f
-  and moved f = sum_known ( + ) 0 (List.map f d.frontends)
-  and sync f = Option.bind d.sync f in
-  [
-    Separator;
-    row (d.name ^ if traits = [] then "" else " — " ^ String.concat ", " traits);
-  ]
+  let to_upload =
+    part
+      (fun n ->
+        row ~indent:1
+          (Printf.sprintf "To upload: %s%s" (counted n "file")
+             (match queued (fun q -> q.bytes_owed) with
+               | Some b -> ", " ^ size b
+               | None -> "")))
+      (positive (queued (fun q -> q.pending_files)))
+  in
+  row (d.name ^ if traits = [] then "" else " — " ^ String.concat ", " traits)
+  :: cache
+  @ to_upload
   @ part
-      (fun m -> row ~indent:1 (ellipsis m))
-      (List.find_map (fun f -> f.mount) d.frontends)
-  @ line ~indent:1 cache
-  @ line ~indent:1
-      (part
-         (Printf.sprintf "queue %d files")
-         (queued (fun q -> q.pending_files))
-      @ part (fun b -> size b ^ " owed") (queued (fun q -> q.bytes_owed)))
-  @ (match d.settings with
-    | Some { extensions = _ :: _ as names; _ } ->
-        [row ~indent:1 ("extensions " ^ String.concat ", " names)]
-    | _ -> [])
-  @ line ~indent:1
-      (part (fun b -> "read " ^ size b) (moved (fun f -> f.bytes_read))
-      @ part (fun b -> "written " ^ size b) (moved (fun f -> f.bytes_written)))
-  @ line ~indent:1
-      (match
-         part
-           (Printf.sprintf "%d pending")
-           (positive (sync (fun s -> s.pending)))
-         @ part
-             (Printf.sprintf "%d parked")
-             (positive (queued (fun q -> q.parked)))
-         @ part
-             (Printf.sprintf "stopped at entry %d")
-             (sync (fun s -> Option.bind s.cannot_follow (fun c -> c.entry)))
-       with
-        | [] -> []
-        | first :: rest -> ("sync " ^ first) :: rest)
+      (fun n -> row ~indent:1 (counted n "upload" ^ " waiting to be retried"))
+      (positive (queued (fun q -> q.parked)))
+  @ part
+      (fun n -> row ~indent:1 (counted n "change" ^ " to apply"))
+      (positive (sync (fun s -> s.pending)))
+  @ part
+      (fun n -> row ~indent:1 (Printf.sprintf "Can't follow change %d" n))
+      (sync (fun s -> Option.bind s.cannot_follow (fun c -> c.entry)))
   @ List.map backend_row d.backends
 
-let process_stats (s : stats) =
+let service_row (s : stats) =
   let self f = Option.bind s.self f in
-  let server f = Option.bind (self (fun s -> s.server)) f
-  and usage f = Option.bind (self (fun s -> s.usage)) f
-  and traffic f = Option.bind (self (fun s -> s.traffic)) f in
+  let running =
+    part
+      (fun up ->
+        match duration up with
+          | Some d -> "running " ^ d
+          | None -> "just started")
+      (Option.bind (self (fun s -> s.server)) (fun s -> s.uptime))
+  and memory =
+    part
+      (fun b -> size b ^ " memory")
+      (Option.bind (self (fun s -> s.usage)) (fun u -> u.rss_bytes))
+  in
+  match running @ memory with
+    | [] -> []
+    | parts ->
+        [
+          row
+            (match s.domains with
+              | [] -> "Service: " ^ join parts
+              | domains ->
+                  Printf.sprintf "Service for %s: %s"
+                    (String.concat ", "
+                       (List.map (fun (d : domain) -> d.name) domains))
+                    (join parts));
+        ]
+
+let traffic_row replies =
+  let summed f = sum_known ( + ) 0 (List.map f replies)
+  and rates f = sum_known ( +. ) 0. (List.map f replies) in
+  let traffic f (s : stats) = Option.bind (Option.bind s.self (fun s -> s.traffic)) f in
   let flow name bytes speed =
     part
       (fun b ->
@@ -560,40 +613,35 @@ let process_stats (s : stats) =
             | _ -> ""))
       bytes
   in
-  [
-    row
-      (Printf.sprintf "%s — %s"
-         (Option.value ~default:"?" (server (fun s -> s.hostname)))
-         (Option.value ~default:"?" (server (fun s -> s.role))));
-  ]
-  @ part
-      (fun pid ->
-        row
-          (join
-             (Printf.sprintf "pid %d" pid
-             :: part
-                  (fun up ->
-                    match duration up with
-                      | Some d -> "up " ^ d
-                      | None -> "just started")
-                  (server (fun s -> s.uptime)))))
-      (server (fun s -> s.pid))
-  @ line
-      (part (Printf.sprintf "cpu %.1f%%") (usage (fun u -> u.cpu_percent))
-      @ part (fun b -> size b ^ " rss") (usage (fun u -> u.rss_bytes))
-      @ part (fun b -> size b ^ " heap") (usage (fun u -> u.heap_bytes)))
-  @ line
-      (flow "up" (traffic (fun t -> t.up_bytes)) (traffic (fun t -> t.up_rate))
-      @ flow "down"
-          (traffic (fun t -> t.down_bytes))
-          (traffic (fun t -> t.down_rate)))
-  @ List.concat_map domain_stats s.domains
+  line
+    (flow "Sent"
+       (summed (traffic (fun t -> t.up_bytes)))
+       (rates (traffic (fun t -> t.up_rate)))
+    @ flow "received"
+        (summed (traffic (fun t -> t.down_bytes)))
+        (rates (traffic (fun t -> t.down_rate))))
 
-let stats = function
-  | [] -> [row "No daemon answering"]
-  | first :: rest ->
-      process_stats first
-      @ List.concat_map (fun s -> Separator :: process_stats s) rest
+let stats ?(report = false) replies =
+  let separated = function
+    | [] -> []
+    | first :: rest -> first @ List.concat_map (fun l -> Separator :: l) rest
+  in
+  match replies with
+    | [] -> [row "No daemon answering"]
+    | replies ->
+        let device =
+          List.concat_map service_row replies @ traffic_row replies
+        in
+        (match
+           List.concat_map
+             (fun (s : stats) -> List.map domain_details s.domains)
+             replies
+           @ if device = [] then [] else [device]
+         with
+          | [] -> [[row "Nothing reported"]]
+          | sections -> sections)
+        @ (if report then [[row ~action:Copy_report "Copy report"]] else [])
+        |> separated
 
 (* §7: what the model reads of one domain's [totp_list] reply, or its
    failure. *)
@@ -686,6 +734,8 @@ let action_to_yojson = function
         [("copyCode", `Assoc [("domain", `String domain); ("id", `String id)])]
   | Unlock domain -> `Assoc [("unlock", `String domain)]
   | Add_code domain -> `Assoc [("addCode", `String domain)]
+  | Seen_machines domain -> `Assoc [("seenMachines", `String domain)]
+  | Copy_report -> `Assoc [("copyReport", `Bool true)]
   | Quit -> `Assoc [("quit", `Bool true)]
 
 (* §7: a row's icon is not sent. *)

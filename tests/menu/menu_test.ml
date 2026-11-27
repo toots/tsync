@@ -18,6 +18,8 @@ let action = function
   | Copy_code { domain; id } -> Printf.sprintf " -> copy %s:%s" domain id
   | Unlock d -> " -> unlock " ^ d
   | Add_code d -> " -> add " ^ d
+  | Seen_machines d -> " -> seen " ^ d
+  | Copy_report -> " -> copy report"
   | Quit -> " -> quit"
 
 let entry = function
@@ -44,9 +46,9 @@ let show (m : M.t) =
   Printf.printf "icon    %s\ntooltip %s\n" (M.icon_name m.icon) m.tooltip;
   List.iter entry m.entries
 
-let stats replies =
+let stats ?report replies =
   List.iter entry
-    (M.stats
+    (M.stats ?report
        (List.filter_map
           (fun text -> M.stats_of_json (Yojson.Safe.from_string text))
           replies))
@@ -136,8 +138,29 @@ let () =
                 {"name":"notes.pdf","rel":"notes.pdf","bytes":240000,"size":900000},
                 {"name":"holiday.mov","rel":"trips/holiday.mov","bytes":788529152,
                  "size":15589124313,"rate":1600000}],
+              "mount":"/home/u/tsync/photos","extensions":["vault","passwords"],
+              "newMachines":["Pixel 8"],
               "traffic":{"upBytes":1000},"pendingBytes":0}|}
          );
+       ]);
+
+  case "formatters: progress bar";
+  List.iter
+    (fun (moved, total) ->
+      Printf.printf "%d / %d -> %s\n" moved total (M.progress_bar ~moved ~total))
+    [(0, 100); (788529152, 15589124313); (240000, 900000); (100, 100); (150, 100)];
+
+  case "contents rows: what each domain holds, and where";
+  show
+    (menu
+       [
+         ("plain", idle);
+         ("mounted", {|{"ok":true,"mount":"/home/u/tsync/mounted"}|});
+         ("vault", {|{"ok":true,"extensions":["vault"]}|});
+         ("codes", {|{"ok":true,"extensions":["vault","totp"]}|});
+         ("all", {|{"ok":true,"extensions":["totp","vault","passwords"]}|});
+         ("unknown", {|{"ok":true,"extensions":["frobnicate"]}|});
+         ("down", silent);
        ]);
 
   case "two domains, one busy: rows sorted, traffic and rate summed";
@@ -358,6 +381,20 @@ let () =
     ];
   case "stats: sparse";
   stats [{|{"ok":true,"self":{"server":{"hostname":"box"}}}|}];
+  case "stats: counts of one, a read-only store, and Copy report";
+  stats ~report:true
+    [
+      {|{"ok":true,
+         "self":{"process":{"rssBytes":1048576},"traffic":{"upBytes":2048}},
+         "domains":[{"name":"Files",
+           "queues":{"pendingFiles":1,"bytesOwed":4096,"parked":1},
+           "sync":{"pending":1},
+           "cache":{"chunks":3,"bytes":4096},
+           "backends":[{"name":"ro","role":"readOnly","reach":{"reachable":true},
+                        "corrupted":{"checked":true,"chunks":1}}]}]}|};
+    ];
+  case "stats: Copy report with nothing answering";
+  stats ~report:true [silent];
   case "stats: an entry that cannot be followed";
   stats
     [
