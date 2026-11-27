@@ -686,7 +686,9 @@ the row copies its secret.
   then writes it to the general pasteboard as plain text together with the
   `org.nspasteboard.ConcealedType` marker, so clipboard managers and history skip it. The code is
   never logged and never cached in the app beyond the page on screen. A refusal is shown as a user
-  notification carrying the reply's `error`; nothing is written.
+  notification carrying the reply's `error`; nothing is written. A copy that succeeded is said on
+  its row: a checkmark and `Copied` in place of the row's icon, for `copied_feedback`; a copy
+  that failed leaves the row as it was.
 - The page ends with **Add a code…**. A locked vault shows `Locked` and **Unlock…**; a domain with
   no vault says so; a failure shows the reply's `error`.
 - `unlock` opens a dialog with a secure text field for the passphrase (no echo, no autofill,
@@ -719,7 +721,8 @@ A page of the panel, opened from the Vault section, for one domain.
 - Each login is a row with its title and username. A click on the row asks `passwords_get` for
   that record and writes its `password` as §10.1 writes a code: plain text with the concealed
   marker, never logged, never cached in the app. A refusal is a user notification carrying the
-  reply's `error`. A **Copy username** button beside it copies the username, which is no secret.
+  reply's `error`. A copy that succeeded is said on the row as §10.1 says it. A **Copy
+  username** button beside it copies the username, which is no secret, and says so the same way.
 - A locked vault shows `Locked` and **Unlock…**, the dialog of §10.1; a domain with no vault says
   so; a failure shows the reply's `error`.
 
@@ -797,6 +800,7 @@ A page of the panel, opened from the Vault section, for one domain.
 | `purge_wait` | 60 s | |
 | `menu_poll_interval` | 3 s | |
 | `panel_size` | 380 × 560 points | |
+| `copied_feedback` | 1.5 s | long enough to be seen after a click, short enough not to be read as a state |
 
 ## 14. Conformance
 

@@ -366,7 +366,9 @@ helper ever receives a secret in its arguments, which other processes can list.
   `x-kde-passwordManagerHint` = `secret` beside the text so Klipper keeps no history of it. The
   tray waits for `wl-copy` to return, which it does once it serves the clipboard. The code is not
   cleared on a timer, never logged and not kept. A refusal, or `wl-copy` failing, is a desktop
-  notification (`org.freedesktop.Notifications`) carrying the reason; nothing is copied.
+  notification (`org.freedesktop.Notifications`) carrying the reason; nothing is copied. A copy
+  that succeeded is a notification `One-time code copied`, which carries no code: the menu closed
+  on the click, so nothing else can say it.
 - **`Unlock(domain)`** asks `vault_status`, then runs `kdialog --password` naming the domain, and
   reads the passphrase from its standard output; on a machine not enrolled
   ([vault §6](../extensions/vault.md#6-unlocking-and-the-keystore)), a second one for the secret
@@ -387,7 +389,8 @@ The same as §6.5, for [menu-model.md §7.1](menu-model.md#71-passwords-submenu)
 - **The submenu** is set at every opening notice from `passwords_list`, sent to every password
   domain at the same time under `TRAY_STATS_DEADLINE`, placeholder first.
 - **`CopyPassword(domain, id)`** asks the owner `passwords_get` for that record and copies its
-  `password` as `CopyCode` copies a code; nothing else of the reply is kept.
+  `password` as `CopyCode` copies a code; nothing else of the reply is kept. Success is the
+  notification `Password copied`.
 - **`Unlock(domain)`** is §6.5's.
 
 ## 7. Showing a path in the file manager

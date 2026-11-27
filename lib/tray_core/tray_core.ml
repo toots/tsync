@@ -280,7 +280,9 @@ let copy_code t domain id =
           | Error reason -> t.platform.notify "The code was not copied" reason
           | Ok { code; _ } -> (
               match t.platform.copy code with
-                | Ok () -> ()
+                | Ok () ->
+                    t.platform.notify "One-time code copied"
+                      "It is on the clipboard."
                 | Error reason ->
                     t.platform.notify "The code was not copied" reason))
 
@@ -304,7 +306,9 @@ let copy_password t domain id =
                 | None, None -> failed "the record has no password"
                 | None, Some password -> (
                     match t.platform.copy password with
-                      | Ok () -> ()
+                      | Ok () ->
+                          t.platform.notify "Password copied"
+                            "It is on the clipboard."
                       | Error reason -> failed reason)))
 
 (* §6.5: [sentence] is the owner's word on the previous attempt. *)

@@ -679,9 +679,10 @@ the menu model ([menu-model.md](menu-model.md)), which it evaluates itself.
 - **Copy code** asks `totp_code` and puts the code on the clipboard as text, with the clipboard
   formats that keep it out of clipboard monitors, clipboard history and cloud clipboard. It is never
   logged and never kept. A refusal is a notification carrying the owner's sentence; nothing is
-  copied.
+  copied. Success is the notification `One-time code copied`, which carries no code.
 - **Copy password** asks `passwords_get` for the record and puts its `password` on the clipboard
-  as Copy code puts a code, and keeps nothing else of the reply; the passwords submenu lists the
+  as Copy code puts a code, and keeps nothing else of the reply; success is the notification
+  `Password copied`; the passwords submenu lists the
   domains that use `passwords` ([menu-model §7.1](menu-model.md#71-passwords-submenu)).
 - **Unlock** opens a dialog naming the domain with a password field, and a second for the secret
   key when status says this machine is not enrolled; each has a Show box

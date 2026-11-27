@@ -35,9 +35,13 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
             self?.pause(paused)
             self?.poll()
         }
-        model.copyCode = { [weak self] domain, id in self?.copyCode(domain: domain, id: id) }
+        model.copyCode = { [weak self] domain, id, copied in
+            self?.copyCode(domain: domain, id: id, copied: copied)
+        }
         model.addCode = { [weak self] domain in self?.addCode(domain: domain, problem: nil) }
-        model.copyPassword = { [weak self] domain, id in self?.copyPassword(domain: domain, id: id) }
+        model.copyPassword = { [weak self] domain, id, copied in
+            self?.copyPassword(domain: domain, id: id, copied: copied)
+        }
         model.unlock = { [weak self] domain in self?.unlock(domain: domain, problem: nil) }
         model.openSettings = { [weak self] in self?.openAutofillSettings() }
         model.open = { [weak self] name in self?.withRoot(of: name) { NSWorkspace.shared.open($0) } }
@@ -193,20 +197,23 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
         return lines
     }
 
-    private func copyCode(domain: String, id: String) {
+    private func copyCode(domain: String, id: String, copied: @escaping () -> Void) {
         copySecret(["action": "totp_code", "domain": domain, "id": id], field: "code",
-                   failure: "Code not copied")
+                   failure: "Code not copied", copied: copied)
     }
 
     /// §10.2: a password is copied as a code is.
-    private func copyPassword(domain: String, id: String) {
+    private func copyPassword(domain: String, id: String, copied: @escaping () -> Void) {
         copySecret(["action": "passwords_get", "domain": domain, "id": id], field: "password",
-                   failure: "Password not copied")
+                   failure: "Password not copied", copied: copied)
     }
 
     /// One field of the owner's reply onto the pasteboard, concealed; nothing
-    /// else of the reply is kept.
-    private func copySecret(_ request: [String: Any], field: String, failure title: String) {
+    /// else of the reply is kept. [copied] runs on the main queue once it is there.
+    private func copySecret(
+        _ request: [String: Any], field: String, failure title: String,
+        copied: @escaping () -> Void
+    ) {
         Thread.detachNewThread {
             do {
                 let reply = try OwnerClient.call(request)
@@ -218,6 +225,7 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
                     pasteboard.declareTypes([.string, concealed], owner: nil)
                     pasteboard.setString(secret, forType: .string)
                     pasteboard.setString("", forType: concealed)
+                    copied()
                 }
             } catch let failure as OwnerFailure {
                 Self.notify(title: title, body: failure.message)

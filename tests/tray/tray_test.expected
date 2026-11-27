@@ -172,6 +172,7 @@ a click runs wl-copy: yes
 wl-copy ran with: --sensitive --type text/plain
 the owner's code is on its standard input: yes
 no argument holds the code: yes
+a copy that succeeded says so, without the code: yes
 with no WAYLAND_DISPLAY there is no codes row: yes
 with no wl-copy there is no codes row: yes
 

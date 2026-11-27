@@ -13,9 +13,10 @@ final class PanelModel: ObservableObject {
     @Published var domains: [String] = []
 
     var pause: (Bool) -> Void = { _ in }
-    var copyCode: (String, String) -> Void = { _, _ in }
+    /// The domain, the record, and what to run once the secret is on the pasteboard.
+    var copyCode: (String, String, @escaping () -> Void) -> Void = { _, _, _ in }
     var addCode: (String) -> Void = { _ in }
-    var copyPassword: (String, String) -> Void = { _, _ in }
+    var copyPassword: (String, String, @escaping () -> Void) -> Void = { _, _, _ in }
     var unlock: (String) -> Void = { _ in }
     var openSettings: () -> Void = {}
     var open: (String) -> Void = { _ in }
@@ -148,7 +149,10 @@ struct VaultPage: View {
     @State private var items: [Item] = []
     @State private var locked = false
     @State private var problem: String?
+    /// §10.1: the row whose copy just succeeded, and which of its two copies.
+    @State private var copied: String?
     private static let typing: UInt64 = 250_000_000
+    private static let copiedFeedback: UInt64 = 1_500_000_000
 
     var body: some View {
         Form {
@@ -192,7 +196,12 @@ struct VaultPage: View {
         HStack {
             Button { copy(item) } label: {
                 HStack {
-                    Image(systemName: kind == .codes ? "123.rectangle" : "key").foregroundStyle(.secondary)
+                    if copied == item.id {
+                        Label("Copied", systemImage: "checkmark.circle.fill")
+                            .labelStyle(.iconOnly).foregroundStyle(.green)
+                    } else {
+                        Image(systemName: kind == .codes ? "123.rectangle" : "key").foregroundStyle(.secondary)
+                    }
                     VStack(alignment: .leading) {
                         Text(item.title).lineLimit(1)
                         if !item.detail.isEmpty {
@@ -200,23 +209,43 @@ struct VaultPage: View {
                         }
                     }
                     Spacer()
-                    if let code = item.code { CodeView(code: code, expires: item.expires) }
+                    if copied == item.id {
+                        Text("Copied").font(.callout.weight(.semibold)).foregroundStyle(.green)
+                    } else if let code = item.code {
+                        CodeView(code: code, expires: item.expires)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(kind == .codes ? "Copy the code" : "Copy the password")
             if kind == .passwords && !item.detail.isEmpty {
-                Button { Pasteboard.copy(item.detail) } label: { Image(systemName: "person") }
-                    .buttonStyle(.borderless).help("Copy username")
+                Button {
+                    Pasteboard.copy(item.detail)
+                    acknowledge("user:" + item.id)
+                } label: {
+                    Image(systemName: copied == "user:" + item.id ? "checkmark" : "person")
+                        .foregroundStyle(copied == "user:" + item.id ? .green : .accentColor)
+                }
+                .buttonStyle(.borderless).help("Copy username")
             }
         }
     }
 
     private func copy(_ item: Item) {
+        let done = { acknowledge(item.id) }
         switch kind {
-        case .codes: model.copyCode(domain, item.id)
-        case .passwords: model.copyPassword(domain, item.id)
+        case .codes: model.copyCode(domain, item.id, done)
+        case .passwords: model.copyPassword(domain, item.id, done)
+        }
+    }
+
+    /// Shown for `copied_feedback`, unless another copy took its place.
+    private func acknowledge(_ key: String) {
+        withAnimation { copied = key }
+        Task {
+            try? await Task.sleep(nanoseconds: Self.copiedFeedback)
+            if copied == key { withAnimation { copied = nil } }
         }
     }
 
