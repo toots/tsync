@@ -176,10 +176,11 @@ store request ended `unreachable` and no pull has completed since. A listing `ou
 `offline` is one whose pull had not completed when it was answered: the store is reachable, and a
 host does not show it as offline. A page asked with
 `after` carries the flags of the view it continues: `outdated` only when this process never
-completed a pull of the folder. A client takes a listing's flags from its first page.
+completed a pull of the folder, `offline` as the owner holds the store now. A client takes a listing's flags from its first page.
 
 **Notices.** After a pull that changed a folder's children, after the first completed pull of a
-folder it answered `outdated`, whether or not its children differ, and after every mutation it
+folder it answered `outdated`, whether or not its children differ, after a pull that ended
+`unreachable` of a folder it answered `outdated` and not `offline` meanwhile, and after every mutation it
 performs, the owner sends the host a `changed` notice naming each folder concerned (§4.2). The host
 tells the platform; the owner does not track what the platform displays.
 

@@ -27,8 +27,9 @@ type t = {
   m : Mutex.t;
   fresh : (string, float) Hashtbl.t;
       (** folder id → monotonic time of this process's last completed pull *)
-  owed_notice : (string, unit) Hashtbl.t;
-      (** folders answered outdated while their pull ran *)
+  owed_notice : (string, bool) Hashtbl.t;
+      (** folders answered outdated while their pull ran, and whether that
+          answer said offline *)
   unreachable : bool Atomic.t;
   passes : passes;
   passes_m : Mutex.t;
@@ -100,7 +101,21 @@ let start t dir =
               if differs || owed then (try t.changed [dir] with _ -> ());
               Ok ()
           | exception (Fail.E { kind = Unreachable; _ } as e) ->
-              note_unreachable t;
+              (* android §3.2: an answer that said online is listed again,
+                 now offline; one that said offline already is not, or each
+                 relisting's pull would notify again. Under [t.m] with
+                 [stale]'s check, so an answer either says offline or is
+                 owed this notice. *)
+              let said_online =
+                Mutex.protect t.m (fun () ->
+                    note_unreachable t;
+                    match Hashtbl.find_opt t.owed_notice dir with
+                      | Some false ->
+                          Hashtbl.remove t.owed_notice dir;
+                          true
+                      | _ -> false)
+              in
+              if said_online then (try t.changed [dir] with _ -> ());
               Error e
           | exception e -> Error e
       in
@@ -136,7 +151,11 @@ let continued t dir =
       | Some k -> Mutex.protect t.m (fun () -> Hashtbl.mem t.fresh k)
       | None -> false
   in
-  { pulled_at = E.pulled_at dir; outdated = not pulled; offline = false }
+  {
+    pulled_at = E.pulled_at dir;
+    outdated = not pulled;
+    offline = t.silent () || Atomic.get t.unreachable;
+  }
 
 let for_listing t ~pull dir =
   let (module E : Engine.S) = t.engine in
@@ -145,8 +164,13 @@ let for_listing t ~pull dir =
     { pulled_at = E.pulled_at dir; outdated = false; offline = false }
   in
   let stale () =
-    Mutex.protect t.m (fun () -> Hashtbl.replace t.owed_notice dir ());
-    { pulled_at = E.pulled_at dir; outdated = true; offline = offline () }
+    let offline =
+      Mutex.protect t.m (fun () ->
+          let offline = offline () in
+          Hashtbl.replace t.owed_notice dir offline;
+          offline)
+    in
+    { pulled_at = E.pulled_at dir; outdated = true; offline }
   in
   match pull with
     | `Never ->

@@ -109,9 +109,10 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)) are shown, never hidden
   (§7, §10.3). The offline state is per domain. An `unreachable` answer or an `offline` listing
   puts its domain in the offline state. Only that domain's `recovered` notice, or a listing of it that
-  is not `offline`, clears it. A listing `outdated` and not `offline` is shown as it is: its pull
-  goes on, and its `changed` notice lists the folder again: `stat`, `status` and
-  mutations succeed without the store and say nothing about it.
+  is not `offline`, clears it: `stat`, `status` and mutations succeed without the store and say
+  nothing about it. A listing `outdated` and not `offline` is shown as it is while its pull goes
+  on; a `changed` notice lists the folder again when the pull completes, or when it fails
+  `unreachable` ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)).
 
 ### 5.1 Working offline
 

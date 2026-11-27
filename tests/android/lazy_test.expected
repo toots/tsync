@@ -105,6 +105,12 @@
   root, the store up                 [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store
   root, pull background              [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store, outdated
   answered                           at once
+  notices while it hangs             {}
+  its pull fails                     {changed root}
+  root, listed again                 [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store, outdated, offline
+  notices after it                   {}
+  root, the store back               [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store
+  notices                            {changed root, recovered}
 == the vault, then the store down (extensions README §4.1)
   init                               ok
   add                                ok

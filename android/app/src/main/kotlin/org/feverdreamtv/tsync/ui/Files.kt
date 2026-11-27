@@ -106,12 +106,13 @@ class FolderModel(private val domain: Served, val ref: String, private val scope
     var offline by mutableStateOf(false)
         private set
     private var busy = false
-    private var again = false
+    // The load asked while one ran, if any: a user's pull to refresh is not weakened to a background one.
+    private var again: Pair<Pull, Boolean>? = null
 
     /** Lists again, as many rows as are shown, so a refresh neither clears the list nor moves it. */
     fun load(pull: Pull = Pull.BACKGROUND, byUser: Boolean = false) {
         if (busy) {
-            again = true
+            if (again?.second != true) again = pull to byUser
             return
         }
         busy = true
@@ -131,9 +132,9 @@ class FolderModel(private val domain: Served, val ref: String, private val scope
             } finally {
                 busy = false
                 refreshing = false
-                if (again) {
-                    again = false
-                    load()
+                again?.let { (pull, byUser) ->
+                    again = null
+                    load(pull, byUser)
                 }
             }
         }

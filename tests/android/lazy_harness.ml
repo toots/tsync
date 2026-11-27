@@ -214,14 +214,15 @@ let () =
 
 (* Notices since the last call, as a set: background pulls send theirs when
    they complete. *)
-let show_notices label =
+let take_notices () =
   Thread.delay 0.3;
-  let got =
-    Mutex.protect notices_m (fun () ->
-        let got = !notices in
-        notices := [];
-        got)
-  in
+  Mutex.protect notices_m (fun () ->
+      let got = !notices in
+      notices := [];
+      got)
+
+let show_notices label =
+  let got = take_notices () in
   let render n =
     let j = Yojson.Safe.from_string n in
     match field j "refs" with
