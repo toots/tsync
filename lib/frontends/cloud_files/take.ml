@@ -12,6 +12,8 @@ type t = {
   staging : string;
   read_only : bool;
   due : (string, float) Hashtbl.t;
+  awaiting_commit : (string, int) Hashtbl.t;
+      (** §9.3: the last write time of the bytes each file's write staged *)
   m : Mutex.t;
   untaken : int Atomic.t;
   takes : int Atomic.t;
@@ -24,6 +26,7 @@ let create ~engine:_ ~handler ~root ~staging ~read_only () =
     staging;
     read_only;
     due = Hashtbl.create 64;
+    awaiting_commit = Hashtbl.create 64;
     m = Mutex.create ();
     untaken = Atomic.make 0;
     takes = Atomic.make 0;
@@ -36,6 +39,28 @@ let schedule_at t path at =
   Mutex.protect t.m (fun () -> Hashtbl.replace t.due path at)
 
 let schedule t path = schedule_at t path (Unix.gettimeofday () +. take_settle)
+
+let await_commit t path mtime =
+  Mutex.protect t.m (fun () -> Hashtbl.replace t.awaiting_commit path mtime)
+
+(* §9.3: awaiting commit, and its last write time still the one written. *)
+let awaited t path =
+  match
+    Mutex.protect t.m (fun () -> Hashtbl.find_opt t.awaiting_commit path)
+  with
+    | Some mtime -> (Fs.times path).mtime = mtime
+    | None -> false
+
+let forget_commit t path =
+  Mutex.protect t.m (fun () -> Hashtbl.remove t.awaiting_commit path)
+
+let commits_changed t =
+  let now = Unix.gettimeofday () in
+  Mutex.protect t.m (fun () ->
+      Hashtbl.iter
+        (fun path _ -> Hashtbl.replace t.due path now)
+        t.awaiting_commit)
+
 let call t request = Rt.run_sync (fun () -> Handler.call t.handler request)
 
 let identity_of (row : Protocol.row) =
@@ -125,7 +150,9 @@ let rec take t path =
   if Names.is_temp_name (Filename.basename path) then `Done
   else (
     match Cf.state path with
-      | None -> `Done
+      | None ->
+          forget_commit t path;
+          `Done
       | Some st when st.other_reparse ->
           untake t path "a link or another provider's item";
           `Done
@@ -135,6 +162,7 @@ let rec take t path =
       | Some st when st.placeholder && st.in_sync ->
           follow_pin t path st;
           `Done
+      | Some st when st.placeholder && awaited t path -> settle t path st
       | Some _ when t.read_only ->
           untake t path "the domain is read-only";
           `Done
@@ -201,6 +229,34 @@ and take_folder t path (st : Cf.state) parent_ref =
           (try Sys.readdir path with Sys_error _ -> [||]);
         `Done
 
+(* §9.3: a write superseded or gone in the domain is no longer awaited. *)
+and committed t (st : Cf.state) =
+  match Identity.decode st.identity with
+    | None -> true
+    | Some id -> (
+        match call t (Stat (Ref id.ref_)) with
+          | (row : Protocol.row) ->
+              row.is_uploaded || row.content_id <> Some id.content_id
+          | exception Fail.E { kind = Absent; _ } -> true)
+
+and settle t path st =
+  if not (committed t st) then `Done
+  else (
+    match Cf.hold path with
+      | None -> `Again
+      | Some h ->
+          let unchanged =
+            Fun.protect
+              ~finally:(fun () -> Cf.release h)
+              (fun () ->
+                let unchanged = awaited t path in
+                if unchanged then
+                  Cf.set_identity h ~placeholder:true st.identity ~in_sync:true;
+                unchanged)
+          in
+          forget_commit t path;
+          if unchanged then `Done else take t path)
+
 (* §9.3: settled is unchanged for TAKE_SETTLE and openable by no other writer;
    the bytes copied are marked in sync only if nothing changed them since. *)
 and take_file t path (st : Cf.state) parent_ref =
@@ -222,6 +278,7 @@ and take_file t path (st : Cf.state) parent_ref =
         `Again
     | Some h -> (
         Cf.release h;
+        let written_mtime = (Fs.times path).mtime in
         let staging = copy_to_staging t path in
         let (w : Protocol.written) =
           match Identity.decode st.identity with
@@ -256,15 +313,27 @@ and take_file t path (st : Cf.state) parent_ref =
               (* A writer came back: the identity waits for the next take. *)
               `Again
           | Some h ->
-              Fun.protect
-                ~finally:(fun () -> Cf.release h)
-                (fun () ->
-                  Cf.set_identity ~size:got.size h ~placeholder:st.placeholder
-                    (identity_of got)
-                    ~in_sync:(Cf.held_usn h = st.usn));
+              let unchanged =
+                Fun.protect
+                  ~finally:(fun () -> Cf.release h)
+                  (fun () ->
+                    let unchanged = Cf.held_usn h = st.usn in
+                    Cf.set_identity ~size:got.size h ~placeholder:st.placeholder
+                      (identity_of got)
+                      ~in_sync:(unchanged && got.is_uploaded);
+                    unchanged)
+              in
               Atomic.incr t.takes;
               Log.info "cloud_files: took %s" path;
               Option.iter (follow_aside path) w.aside;
+              let landed_path =
+                match w.aside with
+                  | Some a -> Filename.concat (Filename.dirname path) a.name
+                  | None -> path
+              in
+              if unchanged && not got.is_uploaded then
+                await_commit t landed_path written_mtime
+              else forget_commit t landed_path;
               `Done)
 
 let take_logged t path =

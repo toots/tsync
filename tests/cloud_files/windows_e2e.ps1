@@ -60,6 +60,30 @@ function PublishedText($rel) {
   if (Test-Path $file) { Get-Content -Raw $file } else { $null }
 }
 
+# The in-sync bit Explorer shows as the check mark; false for a file that is
+# not a placeholder.
+Add-Type -TypeDefinition @'
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class Placeholder {
+  [DllImport("cldapi.dll")]
+  static extern int CfGetPlaceholderInfo(SafeFileHandle h, int infoClass, byte[] buffer,
+                                         uint length, out uint returned);
+  public static bool InSync(string path) {
+    using (var f = File.Open(path, FileMode.Open, FileAccess.Read,
+                             FileShare.ReadWrite | FileShare.Delete)) {
+      var info = new byte[8192];
+      uint returned;
+      // CF_PLACEHOLDER_INFO_BASIC: PinState, then InSyncState (1 = in sync).
+      if (CfGetPlaceholderInfo(f.SafeFileHandle, 0, info, (uint)info.Length, out returned) < 0)
+        return false;
+      return System.BitConverter.ToInt32(info, 4) == 1;
+    }
+  }
+}
+'@
+
 $programs = Join-Path $env:LOCALAPPDATA 'Programs\tsync'
 $tsync = Join-Path $programs 'tsync.exe'
 $log = Join-Path $env:LOCALAPPDATA 'tsync\logs\tsync.log'
@@ -199,6 +223,22 @@ try {
     ((PublishedText 'new.txt') -eq 'saved whole') -and
       -not ($p -match 'conflicted copy') -and -not ($p -contains 'new.txt.saving')
   } 90
+
+  Step 'marking a file in sync once its content is committed'
+  & $tsync pause --domain docs
+  Check 'pause exits 0' ($LASTEXITCODE -eq 0)
+  $pending = Join-Path $root 'pending.txt'
+  function Takes { @(Select-String -Path $log -Pattern 'cloud_files: took .*pending\.txt').Count }
+  Set-Content -NoNewline -Path $pending -Value 'first'
+  Until 'a file saved while paused is taken' { (Takes) -ge 1 } 90
+  Check 'a file taken but not committed is not in sync' (-not [Placeholder]::InSync($pending))
+  Set-Content -NoNewline -Path $pending -Value 'second'
+  Until 'an edit awaiting commit is taken again' { (Takes) -ge 2 } 90
+  Check 'it is still not in sync' (-not [Placeholder]::InSync($pending))
+  & $tsync resume --domain docs
+  Check 'resume exits 0' ($LASTEXITCODE -eq 0)
+  Until 'it is in sync once committed' { [Placeholder]::InSync($pending) } 90
+  Check 'the commit holds the edit' ((PublishedText 'pending.txt') -eq 'second')
 
   Step 'changing the domain outside the sync root'
   $elsewhere = Join-Path $Work 'elsewhere'
