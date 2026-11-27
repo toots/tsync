@@ -12,8 +12,8 @@ type t = {
   staging : string;
   read_only : bool;
   due : (string, float) Hashtbl.t;
-  awaiting_commit : (string, int) Hashtbl.t;
-      (** §9.3: the last write time of the bytes each file's write staged *)
+  awaiting_commit : (string, int * int64) Hashtbl.t;
+      (** §9.3: the last write time and size of the bytes each write staged *)
   m : Mutex.t;
   untaken : int Atomic.t;
   takes : int Atomic.t;
@@ -40,15 +40,19 @@ let schedule_at t path at =
 
 let schedule t path = schedule_at t path (Unix.gettimeofday () +. take_settle)
 
-let await_commit t path mtime =
-  Mutex.protect t.m (fun () -> Hashtbl.replace t.awaiting_commit path mtime)
+(* §9.3: what the in-sync policy compares, and the size, which a tool that
+   restores the last write time still changes. *)
+let written_mark path =
+  ((Fs.times path).mtime, (Unix.LargeFile.stat path).st_size)
 
-(* §9.3: awaiting commit, and its last write time still the one written. *)
+let await_commit t path mark =
+  Mutex.protect t.m (fun () -> Hashtbl.replace t.awaiting_commit path mark)
+
 let awaited t path =
   match
     Mutex.protect t.m (fun () -> Hashtbl.find_opt t.awaiting_commit path)
   with
-    | Some mtime -> (Fs.times path).mtime = mtime
+    | Some mark -> written_mark path = mark
     | None -> false
 
 let forget_commit t path =
@@ -58,7 +62,9 @@ let commits_changed t =
   let now = Unix.gettimeofday () in
   Mutex.protect t.m (fun () ->
       Hashtbl.iter
-        (fun path _ -> Hashtbl.replace t.due path now)
+        (* A settle or a backoff already due keeps its time. *)
+        (fun path _ ->
+          if not (Hashtbl.mem t.due path) then Hashtbl.replace t.due path now)
         t.awaiting_commit)
 
 let call t request = Rt.run_sync (fun () -> Handler.call t.handler request)
@@ -255,7 +261,10 @@ and settle t path st =
                 unchanged)
           in
           forget_commit t path;
-          if unchanged then `Done else take t path)
+          if unchanged then (
+            Option.iter (follow_pin t path) (Cf.state path);
+            `Done)
+          else take t path)
 
 (* §9.3: settled is unchanged for TAKE_SETTLE and openable by no other writer;
    the bytes copied are marked in sync only if nothing changed them since. *)
@@ -278,7 +287,7 @@ and take_file t path (st : Cf.state) parent_ref =
         `Again
     | Some h -> (
         Cf.release h;
-        let written_mtime = (Fs.times path).mtime in
+        let written = written_mark path in
         let staging = copy_to_staging t path in
         let (w : Protocol.written) =
           match Identity.decode st.identity with
@@ -331,9 +340,14 @@ and take_file t path (st : Cf.state) parent_ref =
                   | Some a -> Filename.concat (Filename.dirname path) a.name
                   | None -> path
               in
-              if unchanged && not got.is_uploaded then
-                await_commit t landed_path written_mtime
-              else forget_commit t landed_path;
+              if unchanged && not got.is_uploaded then (
+                await_commit t landed_path written;
+                (* The commit's notice may have come before the entry. *)
+                schedule_at t landed_path (Unix.gettimeofday ()))
+              else (
+                forget_commit t landed_path;
+                if unchanged then
+                  Option.iter (follow_pin t landed_path) (Cf.state landed_path));
               `Done)
 
 let take_logged t path =

@@ -393,9 +393,9 @@ durable on the volume, so a crash leaves nothing owed unrecorded, and no provide
 **In sync means committed.** Explorer shows the bit as the check mark, which a user reads as
 "published, ready to share". A file whose write the owner staged but has not committed is
 *awaiting commit*: it keeps the bit clear, so Explorer shows it pending. The provider keeps, in
-memory, each such file's path and the last write time of the bytes written, as the in-sync policy
-compares (§8.3). A sequence number cannot serve: releasing a handle appends a close record, which
-moves it.
+memory, each such file's path and the last write time and size of the bytes written: the last write
+time is what the in-sync policy compares (§8.3), and the size catches most tools that restore it. A
+sequence number cannot serve: releasing a handle appends a close record, which moves it.
 
 ```
 take(item):
@@ -403,7 +403,7 @@ take(item):
     foreign items counted untaken)
   parent not a placeholder → take(parent), which takes its children
   in-sync placeholder → nothing
-  file awaiting commit, its last write time the one recorded → settle(file)
+  file awaiting commit, its last write time and size the ones recorded → settle(file)
   read-only domain → nothing; counted untaken
   folder, not a placeholder:
     mkdir(parentRef, name, aside: true); landed = the reply's aside when present, else its item
@@ -420,7 +420,7 @@ take(item):
     landed = the reply's aside when present, else its item  # the item the file's bytes now are
     under a handle that denies write, if the sequence number is still u:
       store landed's identity and metadata; marked in sync when landed is uploaded, else
-        awaiting commit
+        awaiting commit and settled once at once, since the commit's notice may precede the entry
     else: store landed's identity, not in sync (the item stays owed and is taken again)
     landed is the reply's aside:
       rename the file to landed's presented name; apply the parent folder, which creates the
@@ -429,8 +429,8 @@ take(item):
 settle(file):
   row = stat(its ref)
   row uploaded, gone, or holding another content than the identity's → no longer awaiting commit;
-    under a handle that denies write, if the last write time is still the recorded one: marked in
-    sync, else taken as any owed file
+    under a handle that denies write, if the last write time and size are still the recorded ones:
+    marked in sync and its pin followed (§11), else taken as any owed file
   else → nothing; the commit's `changed` takes it again
 ```
 

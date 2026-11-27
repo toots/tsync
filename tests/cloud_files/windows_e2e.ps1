@@ -60,8 +60,8 @@ function PublishedText($rel) {
   if (Test-Path $file) { Get-Content -Raw $file } else { $null }
 }
 
-# The in-sync bit Explorer shows as the check mark; false for a file that is
-# not a placeholder.
+# The in-sync bit Explorer shows as the check mark; a failed read throws, so a
+# negative check cannot pass without reading it.
 Add-Type -TypeDefinition @'
 using System.IO;
 using System.Runtime.InteropServices;
@@ -76,8 +76,9 @@ public static class Placeholder {
       var info = new byte[8192];
       uint returned;
       // CF_PLACEHOLDER_INFO_BASIC: PinState, then InSyncState (1 = in sync).
-      if (CfGetPlaceholderInfo(f.SafeFileHandle, 0, info, (uint)info.Length, out returned) < 0)
-        return false;
+      int hr = CfGetPlaceholderInfo(f.SafeFileHandle, 0, info, (uint)info.Length, out returned);
+      if (hr < 0)
+        throw new System.ComponentModel.Win32Exception(hr, "CfGetPlaceholderInfo " + path);
       return System.BitConverter.ToInt32(info, 4) == 1;
     }
   }
