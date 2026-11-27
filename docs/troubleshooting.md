@@ -29,6 +29,7 @@
 | A copy is missing files from before it was added | `tsync mirror`. |
 | `tsync gc` says there is nothing it can collect | It needs a `local` main on this machine. See [cleanup](history.md#cleanup). |
 | Space is not freed after `expire` | `expire` forgets history; `tsync gc --apply` frees the space. |
+| A command says "no such file or folder" for a name that looks right | A common file system mismatch. Some file systems treat names that differ in case, or in how an accent is encoded (`é` as one character or as `e` plus a combining accent), as the same name: macOS does by default, being case-insensitive. Others, like Linux and tsync, compare names byte for byte. A name typed or pasted on macOS may therefore open there but not in tsync; shells and terminals can also change the encoding without showing it. `ls \| xxd` shows the stored bytes; spell them with `printf`, e.g. `"$(printf 'Me\xcc\x81moire')"`. |
 | `tsync share` says sharing is not available | Nothing serves links. See [share links](sharing.md#share-links). |
 | No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log in again. |
 | No tray icon elsewhere | Run `tsync-tray -v` in a terminal. |
