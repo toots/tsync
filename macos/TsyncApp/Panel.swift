@@ -40,7 +40,8 @@ struct Panel: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            // A grouped form is macOS's card layout; a List draws an iOS table.
+            Form {
                 notices
                 Section { summary }
                 if model.domains.count > 1 {
@@ -64,6 +65,7 @@ struct Panel: View {
                     Section { Button("One-time codes…", action: model.showCodes) }
                 }
             }
+            .formStyle(.grouped)
         }
         .frame(width: 380, height: 560)
         .task(id: shown) { await poll() }

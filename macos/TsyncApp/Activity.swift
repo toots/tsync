@@ -562,7 +562,7 @@ struct ActivityDetails: View {
 
     var body: some View {
         let settings = report.body?.settings
-        List {
+        Form {
             Section("Settings in force") {
                 LabeledContent("Versioning", value: settings?.versioning == true ? "On" : "Off")
                 LabeledContent("Read-only", value: settings?.readOnly == true ? "Yes" : "No")
@@ -574,6 +574,7 @@ struct ActivityDetails: View {
                 Section { LabeledContent("Asked", value: Format.relative(at)) }
             }
         }
+        .formStyle(.grouped)
         .navigationTitle(domain)
         .toolbar { Button("Copy report") { Pasteboard.copy(Self.json(report.raw)) } }
     }
