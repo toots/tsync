@@ -152,6 +152,9 @@ val max_batch_folders : int
     is re-asked key by key. *)
 val read_many : t -> entry list -> (Key.t * Bigstring.t option) list
 
+(** How many keys a store with no batch read is read at once. *)
+val single_read_width : int
+
 (** {!read_many} of keys no listing gave, batched by the key cap alone. *)
 val read_keys : t -> Key.t list -> (Key.t * Bigstring.t option) list
 

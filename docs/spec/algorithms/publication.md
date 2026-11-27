@@ -259,7 +259,15 @@ FETCH() → entries | PRUNED:
   for an entry that decodes or whose version is unknown.
 - The cursor only saves fetches: the cycle fetches when the cursor moved and every `SWEEP`
   whatever the cursor says. A fetch that finds nothing costs one read of entry $h+1$ and one of the
-  tree head.
+  tree head, made together: the tree head read for a miss at $h+1$ MAY be read alongside entry
+  $h+1$. A tree head read before the miss and below $h+1$ still means entry $h+1$ was never created:
+  only entries below the tree head are ever deleted (§4.9). A miss further on reads the tree head
+  after it.
+- Entries are read in batches ([06](../06-backends.md) §5, one way to read many keys), stopping
+  at the first absent number. On a store without batch reads a batch is as many reads as the
+  entries found so far, at least one and at most the store's single-read width: a fetch catching
+  up $k$ entries costs about $\log_2 k$ round trips and then $k$ / width, not $k$, and reads about
+  as many numbers past the end as it found.
 
 ### 4.4 Arrive: fetch, then merge
 

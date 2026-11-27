@@ -90,7 +90,8 @@ data class Item(
     }
 }
 
-data class Listing(val items: List<Item>, val next: String?, val pulledAt: Long?, val outdated: Boolean)
+/** [offline]: the owner holds the store unreachable; [outdated] alone is a pull slower than the listing waited for. */
+data class Listing(val items: List<Item>, val next: String?, val pulledAt: Long?, val outdated: Boolean, val offline: Boolean = false)
 
 data class Counts(val done: Int, val failed: Int)
 
@@ -288,6 +289,7 @@ class Client(private val core: Core) {
             next = text(reply, "next"),
             pulledAt = if (reply.has("pulledAt") && !reply.isNull("pulledAt")) reply.optLong("pulledAt") else null,
             outdated = reply.optBoolean("outdated", false),
+            offline = reply.optBoolean("offline", false),
         )
     }
 

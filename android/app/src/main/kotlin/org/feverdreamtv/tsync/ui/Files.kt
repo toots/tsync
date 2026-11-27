@@ -89,7 +89,7 @@ sealed interface FilesMode {
     class Pick(val title: @Composable (path: String) -> String, val hidden: String? = null, val onCancel: () -> Unit) : FilesMode
 }
 
-/** One folder's listing and how it stands: loading, loaded, failed, outdated (app §10.3). */
+/** One folder's listing and how it stands: loading, loaded, failed, offline (app §10.3). */
 class FolderModel(private val domain: Served, val ref: String, private val scope: CoroutineScope) {
     var items by mutableStateOf<List<Item>>(emptyList())
         private set
@@ -101,15 +101,15 @@ class FolderModel(private val domain: Served, val ref: String, private val scope
         private set
     var failure by mutableStateOf<CoreException?>(null)
         private set
-    var outdatedSince by mutableStateOf<Long?>(null)
+    var offlineSince by mutableStateOf<Long?>(null)
         private set
-    var outdated by mutableStateOf(false)
+    var offline by mutableStateOf(false)
         private set
     private var busy = false
     private var again = false
 
     /** Lists again, as many rows as are shown, so a refresh neither clears the list nor moves it. */
-    fun load(pull: Pull = Pull.DEFAULT, byUser: Boolean = false) {
+    fun load(pull: Pull = Pull.BACKGROUND, byUser: Boolean = false) {
         if (busy) {
             again = true
             return
@@ -122,8 +122,8 @@ class FolderModel(private val domain: Served, val ref: String, private val scope
                 domain.latch.listed(listing)
                 items = listing.items
                 next = listing.next
-                outdated = listing.outdated
-                outdatedSince = listing.pulledAt
+                offline = listing.offline
+                offlineSince = listing.pulledAt
                 failure = null
                 loaded = true
             } catch (e: CoreException) {
@@ -285,7 +285,7 @@ private fun FolderScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             TrailBar(trail, domains = floor == 0)
             if (readOnly) Banner(stringResource(R.string.read_only_domain))
-            if (model.loaded && model.outdated) Banner(stringResource(R.string.offline_as_of, age(model.outdatedSince)))
+            if (model.loaded && model.offline) Banner(stringResource(R.string.offline_as_of, age(model.offlineSince)))
             if (model.loaded) model.failure?.let { Banner(it.message ?: it.code.wire) }
             running.value?.let { RunningBar(it, onHide = { running.value = null }) }
             PullToRefreshBox(isRefreshing = model.refreshing, onRefresh = { model.load(Pull.NOW, byUser = true) }, modifier = Modifier.fillMaxSize()) {

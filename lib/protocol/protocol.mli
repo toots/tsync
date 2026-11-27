@@ -40,6 +40,7 @@ type page = {
       (** pulled tree: when the pull the rows reflect completed (android §3.2)
       *)
   outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
+  offline : bool;  (** pulled tree: the store is held unreachable *)
 }
 
 (** android §3.2 rule 1: pull unless fresh, pull even when fresh, answer the

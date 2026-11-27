@@ -183,11 +183,12 @@ let list ?(extra = []) label ref_ =
   in
   (match field j "items" with
     | Some (`List items) ->
-        p "  %-34s [%s] %s%s%s" label
+        p "  %-34s [%s] %s%s%s%s" label
           (String.concat ", " (List.map row items))
           read
           (if field j "pulledAt" = None then ", never pulled" else "")
           (if field j "outdated" = Some (`Bool true) then ", outdated" else "")
+          (if field j "offline" = Some (`Bool true) then ", offline" else "")
     | _ -> p "  %-34s %s, %s" label (outcome j) read);
   j
 

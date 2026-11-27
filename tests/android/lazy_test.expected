@@ -52,12 +52,12 @@
   mkdir offline                      ok
 == the store is down
   write note.txt                     ok, not uploaded
-  root, pull never                   [mine.txt, note.txt (not uploaded), offline/, sub/] no read, outdated
+  root, pull never                   [mine.txt, note.txt (not uploaded), offline/, sub/] no read, outdated, offline
   rename note.txt                    ok
   open n2.txt                        "written offline"
   status answers                     ok
-  root, listed before                [mine.txt, n2.txt (not uploaded), offline/, sub/] read the store, outdated
-  root, pull never                   [mine.txt, n2.txt (not uploaded), offline/, sub/] no read, outdated
+  root, listed before                [mine.txt, n2.txt (not uploaded), offline/, sub/] read the store, outdated, offline
+  root, pull never                   [mine.txt, n2.txt (not uploaded), offline/, sub/] no read, outdated, offline
   a folder never listed              unreachable (the store is down), read the store
   root, its view too old             unreachable (the store is down), read the store
 == the store returns
@@ -74,8 +74,8 @@
 == a pin holds the views that lead to it
   sub                                [deep.txt] no read
   restore sub/deep.txt               {"ok":true,"restored":1,"failed":0}
-  root, view old but held            [archive/, c.txt, mine.txt, n2.txt, offline/, sub/] read the store, outdated
-  sub, view old but held             [deep.txt] read the store, outdated
+  root, view old but held            [archive/, c.txt, mine.txt, n2.txt, offline/, sub/] read the store, outdated, offline
+  sub, view old but held             [deep.txt] read the store, outdated, offline
   open the pinned file               "deep"
   restore root                       {"ok":false,"code":"unreachable","error":"the store is down"}
   evict root                         {"ok":true,"evicted":4,"failed":0}
@@ -101,6 +101,10 @@
   the peer's root                    [camera]
 == a write into a folder made here and published
   write, the store down              ok
+== a listing with pull background, the store hung (android-app §5.1)
+  root, the store up                 [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store
+  root, pull background              [c.txt, camera/, fresh/, made/, mine.txt, n2.txt, offline/, sub/] read the store, outdated
+  answered                           at once
 == the vault, then the store down (extensions README §4.1)
   init                               ok
   add                                ok

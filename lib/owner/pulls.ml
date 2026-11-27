@@ -29,7 +29,7 @@ type t = {
       (** folder id → monotonic time of this process's last completed pull *)
   owed_notice : (string, unit) Hashtbl.t;
       (** folders answered outdated while their pull ran *)
-  offline : bool Atomic.t;
+  unreachable : bool Atomic.t;
   passes : passes;
   passes_m : Mutex.t;
 }
@@ -41,7 +41,7 @@ and passes = {
   mutable queued : Protocol.pass_summary option Rt.Promise.t option;
 }
 
-type view = { pulled_at : float option; outdated : bool }
+type view = { pulled_at : float option; outdated : bool; offline : bool }
 
 let create ?(params = default) ~engine ~silent ~changed ~recovered () =
   {
@@ -53,15 +53,16 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     m = Mutex.create ();
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
-    offline = Atomic.make false;
+    unreachable = Atomic.make false;
     passes = { running = None; queued = None };
     passes_m = Mutex.create ();
   }
 
-let note_unreachable t = Atomic.set t.offline true
+let note_unreachable t = Atomic.set t.unreachable true
 
 let succeeded t =
-  if Atomic.exchange t.offline false then (try t.recovered () with _ -> ())
+  if Atomic.exchange t.unreachable false then (
+    try t.recovered () with _ -> ())
 
 (* Freshness is per process and monotonic (android §10); by folder id, which a
    rename keeps. *)
@@ -98,6 +99,9 @@ let start t dir =
               succeeded t;
               if differs || owed then (try t.changed [dir] with _ -> ());
               Ok ()
+          | exception (Fail.E { kind = Unreachable; _ } as e) ->
+              note_unreachable t;
+              Error e
           | exception e -> Error e
       in
       ignore (Rt.Promise.try_resolve_result done_ outcome));
@@ -132,17 +136,25 @@ let continued t dir =
       | Some k -> Mutex.protect t.m (fun () -> Hashtbl.mem t.fresh k)
       | None -> false
   in
-  { pulled_at = E.pulled_at dir; outdated = not pulled }
+  { pulled_at = E.pulled_at dir; outdated = not pulled; offline = false }
 
 let for_listing t ~pull dir =
   let (module E : Engine.S) = t.engine in
-  let fresh () = { pulled_at = E.pulled_at dir; outdated = false } in
+  let offline () = t.silent () || Atomic.get t.unreachable in
+  let fresh () =
+    { pulled_at = E.pulled_at dir; outdated = false; offline = false }
+  in
   let stale () =
     Mutex.protect t.m (fun () -> Hashtbl.replace t.owed_notice dir ());
-    { pulled_at = E.pulled_at dir; outdated = true }
+    { pulled_at = E.pulled_at dir; outdated = true; offline = offline () }
   in
   match pull with
-    | `Never -> { pulled_at = E.pulled_at dir; outdated = not (is_fresh t dir) }
+    | `Never ->
+        {
+          pulled_at = E.pulled_at dir;
+          outdated = not (is_fresh t dir);
+          offline = offline ();
+        }
     | (`Auto | `Background) when is_fresh t dir -> fresh ()
     | `Background ->
         let done_ = start t dir in
@@ -156,7 +168,7 @@ let for_listing t ~pull dir =
           match wait_patiently t done_ with
             | `Done -> fresh ()
             | `Offline ->
-                Atomic.set t.offline true;
+                Atomic.set t.unreachable true;
                 stale ()
             | `Slow -> stale ()
             | `Failed e ->
