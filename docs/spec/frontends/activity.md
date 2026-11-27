@@ -1,16 +1,17 @@
 # The Activity screen
 
-Scope: the Activity destination of the Android and iOS apps: what the app is doing and what went
-wrong, per domain, as a screen of its own and not as text. [android-app §10.5](android-app.md#105-activity)
-and [ios-app §2.1](ios-app.md#21-activity) say what differs on each platform.
+Scope: the Activity destination of the Android and iOS apps, and the panel of the macOS status
+item: what the app is doing and what went wrong, per domain, as a screen of its own and not as
+text. [android-app §10.5](android-app.md#105-activity), [ios-app §2.1](ios-app.md#21-activity)
+and [file-provider §10](file-provider.md#10-menu-bar) say what differs on each platform.
 
 ## 1. Sources
 
 While the screen is visible, every `status_poll`, and not at all otherwise, the app asks the domain
 it shows (§2) for two replies through the owner, and builds every element below from their fields:
 
-- `status`: `paused`, `readOnly`, `failing`, `uploading[]` and `downloading[]` (`name`, `bytes`,
-  `size`, `rate`), `pendingUploads`, `pendingDownloads`, `pendingBytes`.
+- `status`: `paused`, `readOnly`, `failing`, `uploading[]` and `downloading[]` (`name`, `rel`,
+  `bytes`, `size`, `rate`), `pendingUploads`, `pendingDownloads`, `pendingBytes`, `newMachines`.
 - `stats` (`arg: frontend`): the domain's body (`sync`, `setAside`, `mainOffline`, `cache`, `queues`,
   `backends[]`, `settings`) and the process's `self` (`recentErrors`, `process`).
 
@@ -65,6 +66,9 @@ problems".
 - **Uploads waiting to be retried**: `queues.parked`, with `queues.lastError`, and **Retry now**
   (`retry`).
 - **Unreadable records set aside**: `setAside` > 0, "kept and never run".
+- **A new machine**: for each name of `newMachines`, "*name* can now unlock this vault", and one
+  **Mark as seen** for them all, which sends the domain's `vault_machines`: listing the machines
+  acknowledges them ([vault §6.3](../extensions/vault.md#63-machines)).
 - **A store**: held down or unreachable, or holding corrupted chunks (§2.4), named.
 
 ### 2.4 Stores
@@ -121,6 +125,8 @@ one; it is asked again at the next poll.
 - A file uploading shows a progress bar that moves; Pause turns the badge to Paused and holds it;
   Resume lets it go.
 - A parked upload shows Retry now, and Retry now clears it once the store is back.
+- A machine enrolled elsewhere shows under Problems by its name; Mark as seen removes it, and it
+  stays removed at the next poll.
 - With two domains, the picker switches every section, Details included, to the chosen one.
 - Stopping the owner for less than `stale_after` changes nothing on screen.
 - Leaving the screen stops the polling: the owner's log shows no `status` request after it.

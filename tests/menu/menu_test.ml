@@ -148,7 +148,13 @@ let () =
   List.iter
     (fun (moved, total) ->
       Printf.printf "%d / %d -> %s\n" moved total (M.progress_bar ~moved ~total))
-    [(0, 100); (788529152, 15589124313); (240000, 900000); (100, 100); (150, 100)];
+    [
+      (0, 100);
+      (788529152, 15589124313);
+      (240000, 900000);
+      (100, 100);
+      (150, 100);
+    ];
 
   case "contents rows: what each domain holds, and where";
   show

@@ -142,28 +142,8 @@ let () =
       else (
         p "first events: %s" (String.concat ", " (List.sort compare (events 2)));
         show "menu" (menu ());
-        (* The owner's own stats reply through the model. Figures vary with
-           the run, so a row is cut at its first digit. *)
-          (match call [("action", "menu_stats")] with
-          | `Assoc l -> (
-              match List.assoc_opt "entries" l with
-                | Some (`List rows) ->
-                    List.iter
-                      (fun row ->
-                        p "menu_stats row: %s"
-                          (match Ipc.field row "label" with
-                            | Some label -> (
-                                match
-                                  Seq.find
-                                    (fun i -> label.[i] >= '0' && label.[i] <= '9')
-                                    (Seq.init (String.length label) Fun.id)
-                                with
-                                  | Some i -> String.sub label 0 i
-                                  | None -> label)
-                            | None -> "---"))
-                      rows
-                | _ -> p "menu_stats: no entries")
-          | _ -> p "menu_stats: no reply");
+        (* file-provider §10: the panel asks each domain's stats itself. *)
+        show "menu_stats" (call [("action", "menu_stats")]);
         show "pause every domain" (call [("action", "pause"); ("arg", "on")]);
         show "menu while held" (menu ());
         show "resume" (call [("action", "pause"); ("arg", "off")]);

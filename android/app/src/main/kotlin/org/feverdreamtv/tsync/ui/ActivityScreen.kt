@@ -278,7 +278,7 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
     }
 
     Section(R.string.problems)
-    Problems(stats, run, domain)
+    Problems(status, stats, run, domain)
 
     val stores = stats?.stores.orEmpty()
     if (stores.isNotEmpty()) {
@@ -298,11 +298,17 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
 }
 
 @Composable
-private fun Problems(stats: Stats?, run: (() -> String) -> Unit, domain: Served) {
+private fun Problems(status: Status, stats: Stats?, run: (() -> String) -> Unit, domain: Served) {
     val context = LocalContext.current
+    val machines = status.newMachines
     val parked = stats?.parked ?: 0
     val setAside = stats?.setAside ?: 0
     val stores = stats?.stores.orEmpty().filter { it.hasProblem }
+    machines.forEach { Problem(stringResource(R.string.activity_new_machine, it), null) }
+    // vault §6.3: listing the machines acknowledges them.
+    if (machines.isNotEmpty()) TextButton(onClick = {
+        run { domain.vault.acknowledgeMachines().let { context.getString(R.string.activity_machines_seen) } }
+    }) { Text(stringResource(R.string.activity_mark_seen)) }
     if (parked > 0) Row(verticalAlignment = Alignment.CenterVertically) {
         Problem(pluralStringResource(R.plurals.activity_parked, parked, parked), stats?.lastError, Modifier.weight(1f))
         TextButton(onClick = { run { domain.ask { retry() }.let { context.resources.getQuantityString(R.plurals.retried_changes, it, it) } } }) {
@@ -311,7 +317,7 @@ private fun Problems(stats: Stats?, run: (() -> String) -> Unit, domain: Served)
     }
     if (setAside > 0) Problem(pluralStringResource(R.plurals.activity_set_aside, setAside, setAside), stringResource(R.string.activity_set_aside_text))
     stores.forEach { Problem(it.name, if (it.damagedChunks > 0 && !it.down && it.reachable != false) damaged(it) else connection(it)) }
-    if (parked == 0 && setAside == 0 && stores.isEmpty()) Text(stringResource(R.string.no_problems))
+    if (machines.isEmpty() && parked == 0 && setAside == 0 && stores.isEmpty()) Text(stringResource(R.string.no_problems))
 }
 
 @Composable

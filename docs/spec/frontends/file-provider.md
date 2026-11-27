@@ -188,7 +188,7 @@ Requests are `{"action": <verb>, "domain": <display name>, …}`, routed as
   domain the running owner does not serve is answered `unreachable`; the owner's `recovered` notice
   clears it when it starts serving the domain.
 
-`menu` and `menu_stats` span domains and are answered by the router itself (§10).
+`menu` and `menu_codes` span domains and are answered by the router itself (§10).
 
 ### 4.3 Client obligations
 
@@ -618,42 +618,54 @@ owner's binary lives inside the app bundle. tsync has no restart command.
 
 ## 10. Menu bar
 
-There is no settings window; configuration is `config.json`. The app's only UI is a status item whose
-content the owner renders (`menu`) from the model shared with the Linux tray
-([menu-model.md](menu-model.md)), so the platforms cannot drift. Every label of a rendered menu is the
-model's.
+There is no settings window; configuration is `config.json`. The app's only UI is a status item.
+Its image and tooltip are the owner's (`menu`, [menu-model.md §4](menu-model.md#4-icon-and-tooltip));
+a click opens a **panel**, a popover under the item, that is the Activity screen of
+[activity.md](activity.md) drawn with the platform's controls: badges, progress bars, gauges and
+buttons, no row of text standing in for one.
 
 `menu` answers `{"ok":true,"menu":<menu JSON>}`, the model's JSON form
-([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label:
+([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label. The app reads its
+`icon`, its `tooltip`, and whether its rows hold `One-time codes`; it draws none of its rows.
 
 ```json
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Syncing: 1 to download",
   "entries":[{"label":"Files — Syncing","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
              {"label":"1 to download","enabled":true,"indent":1,"action":{}},
-             {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
-             {"label":"1.5 GiB of 3.7 GiB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
              {"label":"Details","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
              {"label":"Pause syncing","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
 
-`menu_stats` answers `{"ok":true,"entries":[…]}`: the stats rows of
-[menu-model.md §6](menu-model.md#6-details-submenu), in the same JSON form. Until it arrives the
-submenu shows the model's placeholder row.
-
-- Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its
-  deadline counts as a failure and releases the latch. The menu is not rebuilt while open and is
-  rebuilt on close.
+- Poll `menu` every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that
+  exceeds its deadline counts as a failure and releases the latch.
 - An owner that cannot be reached, or a poll that timed out, shows the error icon and an
   "unreachable" tooltip rather than the last known state.
 - Icons are named as on the Linux panel (`tsync-idle|sync|paused|error-symbolic`); unknown → idle.
-- `openFolder` opens the domain's user-visible root (asked of the framework, never derived from the
-  display name) in Finder; `reveal` selects the file and never opens it.
-- "Pause syncing" toggles all domains through the owner (`pause`), with the semantics of
-  [07 §2.6](../07-daemon-cli.md#26-pause). The state shown is read back by the next poll.
-- The stats submenu is fetched with `menu_stats` when it opens, at most once per
-  `menu_stats_interval`; a failure leaves the placeholder.
-- The owner renders no quit row for this host (§2).
+
+The panel, top to bottom:
+
+1. **The app's own notices**, each a problem row: a registration that failed, domains not
+   registered for sharing an identifier, local edits kept aside (with the folder they were kept
+   in), and AutoFill turned off while a domain uses passwords, with **Open System Settings**
+   ([passwords/macos §1](../extensions/passwords/macos.md#1-the-component)).
+2. **The summary**: the tooltip's words after `tsync — `, with the item's image, and **Pause all**
+   or **Resume all**, which sends `pause` without a domain
+   ([07 §2.6](../07-daemon-cli.md#26-pause)): Resume all when every domain that answers is held.
+   The state shown is read back by the next poll.
+3. **The domain**: [activity.md §2–§4](activity.md#2-one-domain) for the picked domain of those
+   the reconciler registered, in config order, with **Open in Finder**, which opens the domain's
+   user-visible root (asked of the framework, never derived from the display name). A transfer's
+   row reveals its file in Finder (selected, never opened) from its `rel`. **Copy report** writes
+   both replies to the general pasteboard.
+4. **The warnings** of [activity.md §3](activity.md#3-below-the-domains), the owner's process's.
+5. **One-time codes**, when the menu holds that row: a button that opens the codes menu of §10.1
+   under it.
+
+- The panel polls only while it is shown, every `status_poll` (activity.md §5); closing it stops
+  the polling.
+- The panel closes when the user clicks elsewhere, and on Escape.
+- There is no Quit (§2).
 
 ### 10.1 One-time codes
 
@@ -685,7 +697,7 @@ submenu shows the model's placeholder row.
   `account` (totp §5.3). A refusal reopens the dialog with the owner's sentence, the issuer and
   the account as typed and the secret field empty; success closes it, and the record appears at
   the next open of the submenu. The secret field is a secure field, cleared after sending.
-- Each open of the codes submenu shows the placeholder until the owner's rows arrive, and keeps
+- Each open of the codes menu shows the placeholder until the owner's rows arrive, and keeps
   it when they do not: rows from an earlier open are never shown again.
 - Each secure field of these dialogs has a `Show` checkbox under it that shows its value in clear
   while checked ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)),
@@ -765,7 +777,7 @@ submenu shows the model's placeholder row.
 | `relay_backoff_min` / `relay_backoff_max` / `relay_backoff_reset` | 1 s / 30 s / 30 s | reset ≥ max |
 | `registration_deadline` / `registration_retry` | 10 s / 1 s | |
 | `purge_wait` | 60 s | |
-| `menu_poll_interval` / `menu_stats_interval` | 3 s / 1 s | |
+| `menu_poll_interval` | 3 s | |
 
 ## 14. Conformance
 

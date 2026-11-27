@@ -233,7 +233,7 @@ let code_domains served =
 (* The router of a shared socket (file-provider §4.2, §8.1, §10). *)
 let all_topics = "*"
 
-let shared_router served reports action req =
+let shared_router served action req =
   match action with
     | "subscribe" ->
         Some
@@ -286,31 +286,6 @@ let shared_router served reports action req =
                 [
                   ( "entries",
                     `List (List.map Menu.entry_to_json (Menu.codes answers)) );
-                ]))
-    | "menu_stats" ->
-        let stats =
-          match reports with
-            | [] -> []
-            | (_, report) :: _ ->
-                Option.to_list
-                  (Menu.stats_of_json
-                     (Protocol.encode_reply (Stats [])
-                        {
-                          (stats_reply reports report) with
-                          domains =
-                            List.map
-                              (fun (_, r) ->
-                                Tsync_status.Status_report.Answered
-                                  (Report.domain_body r))
-                              reports;
-                        }))
-        in
-        Some
-          (Ipc.Reply
-             (Ipc.ok
-                [
-                  ( "entries",
-                    `List (List.map Menu.entry_to_json (Menu.stats stats)) );
                 ]))
     | "stop" ->
         Stop.request ();
@@ -409,8 +384,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
         { domain; go; handler = h })
       domains;
   let router =
-    if shared then Some (fun a r -> shared_router !served !reports a r)
-    else None
+    if shared then Some (fun a r -> shared_router !served a r) else None
   in
   server := Some (Ipc.serve ~path:socket (route ~draining ~router !served));
   List.iter

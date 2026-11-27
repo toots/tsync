@@ -293,14 +293,19 @@ let contents_row s =
   in
   match (extras, s.mount) with
     | [], None -> []
-    | _ -> [row ~indent:1 (join (english_list ("Files" :: extras) :: part ellipsis s.mount))]
+    | _ ->
+        [
+          row ~indent:1
+            (join (english_list ("Files" :: extras) :: part ellipsis s.mount));
+        ]
 
 let machine_rows name s =
   match s.new_machines with
     | [] -> []
     | machines ->
         List.map
-          (fun m -> row ~indent:1 ~icon:"computer" (m ^ " can now unlock this vault"))
+          (fun m ->
+            row ~indent:1 ~icon:"computer" (m ^ " can now unlock this vault"))
           machines
         @ [row ~indent:1 ~action:(Seen_machines name) "Mark as seen"]
 
@@ -311,8 +316,7 @@ let domain_rows (name, status) =
     match status with
       | None -> sentence
       | Some s ->
-          contents_row s @ sentence
-          @ machine_rows name s
+          contents_row s @ sentence @ machine_rows name s
           @ (if s.vault_backup_overdue then
                [
                  row ~indent:1 ~icon:"dialog-warning"
@@ -603,7 +607,9 @@ let service_row (s : stats) =
 let traffic_row replies =
   let summed f = sum_known ( + ) 0 (List.map f replies)
   and rates f = sum_known ( +. ) 0. (List.map f replies) in
-  let traffic f (s : stats) = Option.bind (Option.bind s.self (fun s -> s.traffic)) f in
+  let traffic f (s : stats) =
+    Option.bind (Option.bind s.self (fun s -> s.traffic)) f
+  in
   let flow name bytes speed =
     part
       (fun b ->
@@ -632,15 +638,15 @@ let stats ?(report = false) replies =
         let device =
           List.concat_map service_row replies @ traffic_row replies
         in
-        (match
-           List.concat_map
-             (fun (s : stats) -> List.map domain_details s.domains)
-             replies
-           @ if device = [] then [] else [device]
-         with
-          | [] -> [[row "Nothing reported"]]
-          | sections -> sections)
-        @ (if report then [[row ~action:Copy_report "Copy report"]] else [])
+        ((match
+            List.concat_map
+              (fun (s : stats) -> List.map domain_details s.domains)
+              replies
+            @ if device = [] then [] else [device]
+          with
+           | [] -> [[row "Nothing reported"]]
+           | sections -> sections)
+        @ if report then [[row ~action:Copy_report "Copy report"]] else [])
         |> separated
 
 (* §7: what the model reads of one domain's [totp_list] reply, or its

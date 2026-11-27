@@ -1,43 +1,48 @@
 import AppKit
+import SwiftUI
 import AuthenticationServices
 import FileProvider
 import UserNotifications
 
-/// §10: the status item. The owner renders its content (`menu`); the app only
-/// draws it, and adds what only it knows (registration problems). No quit row.
-final class StatusMenu: NSObject, NSMenuDelegate {
-    /// §13 menu_poll_interval / menu_stats_interval.
+/// §10: the status item. Its image and tooltip are the owner's (`menu`); a
+/// click opens the panel, the Activity screen. No quit.
+final class StatusMenu: NSObject, NSPopoverDelegate {
+    /// §13 menu_poll_interval.
     static let pollInterval: TimeInterval = 3
-    static let statsInterval: TimeInterval = 1
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let menu = NSMenu()
+    private let popover = NSPopover()
+    private let model = PanelModel()
     private let lock = NSLock()
     private var polling = false
-    private var isOpen = false
-    /// The codes submenu's last fetch: an older one's reply is dropped.
+    /// The codes menu's last fetch: an older one's reply is dropped.
     private var codesFetch = 0
-    private var latest: [String: Any]?
-    private var reachable = true
-    /// passwords/macos §1: AutoFill is off while a domain uses passwords.
-    private var autofillOff = false
     private var report = ReconcileReport()
     private var registrationProblem: String?
     private var domains: [String: NSFileProviderDomain] = [:]
-    private var statsFetched = Date.distantPast
-    private var statsEntries: [[String: Any]]?
-    /// §10.1: fetched each time it opens, never cached.
-    private var codesSubmenu: NSMenu?
 
     let pause: (Bool) -> Void
 
     init(pause: @escaping (Bool) -> Void) {
         self.pause = pause
         super.init()
-        menu.delegate = self
-        menu.autoenablesItems = false
-        item.menu = menu
-        rebuild()
+        popover.behavior = .transient
+        popover.delegate = self
+        item.button?.target = self
+        item.button?.action = #selector(toggle)
+        model.pause = { [weak self] paused in
+            self?.pause(paused)
+            self?.poll()
+        }
+        model.showCodes = { [weak self] in self?.showCodes() }
+        model.openSettings = { [weak self] in self?.openAutofillSettings() }
+        model.open = { [weak self] name in self?.withRoot(of: name) { NSWorkspace.shared.open($0) } }
+        model.reveal = { [weak self] name, rel in
+            self?.withRoot(of: name) {
+                NSWorkspace.shared.activateFileViewerSelecting([$0.appendingPathComponent(rel)])
+            }
+        }
+        draw(nil)
         Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             self?.poll()
         }
@@ -52,15 +57,35 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         DispatchQueue.main.async {
             self.domains = Dictionary(uniqueKeysWithValues: registered.map { ($0.displayName, $0) })
             self.report = report
-            if !self.isOpen { self.rebuild() }
+            self.model.domains = Tsync.domainNames().filter { self.domains[$0] != nil }
+            self.model.notices = self.localLines()
         }
     }
 
     func update(registrationProblem: String?) {
         DispatchQueue.main.async {
             self.registrationProblem = registrationProblem
-            if !self.isOpen { self.rebuild() }
+            self.model.notices = self.localLines()
         }
+    }
+
+    /// A fresh view each time it opens, dropped when it closes: the panel
+    /// polls only while it is shown.
+    @objc private func toggle() {
+        if popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        guard let button = item.button else { return }
+        checkAutofill()
+        if #available(macOS 14.0, *) { Identities.refresh() }
+        popover.contentViewController = NSHostingController(rootView: Panel(model: model))
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        popover.contentViewController = nil
     }
 
     /// One poll at a time; a poll past its deadline counts as a failure and
@@ -78,82 +103,42 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             self.lock.lock()
             self.polling = false
             self.lock.unlock()
-            DispatchQueue.main.async {
-                self.latest = reply?["menu"] as? [String: Any]
-                self.reachable = self.latest != nil
-                if !self.isOpen { self.rebuild() }
-            }
+            DispatchQueue.main.async { self.draw(reply?["menu"] as? [String: Any]) }
         }
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        if menu === self.menu {
-            checkAutofill()
-            if #available(macOS 14.0, *) { Identities.refresh() }
-        }
-        if menu === codesSubmenu {
-            menu.removeAllItems()
-            menu.addItem(Self.placeholder())
-            fetchCodes(menu)
-            return
-        }
-        isOpen = true
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        if menu === codesSubmenu { return }
-        isOpen = false
-        rebuild()
     }
 
     /// An owner that cannot be reached shows the error icon and says so,
     /// rather than the last known state.
-    private func rebuild() {
-        let model = reachable ? latest : nil
-        let icon = model?["icon"] as? String ?? "tsync-error-symbolic"
+    private func draw(_ menu: [String: Any]?) {
+        let icon = menu?["icon"] as? String ?? "tsync-error-symbolic"
         let image = NSImage(named: icon) ?? NSImage(named: "tsync-idle-symbolic")
         image?.isTemplate = true
         item.button?.image = image
-        item.button?.toolTip = model?["tooltip"] as? String ?? "tsync: the service is unreachable"
-
-        menu.removeAllItems()
-        for line in localLines() {
-            let entry = NSMenuItem(title: line, action: nil, keyEquivalent: "")
-            entry.isEnabled = false
-            menu.addItem(entry)
-        }
-        if autofillOff {
-            let entry = NSMenuItem(
-                title: "Turn on AutoFill for tsync in System Settings…",
-                action: #selector(openAutofillSettings), keyEquivalent: "")
-            entry.target = self
-            menu.addItem(entry)
-        }
-        if !localLines().isEmpty || autofillOff { menu.addItem(.separator()) }
-        if let model = model {
-            for entry in model["entries"] as? [[String: Any]] ?? [] {
-                menu.addItem(menuItem(entry))
-            }
-        } else {
-            let entry = NSMenuItem(title: "The tsync service is unreachable", action: nil, keyEquivalent: "")
-            entry.isEnabled = false
-            menu.addItem(entry)
-        }
+        let tooltip = menu?["tooltip"] as? String ?? "tsync: the service is unreachable"
+        item.button?.toolTip = tooltip
+        let entries = menu?["entries"] as? [[String: Any]] ?? []
+        let actions = entries.compactMap { $0["action"] as? [String: Any] }
+        model.icon = icon
+        model.reachable = menu != nil
+        model.summary = menu == nil ? "The service is unreachable" : Self.summary(tooltip)
+        model.allPaused = entries.contains { $0["checked"] as? Bool == true && ($0["action"] as? [String: Any])?["setPaused"] != nil }
+        model.hasCodes = actions.contains { $0["codes"] as? Bool == true }
     }
 
-    /// passwords/macos §1: asked when the menu opens, off the main queue.
+    /// menu-model §4: the tooltip is `tsync — <summary>`.
+    private static func summary(_ tooltip: String) -> String {
+        guard let range = tooltip.range(of: " — ") else { return tooltip }
+        return String(tooltip[range.upperBound...])
+    }
+
+    /// passwords/macos §1: asked when the panel opens, off the main queue.
     private func checkAutofill() {
         guard #available(macOS 14.0, *), Self.hasCredentialsExtension else { return }
         ASCredentialIdentityStore.shared.getState { state in
             let enabled = state.isEnabled
             DispatchQueue.global().async {
-                let uses = !enabled && self.anyDomainUsesPasswords()
-                DispatchQueue.main.async {
-                    if uses != self.autofillOff {
-                        self.autofillOff = uses
-                        self.rebuild()
-                    }
-                }
+                let off = !enabled && self.anyDomainUsesPasswords()
+                DispatchQueue.main.async { self.model.autofillOff = off }
             }
         }
     }
@@ -178,7 +163,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     /// macOS has no stable link to the AutoFill pane: the row names the path.
-    @objc private func openAutofillSettings() {
+    private func openAutofillSettings() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 
@@ -195,6 +180,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return lines
     }
 
+    /// §10.1: the codes menu, under the pointer; fetched each time it opens.
+    private func showCodes() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(Self.placeholder())
+        fetchCodes(menu)
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     private func menuItem(_ entry: [String: Any]) -> NSMenuItem {
         if entry["separator"] as? Bool == true { return .separator() }
         let title = entry["label"] as? String ?? ""
@@ -202,21 +196,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.target = self
         item.isEnabled = entry["enabled"] as? Bool ?? true
         item.indentationLevel = entry["indent"] as? Int ?? 0
-        if let checked = entry["checked"] as? Bool { item.state = checked ? .on : .off }
         item.representedObject = entry["action"]
-        if entry["submenu"] as? Bool == true {
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            if (entry["action"] as? [String: Any])?["codes"] as? Bool == true {
-                submenu.delegate = self
-                submenu.addItem(Self.placeholder())
-                codesSubmenu = submenu
-            } else {
-                fillStats(submenu)
-            }
-            item.submenu = submenu
-            item.action = nil
-        }
         return item
     }
 
@@ -228,7 +208,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// The owner's rows for the code domains: labels only, a record's code is
     /// asked for when it is clicked. A failure leaves the placeholder.
-    private func fetchCodes(_ submenu: NSMenu) {
+    private func fetchCodes(_ menu: NSMenu) {
         codesFetch += 1
         let fetch = codesFetch
         Thread.detachNewThread {
@@ -240,44 +220,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             for domain in domains { looks[domain] = VaultLook.image(domain: domain) }
             DispatchQueue.main.async {
                 guard fetch == self.codesFetch else { return }
-                submenu.removeAllItems()
+                menu.removeAllItems()
                 for entry in entries {
                     let item = self.menuItem(entry)
                     if let domain = entry["vault"] as? String { item.image = looks[domain] }
-                    submenu.addItem(item)
-                }
-            }
-        }
-    }
-
-    /// Fetched when the submenu is drawn, at most once per stats interval; a
-    /// failure leaves the placeholder.
-    private func fillStats(_ submenu: NSMenu) {
-        let placeholder = NSMenuItem(title: "Reading…", action: nil, keyEquivalent: "")
-        placeholder.isEnabled = false
-        let entries = statsEntries
-        if let entries = entries, !entries.isEmpty {
-            for entry in entries {
-                let line = NSMenuItem(title: entry["label"] as? String ?? "", action: nil, keyEquivalent: "")
-                line.isEnabled = false
-                submenu.addItem(line)
-            }
-        } else {
-            submenu.addItem(placeholder)
-        }
-        guard Date().timeIntervalSince(statsFetched) >= Self.statsInterval else { return }
-        statsFetched = Date()
-        Thread.detachNewThread {
-            let reply = try? OwnerClient.call(["action": "menu_stats"])
-            guard let entries = reply?["entries"] as? [[String: Any]] else { return }
-            DispatchQueue.main.async {
-                self.statsEntries = entries
-                submenu.removeAllItems()
-                for entry in entries {
-                    let line = NSMenuItem(
-                        title: entry["label"] as? String ?? "", action: nil, keyEquivalent: "")
-                    line.isEnabled = false
-                    submenu.addItem(line)
+                    menu.addItem(item)
                 }
             }
         }
@@ -285,18 +232,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func act(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? [String: Any] else { return }
-        if let name = action["openFolder"] as? String {
-            withRoot(of: name) { NSWorkspace.shared.open($0) }
-        } else if let reveal = action["reveal"] as? [String: Any],
-            let name = reveal["domain"] as? String, let rel = reveal["rel"] as? String
-        {
-            withRoot(of: name) {
-                NSWorkspace.shared.activateFileViewerSelecting([$0.appendingPathComponent(rel)])
-            }
-        } else if let paused = action["setPaused"] as? Bool {
-            // The state shown is read back by the next poll.
-            pause(paused)
-        } else if let copy = action["copyCode"] as? [String: Any],
+        if let copy = action["copyCode"] as? [String: Any],
             let domain = copy["domain"] as? String, let id = copy["id"] as? String
         {
             copyCode(domain: domain, id: id)
@@ -304,12 +240,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             unlock(domain: domain, problem: nil)
         } else if let domain = action["addCode"] as? String {
             addCode(domain: domain, problem: nil)
-        } else if let domain = action["seenMachines"] as? String {
-            // vault §6.3: listing the machines acknowledges them.
-            Thread.detachNewThread {
-                _ = try? OwnerClient.call(["action": "vault_machines", "domain": domain])
-                self.poll()
-            }
         }
     }
 
