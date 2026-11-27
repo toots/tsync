@@ -140,7 +140,12 @@ follows this rule rather than failing as a whole when the store is silent; the c
   preferences, then settled by `vault_status`. Each vault read (the status, the codes, the
   passwords) is asked first with `pull: "background"`, which answers from the last view at once,
   then as usual, whose answer replaces it; the offline banner shows only when that second answer
-  is still `outdated`. A screen shows *Loading* only on a phone that never had the vault.
+  is `offline`. A screen shows *Loading* only on a phone that never had the vault.
+  - The Vault destination draws at once from the statuses it last showed, kept in memory for the
+    process's life (statuses only: never codes nor records), then asks again. Every vault domain
+    is asked at once, not one after another.
+  - Which extensions a domain uses comes from its `stats` report, asked by the second read; the
+    first takes the answer learned before in this process, if any.
 
 
 ### 6.1 The config the app writes

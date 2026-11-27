@@ -420,12 +420,13 @@ let list ~domain ~engine ~lazy_tree t args =
           ])
   in
   let view = Atomic.get t.Vault.view in
-  let view = { view with outdated = view.outdated || records_view.outdated } in
+  let view = Vault.oldest_view view records_view in
   [
     ("records", `List (login_rows @ note_rows @ passkey_rows));
     ("corrupt", `List (List.map (fun c -> `String c) corrupt));
   ]
   @ (if view.outdated then [("outdated", `Bool true)] else [])
+  @ (if view.offline then [("offline", `Bool true)] else [])
   @
     match view.pulled_at with
     | Some at -> [("pulledAt", `Int (int_of_float at))]

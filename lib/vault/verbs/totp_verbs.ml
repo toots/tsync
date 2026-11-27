@@ -67,7 +67,13 @@ let list ?pull ~domain ~engine ~lazy_tree t filter : Protocol.totp_listing =
         compare (a.issuer, a.account, a.id) (b.issuer, b.account, b.id))
   in
   let view = Atomic.get t.Vault.view in
-  { rows; corrupt; outdated = view.outdated; pulled_at = view.pulled_at }
+  {
+    rows;
+    corrupt;
+    outdated = view.outdated;
+    offline = view.offline;
+    pulled_at = view.pulled_at;
+  }
 
 let code ?pull ~domain ~engine ~lazy_tree t id : Protocol.totp_code =
   let ctx = context ?pull ~domain ~engine ~lazy_tree t in

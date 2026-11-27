@@ -6,6 +6,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.os.PersistableBundle
+import android.os.SystemClock
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -45,6 +47,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -144,12 +148,16 @@ fun VaultMark(appearance: org.feverdreamtv.tsync.core.Appearance, modifier: Modi
 /** One vault domain as the Vault screen last asked it (android-app §10.8). */
 class VaultView(val domain: Served, val status: VaultStatus?, val failure: String?, val extensions: List<String>, val settled: Boolean)
 
+// android-app §5.1: what the screen last showed, for as long as the process lives, so that opening
+// it again draws at once. Statuses only: codes and records are asked each time.
+private var lastViews: List<VaultView>? = null
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     SecureWindow()
     // android-app §2, §10.8: every vault domain, in config order, each answered on its own.
-    var views by remember { mutableStateOf<List<VaultView>?>(null) }
+    var views by remember { mutableStateOf(lastViews) }
     var generation by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pair<Served, Boolean>?>(null) }
@@ -163,7 +171,13 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
             // android-app §5.1: the last view at once, then the server's answer over it.
             for (pull in listOf(Pull.BACKGROUND, Pull.DEFAULT)) {
                 val previous = views.orEmpty()
-                views = withContext(Dispatchers.IO) { tsync.vaults().mapNotNull { ask(tsync, it, pull, previous.firstOrNull { v -> v.domain === it }) } }
+                views = withContext(Dispatchers.IO) {
+                    val started = SystemClock.elapsedRealtime()
+                    val vaults = tsync.vaults()
+                    Log.i(Tsync.TAG, "vault domains booted in ${SystemClock.elapsedRealtime() - started} ms")
+                    vaults.map { async { ask(tsync, it, pull, previous.firstOrNull { v -> v.domain === it }) } }.awaitAll().filterNotNull()
+                }
+                lastViews = views
             }
             // passwords/android §1.1: after an unlock, once the status is shown.
             if (views.orEmpty().any { it.status?.state == "unlocked" }) tsync.warmPasswords()
@@ -248,10 +262,13 @@ fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
 
 /** One domain's status and extensions; null when it uses no extension, which takes it out of the set (app §2). */
 private fun ask(tsync: Tsync, domain: Served, pull: Pull, previous: VaultView?): VaultView? {
-    // Asked on a refusal too, so a vault that cannot answer still counts as using them.
-    fun extensions() = tsync.extensions(domain) ?: previous?.extensions.orEmpty()
+    // Asked on a refusal too, so a vault that cannot answer still counts as using them. The
+    // first read takes what was learned before: the extensions change with the config, rarely.
+    fun extensions() = timed("${domain.name}: extensions ($pull)") {
+        tsync.extensions(domain, known = pull == Pull.BACKGROUND) ?: previous?.extensions.orEmpty()
+    }
     val status = try {
-        domain.vault.status(pull)
+        timed("${domain.name}: vault status ($pull)") { domain.vault.status(pull) }
     } catch (e: CoreException) {
         // A last view stays shown over a refusal; without one the refusal is.
         return previous?.takeIf { it.status != null } ?: VaultView(domain, null, e.message ?: e.code.wire, extensions(), false)
@@ -293,7 +310,7 @@ private fun VaultState(tsync: Tsync, view: VaultView, onChanged: () -> Unit) {
             status.state == "absent" -> Text(stringResource(R.string.vault_absent))
             status.state == "corrupt" -> Text(stringResource(R.string.vault_corrupt))
             else -> {
-                if (status.outdated && view.settled) Banner(stringResource(R.string.codes_offline_as_of, age(status.pulledAt)))
+                if (status.offline && view.settled) Banner(stringResource(R.string.codes_offline_as_of, age(status.pulledAt)))
                 if (status.secretKeyReplaced) Banner(stringResource(R.string.vault_secret_key_replaced))
                 UnlockForm(view.domain, status.enrolled, onUnlocked = onChanged)
             }
@@ -418,7 +435,7 @@ private fun CodesList(tsync: Tsync, views: List<VaultView>, padding: PaddingValu
                     if (name !in failures) item(key = "$name/loading") { CircularProgressIndicator(Modifier.padding(16.dp)) }
                     continue
                 }
-                if (current.outdated && name in settled) item(key = "$name/outdated") { Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt))) }
+                if (current.offline && name in settled) item(key = "$name/offline") { Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt))) }
                 if (current.records.isEmpty()) item(key = "$name/empty") { Text(stringResource(R.string.codes_empty), Modifier.padding(16.dp)) }
                 items(current.records, key = { "$name/${it.id}" }) { record ->
                     val left = (record.secondsLeft - elapsed).coerceAtLeast(0)
@@ -733,4 +750,14 @@ fun SecretField(
         singleLine = true,
         modifier = modifier,
     )
+}
+
+/** Logs how long [block] took, to see where the vault screen's first draw goes. */
+private fun <T> timed(what: String, block: () -> T): T {
+    val started = SystemClock.elapsedRealtime()
+    try {
+        return block()
+    } finally {
+        Log.i(Tsync.TAG, "$what in ${SystemClock.elapsedRealtime() - started} ms")
+    }
 }

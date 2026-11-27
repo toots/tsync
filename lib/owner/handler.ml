@@ -127,7 +127,7 @@ let vault_reads pulls =
     Vault.for_listing =
       (fun ~pull dir ->
         let v = Pulls.for_listing pulls ~pull dir in
-        { pulled_at = v.pulled_at; outdated = v.outdated });
+        { pulled_at = v.pulled_at; outdated = v.outdated; offline = v.offline });
     before_mutation = Pulls.before_mutation pulls;
   }
 

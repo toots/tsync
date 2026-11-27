@@ -18,6 +18,7 @@ data class PasswordRecords(
     val notes: List<NoteRow> = emptyList(),
     val outdated: Boolean = false,
     val pulledAt: Long? = null,
+    val offline: Boolean = false,
 )
 
 /** What a fill hands the form: passwords §8 `passwords_fill`. */
@@ -63,6 +64,7 @@ class Passwords(private val client: Client) {
             },
             corrupt = reply.optJSONArray("corrupt")?.length() ?: 0,
             outdated = reply.optBoolean("outdated", false),
+            offline = reply.optBoolean("offline", false),
             pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
         )
     }

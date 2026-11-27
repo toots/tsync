@@ -69,9 +69,10 @@ a top-level command or a frontend's CLI group
   folders a verb or fold reads (the root, `/.tsync-ext/`, `/.tsync-ext/vault/` and its
   extension's) are pulled as a listing pulls a folder, and the vault works offline as files do
   ([android §3.3](../frontends/android.md#33-working-without-the-store)):
-  - A **read** (`vault_status`, an extension's `list` and `code`) waits for the pulls at most the
-    pull patience, then answers from the last view of those folders, its reply carrying
-    `outdated: true` and the oldest `pulledAt` among them. The pulls go on and the next read is
+  - A **read** (`vault_status`, an extension's `list` and `code`) pulls those folders at once and
+    waits for the pulls at most the pull patience, then answers from the last view of those
+    folders, its reply carrying `outdated: true`, `offline` when any of them was answered
+    offline, and the oldest `pulledAt` among them. The pulls go on and the next read is
     fresh. A read carrying `pull` takes it as a listing does
     ([android §3.2](../frontends/android.md#32-freshness-without-a-background-cycle) rule 1):
     `background` answers the last view without waiting. A `background` read also waits for no
