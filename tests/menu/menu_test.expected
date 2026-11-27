@@ -78,6 +78,7 @@ tooltip tsync — Syncing: 1 to upload, 2 to download
 240000 / 900000 -> ▰▰▱▱▱▱▱▱▱▱ 26%
 100 / 100 -> ▰▰▰▰▰▰▰▰▰▰ 100%
 150 / 100 -> ▰▰▰▰▰▰▰▰▰▰ 100%
+-1 / 100 -> ▱▱▱▱▱▱▱▱▱▱ 0%
 
 == contents rows: what each domain holds, and where
 icon    tsync-idle-symbolic

@@ -20,6 +20,9 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
     private var report = ReconcileReport()
     private var registrationProblem: String?
     private var domains: [String: NSFileProviderDomain] = [:]
+    /// A transient popover closes on the mouse-down that lands on the item,
+    /// before the item's action runs: that click only closes it.
+    private var closedAt = Date.distantPast
 
     let pause: (Bool) -> Void
 
@@ -76,6 +79,8 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
             popover.performClose(nil)
             return
         }
+        // ponytail: a time window, not the event itself; 0.3 s covers a click.
+        guard Date().timeIntervalSince(closedAt) > 0.3 else { return }
         guard let button = item.button else { return }
         checkAutofill()
         if #available(macOS 14.0, *) { Identities.refresh() }
@@ -85,6 +90,7 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        closedAt = Date()
         popover.contentViewController = nil
     }
 

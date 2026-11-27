@@ -44,6 +44,7 @@ struct ActivityReport {
             // activity.md §1: a domain the reply does not list, or lists unanswered, did not answer.
             guard let body = parsed.domains?.first, body.unanswered != true else {
                 return ActivityReport(failure: "no process reported it", answeredAt: previous?.answeredAt)
+                    .orStill(previous)
             }
             parsed.domains = [body]
             var report = ActivityReport(
@@ -73,7 +74,7 @@ struct ActivityReport {
         func transfers(_ new: [StatusReply.Transfer]?, _ old: [StatusReply.Transfer]?) -> [StatusReply.Transfer]? {
             new?.map { transfer in
                 var transfer = transfer
-                transfer.rate = average(transfer.rate, old?.first { $0.name == transfer.name }?.rate)
+                transfer.rate = average(transfer.rate, old?.first { $0.key == transfer.key }?.rate)
                 return transfer
             }
         }
@@ -106,6 +107,8 @@ struct StatusReply: Decodable {
         var bytes: Int?
         var size: Int?
         var rate: Double?
+        /// Two files of one name in different folders are two transfers.
+        var key: String { rel ?? name ?? "" }
     }
     var paused: Bool?
     var readOnly: Bool?
@@ -283,12 +286,12 @@ struct DomainActivity: View {
     @ViewBuilder private func transfers(_ status: StatusReply) -> some View {
         let uploading = status.uploading ?? [], downloading = status.downloading ?? []
         let waiting = max((status.pendingUploads ?? 0) - uploading.count, 0)
-        ForEach(uploading, id: \.name) { TransferRow(verb: "arrow.up", transfer: $0, reveal: reveal) }
+        ForEach(uploading, id: \.key) { TransferRow(verb: "arrow.up", transfer: $0, reveal: reveal) }
         if waiting > 0 {
             Text("\(waiting) more waiting" + ((status.pendingBytes ?? 0) > 0 ? ", \(Format.bytes(status.pendingBytes)) to send" : ""))
                 .font(.footnote).foregroundStyle(.secondary)
         }
-        ForEach(downloading, id: \.name) { TransferRow(verb: "arrow.down", transfer: $0, reveal: reveal) }
+        ForEach(downloading, id: \.key) { TransferRow(verb: "arrow.down", transfer: $0, reveal: reveal) }
         if uploading.isEmpty && downloading.isEmpty && waiting == 0 && (status.pendingDownloads ?? 0) == 0 {
             Text("Nothing to transfer").foregroundStyle(.secondary)
         }
@@ -305,18 +308,18 @@ struct DomainActivity: View {
         // vault §6.3: listing the machines acknowledges them.
         if !machines.isEmpty { Button("Mark as seen") { act("vault_machines") } }
         if parked > 0 {
-            ProblemRow(icon: "arrow.clockwise.circle", text: "\(parked) uploads waiting to be retried",
+            ProblemRow(icon: "arrow.clockwise.circle", text: Format.count(parked, "upload") + " waiting to be retried",
                        detail: stats.queues?.lastError)
             Button("Retry now") { act("retry") }
         }
         if setAside > 0 {
-            ProblemRow(icon: "archivebox", text: "\(setAside) unreadable records set aside", detail: "Kept and never run.")
+            ProblemRow(icon: "archivebox", text: Format.count(setAside, "unreadable record") + " set aside", detail: "Kept and never run.")
         }
         ForEach(stores) { store in
             ProblemRow(
                 icon: "externaldrive.badge.exclamationmark", text: store.name,
                 detail: store.damagedChunks > 0 && !store.isDown && !store.isUnreachable
-                    ? "\(store.damagedChunks) damaged chunks" : store.connection)
+                    ? Format.count(store.damagedChunks, "damaged chunk") : store.connection)
         }
         if machines.isEmpty && parked == 0 && setAside == 0 && stores.isEmpty {
             Label("No problems", systemImage: "checkmark.circle").foregroundStyle(.secondary)
@@ -337,9 +340,16 @@ struct DomainActivity: View {
             }
         }
         if let usage = report.stats?.process?.process, let ram = usage.anonymousBytes ?? usage.privateBytes {
-            Text("The extension uses \(Format.bytes(ram)) of memory").font(.caption).foregroundStyle(.secondary)
+            Text("\(Self.process) uses \(Format.bytes(ram)) of memory").font(.caption).foregroundStyle(.secondary)
         }
     }
+
+    /// Who answers `stats`: the File Provider extension on iOS, the service on macOS.
+    #if canImport(UIKit)
+    private static let process = "The extension"
+    #else
+    private static let process = "The service"
+    #endif
 
     private func act(_ action: String, _ fields: [String: Any] = [:]) {
         Task {
@@ -536,7 +546,7 @@ struct StoreCard: View {
                 }
             }
             if store.damagedChunks > 0 {
-                Text("\(store.damagedChunks)\(store.corrupted?.truncated == true ? " or more" : "") damaged chunks")
+                Text(Format.count(store.damagedChunks, "damaged chunk") + (store.corrupted?.truncated == true ? " or more" : ""))
                     .font(.footnote).foregroundStyle(.red)
             }
         }
@@ -576,6 +586,11 @@ struct ActivityDetails: View {
 }
 
 enum Format {
+    /// menu-model §6: the noun in the singular for one.
+    static func count(_ n: Int, _ noun: String) -> String {
+        "\(n) \(noun)\(n == 1 ? "" : "s")"
+    }
+
     static func bytes(_ value: Int?) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(value ?? 0), countStyle: .file)
     }

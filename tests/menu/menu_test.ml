@@ -154,6 +154,7 @@ let () =
       (240000, 900000);
       (100, 100);
       (150, 100);
+      (-1, 100);
     ];
 
   case "contents rows: what each domain holds, and where";

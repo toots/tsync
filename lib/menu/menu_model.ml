@@ -90,7 +90,7 @@ let ellipsis text =
     String.sub text 0 cut ^ "…")
 
 let progress_bar ~moved ~total =
-  let share n = min n (n * moved / total) in
+  let share n = max 0 (min n (n * moved / total)) in
   let filled = share bar_cells in
   let cells n glyph = String.concat "" (List.init n (fun _ -> glyph)) in
   Printf.sprintf "%s%s %d%%" (cells filled "▰")
