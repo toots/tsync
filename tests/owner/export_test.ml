@@ -7,7 +7,7 @@
 open Tsync_core
 open Tsync_ipc
 module Owner = Tsync_owner.Owner
-module Keystore = Tsync_owner.Keystore
+module Keystore = Tsync_vault.Keystore
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let root = Printf.sprintf "/tmp/tsync-export-%d" (Unix.getpid ())
@@ -417,7 +417,7 @@ let scenario () =
 let () =
   Keystore.register keystore;
   (* §8.3: an hour's period in 0.6 s. *)
-  Atomic.set Tsync_owner.Vault.minute 0.01;
+  Atomic.set Tsync_vault_verbs.Vault.minute 0.01;
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
       let owner =

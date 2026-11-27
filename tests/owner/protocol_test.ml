@@ -1,5 +1,5 @@
 (* Every request and reply of the hand-written codec reads back as written. *)
-open Tsync_owner.Protocol
+open Tsync_protocol.Protocol
 
 type case = Case : 'a request * 'a -> case
 

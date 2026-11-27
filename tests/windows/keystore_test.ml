@@ -7,7 +7,7 @@ let p fmt = Printf.printf fmt
 
 let () =
   Tsync_credential_manager.Credential_manager.register ();
-  let ks = Option.get (Tsync_owner.Keystore.registered ()) in
+  let ks = Option.get (Tsync_vault.Keystore.registered ()) in
   let name = Printf.sprintf "tsync-test-%d:x" (Pid.self ()) in
   let other = name ^ ":with" in
   let show label domain =

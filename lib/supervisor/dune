@@ -6,6 +6,7 @@
   tsync_config
   tsync_ipc
   tsync_owner
+  tsync_protocol
   tsync_status
   unix
   yojson))

@@ -3,7 +3,7 @@
 
 open Tsync_core
 module Secret_service = Tsync_secret_service.Secret_service
-module Keystore = Tsync_owner.Keystore
+module Keystore = Tsync_vault.Keystore
 
 let dir = Filename.concat (Sys.getcwd ()) "secret-service"
 let path name = Filename.concat dir name

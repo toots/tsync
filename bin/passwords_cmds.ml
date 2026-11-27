@@ -4,7 +4,7 @@ open Cmdliner
 open Tsync_core
 open Tsync_config
 open Extension_cmds
-module P = Tsync_owner.Protocol
+module P = Tsync_protocol.Protocol
 module Passwords = Tsync_vault.Passwords
 
 let extension = "passwords"
@@ -645,7 +645,7 @@ let bridge_request config session j =
         [
           (* browser §5: without one, the extension asks the passphrase. *)
           ( "verifier",
-            match Tsync_owner.Verifier.registered () with
+            match Tsync_vault.Verifier.registered () with
               | Some v -> `String v.name
               | None -> `Null );
           ( "domains",
@@ -795,7 +795,7 @@ let bridge_request config session j =
     (* §9.2 verify: the platform's own verifier; the prompt names the origin
        the browser gave, never a page's words. *)
     | Some "verify" -> (
-        match Tsync_owner.Verifier.registered () with
+        match Tsync_vault.Verifier.registered () with
           | None ->
               Fail.invalid
                 "this machine has no verifier: the passphrase verifies"

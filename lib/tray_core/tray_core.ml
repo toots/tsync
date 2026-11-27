@@ -1,7 +1,7 @@
 open Tsync_core
 open Tsync_config
 open Tsync_ipc
-open Tsync_owner
+open Tsync_protocol
 open Tsync_menu
 module M = Menu_model
 

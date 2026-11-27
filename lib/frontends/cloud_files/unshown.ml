@@ -19,19 +19,19 @@ let present t ~on_disk rows =
   let presented, others =
     Tsync_cloud_files_rules.Presentation.choose ~fold:Cf.upcase ~on_disk
       (List.filter_map
-         (fun (row : Tsync_owner.Protocol.row) ->
+         (fun (row : Tsync_protocol.Protocol.row) ->
            if row.kind = `Symlink then None else Some (row.name, row))
          rows)
   in
   List.iter
-    (fun ((row : Tsync_owner.Protocol.row), why) ->
+    (fun ((row : Tsync_protocol.Protocol.row), why) ->
       note t ~ref_:row.ref_ ~name:row.name
         (match why with
           | `Unpresentable reason -> reason
           | `Case_group shown -> "its case group shows " ^ shown))
     others;
   List.iter
-    (fun (row : Tsync_owner.Protocol.row) ->
+    (fun (row : Tsync_protocol.Protocol.row) ->
       if row.kind = `Symlink then note t ~ref_:row.ref_ ~name:row.name "a link")
     rows;
   presented

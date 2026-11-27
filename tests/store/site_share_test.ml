@@ -115,7 +115,7 @@ let () =
         let max_chunk_buffers = 4
       end in
       let module R = Remote.Make (C) in
-      let module Share = Tsync_gc.Share.Make (C) in
+      let module Share = Tsync_share.Share.Make (C) in
       let put k v = C.store.put k (Bigstring.of_string v) in
       let folder parent name id =
         let id = Folder_id.v id in
@@ -215,7 +215,7 @@ let () =
       create 'a' "site";
       show_site 'a';
       p "== the first visit publishes, then redirects (§A9.9)";
-      Tsync_gc.Share.publish (url ^ "/s/" ^ token 'a');
+      Tsync_share.Share.publish (url ^ "/s/" ^ token 'a');
       show_site 'a';
       p "files 644, folders 755: %b"
         (readable_modes (Filename.concat sites_root (token 'a')));
@@ -320,7 +320,7 @@ let () =
       p "record left: %b"
         (C.store.get_opt (Option.get (Key.share_site (token 'a'))) <> None);
       create '9' "site";
-      Tsync_gc.Share.publish (url ^ "/s/" ^ token '9');
+      Tsync_share.Share.publish (url ^ "/s/" ^ token '9');
       Server.close server;
       p "== revoking with the server gone leaves the site and says so";
       (match Share.revoke (token '9') with

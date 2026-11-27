@@ -5,6 +5,7 @@
 open Tsync_core
 open Tsync_ipc
 open Tsync_owner
+module Keystore = Tsync_vault.Keystore
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 
@@ -157,7 +158,9 @@ let derived () =
     match member r "slots" with Some (`List l) -> l | _ -> []
   in
   let derive ?(secret_key = secret_key) passphrase =
-    match Tsync_owner.Vault.derive ~slots:(slots ()) ~secret_key passphrase with
+    match
+      Tsync_vault_verbs.Vault.derive ~slots:(slots ()) ~secret_key passphrase
+    with
       | keks -> Ok keks
       | exception e -> Error (Tsync_core.Fail.classify e).reason
   in
@@ -208,7 +211,7 @@ let derived () =
           unlock_keks "unlock, enrolled" (keks_of "derive" (derive passphrase));
           status "status";
           answer "lock" (ask [("action", "vault_lock")]);
-          Tsync_owner.Vault.no_derivation ();
+          Tsync_vault_verbs.Vault.no_derivation ();
           p "== an owner that cannot derive";
           answer "unlock, the passphrase" (unlock passphrase);
           answer "kit"
@@ -274,7 +277,7 @@ let keystore_phase = function
           status "status";
           p "%-34s [%s]" "keystore entries" (entries ()))
   | "ks-late" ->
-      Atomic.set Tsync_owner.Vault.keystore_retry 1.;
+      Atomic.set Tsync_vault_verbs.Vault.keystore_retry 1.;
       with_keystore ~late:true ~broken:false (fun _ _ ->
           status "status";
           Fs.write_file_for_test up_marker "";

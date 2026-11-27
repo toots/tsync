@@ -180,7 +180,7 @@
   tsync_remote
   tsync_http
   tsync_http_proxy
-  tsync_gc
+  tsync_share
   unix
   threads.posix
   yojson))

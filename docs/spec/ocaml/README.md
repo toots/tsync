@@ -7,7 +7,7 @@ parent directory, and each note names the spec concept it implements.
 The code is direct style on OCaml 5: fibers on liquidsoap's `duppy` scheduler, run by a pool of
 domains (`lib/core/rt.ml`). It has its own HTTP client and server (`lib/http`) over OpenSSL or
 ocaml-tls, store drivers that register themselves (`lib/store`), bigstring bodies, and a typed
-request protocol between a domain's owner and its clients (`lib/owner/protocol.ml`). Every module
+request protocol between a domain's owner and its clients (`lib/protocol/protocol.ml`). Every module
 has an `.mli` whose doc comments are the first thing to read.
 
 Each note gives a map from spec concept to module and function, the departures the code has from

@@ -1,0 +1,15 @@
+(library
+ (name tsync_vault_verbs)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_domain
+  tsync_sync
+  tsync_vault
+  tsync_http
+  tsync_protocol
+  unix
+  base64
+  yojson)
+ (flags
+  (:standard -open Tsync_protocol)))

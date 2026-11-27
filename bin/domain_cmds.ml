@@ -1,6 +1,7 @@
 open Cmdliner
 open Tsync_core
 open Tsync_owner
+open Tsync_protocol
 open Protocol
 open Cli
 

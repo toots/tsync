@@ -607,7 +607,7 @@ let logins () =
        ]);
   ignore (ask [("action", s "passwords_remove"); ("id", s sg_id)]);
   (* §4.3: an app's verified website, from a stand-in for the statement fetch. *)
-  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+  Atomic.set Tsync_vault_verbs.Well_known.fetch (fun host path ->
       if host = "example.com" && path = "/.well-known/assetlinks.json" then
         Some
           {|[{"relation":["delegate_permission/common.get_login_creds"],
@@ -673,7 +673,7 @@ let logins () =
          ("certs", `List [s "000000"]);
        ]);
   ignore (ask [("action", s "passwords_remove"); ("id", s web_id)]);
-  Tsync_owner.Asset_links_cache.reset ();
+  Tsync_vault_verbs.Asset_links_cache.reset ();
   linked
 
 let import_export () =
@@ -822,7 +822,7 @@ let passkeys () =
          ("clientDataHash", s (b64 client_data_hash));
        ]);
   let fetched = ref [] and document = ref None in
-  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+  Atomic.set Tsync_vault_verbs.Well_known.fetch (fun host path ->
       fetched := (host ^ path) :: !fetched;
       !document);
   let related origin =
@@ -846,7 +846,7 @@ let passkeys () =
 (* §4.3, §8, §10.1, §10.2: an app and its website keep one login. *)
 let merges () =
   p "== an app and its website, merge";
-  Atomic.set Tsync_owner.Well_known.fetch (fun host path ->
+  Atomic.set Tsync_vault_verbs.Well_known.fetch (fun host path ->
       if host = "www.mergetest.com" && path = "/.well-known/assetlinks.json"
       then
         Some
@@ -1199,7 +1199,7 @@ let merges () =
     ([web; other; passkey; router1; router2; cased_app; cased_web]
     @ List.filter_map (fun r -> field r "id") imported
     @ logins_of "merger3" @ logins_of "merger4");
-  Tsync_owner.Asset_links_cache.reset ()
+  Tsync_vault_verbs.Asset_links_cache.reset ()
 
 let () =
   Owner.stop_on_signals ();

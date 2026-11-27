@@ -122,6 +122,15 @@ let schedule_backups ~(domain : Tsync_domain.Domain.t) ~engine vault =
         in
         try loop () with Stop.Stopping -> ())
 
+let vault_reads pulls =
+  {
+    Vault.for_listing =
+      (fun ~pull dir ->
+        let v = Pulls.for_listing pulls ~pull dir in
+        { pulled_at = v.pulled_at; outdated = v.outdated });
+    before_mutation = Pulls.before_mutation pulls;
+  }
+
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     ?(background =
       let one_at_a_time = Rt.Fmutex.create () in
@@ -166,7 +175,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
       staging_roots;
       answered_unreachable = Atomic.make false;
       running = Atomic.make None;
-      vault = Vault.create ?pulls ();
+      vault = Vault.create ?reads:(Option.map vault_reads pulls) ();
       formats = Format_merge.create ();
     }
   in
@@ -1082,13 +1091,13 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Retry -> E.rearm ()
     | Share r ->
         let module S =
-          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+          Tsync_share.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         let c =
           S.create ?expires:r.expires ?token:r.token ~site:r.site
             ?member:(Tsync_config.Config.share_member_name t.domain.domain)
             (target t r.item)
         in
-        if r.site then t.background (fun () -> Tsync_gc.Share.publish c.url);
+        if r.site then t.background (fun () -> Tsync_share.Share.publish c.url);
         (* 05 §4.11: the link is answered before any image is made. *)
         t.background (fun () ->
             match S.preview c.url with
@@ -1098,15 +1107,15 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         { Protocol.url = c.url; expires = c.expires }
     | Share_preview s ->
         let module S =
-          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+          Tsync_share.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         S.preview s
     | Share_revoke s ->
         let module S =
-          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+          Tsync_share.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         S.revoke s
     | Share_clear_cache ->
         let module S =
-          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+          Tsync_share.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         S.clear_cache ()
     | Job r -> run_job t ~send ~narrate:r.narrate r.job
     | Cancel id -> cancel t id

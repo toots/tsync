@@ -13,5 +13,5 @@ val count : t -> int
 val present :
   t ->
   on_disk:(string -> bool) ->
-  Tsync_owner.Protocol.row list ->
-  (Tsync_owner.Protocol.row * string) list
+  Tsync_protocol.Protocol.row list ->
+  (Tsync_protocol.Protocol.row * string) list

@@ -522,7 +522,7 @@ let share path site expires token preview revoke clear name verbose =
             fail "--site makes a link; it goes with a path alone"
         | None, false, None when preview <> None -> (
             match
-              ask (Tsync_owner.Protocol.Share_preview (Option.get preview))
+              ask (Tsync_protocol.Protocol.Share_preview (Option.get preview))
             with
               | `Made ->
                   say "preview image made";
@@ -531,7 +531,7 @@ let share path site expires token preview revoke clear name verbose =
                   say "no preview image: %s" why;
                   1)
         | Some s, false, None ->
-            if ask (Tsync_owner.Protocol.Share_revoke s) then (
+            if ask (Tsync_protocol.Protocol.Share_revoke s) then (
               say "revoked";
               0)
             else (
@@ -539,14 +539,14 @@ let share path site expires token preview revoke clear name verbose =
                 (Domain_name.to_string dom.name);
               1)
         | None, true, None ->
-            let n, bytes = ask Tsync_owner.Protocol.Share_clear_cache in
+            let n, bytes = ask Tsync_protocol.Protocol.Share_clear_cache in
             say "%d cached share objects deleted (%s)" n (Narrate.size bytes);
             0
         | None, false, _ ->
             let rel = Option.value ~default:"" (List.nth_opt paths 0) in
             let r =
               ask
-                (Tsync_owner.Protocol.Share
+                (Tsync_protocol.Protocol.Share
                    { item = Rel rel; expires; token; site })
             in
             say "%s" r.url;
@@ -554,8 +554,8 @@ let share path site expires token preview revoke clear name verbose =
             (* 07 §5.6: an owner makes the image in the background; a run that
                took ownership itself makes it before it exits. *)
             if not (Tsync_owner.Owner.served dom.name) then (
-              if site then Tsync_gc.Share.publish r.url;
-              match ask (Tsync_owner.Protocol.Share_preview r.url) with
+              if site then Tsync_share.Share.publish r.url;
+              match ask (Tsync_protocol.Protocol.Share_preview r.url) with
                 | `Made -> ()
                 | `Not_made why -> Log.debug "share preview: %s" why
                 | exception Fail.E f -> Log.debug "share preview: %s" f.reason);
@@ -683,7 +683,7 @@ let versions path revert version name verbose =
         | true, Some path ->
             Tsync_owner.Owner.request ~what:"tsync versions --revert" config
               (domain ?name config)
-              (Tsync_owner.Protocol.Revert { item = Rel path; version });
+              (Tsync_protocol.Protocol.Revert { item = Rel path; version });
             say "%s is back at %s" path
               (match version with
                 | Some ns -> Narrate.date (Int64.to_float ns /. 1e9)
@@ -739,10 +739,10 @@ let cache evict fetch keep paths name verbose =
               match
                 Tsync_owner.Owner.request ~bulk:true ~what:"tsync cache" config
                   dom
-                  (if evict then Tsync_owner.Protocol.Evict (Rel rel)
+                  (if evict then Tsync_protocol.Protocol.Evict (Rel rel)
                    else Restore { item = Rel rel; keep })
               with
-                | (r : Tsync_owner.Protocol.counted) ->
+                | (r : Tsync_protocol.Protocol.counted) ->
                     say "%s: %s %s%s" (shown rel)
                       (Narrate.count r.succeeded "file")
                       (if evict then "online only" else "available offline")

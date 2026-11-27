@@ -343,7 +343,7 @@ type _ request =
   | Share_revoke : string -> bool request
   | Share_preview : string -> [ `Made | `Not_made of string ] request
   | Share_clear_cache : (int * int) request
-  | Job : { job : Jobs.t; narrate : bool } -> int request
+  | Job : { job : Job.t; narrate : bool } -> int request
   | Cancel : int -> bool request
   | Retry : int request
   | Poll : unit request
@@ -728,7 +728,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ opt "token" (fun t -> `String t) r.token
       @ if r.site then [("site", `Bool true)] else []
   | Share_revoke s | Share_preview s -> [("arg", `String s)]
-  | Job r -> [("job", Jobs.to_yojson r.job); ("narrate", `Bool r.narrate)]
+  | Job r -> [("job", Job.to_yojson r.job); ("narrate", `Bool r.narrate)]
   | Cancel id -> [("job", `Int id)]
   | Pause on -> [("arg", `String (if on then "on" else "off"))]
   | Stats args -> [("arg", `String (String.concat "," args))]
@@ -864,7 +864,7 @@ let decode j =
     | "share_preview" -> Request (Share_preview (required j "arg"))
     | "share_clear_cache" -> Request Share_clear_cache
     | "job" -> (
-        match Option.map Jobs.of_yojson (member j "job") with
+        match Option.map Job.of_yojson (member j "job") with
           | Some (Ok job) -> Request (Job { job; narrate = flag j "narrate" })
           | Some (Error e) -> Fail.invalid "unreadable job: %s" e
           | None -> Fail.invalid "job needs a job")

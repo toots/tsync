@@ -13,10 +13,12 @@
   tsync_catalog
   tsync_ipc
   tsync_owner
+  tsync_protocol
   tsync_vault
   base64
   tsync_domain
   tsync_gc
+  tsync_share
   tsync_remote
   tsync_sync
   tsync_supervisor

@@ -1,0 +1,10 @@
+(library
+ (name tsync_share)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_gc
+  tsync_http
+  unix
+  yojson))

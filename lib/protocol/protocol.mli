@@ -358,7 +358,7 @@ type _ request =
   | Share_revoke : string -> bool request  (** whether a share was there *)
   | Share_preview : string -> [ `Made | `Not_made of string ] request
   | Share_clear_cache : (int * int) request  (** objects and bytes deleted *)
-  | Job : { job : Jobs.t; narrate : bool } -> int request
+  | Job : { job : Job.t; narrate : bool } -> int request
       (** the exit status; its lines stream before the reply (07 §2.5) *)
   | Cancel : int -> bool request  (** whether that job was running *)
   | Retry : int request  (** records re-adopted *)

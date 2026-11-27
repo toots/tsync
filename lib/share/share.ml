@@ -223,8 +223,9 @@ module Make (C : Context.S) = struct
         (fun (m : Composite.member) ->
           match Option.map Bigstring.to_string (m.store.get_opt key) with
             | Some b
-              when Gc_plan.share ~domain:d ~now:(Unix.gettimeofday ()) b = Kept
-              -> (
+              when Tsync_gc.Gc_plan.share ~domain:d ~now:(Unix.gettimeofday ())
+                     b
+                   = Kept -> (
                 match Yojson.Safe.from_string b with
                   | `Assoc f -> Some (m, f)
                   | _ | (exception Yojson.Json_error _) -> None)

@@ -1,61 +1,10 @@
-(** The owner jobs of 07 §2.5: long owner requests, run by the owner or, when
-    none serves, by the command owning the domain for its run. *)
+(** Runs the owner jobs of {!Tsync_protocol.Job}. *)
 
 open Tsync_core
 
-type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
-
-(** Which versions expire (gc.md §4.1): by age, or the expiry list at an
-    absolute path, which the owner reads. *)
-type expiry = [ `Before of float | `Listed of string ] [@@deriving yojson]
-
-type t =
-  | Sync of { full : bool }
-  | Gc of {
-      apply : bool;
-      verify : bool;
-      abort : bool;
-      budget : float option;
-      expire : expiry option;
-    }
-  | Gc_copies of copies
-  | Expire of {
-      apply : bool;
-      expiry : expiry;
-      export : string option;  (** absolute: the owner writes it *)
-    }
-  | Void_entry of { n : int }
-  | Import of {
-      src : string;
-      only : string list;
-      exclude : string list;
-      force_rehash : bool;
-      map : string option;
-    }
-  | Rsync of {
-      src : string;
-      src_in_domain : bool;
-      dst : string;
-      dst_in_domain : bool;
-      move : bool;
-      dry_run : bool;
-    }
-  | Mirror of {
-      source : string option;
-      skip_chunks : bool;
-      path : string option;
-    }
-  | Integrity of {
-      verify : bool;
-      repair : bool;
-      apply : bool;
-      detail : bool;
-      source : string option;
-    }
-[@@deriving yojson]
-
-(** The command as typed, naming the job a conflicting one is refused for. *)
-val kind : t -> string
+include module type of struct
+  include Tsync_protocol.Job
+end
 
 type io = {
   out : string -> unit;  (** one line of the command's standard output *)

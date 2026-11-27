@@ -5,7 +5,7 @@
 open Tsync_core
 open Tsync_ipc
 module Owner = Tsync_owner.Owner
-module Keystore = Tsync_owner.Keystore
+module Keystore = Tsync_vault.Keystore
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 let phase = if Array.length Sys.argv = 3 then Some Sys.argv.(1) else None
@@ -157,7 +157,7 @@ let first () =
   Owner.stop_on_signals ();
   Rt.run_sync (fun () ->
       (* Before any unlock: a watcher keeps the tick it started with. *)
-      Atomic.set Tsync_owner.Vault.minute 2.;
+      Atomic.set Tsync_vault_verbs.Vault.minute 2.;
       with_owner (fun () ->
           ignore (init "aged");
           ignore (init "free");
@@ -193,7 +193,7 @@ let first () =
           status "idle, after the unlock" "idle";
           answer "lock" (ask "idle" [("action", "vault_lock")]);
           p "== age, a minute of 0.05 s: an hour of 3 s";
-          Atomic.set Tsync_owner.Vault.minute 0.05;
+          Atomic.set Tsync_vault_verbs.Vault.minute 0.05;
           (* The age counts from the unlock, which a loaded runner may answer late. *)
           let started = Unix.gettimeofday () in
           answer "unlock" (unlock "aged");
@@ -207,7 +207,7 @@ let first () =
           p "%-40s %b" "locked while used, after 3 s or more" (after >= 3.);
           status "aged" "aged";
           answer "lock free" (ask "free" [("action", "vault_lock")]);
-          Atomic.set Tsync_owner.Vault.minute 60.;
+          Atomic.set Tsync_vault_verbs.Vault.minute 60.;
           answer "unlock" (unlock "idle");
           answer "unlock free" (unlock "free");
           p "%-40s [%s]" "keystore entries" (entries ())))

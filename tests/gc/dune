@@ -135,7 +135,13 @@
 (executable
  (name share_test)
  (modules share_test)
- (libraries test_support tsync_core tsync_store tsync_remote tsync_gc unix))
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_share
+  unix))
 
 (rule
  (with-stdout-to

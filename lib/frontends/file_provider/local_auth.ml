@@ -2,7 +2,7 @@
 external verify : string -> string option = "tsync_local_auth_verify"
 
 let () =
-  Tsync_owner.Verifier.register
+  Tsync_vault.Verifier.register
     {
       name = "LocalAuthentication";
       verify =
