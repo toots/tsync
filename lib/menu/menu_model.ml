@@ -10,6 +10,8 @@ type action =
   | Add_code of string
   | Seen_machines of string
   | Copy_report
+  | Show_passwords
+  | Copy_password of { domain : string; id : string }
   | Quit
 
 type item = {
@@ -328,7 +330,7 @@ let domain_rows (name, status) =
   in
   row ~action:(Open_folder name) (name ^ " — " ^ label) :: rows
 
-let render ?quit ?(codes = []) domains =
+let render ?quit ?(codes = []) ?(passwords = []) domains =
   let reachable = List.filter_map snd domains in
   let all_unreachable = reachable = [] in
   let all_paused =
@@ -388,6 +390,8 @@ let render ?quit ?(codes = []) domains =
     @ [Separator; row ~submenu:true ~action:Show_stats "Details"]
     @ (if codes = [] then []
        else [row ~submenu:true ~action:Show_codes "One-time codes"])
+    @ (if passwords = [] then []
+       else [row ~submenu:true ~action:Show_passwords "Passwords"])
     @ [
         row ~checked:all_paused ~enabled:(not all_unreachable)
           ~action:(Set_paused (not all_paused)) "Pause syncing";
@@ -649,8 +653,39 @@ let stats ?(report = false) replies =
         @ if report then [[row ~action:Copy_report "Copy report"]] else [])
         |> separated
 
-(* §7: what the model reads of one domain's [totp_list] reply, or its
-   failure. *)
+(* §7, §7.1: a vault extension's listing, or why there is none. *)
+type 'a answer = Answered of 'a | Locked | No_vault | Not_answering
+
+let answer_of_json read = function
+  | None -> Not_answering
+  | Some j -> (
+      let field k = match j with `Assoc l -> List.assoc_opt k l | _ -> None in
+      match (field "ok", field "code") with
+        | Some (`Bool true), _ -> Answered (read field)
+        | _, Some (`String "locked") -> Locked
+        | _, Some (`String "not_found") -> No_vault
+        | _ -> Not_answering)
+
+let refused_rows ~indent domain = function
+  | Locked -> [row ~indent ~action:(Unlock domain) "Locked — unlock…"]
+  | No_vault -> [row ~indent "No vault — run tsync vault init"]
+  | Not_answering | Answered _ -> [row ~indent "not answering"]
+
+(* A header row per domain when there are several (vault §8.1 marks it). *)
+let per_domain ~none rows = function
+  | [] -> [row none]
+  | [one] -> rows ~indent:0 one
+  | several ->
+      List.concat_map
+        (fun ((domain, _) as one) ->
+          row ~vault:domain domain :: rows ~indent:1 one)
+        several
+
+let listed of_yojson field =
+  match field "records" with
+    | Some j -> Result.get_ok (items of_yojson j)
+    | None -> []
+
 type record = {
   id : string;
   issuer : string; [@default ""]
@@ -658,53 +693,33 @@ type record = {
 }
 [@@deriving of_yojson { strict = false }]
 
-type codes =
-  | Records of { records : record list; unreadable : int }
-  | Locked
-  | No_vault
-  | Not_answering
+type code_list = { records : record list; unreadable : int }
+type codes = code_list answer
 
-let codes_of_json = function
-  | None -> Not_answering
-  | Some j -> (
-      let field k = match j with `Assoc l -> List.assoc_opt k l | _ -> None in
-      match (field "ok", field "code") with
-        | Some (`Bool true), _ ->
-            Records
-              {
-                records =
-                  (match field "records" with
-                    | Some j -> Result.get_ok (items record_of_yojson j)
-                    | None -> []);
-                unreadable =
-                  (match field "corrupt" with
-                    | Some (`List l) -> List.length l
-                    | _ -> 0);
-              }
-        | _, Some (`String "locked") -> Locked
-        | _, Some (`String "not_found") -> No_vault
-        | _ -> Not_answering)
+let codes_of_json =
+  answer_of_json (fun field ->
+      {
+        records = listed record_of_yojson field;
+        unreadable =
+          (match field "corrupt" with
+            | Some (`List l) -> List.length l
+            | _ -> 0);
+      })
 
 let codes_placeholder = [row "Reading…"]
 
-let record_label r =
-  match (r.issuer, r.account) with
-    | "", a -> a
-    | i, "" -> i
-    | i, a -> i ^ " — " ^ a
+let either_label first second =
+  match (first, second) with "", s -> s | f, "" -> f | f, s -> f ^ " — " ^ s
 
 let domain_codes ~add ~indent (domain, codes) =
   match codes with
-    | Locked -> [row ~indent ~action:(Unlock domain) "Locked — unlock…"]
-    | No_vault -> [row ~indent "No vault — run tsync vault init"]
-    | Not_answering -> [row ~indent "not answering"]
-    | Records { records; unreadable } ->
+    | Answered { records; unreadable } ->
         (if records = [] then [row ~indent "No codes"] else [])
         @ List.map
             (fun r ->
               row ~indent
                 ~action:(Copy_code { domain; id = r.id })
-                (ellipsis (record_label r)))
+                (ellipsis (either_label r.issuer r.account)))
             records
         @ (if unreadable > 0 then
              [
@@ -716,15 +731,39 @@ let domain_codes ~add ~indent (domain, codes) =
         @
         if add then [row ~indent ~action:(Add_code domain) "Add a code…"]
         else []
+    | refused -> refused_rows ~indent domain refused
 
-let codes ?(add = true) = function
-  | [] -> [row "No codes"]
-  | [one] -> domain_codes ~add ~indent:0 one
-  | several ->
-      List.concat_map
-        (fun ((domain, _) as one) ->
-          row ~vault:domain domain :: domain_codes ~add ~indent:1 one)
-        several
+let codes ?(add = true) = per_domain ~none:"No codes" (domain_codes ~add)
+
+type login = {
+  id : string;
+  kind : string; [@default ""]
+  title : string; [@default ""]
+  username : string; [@default ""]
+}
+[@@deriving of_yojson { strict = false }]
+
+type passwords = login list answer
+
+let passwords_of_json = answer_of_json (listed login_of_yojson)
+let passwords_placeholder = [row "Reading…"]
+
+(* §7.1: notes and passkeys hold no password. *)
+let domain_passwords ~indent (domain, passwords) =
+  match passwords with
+    | Answered logins -> (
+        match List.filter (fun (l : login) -> l.kind = "login") logins with
+          | [] -> [row ~indent "No passwords"]
+          | logins ->
+              List.map
+                (fun (l : login) ->
+                  row ~indent
+                    ~action:(Copy_password { domain; id = l.id })
+                    (ellipsis (either_label l.title l.username)))
+                logins)
+    | refused -> refused_rows ~indent domain refused
+
+let passwords = per_domain ~none:"No passwords" domain_passwords
 
 let action_to_yojson = function
   | Nothing -> `Assoc []
@@ -742,6 +781,13 @@ let action_to_yojson = function
   | Add_code domain -> `Assoc [("addCode", `String domain)]
   | Seen_machines domain -> `Assoc [("seenMachines", `String domain)]
   | Copy_report -> `Assoc [("copyReport", `Bool true)]
+  | Show_passwords -> `Assoc [("passwords", `Bool true)]
+  | Copy_password { domain; id } ->
+      `Assoc
+        [
+          ( "copyPassword",
+            `Assoc [("domain", `String domain); ("id", `String id)] );
+        ]
   | Quit -> `Assoc [("quit", `Bool true)]
 
 (* §7: a row's icon is not sent. *)

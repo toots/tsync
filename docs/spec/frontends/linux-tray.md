@@ -140,7 +140,7 @@ Three things make this hard, and the rules of this section answer them:
 - the content is recomputed every few seconds, while a host that is told the whole layout changed
   may drop the menu it is drawing;
 - a click names a row by a number the host fetched earlier;
-- the Details and codes submenus are written by another source than the rest of the tree.
+- the Details, codes and passwords submenus are written by another source than the rest of the tree.
 
 ### 4.1 State
 
@@ -377,6 +377,18 @@ helper ever receives a secret in its arguments, which other processes can list.
   `tsync vault unlock`. The answers are dropped once the request is sent, never logged.
 - These run outside the work that answers the bus (§5.1), one unlock at a time: a click on an
   unlock row while a dialog is open does nothing.
+
+### 6.6 Passwords
+
+The same as §6.5, for [menu-model.md §7.1](menu-model.md#71-passwords-submenu):
+
+- **Password domains** are the domains whose last `status` lists `passwords`, under the same
+  Wayland and `wl-copy` condition as code domains.
+- **The submenu** is set at every opening notice from `passwords_list`, sent to every password
+  domain at the same time under `TRAY_STATS_DEADLINE`, placeholder first.
+- **`CopyPassword(domain, id)`** asks the owner `passwords_get` for that record and copies its
+  `password` as `CopyCode` copies a code; nothing else of the reply is kept.
+- **`Unlock(domain)`** is §6.5's.
 
 ## 7. Showing a path in the file manager
 

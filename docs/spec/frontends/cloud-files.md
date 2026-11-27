@@ -670,7 +670,7 @@ the menu model ([menu-model.md](menu-model.md)), which it evaluates itself.
   same parameters. The config is read from §4.2.
 - **The interface thread never waits on an owner.** Requests run on other threads; the menu opens on
   the content last installed, within `TRAY_UI_BOUND`.
-- **Submenus** (stats, codes) are filled when the menu opens: they show the model's placeholder
+- **Submenus** (details, codes, passwords) are filled when the menu opens: they show the model's placeholder
   until the rows arrive, and the rows replace it, shown the next time that submenu is opened if it
   is already on screen. Codes rows from an earlier opening are never shown again.
 - **Open folder** opens the domain's sync root in Explorer: the `syncRoot` the owner reported at the
@@ -680,6 +680,9 @@ the menu model ([menu-model.md](menu-model.md)), which it evaluates itself.
   formats that keep it out of clipboard monitors, clipboard history and cloud clipboard. It is never
   logged and never kept. A refusal is a notification carrying the owner's sentence; nothing is
   copied.
+- **Copy password** asks `passwords_get` for the record and puts its `password` on the clipboard
+  as Copy code puts a code, and keeps nothing else of the reply; the passwords submenu lists the
+  domains that use `passwords` ([menu-model §7.1](menu-model.md#71-passwords-submenu)).
 - **Unlock** opens a dialog naming the domain with a password field, and a second for the secret
   key when status says this machine is not enrolled; each has a Show box
   ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)). It then

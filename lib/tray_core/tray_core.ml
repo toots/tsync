@@ -37,6 +37,7 @@ type t = {
   mutable stats_started : float;
   mutable unlocking : bool;
   mutable code_domains : string list;  (** at the last refresh (§6.5) *)
+  mutable password_domains : string list;  (** at the last refresh (§6.6) *)
   mutable report : (string * Yojson.Safe.t) list;
       (** the last [status] and [stats] replies, for Copy report *)
   refreshing : Rt.Fmutex.t;
@@ -53,6 +54,7 @@ let create ~quit platform =
     stats_started = neg_infinity;
     unlocking = false;
     code_domains = [];
+    password_domains = [];
     report = [];
     refreshing = Rt.Fmutex.create ();
     finished = Rt.Promise.create ();
@@ -105,11 +107,11 @@ let string_field name = function
       match List.assoc_opt name l with Some (`String s) -> Some s | _ -> None)
   | _ -> None
 
-(* §6.5: whether a status reply lists totp among the extensions in force. *)
-let lists_totp = function
+(* §6.5, §6.6: whether a status reply lists that extension in force. *)
+let lists extension = function
   | `Assoc l -> (
       match List.assoc_opt "extensions" l with
-        | Some (`List e) -> List.mem (`String "totp") e
+        | Some (`List e) -> List.mem (`String extension) e
         | _ -> false)
   | _ -> false
 
@@ -127,22 +129,24 @@ let refresh t =
       (fun d reply -> (d, reply, Option.bind reply M.status_of_json))
       domains replies
   in
-  let codes =
+  let using extension =
     t.platform.code_domains
       (List.filter_map
          (fun (d, reply, status) ->
            match (status, reply) with
-             | Some _, Some reply when lists_totp reply -> Some d.name
+             | Some _, Some reply when lists extension reply -> Some d.name
              | _ -> None)
          answers)
   in
+  let codes = using "totp" and passwords = using "passwords" in
   let menu =
-    M.render ~quit:t.quit ~codes
+    M.render ~quit:t.quit ~codes ~passwords
       (List.map (fun (d, _, status) -> (d.name, status)) answers)
   in
   locked t (fun () ->
       t.domains <- domains;
       t.code_domains <- codes;
+      t.password_domains <- passwords;
       t.report <-
         ( "status",
           `Assoc
@@ -195,6 +199,25 @@ let code_domains t =
   locked t (fun () ->
       List.filter (fun d -> List.mem d.name t.code_domains) t.domains)
 
+let password_domains t =
+  locked t (fun () ->
+      List.filter (fun d -> List.mem d.name t.password_domains) t.domains)
+
+(* §6.6: the extension's actions are not in the typed protocol. *)
+let ask_action ~deadline d fields = Ipc.ask ~deadline d.socket (`Assoc fields)
+
+let fetch_passwords t domains =
+  if domains <> [] then
+    t.platform.children Show_passwords
+      (M.passwords
+         (Rt.map_concurrently
+            (fun d ->
+              ( d.name,
+                M.passwords_of_json
+                  (ask_action ~deadline:stats_deadline d
+                     [("action", `String "passwords_list")]) ))
+            domains))
+
 let fetch_codes t domains =
   if domains <> [] then (
     let answers =
@@ -242,7 +265,11 @@ let opened t =
        gone before the platform can show the submenu. *)
     let domains = code_domains t in
     if domains <> [] then t.platform.children Show_codes M.codes_placeholder;
-    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t domains))
+    Rt.spawn ~name:"tray codes" (fun () -> fetch_codes t domains);
+    let domains = password_domains t in
+    if domains <> [] then
+      t.platform.children Show_passwords M.passwords_placeholder;
+    Rt.spawn ~name:"tray passwords" (fun () -> fetch_passwords t domains))
 
 (* security-model §10.6: the code is never logged and the clipboard never
    cleared. *)
@@ -257,6 +284,29 @@ let copy_code t domain id =
                 | Ok () -> ()
                 | Error reason ->
                     t.platform.notify "The code was not copied" reason))
+
+(* security-model §10.6: as a code, the password is never logged and nothing
+   else of the reply is kept. *)
+let copy_password t domain id =
+  let failed reason = t.platform.notify "The password was not copied" reason in
+  match domain_named t domain with
+    | None -> ()
+    | Some d -> (
+        match
+          ask_action ~deadline:stats_deadline d
+            [("action", `String "passwords_get"); ("id", `String id)]
+        with
+          | None -> failed "tsync is not answering"
+          | Some reply -> (
+              match
+                (Protocol.failure_of_reply reply, string_field "password" reply)
+              with
+                | Some f, _ -> failed f.reason
+                | None, None -> failed "the record has no password"
+                | None, Some password -> (
+                    match t.platform.copy password with
+                      | Ok () -> ()
+                      | Error reason -> failed reason)))
 
 (* §6.5: [sentence] is the owner's word on the previous attempt. *)
 let rec unlock_dialogs ?sentence ~enrolled t d =
@@ -367,7 +417,8 @@ let copy_report t =
     | Error reason -> t.platform.notify "The report was not copied" reason
 
 let run_action t : M.action -> unit = function
-  | Nothing | Show_stats | Show_codes | Add_code _ -> ()
+  | Nothing | Show_stats | Show_codes | Show_passwords | Add_code _ -> ()
+  | Copy_password { domain; id } -> copy_password t domain id
   | Seen_machines domain -> seen_machines t domain
   | Copy_report -> copy_report t
   | Copy_code { domain; id } -> copy_code t domain id

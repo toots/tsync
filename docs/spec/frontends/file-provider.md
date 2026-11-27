@@ -659,12 +659,17 @@ The panel, top to bottom:
    row reveals its file in Finder (selected, never opened) from its `rel`. **Copy report** writes
    both replies to the general pasteboard.
 4. **The warnings** of [activity.md §3](activity.md#3-below-the-domains), the owner's process's.
-5. **One-time codes**, when the menu holds that row: a button that opens the codes menu of §10.1
-   under it.
+5. **One-time codes** and **Passwords**, in the domain's Vault section (activity.md §2.7):
+   One-time codes, when the menu holds that row, opens the codes menu of §10.1 under it;
+   Passwords, for a domain that uses `passwords`, opens the page of §10.2.
 
 - The panel polls only while it is shown, every `status_poll` (activity.md §5); closing it stops
   the polling.
 - The panel closes when the user clicks elsewhere, and on Escape.
+- A popover has no toolbar: a page the panel opens (Details, every warning) starts with **Back**,
+  and Copy report is a row of Details, not a toolbar button.
+- The panel's size is its own, `panel_size`, less on a screen too short for it; it never takes the
+  height of its content, which would push it over the menu bar.
 - There is no Quit (§2).
 
 ### 10.1 One-time codes
@@ -704,6 +709,20 @@ The panel, top to bottom:
   unchecked each time a dialog opens.
 - The app offers neither `vault init`, `vault passphrase`, `vault delete` nor `totp export`: those
   set or print secrets, or destroy records, and stay with the CLI (totp §5).
+
+### 10.2 Passwords
+
+A page of the panel, opened from the Vault section, for one domain.
+
+- It starts with **Back** and a search field. It lists the domain's logins from `passwords_list`
+  with `filter` set to what is typed, asked again as the text changes and each time the page
+  opens, never cached; notes and passkeys are not listed.
+- Each login is a row with its title and username and two buttons: **Copy username**, and **Copy
+  password**, which asks `passwords_get` for that record and writes its `password` as §10.1 writes
+  a code: plain text with the concealed marker, never logged, never cached in the app. A refusal
+  is a user notification carrying the reply's `error`.
+- A locked vault shows `Locked` and **Unlock…**, the dialog of §10.1; a domain with no vault says
+  so; a failure shows the reply's `error`.
 
 ## 11. Installation
 
@@ -778,6 +797,7 @@ The panel, top to bottom:
 | `registration_deadline` / `registration_retry` | 10 s / 1 s | |
 | `purge_wait` | 60 s | |
 | `menu_poll_interval` | 3 s | |
+| `panel_size` | 380 × 560 points | |
 
 ## 14. Conformance
 

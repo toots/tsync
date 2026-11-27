@@ -15,6 +15,8 @@ final class PanelModel: ObservableObject {
 
     var pause: (Bool) -> Void = { _ in }
     var showCodes: () -> Void = {}
+    var copyPassword: (String, String) -> Void = { _, _ in }
+    var unlock: (String) -> Void = { _ in }
     var openSettings: () -> Void = {}
     var open: (String) -> Void = { _ in }
     var reveal: (String, String) -> Void = { _, _ in }
@@ -59,13 +61,12 @@ struct Panel: View {
                         domain: domain, report: reports[domain], owner: ownerAsk,
                         refresh: { await ask(domain) },
                         open: { model.open(domain) },
-                        reveal: { model.reveal(domain, $0) }
+                        reveal: { model.reveal(domain, $0) },
+                        codes: model.hasCodes ? model.showCodes : nil,
+                        passwords: { AnyView(PasswordsPage(domain: domain, model: model)) }
                     )
                     .id(domain)
                     WarningsSection(lines: reports[domain]?.warnings ?? [])
-                }
-                if model.hasCodes {
-                    Section { Button("One-time codes…", action: model.showCodes) }
                 }
             }
             .formStyle(.grouped)
@@ -84,7 +85,7 @@ struct Panel: View {
                     ProblemRow(
                         icon: "key", text: "AutoFill is off for tsync",
                         detail: "Turn it on in System Settings, under Passwords.")
-                    Button("Open System Settings", action: model.openSettings)
+                    Button(action: model.openSettings) { Label("Open System Settings", systemImage: "gear") }
                 }
             }
         }
@@ -97,7 +98,10 @@ struct Panel: View {
             }
             Text(model.summary).font(.headline)
             Spacer()
-            Button(model.allPaused ? "Resume all" : "Pause all") { model.pause(!model.allPaused) }
+            Button { model.pause(!model.allPaused) } label: {
+                Label(model.allPaused ? "Resume all" : "Pause all",
+                      systemImage: model.allPaused ? "play.fill" : "pause.fill")
+            }
                 .disabled(!model.reachable)
         }
     }
@@ -118,5 +122,90 @@ struct Panel: View {
 
     private func ask(_ domain: String) async {
         reports[domain] = await ActivityReport.ask(domain, previous: reports[domain], owner: ownerAsk)
+    }
+}
+
+/// file-provider §10.2: one domain's logins, searched as typed; a password is
+/// asked of the owner only when its button is clicked.
+struct PasswordsPage: View {
+    struct Login: Identifiable {
+        let id: String
+        let title: String
+        let username: String
+    }
+
+    let domain: String
+    @ObservedObject var model: PanelModel
+    @State private var filter = ""
+    @State private var logins: [Login] = []
+    @State private var locked = false
+    @State private var problem: String?
+    private static let typing: UInt64 = 250_000_000
+
+    var body: some View {
+        Form {
+            BackRow()
+            Section {
+                TextField(text: $filter, prompt: Text("Search")) {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                if locked {
+                    Label("Locked", systemImage: "lock.fill")
+                    Button { model.unlock(domain) } label: { Label("Unlock…", systemImage: "lock.open") }
+                } else if let problem {
+                    Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
+                } else if logins.isEmpty {
+                    Text("No passwords").foregroundStyle(.secondary)
+                }
+                ForEach(logins) { row($0) }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Passwords")
+        .task(id: filter) {
+            // A new keystroke cancels this task, so only a pause asks the owner.
+            if !filter.isEmpty { try? await Task.sleep(nanoseconds: Self.typing) }
+            if !Task.isCancelled { await load() }
+        }
+    }
+
+    private func row(_ login: Login) -> some View {
+        HStack {
+            Image(systemName: "key").foregroundStyle(.secondary)
+            VStack(alignment: .leading) {
+                Text(login.title.isEmpty ? login.username : login.title).lineLimit(1)
+                if !login.title.isEmpty && !login.username.isEmpty {
+                    Text(login.username).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            if !login.username.isEmpty {
+                Button { Pasteboard.copy(login.username) } label: { Image(systemName: "person") }
+                    .buttonStyle(.borderless).help("Copy username")
+            }
+            Button { model.copyPassword(domain, login.id) } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.borderless).help("Copy password")
+        }
+    }
+
+    private func load() async {
+        do {
+            let reply = try await ownerAsk(domain, "passwords_list", filter.isEmpty ? [:] : ["filter": filter])
+            let records = reply["records"] as? [[String: Any]] ?? []
+            logins = records.compactMap { record in
+                guard record["kind"] as? String == "login", let id = record["id"] as? String else { return nil }
+                return Login(
+                    id: id, title: record["title"] as? String ?? "",
+                    username: record["username"] as? String ?? "")
+            }
+            (locked, problem) = (false, nil)
+        } catch let failure as OwnerFailure {
+            logins = []
+            locked = failure.code == "locked"
+            problem = failure.code == "not_found" ? "This domain has no vault" : failure.message
+        } catch {
+            logins = []
+            (locked, problem) = (false, error.localizedDescription)
+        }
     }
 }

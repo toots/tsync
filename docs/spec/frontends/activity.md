@@ -33,7 +33,13 @@ The screen holds still between answers:
 
 The screen shows one domain at a time. With more than one listed, a segmented picker of their names
 sits at the top; the choice is kept across visits, and a domain no longer listed falls back to the
-first. Under it, top to bottom:
+first. Under it, top to bottom: Vault (§2.7), State (§2.1), Transfers (§2.2), This device (§2.5),
+Problems (§2.3), Stores (§2.4), Details (§2.6). The sections are numbered as they were first
+written, not in the order shown.
+
+Each section's heading SHOULD carry an icon, and so should each action and each row that stands
+for a thing (a file, a store, a machine, the cache): the icon says what a row is before its words
+do.
 
 ### 2.1 State
 
@@ -48,7 +54,7 @@ A badge and one sentence, the first that holds:
 | Syncing | uploads or downloads pending, or `sync.pending` > 0 | *n* to upload, *m* to download |
 | Up to date | otherwise | — |
 
-The badge is coloured: neutral for Up to date and Syncing, amber for Paused, Read-only and Store
+The badge has an icon and a colour: neutral for Up to date and Syncing, amber for Paused, Read-only and Store
 offline, red for Not syncing. **Pause** or **Resume** (`pause`) sits beside it.
 
 ### 2.2 Transfers
@@ -66,9 +72,6 @@ problems".
 - **Uploads waiting to be retried**: `queues.parked`, with `queues.lastError`, and **Retry now**
   (`retry`).
 - **Unreadable records set aside**: `setAside` > 0, "kept and never run".
-- **A new machine**: for each name of `newMachines`, "*name* can now unlock this vault", and one
-  **Mark as seen** for them all, which sends the domain's `vault_machines`: listing the machines
-  acknowledges them ([vault §6.3](../extensions/vault.md#63-machines)).
 - **A store**: held down or unreachable, or holding corrupted chunks (§2.4), named.
 
 ### 2.4 Stores
@@ -93,7 +96,20 @@ One card per entry of `backends[]`: its name and role (main, replica, backfill, 
 
 A row that opens the domain's settings in force (`settings`): versioning, read-only, the extensions
 and where each setting comes from, as labelled rows. It has **Copy report**, which copies both
-replies as indented JSON for a bug report; the JSON is never shown.
+replies as indented JSON for a bug report; the JSON is never shown. Every page it opens has a way
+back to the screen.
+
+### 2.7 Vault
+
+First, and only when it has a row:
+
+- **A new machine**: for each name of `newMachines`, "*name* can now unlock this vault", and one
+  **Mark as seen** for them all, which sends the domain's `vault_machines`: listing the machines
+  acknowledges them ([vault §6.3](../extensions/vault.md#63-machines)).
+- **One-time codes**, where the app copies codes from its status item (the macOS panel, file-provider
+  §10.1), for a domain whose `settings.extensions` lists `totp`.
+- **Passwords**, where the app copies passwords from its status item (the macOS panel,
+  file-provider §10.2), for a domain whose `settings.extensions` lists `passwords`.
 
 ## 3. Below the domain
 
@@ -125,7 +141,7 @@ one; it is asked again at the next poll.
 - A file uploading shows a progress bar that moves; Pause turns the badge to Paused and holds it;
   Resume lets it go.
 - A parked upload shows Retry now, and Retry now clears it once the store is back.
-- A machine enrolled elsewhere shows under Problems by its name; Mark as seen removes it, and it
+- A machine enrolled elsewhere shows under Vault, first, by its name; Mark as seen removes it, and it
   stays removed at the next poll.
 - With two domains, the picker switches every section, Details included, to the chosen one.
 - Stopping the owner for less than `stale_after` changes nothing on screen.

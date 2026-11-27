@@ -38,6 +38,8 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
             self?.poll()
         }
         model.showCodes = { [weak self] in self?.showCodes() }
+        model.copyPassword = { [weak self] domain, id in self?.copyPassword(domain: domain, id: id) }
+        model.unlock = { [weak self] domain in self?.unlock(domain: domain, problem: nil) }
         model.openSettings = { [weak self] in self?.openAutofillSettings() }
         model.open = { [weak self] name in self?.withRoot(of: name) { NSWorkspace.shared.open($0) } }
         model.reveal = { [weak self] name, rel in
@@ -260,23 +262,35 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
     /// security-model §10.6: copied on the user's click, marked concealed so
     /// clipboard managers and history skip it, never logged or kept.
     private func copyCode(domain: String, id: String) {
+        copySecret(["action": "totp_code", "domain": domain, "id": id], field: "code",
+                   failure: "Code not copied")
+    }
+
+    /// §10.2: a password is copied as a code is.
+    private func copyPassword(domain: String, id: String) {
+        copySecret(["action": "passwords_get", "domain": domain, "id": id], field: "password",
+                   failure: "Password not copied")
+    }
+
+    /// One field of the owner's reply onto the pasteboard, concealed; nothing
+    /// else of the reply is kept.
+    private func copySecret(_ request: [String: Any], field: String, failure title: String) {
         Thread.detachNewThread {
             do {
-                let reply = try OwnerClient.call(
-                    ["action": "totp_code", "domain": domain, "id": id])
-                guard let code = reply["code"] as? String else { return }
+                let reply = try OwnerClient.call(request)
+                guard let secret = reply[field] as? String else { return }
                 DispatchQueue.main.async {
                     let pasteboard = NSPasteboard.general
                     let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
                     pasteboard.clearContents()
                     pasteboard.declareTypes([.string, concealed], owner: nil)
-                    pasteboard.setString(code, forType: .string)
+                    pasteboard.setString(secret, forType: .string)
                     pasteboard.setString("", forType: concealed)
                 }
             } catch let failure as OwnerFailure {
-                Self.notify(title: "Code not copied", body: failure.message)
+                Self.notify(title: title, body: failure.message)
             } catch {
-                Self.notify(title: "Code not copied", body: "\(error)")
+                Self.notify(title: title, body: "\(error)")
             }
         }
     }

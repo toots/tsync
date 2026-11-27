@@ -9,7 +9,7 @@ Three clients draw it: the Linux tray ([linux-tray.md](linux-tray.md)) and the W
 ([cloud-files.md §15](cloud-files.md#15-tray)), which evaluate the model themselves, and the macOS menu ([file-provider.md §10](file-provider.md#10-menu-bar)), which receives
 its output as JSON (§8) from the owner.
 
-Inputs are the `status`, `stats` and `totp_list` replies of the request handler
+Inputs are the `status`, `stats`, `totp_list` and `passwords_list` replies of the request handler
 ([08 §3.3](../08-frontends.md#33-actions), [07 §5.5](../07-daemon-cli.md#55-tsync-status),
 [totp §5](../extensions/totp.md#5-commands)). This file owns nothing of those replies; it names
 the fields it reads.
@@ -24,6 +24,7 @@ entry  = Separator | Item
 Item   = { label, enabled, icon?, checked?, indent, action, submenu }
 action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | ShowStats
        | ShowCodes | CopyCode(domain, id) | Unlock(domain) | AddCode(domain)
+       | ShowPasswords | CopyPassword(domain, id)
        | SeenMachines(domain) | CopyReport | Quit
 ```
 
@@ -231,6 +232,9 @@ In order:
    domains that use `totp`, [extensions README §3](../extensions/README.md#3-opting-in), and whose codes this
    client can copy): label
    `One-time codes`, action `ShowCodes`, `submenu`.
+   **Passwords**, only when the caller gives a non-empty list of **password domains** (the domains
+   that use `passwords`, and whose passwords this client can copy): label `Passwords`, action
+   `ShowPasswords`, `submenu`.
 6. **Pause syncing**: label `Pause syncing`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that
    answers ([07 §2.6](../07-daemon-cli.md#26-pause) says what a pause holds).
@@ -432,6 +436,35 @@ Worked example, two code domains, one locked:
             Locked — unlock… -> unlock home
 ```
 
+### 7.1 Passwords submenu
+
+A fourth pure function, from one `passwords_list` reply (or failure) per password domain, in
+configuration order, to the rows of the Passwords submenu. As with codes, no row carries a
+password: a row names a login, and `CopyPassword` makes the client ask the owner `passwords_get`
+for that one record when it is clicked, and copy its `password` under the rules of a code
+([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)): onto
+the clipboard marked sensitive, never logged, never kept.
+
+- **Placeholder**, shown until the replies arrive: one row `Reading…`.
+- **Per domain**, a header row `<domain>` (informational, `vault` naming the domain) when there is
+  more than one password domain, then, first match:
+  - a reply refused `locked`: a row `Locked — unlock…`, action `Unlock(domain)`;
+  - a reply refused `not_found` (no vault): a row `No vault — run tsync vault init` (informational);
+  - another failure or no reply: a row `not answering` (informational);
+  - a reply with no login: a row `No passwords` (informational);
+  - else one row per record of `kind` `login`, in the reply's order, label `<title> — <username>`,
+    or the one that is not empty, ellipsised to `LABEL_MAX`; action `CopyPassword(domain, id)`.
+    Notes and passkeys have no row: neither has a password.
+- Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
+
+```
+        work
+            GitHub — me -> copy password work:51c0…
+            Bank -> copy password work:77e2…
+        home
+            Locked — unlock… -> unlock home
+```
+
 ## 8. JSON form
 
 For a client that cannot evaluate the model. The menu:
@@ -460,7 +493,8 @@ For a client that cannot evaluate the model. The menu:
 - `action` is an object with at most one key: `{}` (Nothing), `{"openFolder": <domain>}`,
   `{"reveal": {"domain", "rel"}}`, `{"setPaused": <bool>}`, `{"stats": true}`,
   `{"codes": true}`, `{"copyCode": {"domain", "id"}}`, `{"unlock": <domain>}`,
-  `{"addCode": <domain>}`, `{"seenMachines": <domain>}`, `{"copyReport": true}`, `{"quit": true}`.
+  `{"addCode": <domain>}`, `{"seenMachines": <domain>}`, `{"copyReport": true}`, `{"passwords": true}`,
+  `{"copyPassword": {"domain", "id"}}`, `{"quit": true}`.
 - `checked` and `submenu` are present only when set.
 - A row's `icon` is not sent: it is a freedesktop name, and a reader of this form has no such
   icons. A reader that draws a file icon MUST derive it from the action's `rel`, never from the
@@ -498,6 +532,9 @@ someone agrees to; and both functions are total.
 - the JSON form of a menu containing every kind of entry and action;
 - a domain's contents row: no extension and no mount (no row), each known extension alone and
   together, `vault` alone, an unknown extension, with and without a mount; a new machine with its Mark as seen row;
+- the passwords rows: one domain and two; locked, no vault, not answering, no logins; notes and
+  passkeys left out; a label longer than `LABEL_MAX`; no row of any menu carries a password; no
+  password domain gives no `Passwords` row;
 - the details rows: full, sparse, an entry that cannot be followed, counts of one, two replies,
   a reply with nothing to show, nothing answering; with and without Copy report; no row carries a pid, a cpu figure or a
   chunk count;

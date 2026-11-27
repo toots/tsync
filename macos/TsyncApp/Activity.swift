@@ -243,6 +243,10 @@ struct DomainActivity: View {
     /// file-provider §10: Open in Finder, and a transfer's row revealing its file.
     var open: (() -> Void)?
     var reveal: ((String) -> Void)?
+    /// file-provider §10.1, §10.2: the codes menu and the passwords page, where
+    /// the app has them.
+    var codes: (() -> Void)?
+    var passwords: (() -> AnyView)?
     @State private var message: String?
 
     var body: some View {
@@ -265,21 +269,53 @@ struct DomainActivity: View {
 
     @ViewBuilder
     private func answered(_ report: ActivityReport, _ status: StatusReply, _ stats: DomainBody) -> some View {
+        vault(status, stats)
         Section {
             StateRow(state: DomainState(status, stats), paused: status.paused == true) {
                 act("pause", ["arg": status.paused == true ? "off" : "on"])
             }
             if let message { Text(message).font(.footnote).foregroundStyle(.red) }
-            if let open { Button("Open in Finder", action: open) }
+            if let open { Button(action: open) { Label("Open in Finder", systemImage: "folder") } }
         }
-        Section("Transfers") { transfers(status) }
-        Section("Problems") { problems(report, status, stats) }
+        Section { transfers(status) } header: { Label("Transfers", systemImage: "arrow.up.arrow.down") }
+        Section { device(report, stats) } header: { Label("This device", systemImage: Self.deviceIcon) }
+        Section { problems(report, stats) } header: { Label("Problems", systemImage: "exclamationmark.triangle") }
         if let stores = stats.backends, !stores.isEmpty {
-            Section("Stores") { ForEach(stores) { StoreCard(store: $0) } }
+            Section { ForEach(stores) { StoreCard(store: $0) } } header: {
+                Label("Stores", systemImage: "externaldrive.connected.to.line.below")
+            }
         }
-        Section("This device") { device(report, stats) }
         Section {
-            NavigationLink("Details") { ActivityDetails(domain: domain, report: report) }
+            NavigationLink { ActivityDetails(domain: domain, report: report) } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+        }
+    }
+
+    /// activity.md §2.7: the vault's rows, first, when there is one.
+    @ViewBuilder private func vault(_ status: StatusReply, _ stats: DomainBody) -> some View {
+        let machines = status.newMachines ?? []
+        let extensions = stats.settings?.extensions ?? []
+        let showsCodes = codes != nil && extensions.contains("totp")
+        let showsPasswords = passwords != nil && extensions.contains("passwords")
+        if !machines.isEmpty || showsCodes || showsPasswords {
+            Section {
+                ForEach(machines, id: \.self) { name in
+                    Label("\(name) can now unlock this vault", systemImage: "laptopcomputer.and.iphone")
+                }
+                // vault §6.3: listing the machines acknowledges them.
+                if !machines.isEmpty {
+                    Button { act("vault_machines") } label: { Label("Mark as seen", systemImage: "checkmark.circle") }
+                }
+                if showsPasswords, let passwords {
+                    NavigationLink { passwords() } label: { Label("Passwords", systemImage: "key") }
+                }
+                if showsCodes, let codes {
+                    Button(action: codes) { Label("One-time codes…", systemImage: "123.rectangle") }
+                }
+            } header: {
+                Label("Vault", systemImage: "lock.shield")
+            }
         }
     }
 
@@ -297,20 +333,14 @@ struct DomainActivity: View {
         }
     }
 
-    @ViewBuilder private func problems(_ report: ActivityReport, _ status: StatusReply, _ stats: DomainBody) -> some View {
-        let machines = status.newMachines ?? []
+    @ViewBuilder private func problems(_ report: ActivityReport, _ stats: DomainBody) -> some View {
         let parked = stats.queues?.parked ?? 0
         let setAside = stats.setAside ?? 0
         let stores = (stats.backends ?? []).filter(\.hasProblem)
-        ForEach(machines, id: \.self) { name in
-            ProblemRow(icon: "laptopcomputer", text: "\(name) can now unlock this vault", detail: nil)
-        }
-        // vault §6.3: listing the machines acknowledges them.
-        if !machines.isEmpty { Button("Mark as seen") { act("vault_machines") } }
         if parked > 0 {
             ProblemRow(icon: "arrow.clockwise.circle", text: Format.count(parked, "upload") + " waiting to be retried",
                        detail: stats.queues?.lastError)
-            Button("Retry now") { act("retry") }
+            Button { act("retry") } label: { Label("Retry now", systemImage: "arrow.clockwise") }
         }
         if setAside > 0 {
             ProblemRow(icon: "archivebox", text: Format.count(setAside, "unreadable record") + " set aside", detail: "Kept and never run.")
@@ -321,7 +351,7 @@ struct DomainActivity: View {
                 detail: store.damagedChunks > 0 && !store.isDown && !store.isUnreachable
                     ? Format.count(store.damagedChunks, "damaged chunk") : store.connection)
         }
-        if machines.isEmpty && parked == 0 && setAside == 0 && stores.isEmpty {
+        if parked == 0 && setAside == 0 && stores.isEmpty {
             Label("No problems", systemImage: "checkmark.circle").foregroundStyle(.secondary)
         }
     }
@@ -330,25 +360,29 @@ struct DomainActivity: View {
         let cache = stats.cache
         VStack(alignment: .leading, spacing: 4) {
             if let limit = cache?.maxCache, limit > 0 {
-                Meter(label: "Cache", value: "\(Format.bytes(cache?.bytes)) of \(Format.bytes(limit))",
+                Meter(label: "Cache", icon: "internaldrive",
+                      value: "\(Format.bytes(cache?.bytes)) of \(Format.bytes(limit))",
                       used: cache?.bytes ?? 0, total: limit)
             } else {
-                LabeledContent("Cache", value: Format.bytes(cache?.bytes))
+                LabeledContent { Text(Format.bytes(cache?.bytes)) } label: { Label("Cache", systemImage: "internaldrive") }
             }
             if let pinned = cache?.pinnedBytes, pinned > 0 {
-                Text("\(Format.bytes(pinned)) kept offline").font(.footnote).foregroundStyle(.secondary)
+                Label("\(Format.bytes(pinned)) kept offline", systemImage: "pin").font(.footnote).foregroundStyle(.secondary)
             }
         }
         if let usage = report.stats?.process?.process, let ram = usage.anonymousBytes ?? usage.privateBytes {
-            Text("\(Self.process) uses \(Format.bytes(ram)) of memory").font(.caption).foregroundStyle(.secondary)
+            Label("\(Self.process) uses \(Format.bytes(ram)) of memory", systemImage: "memorychip")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
     /// Who answers `stats`: the File Provider extension on iOS, the service on macOS.
     #if canImport(UIKit)
     private static let process = "The extension"
+    private static let deviceIcon = "iphone"
     #else
     private static let process = "The service"
+    private static let deviceIcon = "laptopcomputer"
     #endif
 
     private func act(_ action: String, _ fields: [String: Any] = [:]) {
@@ -400,7 +434,7 @@ struct StateRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(state.badge)
+                Label(state.badge, systemImage: icon)
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 10).padding(.vertical, 3)
                     .background(color.opacity(0.18), in: Capsule())
@@ -408,7 +442,21 @@ struct StateRow: View {
                 if let sentence = state.sentence, !sentence.isEmpty { Text(sentence).font(.footnote) }
             }
             Spacer()
-            Button(paused ? "Resume" : "Pause", action: toggle).buttonStyle(.bordered)
+            Button(action: toggle) {
+                Label(paused ? "Resume" : "Pause", systemImage: paused ? "play.fill" : "pause.fill")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var icon: String {
+        switch state.badge {
+        case "Up to date": return "checkmark.circle.fill"
+        case "Syncing": return "arrow.triangle.2.circlepath"
+        case "Paused": return "pause.circle.fill"
+        case "Store offline": return "icloud.slash"
+        case "Read-only": return "lock.fill"
+        default: return "exclamationmark.octagon.fill"
         }
     }
 
@@ -470,15 +518,38 @@ struct WarningsSection: View {
 
     var body: some View {
         if !lines.isEmpty {
-            Section("Warnings and errors") {
+            Section {
                 ForEach(Array(lines.prefix(ActivityDetails.shownErrors).enumerated()), id: \.offset) { ErrorRow(line: $0.element) }
                 if lines.count > ActivityDetails.shownErrors {
                     NavigationLink("Show all \(lines.count)") {
-                        List(Array(lines.enumerated()), id: \.offset) { ErrorRow(line: $0.element) }.navigationTitle("Warnings and errors")
+                        Form {
+                            BackRow()
+                            Section {
+                                ForEach(Array(lines.enumerated()), id: \.offset) { ErrorRow(line: $0.element) }
+                            }
+                        }
+                        .formStyle(.grouped)
+                        .navigationTitle("Warnings and errors")
                     }
                 }
+            } header: {
+                Label("Warnings and errors", systemImage: "exclamationmark.bubble")
             }
         }
+    }
+}
+
+/// file-provider §10: a popover has no toolbar, so a pushed page starts with
+/// its way back. iOS draws its own.
+struct BackRow: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        #if !canImport(UIKit)
+        Section {
+            Button { dismiss() } label: { Label("Back", systemImage: "chevron.left") }
+        }
+        #endif
     }
 }
 
@@ -501,6 +572,7 @@ struct ErrorRow: View {
 /// A labelled bar of a part against its whole.
 struct Meter: View {
     let label: String
+    var icon: String?
     let value: String
     let used: Int
     let total: Int
@@ -508,7 +580,7 @@ struct Meter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label)
+                if let icon { Label(label, systemImage: icon) } else { Text(label) }
                 Spacer()
                 Text(value).foregroundStyle(.secondary)
             }
@@ -534,7 +606,7 @@ struct StoreCard: View {
             }
             Text(store.connection).font(.footnote).foregroundStyle(store.isDown || store.isUnreachable ? .red : .secondary)
             if let free = store.disk?.freeBytes, let total = store.disk?.totalBytes, total > 0 {
-                Meter(label: "Space", value: "\(Format.bytes(free)) free of \(Format.bytes(total))",
+                Meter(label: "Space", icon: "externaldrive", value: "\(Format.bytes(free)) free of \(Format.bytes(total))",
                       used: total - free, total: total)
             }
             if let copies = store.copies, let owed = copies.owed, owed > 0 {
@@ -563,6 +635,7 @@ struct ActivityDetails: View {
     var body: some View {
         let settings = report.body?.settings
         Form {
+            BackRow()
             Section("Settings in force") {
                 LabeledContent("Versioning", value: settings?.versioning == true ? "On" : "Off")
                 LabeledContent("Read-only", value: settings?.readOnly == true ? "Yes" : "No")
@@ -573,6 +646,13 @@ struct ActivityDetails: View {
             if let at = report.answeredAt {
                 Section { LabeledContent("Asked", value: Format.relative(at)) }
             }
+            #if !canImport(UIKit)
+            Section {
+                Button { Pasteboard.copy(Self.json(report.raw)) } label: {
+                    Label("Copy report", systemImage: "doc.on.doc")
+                }
+            }
+            #endif
         }
         .formStyle(.grouped)
         .navigationTitle(domain)

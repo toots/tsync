@@ -20,6 +20,9 @@ let action = function
   | Add_code d -> " -> add " ^ d
   | Seen_machines d -> " -> seen " ^ d
   | Copy_report -> " -> copy report"
+  | Show_passwords -> ""
+  | Copy_password { domain; id } ->
+      Printf.sprintf " -> copy password %s:%s" domain id
   | Quit -> " -> quit"
 
 let entry = function
@@ -479,6 +482,64 @@ let () =
     (fun code ->
       Printf.printf "carries %s: %b\n" code (Tsync_core.Text.contains json code))
     ["123456"; "654321"; "000000"];
+
+  let passwords answers =
+    List.iter entry
+      (M.passwords
+         (List.map
+            (fun (d, reply) ->
+              (d, M.passwords_of_json (Option.map Yojson.Safe.from_string reply)))
+            answers))
+  in
+  (* A list reply never carries a password; this one does, to show no row
+     would print it. *)
+  let logins =
+    {|{"ok":true,"records":[
+       {"id":"51c0","kind":"login","title":"GitHub","username":"me","password":"hunter2"},
+       {"id":"77e2","kind":"login","title":"Bank","username":""},
+       {"id":"90ab","kind":"login","title":"","username":"bob"},
+       {"id":"n1","kind":"note","title":"Wifi"},
+       {"id":"p1","kind":"passkey","rpId":"example.com"},
+       {"id":"long","kind":"login","title":"|}
+    ^ long_name ^ {|","username":"x"}]}|}
+  in
+  case
+    "passwords: a menu with password domains has the row, one without has not";
+  show (M.render ~passwords:["work"] [("work", status idle)]);
+  show (M.render ~passwords:[] [("work", status idle)]);
+  case "passwords: before any answer";
+  List.iter entry M.passwords_placeholder;
+  case "passwords: one domain, notes and passkeys left out";
+  passwords [("work", Some logins)];
+  case "passwords: two domains, locked, no vault, not answering, no logins";
+  passwords
+    [
+      ("work", Some logins);
+      ("home", Some {|{"ok":false,"code":"locked"}|});
+      ("none", Some {|{"ok":false,"code":"not_found"}|});
+      ("gone", None);
+      ( "empty",
+        Some
+          {|{"ok":true,"records":[{"id":"n1","kind":"note","title":"Wifi"}]}|}
+      );
+    ];
+  case "passwords: no password domain at all";
+  passwords [];
+  case "passwords: the JSON form, and no password in any row";
+  let json =
+    Yojson.Safe.to_string
+      (`List
+         (List.map M.entry_to_json
+            (M.passwords
+               [
+                 ( "work",
+                   M.passwords_of_json (Some (Yojson.Safe.from_string logins))
+                 );
+               ])))
+  in
+  print_endline json;
+  Printf.printf "carries hunter2: %b\n"
+    (Tsync_core.Text.contains json "hunter2");
 
   case "replies with fields of the wrong type, and an empty object";
   show

@@ -14,6 +14,8 @@ type action =
   | Add_code of string
   | Seen_machines of string  (** acknowledges the domain's new machines *)
   | Copy_report  (** the last [status] and [stats] replies onto the clipboard *)
+  | Show_passwords
+  | Copy_password of { domain : string; id : string }
   | Quit
 
 type item = {
@@ -59,10 +61,14 @@ val status_of_json : Yojson.Safe.t -> status option
 
 (** The domains in configuration order, each with its status or [None] when
     unreachable. [quit] is the label of the quit row, absent for a client whose
-    process must keep running. [codes] are the code domains (§5): with none
-    there is no One-time codes row. *)
+    process must keep running. [codes] and [passwords] are the code and password
+    domains (§5): with none there is no One-time codes or Passwords row. *)
 val render :
-  ?quit:string -> ?codes:string list -> (string * status option) list -> t
+  ?quit:string ->
+  ?codes:string list ->
+  ?passwords:string list ->
+  (string * status option) list ->
+  t
 
 (** {1 Stats submenu (§6)} *)
 
@@ -93,6 +99,20 @@ val codes_placeholder : entry list
     no row carries a code. [add] (default [true]) ends each answering domain
     with its Add a code row. *)
 val codes : ?add:bool -> (string * codes) list -> entry list
+
+(** {1 Passwords submenu (§7.1)} *)
+
+(** What the model reads of one domain's [passwords_list] answer. *)
+type passwords
+
+(** The reply, or [None] when the owner did not answer; total. *)
+val passwords_of_json : Yojson.Safe.t option -> passwords
+
+val passwords_placeholder : entry list
+
+(** The password domains in configuration order with their answers; never empty,
+    and no row carries a password. *)
+val passwords : (string * passwords) list -> entry list
 
 (** {1 JSON form (§8)} *)
 

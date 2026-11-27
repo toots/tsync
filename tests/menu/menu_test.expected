@@ -526,6 +526,52 @@ carries 123456: false
 carries 654321: false
 carries 000000: false
 
+== passwords: a menu with password domains has the row, one without has not
+icon    tsync-idle-symbolic
+tooltip tsync — Up to date
+        work — Up to date -> open work
+        ---
+        Details >
+        Passwords >
+        [ ] Pause syncing -> pause true
+icon    tsync-idle-symbolic
+tooltip tsync — Up to date
+        work — Up to date -> open work
+        ---
+        Details >
+        [ ] Pause syncing -> pause true
+
+== passwords: before any answer
+        Reading…
+
+== passwords: one domain, notes and passkeys left out
+        GitHub — me -> copy password work:51c0
+        Bank -> copy password work:77e2
+        bob -> copy password work:90ab
+        Compte rendu de la réunion générale extraordinaire du… -> copy password work:long
+
+== passwords: two domains, locked, no vault, not answering, no logins
+        work
+            GitHub — me -> copy password work:51c0
+            Bank -> copy password work:77e2
+            bob -> copy password work:90ab
+            Compte rendu de la réunion générale extraordinaire du… -> copy password work:long
+        home
+            Locked — unlock… -> unlock home
+        none
+            No vault — run tsync vault init
+        gone
+            not answering
+        empty
+            No passwords
+
+== passwords: no password domain at all
+        No passwords
+
+== passwords: the JSON form, and no password in any row
+[{"label":"GitHub — me","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"51c0"}}},{"label":"Bank","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"77e2"}}},{"label":"bob","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"90ab"}}},{"label":"Compte rendu de la réunion générale extraordinaire du…","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"long"}}}]
+carries hunter2: false
+
 == replies with fields of the wrong type, and an empty object
 icon    tsync-sync-symbolic
 tooltip tsync — Syncing: 1 to download
@@ -542,4 +588,4 @@ tooltip tsync — Syncing: 1 to download
         d
             ? (?)
 
-45 cases
+51 cases
