@@ -742,10 +742,16 @@ module Make (C : Engine_ctx.S) = struct
     let n = h + 1 in
     if left [] = Some 0 then `Entries []
     else (
+      (* A failed early read is not the fetch's: the head is read again after
+         a miss. *)
       let more, t =
-        Rt.both (fun () -> read n []) (fun () -> Log_store.tree_head log)
+        Rt.both
+          (fun () -> read n [])
+          (fun () ->
+            try Some (Log_store.tree_head log)
+            with e when not (Rt.is_cancelled e) -> None)
       in
-      got n [] more (Some t))
+      got n [] more t)
 
   let unfollowable (e : Log_store.entry) =
     match e.read with

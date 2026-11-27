@@ -266,8 +266,7 @@ Before the core initialises:
    Boot fails, naming the trust store, when the file is missing or holds no certificate; an empty
    path is a path, and fails so. A host gives none by passing no path at all, and has connections verified against the system's store, which only a platform TLS
    implementation reads ([security-model.md §9.2](../algorithms/security-model.md#92-implementation-per-host)); iOS gives none.
-3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`. The core hands it `info` and
-   above; the platform's log filters further.
+3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`.
 4. **A notice sink** (§4.2).
 5. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
    one directory under home that every `staging` and `dest` path MUST lie in, shared by every domain.

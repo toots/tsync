@@ -157,7 +157,8 @@ private var lastViews: List<VaultView>? = null
 fun VaultScreen(tsync: Tsync, outer: PaddingValues) {
     SecureWindow()
     // android-app §2, §10.8: every vault domain, in config order, each answered on its own.
-    var views by remember { mutableStateOf(lastViews) }
+    // A kept view of a domain served anew (a config reload) is not drawn: its client is gone.
+    var views by remember { mutableStateOf(lastViews?.filter { v -> tsync.domains().any { it === v.domain } }) }
     var generation by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pair<Served, Boolean>?>(null) }

@@ -205,6 +205,7 @@ class Tsync private constructor(val context: Context) {
     }
 
     /** Records whether [domain]'s `vault_status` answered, so later readers boot it (app §2). */
+    @Synchronized
     fun noteVault(domain: String, has: Boolean) {
         val known = vaultDomains()
         if ((domain in known) == has) return

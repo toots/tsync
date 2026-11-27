@@ -367,28 +367,38 @@ let oldest_view (a : view) (b : view) =
         | a, None | None, a -> a);
   }
 
+let depth dir =
+  if dir = "" then 0 else List.length (String.split_on_char '/' dir)
+
 (* README §4.1: a read answers the last view of the folders after the pull
    patience, a folder never pulled waits for its pull, and the oldest view
-   read is what the reply says. The folders are a fixed few, read at once:
-   one after another, each patience adds up. *)
+   read is what the reply says. The folders known here are read at once: one
+   after another, each patience adds up. One not known yet may appear with
+   its parent's pull, so those are read after, shallowest first. *)
 let read_folders ?(pull = `Auto) engine t dirs =
   let (module E : Engine.S) = engine in
   match t.reads with
     | None -> ()
     | Some reads ->
         let read dir =
-          let v = reads.for_listing ~pull dir in
-          E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
-          v
+          if E.kind dir <> `Dir then None
+          else (
+            let v = reads.for_listing ~pull dir in
+            E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
+            Some v)
         in
-        let views =
-          Rt.map_concurrently read
-            (List.filter (fun dir -> E.kind dir = `Dir) dirs)
+        let known, unknown =
+          List.partition (fun dir -> E.kind dir = `Dir) dirs
+        in
+        let at_once = Rt.map_concurrently read known in
+        let after =
+          List.map read
+            (List.sort (fun a b -> compare (depth a) (depth b)) unknown)
         in
         Atomic.set t.view
           (List.fold_left oldest_view
              { pulled_at = None; outdated = false; offline = false }
-             views)
+             (List.filter_map Fun.id (at_once @ after)))
 
 let read_current ?pull engine ~lazy_tree t =
   if lazy_tree then read_folders ?pull engine t vault_folders

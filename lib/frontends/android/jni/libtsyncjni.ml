@@ -2,9 +2,7 @@
    log sink is the platform's (android §4.1). *)
 external log_write : int -> string -> unit = "tsync_log_write"
 
-(* Logcat filters by priority itself, so info lines are handed to it too. *)
 let () =
-  Atomic.set Tsync_core.Log.min_level Tsync_core.Log.Info;
   Atomic.set Tsync_core.Log.sink (fun level message ->
       log_write
         (match level with Debug -> 0 | Info -> 1 | Warn -> 2 | Err -> 3)

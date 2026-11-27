@@ -181,10 +181,13 @@ let for_listing t ~pull dir =
         }
     | (`Auto | `Background) when is_fresh t dir -> fresh ()
     | `Background ->
-        let done_ = start t dir in
-        if has_view t dir then stale ()
+        (* The answer's owed notice is recorded before its pull can end. *)
+        if has_view t dir then (
+          let view = stale () in
+          ignore (start t dir);
+          view)
         else (
-          Rt.Promise.await done_;
+          Rt.Promise.await (start t dir);
           fresh ())
     | `Auto | `Now ->
         let done_ = start t dir in
