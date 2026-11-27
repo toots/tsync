@@ -33,7 +33,10 @@ func ownerAsk(_ domain: String, _ action: String, _ fields: [String: Any]) async
 }
 
 struct Panel: View {
+    static let width: CGFloat = 380
+    static let height: CGFloat = 560
     @ObservedObject var model: PanelModel
+    let height: CGFloat
     @AppStorage("panel-domain") private var picked = ""
     @State private var reports: [String: ActivityReport] = [:]
     private static let statusPoll: UInt64 = 2_000_000_000
@@ -67,7 +70,7 @@ struct Panel: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 380, height: 560)
+        .frame(width: Self.width, height: height)
         .task(id: shown) { await poll() }
     }
 

@@ -84,7 +84,15 @@ final class StatusMenu: NSObject, NSPopoverDelegate {
         guard let button = item.button else { return }
         checkAutofill()
         if #available(macOS 14.0, *) { Identities.refresh() }
-        popover.contentViewController = NSHostingController(rootView: Panel(model: model))
+        // The size is set here, never taken from the content: a form's ideal
+        // height is all of its rows, and a popover taller than the room under
+        // the menu bar is pushed up over it with its top cut off.
+        let room = (button.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? Panel.height
+        let size = NSSize(width: Panel.width, height: min(Panel.height, room - 16))
+        let host = NSHostingController(rootView: Panel(model: model, height: size.height))
+        host.sizingOptions = []
+        popover.contentViewController = host
+        popover.contentSize = size
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
