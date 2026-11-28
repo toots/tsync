@@ -31,6 +31,7 @@ type page = {
       (** pulled tree: when the pull the rows reflect completed (android §3.2)
       *)
   outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
+  offline : bool;  (** pulled tree: the store is held unreachable *)
 }
 
 (** android §3.2 rule 1: pull unless fresh, pull even when fresh, or answer the
@@ -132,6 +133,7 @@ type totp_listing = {
   rows : totp_row list;
   corrupt : string list;  (** record ids that do not open *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  offline : bool;  (** android §3.2: the store is held unreachable *)
   pulled_at : float option;
 }
 
@@ -213,6 +215,7 @@ type vault_status = {
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  offline : bool;  (** android §3.2: the store is held unreachable *)
   pulled_at : float option;  (** of that view *)
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
   auto_lock : auto_lock option;  (** none without a policy *)
@@ -1152,7 +1155,8 @@ let page_fields (pg : page) =
   @ opt "next" (fun n -> `String n) pg.next
   @ (if pg.unnamed > 0 then [("unnamed", `Int pg.unnamed)] else [])
   @ opt "pulledAt" (fun at -> `Int (int_of_float at)) pg.pulled_at
-  @ if pg.outdated then [("outdated", `Bool true)] else []
+  @ (if pg.outdated then [("outdated", `Bool true)] else [])
+  @ if pg.offline then [("offline", `Bool true)] else []
 
 let secret_fields s =
   [("secretKey", `String s.secret_key); ("keyId", `String s.key_id)]
@@ -1245,6 +1249,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
              ("corrupt", `List (List.map (fun c -> `String c) reply.corrupt));
            ]
           @ (if reply.outdated then [("outdated", `Bool true)] else [])
+          @ (if reply.offline then [("offline", `Bool true)] else [])
           @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at)
     | Vault_init _ -> ok (secret_fields reply)
     | Vault_kit _ -> ok (secret_fields reply)
@@ -1342,6 +1347,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                     | `Age -> "age"))
               reply.locked_by
           @ (if reply.outdated then [("outdated", `Bool true)] else [])
+          @ (if reply.offline then [("offline", `Bool true)] else [])
           @ opt "pulledAt" (fun at -> `Int (int_of_float at)) reply.pulled_at
           @ opt "appearance"
               (fun (a : appearance) ->
@@ -1503,6 +1509,7 @@ let page_of j =
     unnamed = count "unnamed" j;
     pulled_at = Option.map float_of_int (int j "pulledAt");
     outdated = flag j "outdated";
+    offline = flag j "offline";
   }
 
 let decode_reply : type a. a request -> Yojson.Safe.t -> a =
@@ -1573,6 +1580,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               (function `String s -> Some s | _ -> None)
               (strings "corrupt");
           outdated = flag j "outdated";
+          offline = flag j "offline";
           pulled_at = Option.map float_of_int (int j "pulledAt");
         }
     | Vault_init _ -> secret_of j
@@ -1677,6 +1685,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
               | Some "age" -> Some `Age
               | _ -> None);
           outdated = flag j "outdated";
+          offline = flag j "offline";
           pulled_at = Option.map float_of_int (int j "pulledAt");
           appearance =
             Option.map

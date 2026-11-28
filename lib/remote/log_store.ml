@@ -77,16 +77,15 @@ let entry_of t n body =
 let read_entry t n =
   Option.map (entry_of t n) (t.store.get_opt (Key.log_entry t.domain n))
 
-let batch = 32
+(* publication §4.3: a store's batch is one request. Single reads grow with
+   what was found, the usual answer being that the next number is absent, so
+   the reads past the end stay about as many as the entries found. *)
+let batch t ~found =
+  match t.store.get_many with
+    | Some _ -> 32
+    | None -> Int.min Store.single_read_width (Int.max 1 found)
 
 let read_entries ?max t from =
-  let rec sequential = function
-    | [] -> []
-    | key :: rest -> (
-        match t.store.get_opt key with
-          | None -> [None]
-          | found -> found :: sequential rest)
-  in
   let rec take acc numbers bodies =
     match (numbers, bodies) with
       | n :: numbers, Some body :: bodies ->
@@ -95,18 +94,15 @@ let read_entries ?max t from =
       | _ -> `More acc
   in
   let rec go from acc =
+    let width = batch t ~found:(List.length acc) in
     let wanted =
       match max with
-        | Some m -> Int.min batch (m - List.length acc)
-        | None -> batch
+        | Some m -> Int.min width (m - List.length acc)
+        | None -> width
     in
     let numbers = List.init wanted (fun i -> from + i) in
     let keys = List.map (Key.log_entry t.domain) numbers in
-    let bodies =
-      match t.store.get_many with
-        | Some get_many -> get_many keys
-        | None -> sequential keys
-    in
+    let bodies = List.map snd (Store.read_keys t.store keys) in
     match take acc numbers bodies with
       | `Done acc -> List.rev acc
       | `More acc when Some (List.length acc) = max -> List.rev acc

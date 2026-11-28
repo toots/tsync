@@ -40,6 +40,7 @@ type page = {
       (** pulled tree: when the pull the rows reflect completed (android §3.2)
       *)
   outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
+  offline : bool;  (** pulled tree: the store is held unreachable *)
 }
 
 (** android §3.2 rule 1: pull unless fresh, pull even when fresh, answer the
@@ -145,6 +146,7 @@ type totp_listing = {
   rows : totp_row list;
   corrupt : string list;  (** record ids that do not open *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  offline : bool;  (** android §3.2: the store is held unreachable *)
   pulled_at : float option;
 }
 
@@ -226,6 +228,7 @@ type vault_status = {
   keystore_error : string option;  (** why the keystore was not used *)
   enrolled : bool;  (** this machine holds the secret key of a slot *)
   outdated : bool;  (** extensions README §4.1: answered from the last view *)
+  offline : bool;  (** android §3.2: the store is held unreachable *)
   pulled_at : float option;  (** of that view *)
   appearance : appearance option;  (** vault §8.1; none without a keyring *)
   auto_lock : auto_lock option;  (** none without a policy *)

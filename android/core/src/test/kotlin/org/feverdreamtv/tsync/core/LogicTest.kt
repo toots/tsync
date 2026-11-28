@@ -143,7 +143,7 @@ class KeepAliveTest {
 
 class OfflineLatchTest {
     @Test
-    fun onlyRecoveryOrAFreshListingClears() {
+    fun onlyRecoveryOrAListingNotOfflineClears() {
         val latch = OfflineLatch()
         latch.failed(CoreException(Code.INTERNAL, "x"))
         assertFalse(latch.offline)
@@ -152,10 +152,12 @@ class OfflineLatchTest {
         latch.recovered()
         assertFalse(latch.offline)
         latch.listed(Listing(emptyList(), null, 1, outdated = true))
+        assertFalse(latch.offline, "a pull slower than the listing waited is not offline")
+        latch.listed(Listing(emptyList(), null, 1, outdated = true, offline = true))
         assertTrue(latch.offline)
         latch.failed(CoreException(Code.NOT_FOUND, "x"))
         assertTrue(latch.offline)
-        latch.listed(Listing(emptyList(), null, 1, outdated = false))
+        latch.listed(Listing(emptyList(), null, 1, outdated = true))
         assertFalse(latch.offline)
     }
 }

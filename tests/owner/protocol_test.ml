@@ -45,6 +45,7 @@ let cases =
           unnamed = 1;
           pulled_at = Some 1700000000.;
           outdated = true;
+          offline = true;
         } );
     Case (Cursor, "1756600000000|0001756600000-abc");
     Case (List_all { after = None; limit = Some 2 }, Walk_stale);
@@ -57,6 +58,7 @@ let cases =
             unnamed = 0;
             pulled_at = None;
             outdated = false;
+            offline = false;
           } );
     Case (Changes_since { anchor = "1|"; limit = None }, Stale);
     Case

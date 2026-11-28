@@ -27,9 +27,10 @@ type t = {
   m : Mutex.t;
   fresh : (string, float) Hashtbl.t;
       (** folder id → monotonic time of this process's last completed pull *)
-  owed_notice : (string, unit) Hashtbl.t;
-      (** folders answered outdated while their pull ran *)
-  offline : bool Atomic.t;
+  owed_notice : (string, bool) Hashtbl.t;
+      (** folders answered outdated while their pull ran, and whether that
+          answer said offline *)
+  unreachable : bool Atomic.t;
   passes : passes;
   passes_m : Mutex.t;
 }
@@ -41,7 +42,7 @@ and passes = {
   mutable queued : Protocol.pass_summary option Rt.Promise.t option;
 }
 
-type view = { pulled_at : float option; outdated : bool }
+type view = { pulled_at : float option; outdated : bool; offline : bool }
 
 let create ?(params = default) ~engine ~silent ~changed ~recovered () =
   {
@@ -53,15 +54,16 @@ let create ?(params = default) ~engine ~silent ~changed ~recovered () =
     m = Mutex.create ();
     fresh = Hashtbl.create 16;
     owed_notice = Hashtbl.create 4;
-    offline = Atomic.make false;
+    unreachable = Atomic.make false;
     passes = { running = None; queued = None };
     passes_m = Mutex.create ();
   }
 
-let note_unreachable t = Atomic.set t.offline true
+let note_unreachable t = Atomic.set t.unreachable true
 
 let succeeded t =
-  if Atomic.exchange t.offline false then (try t.recovered () with _ -> ())
+  if Atomic.exchange t.unreachable false then (
+    try t.recovered () with _ -> ())
 
 (* Freshness is per process and monotonic (android §10); by folder id, which a
    rename keeps. *)
@@ -98,6 +100,23 @@ let start t dir =
               succeeded t;
               if differs || owed then (try t.changed [dir] with _ -> ());
               Ok ()
+          | exception (Fail.E { kind = Unreachable; _ } as e) ->
+              (* android §3.2: an answer that said online is listed again,
+                 now offline; one that said offline already is not, or each
+                 relisting's pull would notify again. Under [t.m] with
+                 [stale]'s check, so an answer either says offline or is
+                 owed this notice. *)
+              let said_online =
+                Mutex.protect t.m (fun () ->
+                    note_unreachable t;
+                    match Hashtbl.find_opt t.owed_notice dir with
+                      | Some false ->
+                          Hashtbl.remove t.owed_notice dir;
+                          true
+                      | _ -> false)
+              in
+              if said_online then (try t.changed [dir] with _ -> ());
+              Error e
           | exception e -> Error e
       in
       ignore (Rt.Promise.try_resolve_result done_ outcome));
@@ -132,23 +151,43 @@ let continued t dir =
       | Some k -> Mutex.protect t.m (fun () -> Hashtbl.mem t.fresh k)
       | None -> false
   in
-  { pulled_at = E.pulled_at dir; outdated = not pulled }
+  {
+    pulled_at = E.pulled_at dir;
+    outdated = not pulled;
+    offline = t.silent () || Atomic.get t.unreachable;
+  }
 
 let for_listing t ~pull dir =
   let (module E : Engine.S) = t.engine in
-  let fresh () = { pulled_at = E.pulled_at dir; outdated = false } in
+  let offline () = t.silent () || Atomic.get t.unreachable in
+  let fresh () =
+    { pulled_at = E.pulled_at dir; outdated = false; offline = false }
+  in
   let stale () =
-    Mutex.protect t.m (fun () -> Hashtbl.replace t.owed_notice dir ());
-    { pulled_at = E.pulled_at dir; outdated = true }
+    let offline =
+      Mutex.protect t.m (fun () ->
+          let offline = offline () in
+          Hashtbl.replace t.owed_notice dir offline;
+          offline)
+    in
+    { pulled_at = E.pulled_at dir; outdated = true; offline }
   in
   match pull with
-    | `Never -> { pulled_at = E.pulled_at dir; outdated = not (is_fresh t dir) }
+    | `Never ->
+        {
+          pulled_at = E.pulled_at dir;
+          outdated = not (is_fresh t dir);
+          offline = offline ();
+        }
     | (`Auto | `Background) when is_fresh t dir -> fresh ()
     | `Background ->
-        let done_ = start t dir in
-        if has_view t dir then stale ()
+        (* The answer's owed notice is recorded before its pull can end. *)
+        if has_view t dir then (
+          let view = stale () in
+          ignore (start t dir);
+          view)
         else (
-          Rt.Promise.await done_;
+          Rt.Promise.await (start t dir);
           fresh ())
     | `Auto | `Now ->
         let done_ = start t dir in
@@ -156,7 +195,7 @@ let for_listing t ~pull dir =
           match wait_patiently t done_ with
             | `Done -> fresh ()
             | `Offline ->
-                Atomic.set t.offline true;
+                Atomic.set t.unreachable true;
                 stale ()
             | `Slow -> stale ()
             | `Failed e ->

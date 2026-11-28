@@ -23,7 +23,7 @@ let backup_key_path = Names.join backup_folder "key"
 
 (* §6.2: when K was adopted, and last used for the user. *)
 type since = { unlocked_at : float; last_use : float }
-type view = { pulled_at : float option; outdated : bool }
+type view = { pulled_at : float option; outdated : bool; offline : bool }
 
 (* README §4.1: the owner's pull policy on a lazy tree, as the verbs use it. *)
 type reads = {
@@ -66,7 +66,7 @@ let create ?reads () =
     keystore_error = Atomic.make None;
     backup_error = Atomic.make None;
     reads;
-    view = Atomic.make { pulled_at = None; outdated = false };
+    view = Atomic.make { pulled_at = None; outdated = false; offline = false };
   }
 
 (* README §4.5. *)
@@ -357,32 +357,48 @@ let refresh engine ~lazy_tree =
   let (module E : Engine.S) = engine in
   if lazy_tree then pull engine else ignore (E.resync ())
 
+let oldest_view (a : view) (b : view) =
+  {
+    outdated = a.outdated || b.outdated;
+    offline = a.offline || b.offline;
+    pulled_at =
+      (match (a.pulled_at, b.pulled_at) with
+        | Some a, Some b -> Some (Float.min a b)
+        | a, None | None, a -> a);
+  }
+
+let depth dir =
+  if dir = "" then 0 else List.length (String.split_on_char '/' dir)
+
 (* README §4.1: a read answers the last view of the folders after the pull
    patience, a folder never pulled waits for its pull, and the oldest view
-   read is what the reply says. *)
+   read is what the reply says. The folders known here are read at once: one
+   after another, each patience adds up. One not known yet may appear with
+   its parent's pull, so those are read after, shallowest first. *)
 let read_folders ?(pull = `Auto) engine t dirs =
   let (module E : Engine.S) = engine in
   match t.reads with
     | None -> ()
     | Some reads ->
-        let view =
-          List.fold_left
-            (fun (acc : view) dir ->
-              if E.kind dir <> `Dir then acc
-              else (
-                let v = reads.for_listing ~pull dir in
-                E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
-                {
-                  outdated = acc.outdated || v.outdated;
-                  pulled_at =
-                    (match (acc.pulled_at, v.pulled_at) with
-                      | Some a, Some b -> Some (Float.min a b)
-                      | a, None | None, a -> a);
-                }))
-            { pulled_at = None; outdated = false }
-            dirs
+        let read dir =
+          if E.kind dir <> `Dir then None
+          else (
+            let v = reads.for_listing ~pull dir in
+            E.hold_views dir ~until:(Unix.gettimeofday () +. record_keep);
+            Some v)
         in
-        Atomic.set t.view view
+        let known, unknown =
+          List.partition (fun dir -> E.kind dir = `Dir) dirs
+        in
+        let at_once = Rt.map_concurrently read known in
+        let after =
+          List.map read
+            (List.sort (fun a b -> compare (depth a) (depth b)) unknown)
+        in
+        Atomic.set t.view
+          (List.fold_left oldest_view
+             { pulled_at = None; outdated = false; offline = false }
+             (List.filter_map Fun.id (at_once @ after)))
 
 let read_current ?pull engine ~lazy_tree t =
   if lazy_tree then read_folders ?pull engine t vault_folders
@@ -1300,11 +1316,23 @@ let slots ~domain ~engine ~lazy_tree t =
     | Some (id, _) -> [("enrolled", `String id)]
     | None -> []
 
+let slow_status = 0.3
+
 let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
   check_uses ~domain ~engine;
+  let started = Rt.now () in
   restore ~domain ~engine t;
+  let restored = Rt.now () in
   read_current ?pull engine ~lazy_tree t;
+  let read_views = Rt.now () in
   let found = read ~domain engine in
+  let ended = Rt.now () in
+  (* android-app §5.1: a first status the screen waits on, broken down. *)
+  if ended -. started >= slow_status then
+    Log.info
+      "vault status took %.2fs: keystore %.2fs, folders %.2fs, keyring %.2fs"
+      (ended -. started) (restored -. started) (read_views -. restored)
+      (ended -. read_views);
   let base =
     {
       Protocol.vault = `Absent;
@@ -1330,6 +1358,7 @@ let status ?pull ~domain ~engine ~lazy_tree t : Protocol.vault_status =
       keystore_error = Atomic.get t.keystore_error;
       enrolled = false;
       outdated = (Atomic.get t.view).outdated;
+      offline = (Atomic.get t.view).offline;
       pulled_at = (Atomic.get t.view).pulled_at;
       appearance = None;
       auto_lock =

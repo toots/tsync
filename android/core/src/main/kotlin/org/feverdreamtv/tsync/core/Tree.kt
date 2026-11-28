@@ -52,7 +52,7 @@ class Folders(private val client: Client, private val cache: FolderCache) {
     }
 }
 
-/** app §5: `unreachable` or an outdated listing latches; only `recovered` or a fresh listing clears. */
+/** app §5: `unreachable` or an offline listing latches; only `recovered` or a listing not offline clears. */
 class OfflineLatch(private val changed: (Boolean) -> Unit = {}) {
     @Volatile
     var offline = false
@@ -62,7 +62,7 @@ class OfflineLatch(private val changed: (Boolean) -> Unit = {}) {
         if (error.code == Code.UNREACHABLE) set(true)
     }
 
-    fun listed(listing: Listing) = set(listing.outdated)
+    fun listed(listing: Listing) = set(listing.offline)
 
     fun recovered() = set(false)
 

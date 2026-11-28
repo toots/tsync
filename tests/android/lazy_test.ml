@@ -311,6 +311,25 @@ let () =
        (action "write"
           [s "parentRef" made; s "name" "m.txt"; s "staging" (staged "s11" "m")]));
   Atomic.set mode `Up;
+  p "== a listing with pull background, the store hung (android-app §5.1)";
+  ignore (list ~extra:[s "pull" "now"] "root, the store up" "root");
+  wait_stale ();
+  ignore (take_notices ());
+  Atomic.set mode `Hung;
+  let started = Unix.gettimeofday () in
+  ignore (list ~extra:[s "pull" "background"] "root, pull background" "root");
+  p "  %-34s %s" "answered"
+    (* Under the boot's pull_patience: the hung pull was not waited for. *)
+    (if Unix.gettimeofday () -. started < 0.5 then "at once" else "after a wait");
+  show_notices "notices while it hangs";
+  Atomic.set mode `Down;
+  show_notices "its pull fails";
+  ignore (list ~extra:[s "pull" "background"] "root, listed again" "root");
+  show_notices "notices after it";
+  Atomic.set mode `Up;
+  ignore (list ~extra:[s "pull" "now"] "root, the store back" "root");
+  show_notices "notices";
+  wait_stale ();
   p "== the vault, then the store down (extensions README §4.1)";
   let vault label =
     let r = action "vault_status" [] in

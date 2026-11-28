@@ -127,7 +127,7 @@ let vault_reads pulls =
     Vault.for_listing =
       (fun ~pull dir ->
         let v = Pulls.for_listing pulls ~pull dir in
-        { pulled_at = v.pulled_at; outdated = v.outdated });
+        { pulled_at = v.pulled_at; outdated = v.outdated; offline = v.offline });
     before_mutation = Pulls.before_mutation pulls;
   }
 
@@ -548,6 +548,8 @@ let list_dir t dir ~after ~limit ~pull : Protocol.page =
     pulled_at = Option.bind view (fun (v : Pulls.view) -> v.pulled_at);
     outdated =
       (match view with Some (v : Pulls.view) -> v.outdated | None -> false);
+    offline =
+      (match view with Some (v : Pulls.view) -> v.offline | None -> false);
   }
 
 (* 08 §3.6 step 6: names come from the folder-id index, which keeps an id after
@@ -757,6 +759,7 @@ let list_all t ~after ~limit : Protocol.listing =
                   unnamed = note_unnamed t unnamed;
                   pulled_at = None;
                   outdated = false;
+                  offline = false;
                 })
 
 let event_json t ev = event t (Protocol.event_name ev) []

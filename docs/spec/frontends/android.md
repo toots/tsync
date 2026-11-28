@@ -170,12 +170,17 @@ written. Each merge sends its notices as any pull does.
 
 **The listing says how fresh it is.** On a pulled tree a `list_dir` reply carries `pulledAt` (epoch
 seconds of the pull its rows reflect; absent for a folder never pulled) and `outdated: true` when the
-rows do not come from a pull made for this request or within `pull_freshness`. A page asked with
+rows do not come from a pull made for this request or within `pull_freshness`. It carries
+`offline: true` when the owner holds the store unreachable: the health breaker is open, or the last
+store request ended `unreachable` and no pull has completed since. A listing `outdated` and not
+`offline` is one whose pull had not completed when it was answered: the store is reachable, and a
+host does not show it as offline. A page asked with
 `after` carries the flags of the view it continues: `outdated` only when this process never
-completed a pull of the folder. A client takes a listing's flags from its first page.
+completed a pull of the folder, `offline` as the owner holds the store now. A client takes a listing's flags from its first page.
 
 **Notices.** After a pull that changed a folder's children, after the first completed pull of a
-folder it answered `outdated`, whether or not its children differ, and after every mutation it
+folder it answered `outdated`, whether or not its children differ, after a pull that ended
+`unreachable` of a folder it answered `outdated` and not `offline` meanwhile, and after every mutation it
 performs, the owner sends the host a `changed` notice naming each folder concerned (§4.2). The host
 tells the platform; the owner does not track what the platform displays.
 
@@ -342,7 +347,7 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 
 The actions are [08 §3.3](../08-frontends.md#33-actions)'s. What differs here:
 
-- `list_dir` takes `pull?` and answers `pulledAt?` and `outdated?` (§3.2).
+- `list_dir` takes `pull?` and answers `pulledAt?`, `outdated?` and `offline?` (§3.2).
 - `full_resync`, `sync` and `subscribe` are refused `invalid`, naming the pulled tree.
 - `changes_since` and `cursor` are [08 §3.6](../08-frontends.md#36-change-feed-changes_since)'s.
   Every pull's merge appends its changes to the applied log, the first pull of a folder (by state)
@@ -442,13 +447,14 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 
 **Without the store**
 - With the store silent, a previously listed folder is answered within `pull_patience` with
-  `outdated: true` and its `pulledAt`; with the breaker open it is answered without waiting; a
+  `outdated: true` and its `pulledAt`, and `offline: true` once the breaker is open or a pull has
+  ended `unreachable`; with the breaker open it is answered without waiting; a
   never-listed folder, and one last pulled more than `view_max_age` ago that no pin holds, answers
   `unreachable`, never an empty listing.
 - A file pinned in a folder whose ancestors were pulled long before, and a pin extended while the
   store is silent, stay reachable from the root until the pin's deadline.
-- A listing answered `outdated` on patience alone is followed by a `changed` notice when its pull
-  completes with the same children.
+- A listing answered `outdated` on patience alone, or by `"pull":"background"`, is not `offline`, and is followed by a `changed`
+  notice when its pull completes with the same children.
 - With the store silent, a cached file opens and reads; a pinned file reads whole; `create`,
   `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are committed
   after the store returns, across a process kill.

@@ -720,20 +720,38 @@ module Make (C : Engine_ctx.S) = struct
   (* publication §4.3. With [max], at most that many entries: a full answer
      may have more after it. *)
   let fetch ?max h =
+    let left acc = Option.map (fun m -> m - List.length acc) max in
+    let read n acc = Log_store.read_entries ?max:(left acc) log n in
     let rec go n acc =
-      let left = Option.map (fun m -> m - List.length acc) max in
-      if left = Some 0 then `Entries acc
-      else (
-        match Log_store.read_entries ?max:left log n with
-          | _ :: _ as more -> go (n + List.length more) (acc @ more)
-          | [] ->
-              let t = Log_store.tree_head log in
-              Atomic.set tree_head_seen t;
-              if t < n then `Entries acc
-              else if Log_store.read_entry log n <> None then go n acc
-              else `Pruned)
+      if left acc = Some 0 then `Entries acc else got n acc (read n acc) None
+    and got n acc more early_head =
+      match more with
+        | _ :: _ -> go (n + List.length more) (acc @ more)
+        | [] ->
+            let t =
+              match early_head with
+                | Some t -> t
+                | None -> Log_store.tree_head log
+            in
+            Atomic.set tree_head_seen t;
+            if t < n then `Entries acc
+            else if Log_store.read_entry log n <> None then go n acc
+            else `Pruned
     in
-    go (h + 1) []
+    (* publication §4.3: the tree head a miss at h + 1 needs, read with it. *)
+    let n = h + 1 in
+    if left [] = Some 0 then `Entries []
+    else (
+      (* A failed early read is not the fetch's: the head is read again after
+         a miss. *)
+      let more, t =
+        Rt.both
+          (fun () -> read n [])
+          (fun () ->
+            try Some (Log_store.tree_head log)
+            with e when not (Rt.is_cancelled e) -> None)
+      in
+      got n [] more t)
 
   let unfollowable (e : Log_store.entry) =
     match e.read with

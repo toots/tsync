@@ -10,6 +10,8 @@ data class VaultStatus(
     val keystoreError: String?,
     /** extensions README §4.1: answered from the last view, of that age. */
     val outdated: Boolean = false,
+    /** android §3.2: the owner holds the store unreachable. */
+    val offline: Boolean = false,
     val pulledAt: Long? = null,
     val appearance: Appearance? = null,
     /** vault §6.3: the machines that joined since this phone last acknowledged them. */
@@ -23,7 +25,7 @@ class Appearance(val color: String, val colorChosen: Boolean, val icon: ByteArra
 
 data class OneTimeCode(val id: String, val issuer: String, val account: String, val code: String, val secondsLeft: Int)
 
-data class Codes(val records: List<OneTimeCode>, val corrupt: Int, val outdated: Boolean = false, val pulledAt: Long? = null)
+data class Codes(val records: List<OneTimeCode>, val corrupt: Int, val outdated: Boolean = false, val pulledAt: Long? = null, val offline: Boolean = false)
 
 data class Refusal(val line: Int, val reason: String)
 
@@ -47,6 +49,7 @@ class Vault(private val client: Client) {
             cached = text(reply, "cached"),
             keystoreError = text(reply, "keystoreError"),
             outdated = reply.optBoolean("outdated", false),
+            offline = reply.optBoolean("offline", false),
             pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
             appearance = reply.optJSONObject("appearance")?.let {
                 Appearance(
@@ -93,6 +96,7 @@ class Vault(private val client: Client) {
             records,
             reply.optJSONArray("corrupt")?.length() ?: 0,
             outdated = reply.optBoolean("outdated", false),
+            offline = reply.optBoolean("offline", false),
             pulledAt = if (reply.has("pulledAt")) reply.optLong("pulledAt") else null,
         )
     }

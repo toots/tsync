@@ -216,7 +216,9 @@ let sync ?full (module E : Engine.S) =
     | exception e -> "failed: " ^ Printexc.to_string e
 
 let log root = Log_store.create d (main root)
-let entries root = List.length (Log_store.read_entries (log root) 1)
+
+let entries root =
+  List.length (Rt.run_sync (fun () -> Log_store.read_entries (log root) 1))
 
 let status (module E : Engine.S) =
   let a = E.activity () in
@@ -460,7 +462,7 @@ let () =
           let theirs =
             List.concat_map
               (fun e -> Option.value ~default:[] (Log_store.commands e))
-              (Log_store.read_entries (log root) 2)
+              (Rt.run_sync (fun () -> Log_store.read_entries (log root) 2))
           in
           Sync_state.set_arrival state
             {
@@ -520,7 +522,7 @@ let () =
             List.map
               (fun e ->
                 List.length (Option.value ~default:[] (Log_store.commands e)))
-              (Log_store.read_entries (log root) 1)
+              (Rt.run_sync (fun () -> Log_store.read_entries (log root) 1))
           in
           p "  commands per entry: %s; tree head: %d\n"
             (String.concat ", " (List.map string_of_int sizes))

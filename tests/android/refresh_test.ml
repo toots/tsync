@@ -219,7 +219,11 @@ let entry_path n =
 let unreadable n =
   Tsync_core.Fs.write_file_for_test (entry_path n) "not an entry"
 
-let last_entry () = List.length (Tsync_remote.Log_store.read_entries log 1);;
+let last_entry () =
+  List.length
+    (Tsync_core.Rt.run_sync (fun () ->
+         Tsync_remote.Log_store.read_entries log 1))
+;;
 
 p "== an entry no reader can follow, below the tree head";
 quiet ();

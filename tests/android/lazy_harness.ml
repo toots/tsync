@@ -183,11 +183,12 @@ let list ?(extra = []) label ref_ =
   in
   (match field j "items" with
     | Some (`List items) ->
-        p "  %-34s [%s] %s%s%s" label
+        p "  %-34s [%s] %s%s%s%s" label
           (String.concat ", " (List.map row items))
           read
           (if field j "pulledAt" = None then ", never pulled" else "")
           (if field j "outdated" = Some (`Bool true) then ", outdated" else "")
+          (if field j "offline" = Some (`Bool true) then ", offline" else "")
     | _ -> p "  %-34s %s, %s" label (outcome j) read);
   j
 
@@ -213,14 +214,15 @@ let () =
 
 (* Notices since the last call, as a set: background pulls send theirs when
    they complete. *)
-let show_notices label =
+let take_notices () =
   Thread.delay 0.3;
-  let got =
-    Mutex.protect notices_m (fun () ->
-        let got = !notices in
-        notices := [];
-        got)
-  in
+  Mutex.protect notices_m (fun () ->
+      let got = !notices in
+      notices := [];
+      got)
+
+let show_notices label =
+  let got = take_notices () in
   let render n =
     let j = Yojson.Safe.from_string n in
     match field j "refs" with

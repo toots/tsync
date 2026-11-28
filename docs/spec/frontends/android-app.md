@@ -105,12 +105,14 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   caller picks the next name, `<stem> (<n>)<ext>`, n = 1, 2, …, up to `max_name_attempts`; `<ext>`
   starts at the last dot when that dot is not the first character. The name check and the creation
   are one step in the owner, so two concurrent saves never overwrite each other.
-- **Offline.** A listing reply's `outdated` and `pulledAt`
+- **Offline.** A listing reply's `offline` and `pulledAt`
   ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)) are shown, never hidden
-  (§7, §10.3). The offline state is per domain. An `unreachable` answer or an `outdated` listing
+  (§7, §10.3). The offline state is per domain. An `unreachable` answer or an `offline` listing
   puts its domain in the offline state. Only that domain's `recovered` notice, or a listing of it that
-  is not `outdated`, clears it: `stat`, `status` and
-  mutations succeed without the store and say nothing about it.
+  is not `offline`, clears it: `stat`, `status` and mutations succeed without the store and say
+  nothing about it. A listing `outdated` and not `offline` is shown as it is while its pull goes
+  on; a `changed` notice lists the folder again when the pull completes, or when it fails
+  `unreachable` ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)).
 
 ### 5.1 Working offline
 
@@ -121,8 +123,9 @@ follows this rule rather than failing as a whole when the store is silent; the c
 [android §3.3](android.md#33-working-without-the-store) and, for the vault,
 [extensions README §4.1](../extensions/README.md#41-where-they-live).
 
-- **Files.** A folder listed before is shown from its last view, `outdated` with its age
-  (§10.3). A file whose bytes are on the phone (`cached`, `pinned`) opens from such a listing,
+- **Files.** A folder listed before is shown from its last view at once: the Files screen and
+  the documents provider ask its listing with `"pull":"background"`, and the pull's `changed`
+  notice lists it again. While offline it says its age (§10.3). A file whose bytes are on the phone (`cached`, `pinned`) opens from such a listing,
   in the app and through the documents provider. A file that is `online-only` while the app is
   offline is shown as not available offline, and an open of it is refused at once with that
   reason, never handed out as a descriptor whose reads wait on a silent store. Saves, uploads and
@@ -137,7 +140,12 @@ follows this rule rather than failing as a whole when the store is silent; the c
   preferences, then settled by `vault_status`. Each vault read (the status, the codes, the
   passwords) is asked first with `pull: "background"`, which answers from the last view at once,
   then as usual, whose answer replaces it; the offline banner shows only when that second answer
-  is still `outdated`. A screen shows *Loading* only on a phone that never had the vault.
+  is `offline`. A screen shows *Loading* only on a phone that never had the vault.
+  - The Vault destination draws at once from the statuses it last showed, kept in memory for the
+    process's life (statuses only: never codes nor records), then asks again. Every vault domain
+    is asked at once, not one after another.
+  - Which extensions a domain uses comes from its `stats` report, asked by the second read; the
+    first takes the answer learned before in this process, if any.
 
 
 ### 6.1 The config the app writes
@@ -199,10 +207,10 @@ is refused.
   - File: MIME type from the name's extension (default octet-stream); supports write, delete,
     rename and move; size; last-modified = `mtimeNs` in milliseconds, absent when 0.
   - A row carrying `readOnly` supports none of create, write, delete, rename or move.
-- **Children.** Walk every page of `list_dir` into one result, registered on the folder's
+- **Children.** Walk every page of `list_dir`, the first asked with `"pull":"background"`, into one result, registered on the folder's
   notification address (that of its document id) so a `changed` notice of its domain refreshes it. While the result is open the folder is
   **observed** (§7.1).
-  - `outdated`: the rows, with the info message "Offline: showing this folder as of <time>".
+  - `offline`: the rows, with the info message "Offline: showing this folder as of <time>".
   - `unreachable` (the folder was never listed, or its last view is too old to show): no rows,
     with the error "Cannot reach the server".
   - `not_found`: the folder no longer exists; the platform is told its parent changed.

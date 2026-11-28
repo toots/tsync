@@ -241,7 +241,8 @@ let () =
         in
         let behind () =
           Tsync_remote.Log_store.tree_head log
-          < List.length (Tsync_remote.Log_store.read_entries log 1)
+          < List.length
+              (Rt.run_sync (fun () -> Tsync_remote.Log_store.read_entries log 1))
         in
         let rec wait n =
           if behind () && n > 0 then (

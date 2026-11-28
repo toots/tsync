@@ -31,6 +31,7 @@ import org.feverdreamtv.tsync.core.Item
 import org.feverdreamtv.tsync.core.KeepAliveCounter.Work
 import org.feverdreamtv.tsync.core.Naming
 import org.feverdreamtv.tsync.core.Parameters
+import org.feverdreamtv.tsync.core.Pull
 import org.feverdreamtv.tsync.core.Target
 import org.feverdreamtv.tsync.core.Tree
 import java.io.FileNotFoundException
@@ -160,10 +161,11 @@ class TsyncDocumentsProvider : DocumentsProvider() {
             return cursor.saying(DocumentsContract.EXTRA_ERROR, (boot as? Boot.Failed)?.reason ?: string(R.string.provider_not_set_up))
         }
         try {
-            val listing = domain.ask { listAll(ref) }
+            // The last view at once; the pull's `changed` notice lists the folder again.
+            val listing = domain.ask { listAll(ref, Pull.BACKGROUND) }
             domain.latch.listed(listing)
             listing.items.forEach { row(cursor, domain, it) }
-            if (listing.outdated) cursor.saying(DocumentsContract.EXTRA_INFO, string(R.string.offline_as_of, age(listing.pulledAt)))
+            if (listing.offline) cursor.saying(DocumentsContract.EXTRA_INFO, string(R.string.offline_as_of, age(listing.pulledAt)))
         } catch (e: CoreException) {
             when (e.code) {
                 Code.UNREACHABLE -> cursor.saying(DocumentsContract.EXTRA_ERROR, string(R.string.cannot_reach_server))

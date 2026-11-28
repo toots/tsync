@@ -113,7 +113,7 @@ fun PasswordsTab(tsync: Tsync, views: List<VaultView>, padding: PaddingValues, o
                     if (name !in failures) item(key = "$name/loading") { CircularProgressIndicator(Modifier.padding(16.dp)) }
                     continue
                 }
-                if (current.outdated && name in settled) item(key = "$name/outdated") { Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt))) }
+                if (current.offline && name in settled) item(key = "$name/offline") { Banner(stringResource(R.string.codes_offline_as_of, age(current.pulledAt))) }
                 if (current.logins.isEmpty() && current.passkeys.isEmpty() && current.notes.isEmpty()) item(key = "$name/empty") { Text(stringResource(R.string.passwords_empty), Modifier.padding(16.dp)) }
                 items(current.logins, key = { "$name/${it.id}" }) { login ->
                     ListItem(

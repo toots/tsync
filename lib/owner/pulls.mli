@@ -27,7 +27,9 @@ val create :
   unit ->
   t
 
-type view = { pulled_at : float option; outdated : bool }
+(** [offline]: the store is held unreachable, so an [outdated] view is not
+    merely a slow pull. *)
+type view = { pulled_at : float option; outdated : bool; offline : bool }
 
 (** Rule 1. A folder with no view to fall back on waits for its pull and raises
     the pull's failure. *)
