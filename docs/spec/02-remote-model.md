@@ -121,7 +121,8 @@ Rules:
 - **Corruption marker key from a chunk key.** `…/D/chunks/<sss>/<key>` maps to
   `tsync/corrupted/D/<sss>/<key>`, matching the **last** `/chunks/` segment. There is no marker key for
   anything under `chunks.from/`, for a marker, for a manifest, or when the domain is empty.
-- **Internal leaves.** Every internal leaf starts with the sentinel `.tsync-` (`.tsync-root`,
+- **Internal leaves.** A leaf is internal iff it has the sentinel ([01](01-core.md) §2.6: `.tsync-`
+  in any ASCII case) (`.tsync-root`,
   `.tsync-parent`, `.tsync-index`). A namespace listing's **child objects** are the
   listed keys whose leaf is not internal. Store listings never contain directory keys or a store's own
   temporary files ([06-backends.md §3.6](06-backends.md#36-list_prefix)).

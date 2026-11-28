@@ -146,14 +146,18 @@ For each file key $k$ where $N(k) \neq L(k)$, and for each fresh key the merge m
   owner MUST enact both as one local move: the file id and the cached bytes follow, and the feed
   reports a rename. $N$ is the same either way.
 - **A name the local tree cannot hold.** When the main's value would land on an escape handle that
-  another name of the same folder already uses ([01](../01-core.md) §2.8), the owner installs it at
-  `aside(k)` instead, as a change of its own: $k$ is ∅ locally with the main's value as its
-  before-value, and the fresh key holds the content. The next push publishes that rename.
+  another name of the same folder already uses, or on a name the local filesystem takes for the
+  name of another key in the same folder (a **name clash**, [01](../01-core.md) §2.8), the owner
+  installs it at `aside(k)` instead, as a change of its own: $k$ is ∅ locally with the main's value
+  as its before-value, and the fresh key holds the content. The next push publishes that rename.
+  `aside(k)` is chosen free under the same test, so the copy never clashes in turn.
 
 ### 4.2 Folder keys
 
 For each folder key $i$ where $N(i) \neq L(i)$: create the folder, move it, or remove it. A folder
-restored by R1 comes back with its id; a folder moved by R2 keeps its id and everything in it.
+restored by R1 comes back with its id; a folder moved by R2 keeps its id and everything in it. A
+folder whose place in $N$ is a name clash on the local filesystem is placed at `aside` of its leaf
+instead, as a change of its own, as a file is (§4.1); it keeps its id and everything in it.
 
 **A folder merged into another** ([change-algebra.md](change-algebra.md) Definition 8) stands where
 the main's folder is, so it is not moved: the local folder takes the main's id where it is, and
@@ -171,6 +175,10 @@ are unchanged.
 The changes are a difference of two trees and are applied to the local tree in an order Theorem 3
 allows: a folder exists before anything is placed in it, a place is freed before it is occupied
 again, a folder is empty before it is removed, and a cycle is broken through a temporary place.
+Within those constraints, **removals are applied as early as possible**, and always before any
+placement in the same folder. A filesystem that takes two names for one then sees a name clash
+only where $N$ itself holds both names: a rename made as a write of the new name and a removal of
+the old, such as a case change, arrives as one state that holds the new name alone.
 Folders merged into another (§4.2) are re-identified first, outermost first. Files kept aside
 (§4.1) are moved next: their fresh names are free in the tree as it stands. A
 temporary place is never recorded as a before-value and never reported in the change feed; an
@@ -183,7 +191,10 @@ before-value; every other key has none. The new pending set follows from that an
 next cycle.
 
 A merge that changed anything beyond installing the main's values is **clashed**, and is logged
-with the keys concerned and the three values of each.
+with the keys concerned and the three values of each. A key set aside for a name clash (§4.1,
+§4.2) is also reported in the domain's `status` as `nameClashes`
+([08](../08-frontends.md) §3.3), so that a host can tell the user: the domain is shared with a
+machine whose filesystem keeps names apart that this one takes for one.
 
 ### 4.5 Duties of the other actors
 
@@ -357,6 +368,7 @@ main. `cc` abbreviates "conflicted copy".
 | Client display name | configured per client | two clients with one name produce copies a person cannot tell apart |
 | File-rename refinement (§6) | off | optional |
 | Versioning | per domain, optional | history only; no clash depends on it |
+| `NAME_CLASH_REPORT` | 20 | name clashes kept in `status` (§4.4) |
 
 ---
 
@@ -384,6 +396,19 @@ an empty pending set, both arrived at the head, one more cycle each):
   file contents compared.
 - **INV-own.** A single client, with no peer, never produces a conflicted copy, whatever sequence
   of operations and crashes it goes through.
+- **INV-names.** On a filesystem that ignores case and normalises Unicode, with a peer on one that
+  does neither:
+  - the peer's write of `X Of Y.md5` and removal of `X of Y.md5`, committed in one entry, leave
+    `X Of Y.md5` alone on both clients, with no conflicted copy and nothing lost;
+  - the same two changes committed in two entries, with an arrival between them, leave one
+    conflicted copy of `X Of Y.md5` and nothing lost;
+  - `report.txt` and `Report.txt`, both kept by the peer, leave both on every client, one of them
+    as a conflicted copy, reported in `nameClashes`;
+  - a folder pair `Photos` and `photos` is kept apart the same way, each with its own id and
+    content;
+  - an NFC and an NFD spelling of one name behave as the case pairs above;
+  - a case-only rename of a file whose content is unchanged is done in place, its file id kept;
+  - a local create of `report.txt` beside `Report.txt` is refused as EXISTS.
 
 ---
 

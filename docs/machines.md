@@ -35,6 +35,7 @@ tsync is built for one person with several machines. Edits are applied locally a
    Two folders created under one name are the exception: they become one folder, holding what both machines put in it. Only a file both put in it under one name gets a conflicted copy. A folder that existed before and was renamed onto the name still goes aside, as `plans` above.
 3. **An edit outlives a delete.** A file you edited survives its deletion elsewhere. Files you added under a folder that was removed elsewhere bring the folder back with them, and a folder you removed comes back if another machine added to it.
 4. **Two edits of one file are two files.** The one published first is the file; the other is its conflicted copy. Contents are never merged.
+5. **Names a machine cannot tell apart are two names.** Linux keeps `Report.txt` and `report.txt` apart, and an NFC and an NFD spelling of `café`; a Mac or a Windows PC takes each pair for one name. When a domain holds both, such a machine keeps the second as a conflicted copy, publishes that rename, and lists it in `tsync status`. A rename that only changes case is not affected. If you share a domain between these systems, keep names that differ only by case or accents apart by more than that.
 
 Every machine reaches the same result without talking to the others.
 

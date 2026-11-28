@@ -85,7 +85,8 @@ requires rewriting a valid existing file into another form.
 - `<escaped path>` escapes each `/`-separated component with the mirror escaping of
   [01](01-core.md) §2.8. `<shard>` is the chunk-store shard of the group key
   ([01](01-core.md)), so the cache tree fans out like the backend's chunk tree.
-- An **internal leaf** begins with `.tsync-` and is not an escape handle (`.tsync-esc-`). Every
+- An **internal leaf** has the sentinel ([01](01-core.md) §2.6, `.tsync-` in any ASCII case) and
+  is not an escape handle (`.tsync-esc-`). Every
   listing and walk of the mirror, the scratch tree and the staged tree skips internal leaves.
   Temporary files ([01](01-core.md) §2.9) are internal leaves.
 - Folders exist only in the mirror. The staged tree has directories only as containers of
@@ -480,8 +481,11 @@ What a pull does, and what a push requires of the folders held, is
   removed-id record and the reverse entry (§4.9). A folder moved any other way becomes
   unreachable by id.
 - Moving a file rewrites its entry so that the recorded name matches the new leaf.
-- A move that would land on an escape handle already used by a different real name is refused
-  as EXISTS ([01](01-core.md) §2.8).
+- A move that would land on an escape handle already used by a different real name, or on a
+  name the local filesystem takes for another key's (a name clash), is refused as EXISTS
+  ([01](01-core.md) §2.8).
+- Every write of a mirror entry or a staged manifest links it into place without replacing an
+  entry it did not look at, and every lookup checks the recorded name ([01](01-core.md) §2.8).
 
 ### 4.2 Resolution
 
