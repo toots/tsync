@@ -59,7 +59,7 @@ requires rewriting a valid existing file into another form.
   manifests/<escaped path>                     mirror entry of a file (manifest bytes)
   manifests/<escaped dir>/                     mirror entry of a folder (a directory)
   manifests/<escaped dir>/.tsync-dir           folder marker
-  manifests/<escaped dir>/.tsync-name          name marker (only when the dir's leaf is escaped)
+  manifests/<escaped dir>/.tsync-name          name marker (required only when the dir's leaf is escaped)
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
   scratch/<escaped path>                       frontend scratch; wiped by `full_resync` ([07](07-daemon-cli.md))
   file-ids-complete                            file-id record: a backfill pass completed (§4.10)
@@ -82,14 +82,16 @@ requires rewriting a valid existing file into another form.
 <data_dir>/<log>/<domain>/<id>.bad                            set-aside record (or `.bad.<n>`)
 ```
 
-- `<escaped path>` escapes each `/`-separated component with the mirror escaping of
-  [01](01-core.md) §2.8. `<shard>` is the chunk-store shard of the group key
+- `<escaped path>` files each `/`-separated component at its own spelling or at its escape
+  handle ([01](01-core.md) §2.8), as [local-names](algorithms/local-names.md) decides for that
+  tree; a component's local name can depend on its siblings. `<shard>` is the chunk-store shard of the group key
   ([01](01-core.md)), so the cache tree fans out like the backend's chunk tree.
 - An **internal leaf** begins with `.tsync-` and is not an escape handle (`.tsync-esc-`). Every
   listing and walk of the mirror, the scratch tree and the staged tree skips internal leaves.
   Temporary files ([01](01-core.md) §2.9) are internal leaves.
 - Folders exist only in the mirror. The staged tree has directories only as containers of
-  staged manifests.
+  staged manifests; a staged directory lives exactly as long as an edit beneath it, and is
+  filed by the staged tree's own names, not the mirror's ([local-names](algorithms/local-names.md) §3.2).
 - Directories under `<cache_root>/<domain>`, `<data_dir>/sync`, `<data_dir>/uploads-pending` and
   `<data_dir>/intents-pending` are created 0700 and their files 0600 ([durable-queue](algorithms/durable-queue.md) §3.2).
 
@@ -122,9 +124,10 @@ requires rewriting a valid existing file into another form.
   Readers ignore unknown fields. A marker whose `dir` is not `true`, or whose `id` is missing or
   violates the folder-id grammar, is treated as absent: the folder has no id here (operations
   beneath it are UNPREPARED until an arrival by state). The root has no marker; its id is `.tsync-root`.
-- **Name marker** `.tsync-name`: the raw real leaf bytes, no newline, present only in a folder
-  whose leaf is escaped. It is rewritten whenever the folder is recorded, so mtime sweeps see it
-  as live.
+- **Name marker** `.tsync-name`: the raw real leaf bytes, no newline. It is required in a mirror
+  folder or staged directory whose leaf is escaped, written before the directory moves to its
+  escape handle, and MAY remain once the directory is back at its own spelling. It is rewritten
+  whenever the folder is recorded, so mtime sweeps see it as live.
 - **File-id marker.** The file id ([01 §2.7](01-core.md#27-item-references)) of a file entry with
   real leaf `l` is the marker `.tsync-fid-<hex16(XXH3-64(l, 0))>` in the entry's directory; its body
   is the 32-digit id, a newline, then `l`'s bytes. It belongs to the entry iff the body's leaf equals
@@ -473,8 +476,10 @@ What a pull does, and what a push requires of the folders held, is
 
 ### 4.1 Names, markers and moves in the mirror
 
-- Creating a path creates each missing component escaped; an escaped folder component gets a
-  name marker.
+- Creating a path places each missing component as
+  [local-names](algorithms/local-names.md) §5 decides, which can move a sibling to or from its
+  escape handle; an escaped folder component gets a name marker. Removing an entry can promote a
+  sibling the same way. No code path computes a local name other than through that one rule.
 - Every local move of a folder goes through one routine: move the mirror directory, rewrite the
   name marker from the destination leaf (if escaped), rewrite the folder marker's `name`, the
   removed-id record and the reverse entry (§4.9). A folder moved any other way becomes
@@ -482,6 +487,8 @@ What a pull does, and what a push requires of the folders held, is
 - Moving a file rewrites its entry so that the recorded name matches the new leaf.
 - A move that would land on an escape handle already used by a different real name is refused
   as EXISTS ([01](01-core.md) §2.8).
+- Lookup of a name is [local-names](algorithms/local-names.md) §6: the entry at the name's own
+  spelling counts only if its recorded name is exactly that name.
 
 ### 4.2 Resolution
 

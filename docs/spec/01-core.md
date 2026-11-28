@@ -225,25 +225,25 @@ parent-and-leaf name would turn every file rename into a removal and a re-downlo
 
 ### 2.8 Mirror escaping (local names for real paths)
 
-A local mirror files each item by its real path. A component is **storable** as itself iff it
-is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains none of
-`" * : < > ? \ |` and no byte below 0x20. Otherwise it is filed as
-`.tsync-esc-` followed by `hex16(XXH3(leaf, 0))`.
+A local tree (the mirror, the staged tree) files each item by its real path. A component is
+**storable** as itself iff it is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`
+in any ASCII case, and contains none of `" * : < > ? \ |` and no byte below 0x20. Its
+**escape handle** is `.tsync-esc-` followed by `hex16(XXH3(leaf, 0))`.
 
 - Characters illegal on FAT, exFAT or NTFS are escaped even where the local filesystem would
   accept them, so a mirror can be copied to such a volume.
-- The real name is recovered from the file's manifest (files) or from a `.tsync-name` record
-  beside the escaped directory (folders); the layout of those records is owned by
-  [04](04-checkout-cache.md).
-- **Filesystems that match names loosely.** Where the local filesystem compares names other than
-  byte for byte (ignoring case, as NTFS and APFS by default do, or up to Unicode normalisation),
-  a component is also unstorable as itself when the folder already files a different component
-  that the filesystem takes for the same name. A lookup confirms that the name the filesystem
-  holds equals the component byte for byte; a successful open alone does not. Readers accept
-  either form, as for every escaped name.
-- The escape handle is a 64-bit hash, so two distinct unstorable leaves in one folder can map
-  to one handle. A writer that finds the handle already taken by a different real name MUST
-  refuse the second item locally as EXISTS rather than overwrite the first; the conflict policy
+- Which names sit at their own spelling and which at their handle, on a filesystem that takes
+  several names for one (case, Unicode normalisation, or any other rule), is owned by
+  [local-names](algorithms/local-names.md): in each folder, the bytewise least member of each
+  class the filesystem conflates keeps its own spelling, every other member and every
+  unstorable component sits at its handle. The class is found by asking the filesystem, never
+  by a stated rule.
+- The real name is recovered from the entry, never from a listing: the file's manifest (files),
+  the folder marker or a `.tsync-name` record (folders); the layout of those records is owned
+  by [04](04-checkout-cache.md).
+- The escape handle is a 64-bit hash, so two distinct leaves of one folder can map to one
+  handle. A writer that finds the handle already taken by a different real name MUST refuse the
+  second item locally as EXISTS rather than overwrite the first; the conflict policy
   ([conflict-resolution](algorithms/conflict-resolution.md)) then files it under a conflicted
   name.
 
@@ -846,7 +846,11 @@ An implementation MUST exhibit these observable properties.
   a pid-form temporary only when its owner is dead.
 - **Escaped names.** A leaf containing `:` is always escaped to `.tsync-esc-<hex16>` locally; a
   file's real name is recovered from its manifest; an escaped folder's `.tsync-name` record
-  follows the folder through renames.
+  follows the folder through renames. `.TSYNC-dir` is not storable.
+- **Conflated names.** On a case-insensitive APFS folder, every ordering of puts and deletes
+  over `{a, A, á NFC, á NFD}` that reaches the same exact state gives the same local tree
+  ([local-names](algorithms/local-names.md) §2 R2), and the suite asserts a non-zero count of
+  orderings ran.
 - **Random ids.** A forked child draws ids distinct from its parent's.
 - **EINTR.** Both spellings of an interrupted call are retried; other errors propagate; an
   existence check agrees with the platform on missing files, files, directories and dangling

@@ -205,6 +205,7 @@ Extensions:
 | [algorithms/publication](algorithms/publication.md) | The protocol: before-values, upload, the numbered log, fetch and push, projection, arrival by state, recovery, retention. |
 | [algorithms/conflict-resolution](algorithms/conflict-resolution.md) | The principle, how a merge is enacted locally, the conflicted-copy name, and the outcome of every clash. |
 | [algorithms/format-merge](algorithms/format-merge.md) | Optional: settling a file and its conflicted copies after the arrival, for formats where that is no guess; the totp records are the first. |
+| [algorithms/local-names](algorithms/local-names.md) | Filing exact names on a disk that conflates them (case, Unicode normalisation): the canonical form, detection, and the local effect of each operation. |
 | [algorithms/durable-queue](algorithms/durable-queue.md) | Durable queues, persistence rules, and crash immunity across the application. |
 | [algorithms/failure-model](algorithms/failure-model.md) | Failure kinds, propagation, response policy, error codes and deadlines. |
 | [algorithms/replication](algorithms/replication.md) | Several stores with roles presented as one: write and read paths, deferred copies, write guard, repair. |

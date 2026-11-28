@@ -177,7 +177,7 @@ elsewhere; none changes it.
   in place ([01](../01-core.md)) MAY be mapped only while nothing removes it.
 - **Exact names.** The data directory and cache root are case-insensitive. The mirror's rule for
   such filesystems is [01 §2.8](../01-core.md#28-mirror-escaping-local-names-for-real-paths); every
-  lookup in owner state compares the name the filesystem holds.
+  lookup in owner state compares the entry's recorded name, never the name a listing gives.
 - **Long paths.** Every path tsync passes to the system is in its extended-length form (`\\?\`),
   so no path is limited to 260 characters.
 - **Free space** for the core's checks is the volume's free space available to the user.
