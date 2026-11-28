@@ -113,6 +113,9 @@ rename aside onto a free name      {"ok":true,"item":{"ref":"i:<file-9>","parent
 delete on a stale base             {"ok":true,"kept":true}
 delete on its base                 {"ok":true}
 list_dir k                         {"ok":true,"items":[{"ref":"i:<file-9>","parentRef":"d:<id7>","name":"free.txt","kind":"file","size":6,"mtimeNs":"<t>","createdNs":"<t>","etag":"","isUploaded":false,"contentId":"<id13>","availability":"cached"},{"ref":"d:<id11>","parentRef":"d:<id7>","name":"sub","kind":"dir","size":0,"mtimeNs":"<t>","createdNs":"<t>","etag":"<id11>","isUploaded":true},{"ref":"i:<file-7>","parentRef":"d:<id7>","name":"x (conflicted copy 2 from test).txt","kind":"file","size":4,"mtimeNs":"<t>","createdNs":"<t>","etag":"","isUploaded":false,"contentId":"<id12>","availability":"cached"},{"ref":"i:<file-8>","parentRef":"d:<id7>","name":"x (conflicted copy 3 from test).txt","kind":"file","size":6,"mtimeNs":"<t>","createdNs":"<t>","etag":"","isUploaded":false,"contentId":"<id13>","availability":"cached"},{"ref":"i:<file-6>","parentRef":"d:<id7>","name":"x (conflicted copy from test).txt","kind":"file","size":5,"mtimeNs":"<t>","createdNs":"<t>","etag":"","isUploaded":false,"contentId":"<id9>","availability":"cached"},{"ref":"d:<id10>","parentRef":"d:<id7>","name":"x.txt (conflicted copy from test)","kind":"dir","size":0,"mtimeNs":"<t>","createdNs":"<t>","etag":"<id10>","isUploaded":true}]}
+== a feed op whose item cannot be read
+changes_since                      {"ok":true,"stale":false,"more":false,"ops":[],"unnamed":1}
+  unnamed in status                1
 == stop
 stop                               {"ok":true}
 exit status 0

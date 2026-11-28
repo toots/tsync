@@ -530,9 +530,9 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 1b73dd2d, 694c3a82, cac8f7ea, PR #81, PR #87. recurred ×3.
 
 ### A-6.7 One unnameable op stales the whole page
-- **Pitfall** — An op naming a folder with no local id staled the whole batch, forcing a re-enumeration that never removes what the replica holds.
-- **Check** — An unresolvable op is dropped and counted, never escalated to invalidating the feed.
-- **Seen** — 85fd6050, 807e1454, PR #88. recurred ×2.
+- **Pitfall** — An op naming a folder with no local id staled the whole batch, forcing a re-enumeration that never removes what the replica holds. A file id whose manifest was missing from the mirror made rendering its item raise `not_found`, failing the whole `changes_since` request: the consumer retried the same anchor forever and no later change reached Finder.
+- **Check** — An unresolvable op is dropped and counted, never escalated to invalidating the feed or failing the request (08 §3.6 step 7). An item whose reference resolves but whose read raises is counted in `unnamed` and logged, whatever it raised; only cancellation propagates. One helper owns that rule for the feed and both listings.
+- **Seen** — 85fd6050, 807e1454, PR #88, PR #212. recurred ×3.
 
 ### A-6.8 Coalescing an op batch loses intermediates
 - **Pitfall** — Keeping only an item's last op skipped a rename whose new name a later op touched: after `mv a b; rm b`, `a` stayed forever; after `mv a b; mv b c`, `b` was both updated and deleted. The File Provider observer takes unordered update and delete sets, so create-then-delete resurrected.
