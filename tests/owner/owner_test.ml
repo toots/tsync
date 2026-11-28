@@ -695,6 +695,26 @@ let () =
              ("base", `String (content_id x));
            ]);
       show "list_dir k" (ask [("action", "list_dir"); ("ref", k)]);
+      p "== a feed op whose item cannot be read";
+      let before_m = get (ask [("action", "cursor")]) "cursor" in
+      ignore
+        (ask
+           [
+             ("action", "write");
+             ("parentRef", "root");
+             ("name", "m.txt");
+             ("staging", staging "wm" "m");
+           ]);
+      drained 100;
+      Sys.remove
+        (List.fold_left Filename.concat
+           (Tsync_config.Paths.cache_root ())
+           ["docs"; "manifests"; "m.txt"]);
+      (* The cursor holds a clock reading. *)
+      show "changes_since"
+        (match ask [("action", "changes_since"); ("arg", before_m)] with
+          | `Assoc l -> `Assoc (List.remove_assoc "cursor" l)
+          | r -> r);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

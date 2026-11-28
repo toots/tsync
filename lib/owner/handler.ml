@@ -556,8 +556,17 @@ let feed_op t (o : Applied.op) : Protocol.feed_op option =
   let file_ref path =
     match o.fid with Some id -> Some id | None -> M.file_id E.mirror path
   in
-  let file_item fid = Option.bind (M.path_of_file_id E.mirror fid) (row_of t) in
-  let dir_item id = Option.bind (M.key_of_id E.mirror id) (row_of t) in
+  (* An id whose item cannot be read is unnamed, as in a listing (§3.6 step 7):
+     raising would fail the page, and the consumer would retry it forever. *)
+  let readable_row path =
+    match row_of t path with
+      | row -> row
+      | exception Fail.E { kind = Absent | Corrupt; _ } -> None
+  in
+  let file_item fid =
+    Option.bind (M.path_of_file_id E.mirror fid) readable_row
+  in
+  let dir_item id = Option.bind (M.key_of_id E.mirror id) readable_row in
   let folder_id path given =
     match given with
       | Some id -> Some id
