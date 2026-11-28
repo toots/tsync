@@ -197,11 +197,7 @@ before-value; every other key has none. The new pending set follows from that an
 next cycle.
 
 A merge that changed anything beyond installing the main's values is **clashed**, and is logged
-with the keys concerned and the three values of each. A key set aside for a name clash (§4.1,
-§4.2) is also reported as `nameClashes` in the domain's `status`
-([08](../08-frontends.md) §3.3) and in `tsync status` ([07](../07-daemon-cli.md) §5.5), so that a
-host can tell the user: the domain is shared with a machine whose filesystem keeps names apart that
-this one takes for one.
+with the keys concerned and the three values of each.
 
 ### 4.5 Duties of the other actors
 
@@ -381,7 +377,6 @@ main. `cc` abbreviates "conflicted copy".
 | Client display name | configured per client | two clients with one name produce copies a person cannot tell apart |
 | File-rename refinement (§6) | off | optional |
 | Versioning | per domain, optional | history only; no clash depends on it |
-| `NAME_CLASH_REPORT` | 20 | name clashes kept in `status` (§4.4) |
 | Name-clash template | `{base} (name clash[ {n}]){ext}` | stable across versions; every client computes the same |
 
 ---
@@ -418,7 +413,7 @@ an empty pending set, both arrived at the head, one more cycle each):
   - the same two changes committed in two entries, with an arrival between them, leave one
     name-clash copy and nothing lost;
   - `report.txt` and `Report.txt`, both kept by the peer, leave `Report.txt` and
-    `report (name clash).txt` on every client, reported in `nameClashes`; with two such clients,
+    `report (name clash).txt` on every client; with two such clients,
     still exactly one copy;
   - a folder pair `Photos` and `photos` is kept apart the same way, each with its own id and
     content;
