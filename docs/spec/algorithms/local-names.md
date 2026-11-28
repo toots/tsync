@@ -2,8 +2,8 @@
 
 This document owns where a local tree files each exact name: the canonical form, how a
 collision is detected, the local effect of each namespace operation, lookup, and recovery after
-a crash. It applies to the two trees that file items by path: the mirror and the staged tree
-([04](../04-checkout-cache.md) §2.1).
+a crash. It applies to the two trees that file items by path, the mirror and the staged tree
+([04](../04-checkout-cache.md) §2.1); the staged tree takes the trivial form of §3.2.
 
 Related rules owned elsewhere, referenced and not restated:
 
@@ -55,8 +55,11 @@ The local tree L is a function of S and the disk's relation, which gives R2. Inv
 which every step below preserves: a class with at least one member has `min(C)` at the plain
 slot.
 
-Two names whose escaped names coincide (a 64-bit hash collision) cannot both be filed; the
-second is refused locally as EXISTS ([01](../01-core.md) §2.8).
+Two names whose escaped names coincide (a 64-bit hash collision) cannot both be filed. A
+placement whose own handle, or whose demotion's target handle, is held by another name is
+refused locally as EXISTS before any step is taken, and the name goes aside
+([conflict-resolution](conflict-resolution.md) §4.1). Which of the two is refused depends on
+order; at 64 bits this is accepted as the one exception to R2.
 
 ### 3.1 Recorded names
 
@@ -66,7 +69,7 @@ The **recorded name** of an entry is the only truth about which exact name it fi
 |---|---|
 | file entry (mirror) or staged edit | the manifest's `name` field |
 | mirror folder | the folder marker's `name` (`.tsync-dir`); else its name marker `.tsync-name` |
-| staged directory | its name marker `.tsync-name`; else, for one written before staged name markers, the mirror folder's recorded name at the same local path |
+| staged directory | its name marker `.tsync-name` |
 
 An entry with none of these (a folder whose markers are missing or invalid, a file entry that
 does not decode) is taken to file the name the directory listing gives for it. A listing is
@@ -78,11 +81,22 @@ exact name. It MUST be present in an escaped directory that has no valid folder 
 
 ### 3.2 The staged tree
 
-The staged tree is canonical on its own names, independently of the mirror: its members in a
-folder are its staged edits and its directories that have an edit beneath them. A staged
-directory with no edit beneath it is not a member; a step that finds one in the way removes it
-instead of moving it. The last edit removed from a staged directory removes the directory, and
-each ancestor left empty, so an empty directory does not outlive its edits.
+The staged tree files every component, leaf and directory, at `esc(n)`, whatever its siblings,
+and every staged directory carries a name marker: a directory is made at a temporary name,
+given its marker, then renamed to its handle. Two distinct names never reach one slot there, since escape handles are lowercase
+ASCII and differ unless their hashes collide, so no staged step ever moves a sibling: §4 and the
+promote and demote rows of §5 do not apply to it, and a staged step needs no lock beyond the one
+04 §3.2 already assigns. `find` (§6) is step 2 alone. The staged tree is internal and never
+shown, so nothing is lost by its names being unreadable.
+
+- A staged directory lives exactly as long as an edit beneath it: the last edit removed from it
+  removes the directory, and each ancestor left empty.
+- **Migration.** A staged edit or directory found at a name that is not an escape handle was
+  written before this rule. Owner start, before the domain serves, moves each such entry to its
+  handle with one rename, writing a directory's name marker first; its recorded name is its
+  manifest's name (files), or for a directory the recorded name of the mirror folder at the same
+  local path, which the old layout shared, else the listed name. A move whose
+  handle is held by another name sets the entry aside ([04](../04-checkout-cache.md) §2.1).
 
 ## 4. Detection
 
@@ -90,20 +104,28 @@ The identity of a slot is the pair (device, inode) of what a lookup reaches (on 
 serial and file index).
 
 - **On placing n.** Look up n's plain name. If it reaches an entry whose recorded name m ≠ n,
-  then n ~ m, and by I m is the class's minimum. If it reaches nothing, or an empty regular file
-  (a probe, below), n's class has no member.
+  then n ~ m, and by I m is the class's minimum. If it reaches nothing, n's class has no
+  member. If it reaches an empty regular file, a probe a crash left behind (below), a removal
+  of the class's plain holder did not finish: the probe pass and its promotion run first, with
+  that probe, and the placement then starts again.
 - **When the plain holder n leaves.** The departing entry can no longer answer, so the slot is
   probed: create an empty regular file at n's plain name, exclusively; if one is already there
   (a probe a crash left behind), use it; if an entry is there, the class still has its plain
   holder and nothing is promoted. For each escaped sibling e whose recorded name m is storable,
   look up m's plain name; m is in n's class iff it reaches the probe. Remove the probe. An
   unstorable n has no plain slot and is never probed.
+- **The demoted flag.** Only an entry demoted by a collision can be promoted, so a folder that
+  holds none skips the probe and the listing. The flag `.tsync-demoted` in a mirror folder
+  is written durably before any entry of that folder is demoted, and removed only by a probe
+  pass that finds no storable escaped entry left. A removal in a folder without the flag costs
+  one failed lookup. A crash can leave the flag present with nothing demoted, which costs one
+  pass, never absent while a demoted entry exists. Unstorable names never set it. The flag
+  only says when to ask the disk; the class is still found by the probe.
 
 A probe is never an entry: no manifest, staged edit or marker is empty. A lookup that reaches an
-empty regular file at a plain name answers absent, a listing skips it, and a placement overwrites
-it.
+empty regular file at a plain name answers absent, and a listing skips it.
 
-Internal leaves (`.tsync-dir`, `.tsync-name`, `.tsync-fid-…`, temporaries) are not members.
+Internal leaves (`.tsync-dir`, `.tsync-name`, `.tsync-demoted`, `.tsync-fid-…`, temporaries) are not members.
 `storable` refuses every name that begins with `.tsync-` ignoring ASCII case, so no user name
 reaches an internal leaf through case folding.
 
@@ -118,27 +140,36 @@ folder it affects, which can move a sibling.
 |---|---|---|
 | place n (create, write) | empty | n is filed at its plain name |
 | place n | holder m, n > m | n is filed at `esc(n)` |
-| place n | holder m, n < m | **demote**: move m to `esc(m)`; then n is filed at its plain name |
+| place n | holder m, n < m | write n's entry at a temporary name; **demote**: move m to `esc(m)`; move n's entry to its plain name |
 | place n | holder is n | rewrite in place |
-| remove n, n at the plain name | {n, m…} | remove n; probe; **promote**: move `esc(min rest)` to the plain name |
+| remove n, n at the plain name | {n, m…} | remove n; if the folder is flagged (§4), probe; **promote**: move `esc(min rest)` to the plain name |
 | remove n, n escaped | {m, n…} | remove `esc(n)` only |
-| remove n, n absent | — | probe and promote as if n had been the plain holder |
+| remove n, n absent | — | if the folder is flagged, probe and promote as if n had been the plain holder |
 
 - **A move is one rename.** A demotion or a promotion moves one entry with one `rename`; a
-  folder moves with its whole subtree. A directory moving to an escaped slot without a valid
-  folder marker has its name marker written before it moves.
+  folder moves with its whole subtree. A directory that moves gets its name marker rewritten to
+  its exact name before it moves, whenever it has one or the destination is escaped.
+- **No failure leaves a class without its holder.** Every step that can fail for want of space
+  or I/O (writing an entry, a marker, the flag) comes before the demotion, so what follows the
+  demotion is renames. If one of them fails, the demotion is undone (`esc(m)` moved back to the
+  plain name) before the error is returned; if the undo fails too, the error is the state's to
+  repair at the next start, as for a crash (§7).
 - **Sidecars stay.** Records filed by a hash of the exact leaf (the file-id marker
   `.tsync-fid-…`, the ownership marker) are keyed by the name, not the slot, and do not move
   when the entry does.
-- **Rename** of k from n in F to n′ in F′ (F′ may be F) acts on one entry: place n′ in F′ as
-  above, the class taken without the entry being moved (so a case-only rename does not demote
-  itself); rename the entry from its slot to the target slot, its recorded name rewritten; then,
-  if the entry left a plain slot that its new name does not reach, probe and promote in F. When
-  the target slot is the slot it already holds (a rename between two names the disk conflates
-  that stays at the plain name), the rename changes only the stored spelling and the recorded
-  name.
-- **The staged tree** follows the same table on its own members (§3.2). A change of the mirror
-  never moves a staged entry, and a change of the staged tree never moves a mirror entry.
+- **Rename** of k from n in F to n′ in F′ (F′ may be F) is a removal of n from F and a
+  placement of n′ in F′ that move the entry instead of rewriting it, its recorded name
+  rewritten. Before it moves, the entry is the probe of its own slot: when n holds a plain slot
+  in a flagged folder, the escaped siblings of n's class are found by looking up their plain
+  names against the entry itself. When n′ ~ n (a case-only or normalisation-only rename in one
+  folder), the class after the rename is the rest R plus n′: if n′ < min(R), or R is empty, the
+  entry stays at the plain slot and only its stored spelling and recorded name change;
+  otherwise it moves to `esc(n′)` and `esc(min R)` is promoted. Otherwise the placement of n′ in
+  F′ follows the table, the entry moves with one rename, and the removal of n from F promotes as
+  the table says.
+- **The staged tree** files every name at its handle (§3.2), so only the first and the
+  escaped-removal rows apply to it, with the handle in place of the plain name. A change of the
+  mirror never moves a staged entry.
 
 ## 6. Lookup
 
@@ -164,8 +195,9 @@ idempotent:
 
 - a placement looks up the plain holder afresh, so a replay after a demotion finds the class as
   the demotion left it and completes the placement;
-- a removal of a name already gone still probes and promotes (§5 last row), so a crash between
-  the removal and the promotion is repaired by the replay;
+- a removal of a name already gone still probes and promotes in a flagged folder (§5 last
+  row), and the flag outlives the demotion it covers, so a crash between the removal and the
+  promotion is repaired by the replay;
 - a probe a crash left behind is reused by the next probe of that slot and ignored by lookups
   meanwhile.
 

@@ -847,8 +847,8 @@ An implementation MUST exhibit these observable properties.
 - **Escaped names.** A leaf containing `:` is always escaped to `.tsync-esc-<hex16>` locally; a
   file's real name is recovered from its manifest; an escaped folder's `.tsync-name` record
   follows the folder through renames. `.TSYNC-dir` is not storable.
-- **Conflated names.** On a case-insensitive APFS folder, every ordering of puts and deletes
-  over `{a, A, á NFC, á NFD}` that reaches the same exact state gives the same local tree
+- **Conflated names.** On a case-insensitive APFS folder, every ordering of puts, deletes and
+  renames within the class over `{a, A, á NFC, á NFD}` that reaches the same exact state gives the same local tree
   ([local-names](algorithms/local-names.md) §2 R2), and the suite asserts a non-zero count of
   orderings ran.
 - **Random ids.** A forked child draws ids distinct from its parent's.

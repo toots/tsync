@@ -61,6 +61,7 @@ requires rewriting a valid existing file into another form.
   manifests/<escaped dir>/.tsync-dir           folder marker
   manifests/<escaped dir>/.tsync-name          name marker (required only when the dir's leaf is escaped)
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
+  manifests/<escaped dir>/.tsync-demoted       demoted flag: an entry here may sit at its escape handle by a collision ([local-names](algorithms/local-names.md) §4)
   scratch/<escaped path>                       frontend scratch; wiped by `full_resync` ([07](07-daemon-cli.md))
   file-ids-complete                            file-id record: a backfill pass completed (§4.10)
   file-ids-index                               file-id index snapshot, only between a clean stop and the next start (§2.3)
@@ -68,7 +69,7 @@ requires rewriting a valid existing file into another form.
   chunks/<shard>/<group key>                   whole cache body
   chunks/<shard>/<group key>.partial           partial cache body
   chunks/<shard>/<group key>.pin               pin
-  staged/manifests/<escaped path>              staged manifest
+  staged/manifests/<handle path>               staged manifest, every component at its escape handle
   staged/manifests/<dir>/.tsync-bad-<leaf>     set-aside staged manifest (or `.tsync-bad-<n>-<leaf>`)
   staged/chunks/<body id>                      staged group body
   staged/whole/<body id>                       staged whole body
@@ -90,8 +91,9 @@ requires rewriting a valid existing file into another form.
   listing and walk of the mirror, the scratch tree and the staged tree skips internal leaves.
   Temporary files ([01](01-core.md) §2.9) are internal leaves.
 - Folders exist only in the mirror. The staged tree has directories only as containers of
-  staged manifests; a staged directory lives exactly as long as an edit beneath it, and is
-  filed by the staged tree's own names, not the mirror's ([local-names](algorithms/local-names.md) §3.2).
+  staged manifests; a staged directory lives exactly as long as an edit beneath it. Every
+  component of the staged tree is filed at its escape handle, and every staged directory has a
+  name marker ([local-names](algorithms/local-names.md) §3.2).
 - Directories under `<cache_root>/<domain>`, `<data_dir>/sync`, `<data_dir>/uploads-pending` and
   `<data_dir>/intents-pending` are created 0700 and their files 0600 ([durable-queue](algorithms/durable-queue.md) §3.2).
 
@@ -124,8 +126,8 @@ requires rewriting a valid existing file into another form.
   Readers ignore unknown fields. A marker whose `dir` is not `true`, or whose `id` is missing or
   violates the folder-id grammar, is treated as absent: the folder has no id here (operations
   beneath it are UNPREPARED until an arrival by state). The root has no marker; its id is `.tsync-root`.
-- **Name marker** `.tsync-name`: the raw real leaf bytes, no newline. It is required in a mirror
-  folder or staged directory whose leaf is escaped, written before the directory moves to its
+- **Name marker** `.tsync-name`: the raw real leaf bytes, no newline. It is required in every staged
+  directory and in a mirror folder whose leaf is escaped, written before the directory moves to its
   escape handle, and MAY remain once the directory is back at its own spelling. It is rewritten
   whenever the folder is recorded, so mtime sweeps see it as live.
 - **File-id marker.** The file id ([01 §2.7](01-core.md#27-item-references)) of a file entry with
@@ -209,7 +211,8 @@ Version 3, one JSON object per locally edited path:
 
 A slot is one of:
 
-- `{}` **Inherit**: chunk `i` of the mirror entry at the same path (the *base*);
+- `{}` **Inherit**: chunk `i` of the mirror entry of the same key (the *base*), found in the
+  mirror by [local-names](algorithms/local-names.md) §6, never by the staged edit's local path;
 - `{"z":true}` **Zero**: a hole, reading as zeros, with no bytes on disk;
 - `{"u":"<body id>"}` or `{"u":"<body id>","o":<offset>}` **Staged**: the chunk's bytes start at
   byte `offset` (absent: 0; writers omit it when 0) of staged body `<body id>`. Writers MUST NOT
@@ -425,10 +428,10 @@ A domain's tree is either **full** (desktop hosts) or **lazy** (Android); the ho
 ([08](08-frontends.md)). Both expose the same operations; they differ in what absence means.
 
 **Listing** (both):
-- names are real: escaped leaves are resolved through the file entry's recorded name or the
-  folder's name marker;
+- names are real: every leaf is the entry's recorded name
+  ([local-names](algorithms/local-names.md) §3.1), never the name the directory listing gives;
 - internal leaves, set-aside manifests and undecodable file entries are skipped;
-- a staged edit wins over the mirror entry of the same path, and a staged-only file is
+- a staged edit wins over the mirror entry of the same key, and a staged-only file is
   listed;
 - a folder's mtime is the time of the last change to its set of children (an entry added,
   removed or renamed in or out), as recorded here; it is stable between such changes.
@@ -481,7 +484,8 @@ What a pull does, and what a push requires of the folders held, is
   escape handle; an escaped folder component gets a name marker. Removing an entry can promote a
   sibling the same way. No code path computes a local name other than through that one rule.
 - Every local move of a folder goes through one routine: move the mirror directory, rewrite the
-  name marker from the destination leaf (if escaped), rewrite the folder marker's `name`, the
+  name marker from the destination leaf (whenever one is present or the destination is
+  escaped), rewrite the folder marker's `name`, the
   removed-id record and the reverse entry (§4.9). A folder moved any other way becomes
   unreachable by id.
 - Moving a file rewrites its entry so that the recorded name matches the new leaf.
@@ -492,8 +496,8 @@ What a pull does, and what a push requires of the folders held, is
 
 ### 4.2 Resolution
 
-The single resolution point for a key: the staged edit if a staged manifest exists at the path
-(Owed or Uploaded), with the mirror entry at the same path as its base; else the
+The single resolution point for a key: the staged edit if a staged manifest exists for the key
+(Owed or Uploaded), with the mirror entry of the same key as its base; else the
 mirror entry; else nothing. A staged Inherit slot with no base, or whose base lacks that
 chunk, is CORRUPT, never zeros. A mirror entry whose chunk list has a hole is CORRUPT.
 
@@ -697,8 +701,8 @@ on disk, because bodies go last and a cache body is a second name for the same i
   lookup **never mints**: minting on a read would recreate a deleted folder from a `stat`.
 - `write(key, marker)`: if the folder already holds a different id, answer *held(id)* and change
   nothing (references never change under a folder); else `replace`.
-- `replace(key, marker)`: create the directory chain; rewrite the name marker if the leaf is
-  escaped; write the folder marker; write the removed-id record; if the parent has an id, write
+- `replace(key, marker)`: create the directory chain; rewrite the name marker if one is
+  present or the folder is escaped; write the folder marker; write the removed-id record; if the parent has an id, write
   the reverse entry with the parent's id and **the leaf of `key`** (not the marker's name,
   which may spell a pre-move leaf).
 - `lookup_id_removed(key)`: the live id, else the removed-id record's id. The record outlives
