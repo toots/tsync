@@ -715,6 +715,10 @@ let () =
         (match ask [("action", "changes_since"); ("arg", before_m)] with
           | `Assoc l -> `Assoc (List.remove_assoc "cursor" l)
           | r -> r);
+      show "  unnamed in status"
+        (match ask [("action", "status")] with
+          | `Assoc l -> Option.value ~default:`Null (List.assoc_opt "unnamed" l)
+          | _ -> `Null);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

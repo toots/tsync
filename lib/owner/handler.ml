@@ -329,6 +329,13 @@ let row_of t path =
   row t.engine ~root_name:(domain_name t) ~read_only:t.domain.domain.read_only
     path
 
+(* 08 §3.6 step 7, §3.7: an item gone or unreadable since its name was read is
+   reported apart from one that cannot be named, never as a failed request. *)
+let readable_row t path =
+  match row_of t path with
+    | row -> `Row row
+    | exception e when not (Rt.is_cancelled e) -> `Unreadable e
+
 let row_or_unnamed t path =
   match row_of t path with
     | Some r -> r
@@ -502,9 +509,9 @@ let each_file t path f =
 (* 08 §3.7: [None] skips a child gone or unreadable since its name was read;
    [Some None] is one that cannot be named. *)
 let served_row t dir name =
-  match row_of t (Names.join dir name) with
-    | row -> Some row
-    | exception Fail.E { kind = Absent | Corrupt; _ } -> None
+  match readable_row t (Names.join dir name) with
+    | `Row row -> Some row
+    | `Unreadable _ -> None
 
 let list_dir t dir ~after ~limit ~pull : Protocol.page =
   let (module E : Engine.S) = t.engine in
@@ -541,10 +548,12 @@ let list_dir t dir ~after ~limit ~pull : Protocol.page =
       (match view with Some (v : Pulls.view) -> v.outdated | None -> false);
   }
 
+exception Unreadable_item
+
 (* 08 §3.6 step 6: names come from the folder-id index, which keeps an id after
    its marker went, and from the file id the applied log recorded, so an op
    names its item even after it moved or went; [None] counts as unnamed. *)
-let feed_op t (o : Applied.op) : Protocol.feed_op option =
+let render_feed_op t (o : Applied.op) : Protocol.feed_op option =
   let (module E : Engine.S) = t.engine in
   let module M = Tsync_checkout.Mirror in
   let dir_ref id =
@@ -556,17 +565,16 @@ let feed_op t (o : Applied.op) : Protocol.feed_op option =
   let file_ref path =
     match o.fid with Some id -> Some id | None -> M.file_id E.mirror path
   in
-  (* An id whose item cannot be read is unnamed, as in a listing (§3.6 step 7):
-     raising would fail the page, and the consumer would retry it forever. *)
-  let readable_row path =
-    match row_of t path with
-      | row -> row
-      | exception Fail.E { kind = Absent | Corrupt; _ } -> None
+  let item_at path =
+    match readable_row t path with
+      | `Row row -> row
+      | `Unreadable e ->
+          Log.warn "%s: %s cannot be read for the change feed: %s"
+            (domain_name t) path (Printexc.to_string e);
+          raise Unreadable_item
   in
-  let file_item fid =
-    Option.bind (M.path_of_file_id E.mirror fid) readable_row
-  in
-  let dir_item id = Option.bind (M.key_of_id E.mirror id) readable_row in
+  let file_item fid = Option.bind (M.path_of_file_id E.mirror fid) item_at in
+  let dir_item id = Option.bind (M.key_of_id E.mirror id) item_at in
   let folder_id path given =
     match given with
       | Some id -> Some id
@@ -641,6 +649,11 @@ let feed_op t (o : Applied.op) : Protocol.feed_op option =
                name = leaf dst;
                item;
              })
+
+(* An item resolved but unreadable drops its op into [unnamed] (§3.6 step 7):
+   failing the page would make the consumer retry it forever. An item gone since
+   keeps its op, which a later op completes. *)
+let feed_op t o = try render_feed_op t o with Unreadable_item -> None
 
 let changes t ~anchor ~limit : Protocol.changes =
   let (module E : Engine.S) = t.engine in
@@ -748,7 +761,12 @@ let list_all t ~after ~limit : Protocol.listing =
           | `Stale -> Walk_stale
           | `Page (paths, next) ->
               let rows =
-                List.map (fun p -> try row_of t p with _ -> None) paths
+                List.map
+                  (fun p ->
+                    match readable_row t p with
+                      | `Row row -> row
+                      | `Unreadable _ -> None)
+                  paths
               in
               Listed
                 {
