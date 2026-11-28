@@ -80,37 +80,87 @@ let write ?(durable = true) p data =
 let write_if_changed ?durable p data =
   if Fs.read_file_opt p <> Some data then write ?durable p data
 
+let parse_marker body =
+  match Folder.classify_marker body with `Marker m -> Some m | _ -> None
+
+(* 01 §2.8: the name an entry records. A folder without a valid marker and an
+   entry that does not decode record none, and hold whatever name reaches
+   them. *)
+let recorded p (st : Unix.LargeFile.stats) =
+  match st.st_kind with
+    | S_DIR -> (
+        match Option.bind (Fs.read_file_opt (dir_marker p)) parse_marker with
+          | Some (m : Folder.marker) -> Some m.name
+          | None -> Fs.read_file_opt (name_marker p))
+    | S_REG ->
+        Option.map
+          (fun (m : Manifest.t) -> m.name)
+          (Option.bind (Fs.read_file_opt p) Manifest.decode)
+    | _ -> None
+
+let split rel = if rel = "" then [] else String.split_on_char '/' rel
+
+(* 01 §2.8: every component is checked against its record, so a name the
+   filesystem takes for another's is absent. [`Clash held]: the leaf's place
+   holds [held].
+   ponytail: a record read per component per lookup; cache per folder if it
+   shows in profiles. *)
+let locate t rel =
+  let rec go dir = function
+    | [] -> `Found dir
+    | c :: rest -> (
+        let p = Filename.concat dir (Names.escape c) in
+        match Fs.lstat_opt p with
+          | None -> `Absent
+          | Some st -> (
+              match recorded p st with
+                | Some held when held <> c ->
+                    if rest = [] then `Clash held else `Absent
+                | _ -> go p rest))
+  in
+  go t.manifests (split rel)
+
+let clash t rel = match locate t rel with `Clash held -> Some held | _ -> None
+
+let clash_error rel held =
+  Fail.raise_ Fail.Exists "%s: the filesystem takes it for %S" rel held
+
 type file = [ `File of Manifest.t | `Corrupt | `Dir | `Absent ]
 
 let file t rel : file =
-  let p = path t rel in
-  match Fs.lstat_opt p with
-    | None -> `Absent
-    | Some { st_kind = S_DIR; _ } -> `Dir
-    | Some _ -> (
-        match Manifest.decode (Fs.read_file p) with
-          | Some m -> `File m
-          | None -> `Corrupt)
+  match locate t rel with
+    | `Absent | `Clash _ -> `Absent
+    | `Found p -> (
+        match Fs.lstat_opt p with
+          | None -> `Absent
+          | Some { st_kind = S_DIR; _ } -> `Dir
+          | Some _ -> (
+              match Option.map Manifest.decode (Fs.read_file_opt p) with
+                | Some (Some m) -> `File m
+                | Some None -> `Corrupt
+                | None -> `Absent))
 
 let manifest t rel = match file t rel with `File m -> Some m | _ -> None
 
 let kind t rel =
   if rel = "" then `Dir
   else (
-    match Fs.lstat_opt (path t rel) with
-      | Some { st_kind = S_DIR; _ } -> `Dir
-      | Some _ -> `File
-      | None -> `Absent)
+    match locate t rel with
+      | `Found p -> (
+          match Fs.lstat_opt p with
+            | Some { st_kind = S_DIR; _ } -> `Dir
+            | Some _ -> `File
+            | None -> `Absent)
+      | `Absent | `Clash _ -> `Absent)
 
-let parse_marker body =
-  match Folder.classify_marker body with `Marker m -> Some m | _ -> None
+let folder_id_at p =
+  Option.bind
+    (Fs.read_file_opt (dir_marker p))
+    (fun b -> Option.map (fun (m : Folder.marker) -> m.id) (parse_marker b))
 
 let folder_id t rel =
   if rel = "" then Some Folder_id.root
-  else
-    Option.bind
-      (Fs.read_file_opt (dir_marker (path t rel)))
-      (fun b -> Option.map (fun (m : Folder.marker) -> m.id) (parse_marker b))
+  else (match locate t rel with `Found p -> folder_id_at p | _ -> None)
 
 (* The real leaf held by the local name [local] in [dir]. *)
 let real_name dir local =
@@ -139,15 +189,24 @@ let check_handle t rel =
 
 (* Without [durable], a new directory waits for the caller's syncfs where that
    is a barrier. *)
-let ensure_dirs ?(durable = true) t rel =
+(* [id]: the leaf is that folder, whose marker may still record the name a
+   move took it from. *)
+let make_dirs ?(durable = true) ?id t rel =
   let durable = durable || not Fs.syncfs_is_barrier in
-  let rec go rel =
+  let rec go ?id rel =
     if rel <> "" then (
       go (Names.parent_of rel);
       let p = path t rel in
       match Fs.lstat_opt p with
-        | Some { st_kind = S_DIR; _ } -> ()
-        | Some _ -> Fail.raise_ Fail.Exists "%s is a file" rel
+        | Some st -> (
+            match recorded p st with
+              | Some held
+                when held <> Names.leaf_of rel
+                     && (id = None || folder_id_at p <> id) ->
+                  clash_error rel held
+              | _ ->
+                  if st.st_kind <> S_DIR then
+                    Fail.raise_ Fail.Exists "%s is a file" rel)
         | None ->
             check_handle t rel;
             Fs.mkdir_p ~durable p;
@@ -156,7 +215,9 @@ let ensure_dirs ?(durable = true) t rel =
               write ~durable (name_marker p) leaf)
   in
   Fs.mkdir_p t.manifests;
-  go rel
+  go ?id rel
+
+let ensure_dirs ?durable t rel = make_dirs ?durable t rel
 
 let is_own t rel =
   let leaf = Names.leaf_of rel in
@@ -228,19 +289,49 @@ let move_fid_subtree t ~src ~dst =
 
 (* Every write stamps the recorded name, and replaces the entry whole; a path
    keeps its file id across replacements. *)
-let write_file ?durable ?(own = false) t rel (m : Manifest.t) =
-  ensure_dirs ?durable t (Names.parent_of rel);
+(* 01 §2.8: linked into place without replacing an entry this did not look at.
+   The entry a case-only move takes from [moving] is its own. *)
+let place ~durable ?moving t rel body =
+  let p = path t rel and leaf = Names.leaf_of rel in
+  let dir = Filename.dirname p in
+  let tmp =
+    Fs.write_temp_with ~sync:(durable || not Fs.syncfs_is_barrier) dir
+      (fun fd -> Fs.write_all fd body)
+  in
+  let link () =
+    match Fs.rename_noreplace tmp p with
+      | () -> ()
+      | exception Fail.E { kind = Exists; _ } -> (
+          match Option.bind (Fs.lstat_opt p) (recorded p) with
+            | Some held when held <> leaf && Some held <> moving ->
+                clash_error rel held
+            | _ -> Fs.rename tmp p)
+  in
+  (try link ()
+   with e ->
+     Fs.unlink_quiet tmp;
+     raise e);
+  if durable then Fs.fsync_dir dir
+
+let write_entry ?(durable = true) ?moving ?(own = false) t rel (m : Manifest.t)
+    =
+  ensure_dirs ~durable t (Names.parent_of rel);
   check_handle t rel;
   let m = Manifest.rename m (Names.leaf_of rel) in
   if not own then clear_own t rel;
-  write ?durable (path t rel) m.body;
-  ignore (ensure_file_id ?durable t rel);
+  place ~durable ?moving t rel m.body;
+  ignore (ensure_file_id ~durable t rel);
   if own then set_own t rel
 
+let write_file ?durable ?own t rel m = write_entry ?durable ?own t rel m
+
+(* Only the entry recording this name: never another the filesystem takes it
+   for (pitfall A-8.10). *)
 let remove_file t rel =
   clear_own t rel;
-  let p = path t rel in
-  if Fs.release p then Fs.fsync_dir (Filename.dirname p);
+  (match locate t rel with
+    | `Found p -> if Fs.release p then Fs.fsync_dir (Filename.dirname p)
+    | `Absent | `Clash _ -> ());
   clear_file_id t rel
 
 let md5_hex s = Digest.to_hex (Digest.string s)
@@ -271,7 +362,7 @@ let write_removed ?durable t rel id =
    the removed-id record, and the reverse entry with the leaf of [rel]. *)
 let replace_folder ?durable t rel id =
   if rel <> "" then (
-    ensure_dirs ?durable t rel;
+    make_dirs ?durable ~id t rel;
     let p = path t rel in
     let leaf = Names.leaf_of rel in
     if Names.escape leaf <> leaf then
@@ -302,9 +393,11 @@ let mkdir_without_id t rel = ensure_dirs t rel
 let remove_folder t rel =
   Atomic.incr t.folders_moved;
   move_fid_subtree t ~src:rel ~dst:None;
-  let p = path t rel in
-  Fs.rm_rf p;
-  Fs.fsync_dir (Filename.dirname p)
+  match locate t rel with
+    | `Found p ->
+        Fs.rm_rf p;
+        Fs.fsync_dir (Filename.dirname p)
+    | `Absent | `Clash _ -> ()
 
 let lookup_id_removed t rel =
   match folder_id t rel with
@@ -356,9 +449,17 @@ let whereabouts t rel =
 
 (* The one routine that moves a folder: directory, name marker, folder
    marker's name, removed-id record and reverse entry together. *)
+let same_entry a b =
+  match (Fs.lstat_opt a, Fs.lstat_opt b) with
+    | Some x, Some y -> x.st_dev = y.st_dev && x.st_ino = y.st_ino
+    | _ -> false
+
 let move_folder t ~src ~dst =
   ensure_dirs t (Names.parent_of dst);
   check_handle t dst;
+  (* A case-only rename reaches the folder itself, and is done in place. *)
+  if not (same_entry (path t src) (path t dst)) then
+    Option.iter (clash_error dst) (clash t dst);
   Atomic.incr t.folders_moved;
   let id = folder_id t src in
   Fs.rename (path t src) (path t dst);
@@ -379,6 +480,12 @@ let move_file t ~src ~dst =
     | Some id -> set_file_id t dst id
     | None -> clear_file_id t dst);
   (match manifest t src with
+    | Some m when same_entry (path t src) (path t dst) ->
+        (* A case-only rename: the entry is renamed in place. *)
+        let own = is_own t src in
+        Fs.rename (path t src) (path t dst);
+        write_entry ~own ~moving:(Names.leaf_of src) t dst m;
+        clear_own t src
     | Some m ->
         let own = is_own t src in
         write_file ~own t dst m;

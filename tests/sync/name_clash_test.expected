@@ -1,0 +1,27 @@
+== a case change made as a write and a delete, in one entry
+  mac    one/X Of Y.md5=a
+  one: every machine holds the same true
+== the same two changes in two entries, an arrival between
+  mac    two/X Of Y.md5=a  two/X of Y (name clash).md5=b
+  linux  two/X Of Y.md5=a  two/X of Y (name clash).md5=b
+  two: every machine holds the same true
+== two names the peer keeps, two Macs
+  mac    three/Report.txt=c  three/report (name clash).txt=d
+  linux  three/Report.txt=c  three/report (name clash).txt=d
+  three: every machine holds the same true
+== the Mac held the greater name first
+  mac    four/Report.txt=c  four/report (name clash).txt=d
+  four: every machine holds the same true
+== two folders
+  mac    five/Photos/  five/Photos/a.jpg=e  five/photos (name clash)/  five/photos (name clash)/b.jpg=f
+  five: every machine holds the same true
+== an NFC and an NFD spelling
+  refused: EXISTS
+  the NFD spelling reads nothing
+== a case-only rename keeps the file id
+  mac: id kept true
+  arrived: id kept true
+  mac    seven/NOTES.txt=g
+  seven: every machine holds the same true
+== a local create beside a name the filesystem takes for it
+  refused: EXISTS

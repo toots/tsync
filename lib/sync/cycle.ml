@@ -292,6 +292,36 @@ module Make (C : Engine_ctx.S) = struct
         Mirror.file_id mirror dst );
     ]
 
+  (* conflict-resolution §5: free here and clashing with nothing. *)
+  (* [same]: a name already holding this content, which a replay reuses. *)
+  let clash_path ?(same = fun _ -> false) ~is_dir path =
+    let parent = Names.parent_of path in
+    Names.join parent
+      (Conflict.free_clash ~is_dir
+         ~taken:(fun leaf ->
+           let q = Names.join parent leaf in
+           (kind q <> `Absent || clash_of q <> None) && not (same q))
+         (Names.leaf_of path))
+
+  (* conflict-resolution §4.1, a name clash: the main's value is kept at its
+     clash name as this client's change, and the key stays empty here, with the
+     main's value as its before-value. *)
+  let divert_file diverted (p : Algebra.place) path (m : Manifest.t) held =
+    let same q =
+      match Mirror.manifest mirror q with
+        | Some held -> Manifest.content_id held = Manifest.content_id m
+        | None -> false
+    in
+    let dst = clash_path ~same ~is_dir:false path in
+    Log.warn "%s: the filesystem takes it for %S; kept as %s" path held dst;
+    Mirror.write_file ~durable:false mirror dst m;
+    let fid = Mirror.ensure_file_id ~durable:false mirror dst in
+    diverted :=
+      (`File p, Sync_state.Before_file (Some (Log_entry.Known m)))
+      :: (`File { p with name = Names.leaf_of dst }, Sync_state.Before_file None)
+      :: !diverted;
+    [(Op.Put { path = dst; size = m.size }, Some fid)]
+
   (* An edit staged after an arrival's decision was recorded, which only a
      record completed later can meet: it is kept beside the main's value, with
      the entry it inherits from. *)
@@ -302,7 +332,7 @@ module Make (C : Engine_ctx.S) = struct
 
   (* conflict-resolution §4, one step: idempotent, under the metadata lock and
      the key locks of the files it names. *)
-  let apply_step ?(recovered = false) parked :
+  let apply_step ?(recovered = false) parked diverted :
       Sync_state.step -> (Op.t * string option) list =
     let late path = recovered && Staged.edit staged path <> None in
     function
@@ -350,6 +380,8 @@ module Make (C : Engine_ctx.S) = struct
     | File (p, Some m) -> (
         match path_of p with
           | None -> []
+          | Some path when clash_of path <> None ->
+              divert_file diverted p path m (Option.get (clash_of path))
           | Some path ->
               let aside = if late path then keep_aside path else [] in
               (match Staged.edit staged path with
@@ -385,6 +417,18 @@ module Make (C : Engine_ctx.S) = struct
                     [(Op.Rmdir { path = here; id = Some i }, None)]
                 | _ -> [])
           | Some target -> (
+              let target =
+                match clash_of target with
+                  | Some held when place.name <> park_name i ->
+                      let aside = clash_path ~is_dir:true target in
+                      Log.warn "%s: the filesystem takes it for %S; kept as %s"
+                        target held aside;
+                      diverted :=
+                        (`Folder i, Sync_state.Before_folder (Some place))
+                        :: !diverted;
+                      aside
+                  | _ -> target
+              in
               match Mirror.key_of_id mirror i with
                 | Some here when here = target -> []
                 | Some here ->
@@ -430,8 +474,8 @@ module Make (C : Engine_ctx.S) = struct
      recovery completes cannot tell which of its feed lines it had appended,
      so it invalidates the feed's anchors instead. *)
   let run_arrival ?(recovered = false) (a : Sync_state.arrival) =
-    let parked = Hashtbl.create 2 in
-    let ops = List.concat_map (apply_step ~recovered parked) a.steps in
+    let parked = Hashtbl.create 2 and diverted = ref [] in
+    let ops = List.concat_map (apply_step ~recovered parked diverted) a.steps in
     if a.steps <> [] then Fs.syncfs (Mirror.root mirror);
     (* 04 §4.7: before its before-value goes, and under the record. *)
     List.iter
@@ -457,6 +501,15 @@ module Make (C : Engine_ctx.S) = struct
                 Sync_state.set_folder sync_state i v
           | _ -> ())
       a.before;
+    (* After the main's values: a key set aside for a name clash differs from
+       the main, and its before-value says so. *)
+    List.iter
+      (fun ((key : Algebra.key), (settled : Sync_state.settled)) ->
+        match (key, settled) with
+          | `File p, Before_file v -> Sync_state.set_file sync_state p v
+          | `Folder i, Before_folder v -> Sync_state.set_folder sync_state i v
+          | _ -> ())
+      !diverted;
     (match a.view with
       | None -> Sync_state.set_position sync_state a.head
       | Some id ->
@@ -487,6 +540,20 @@ module Make (C : Engine_ctx.S) = struct
         in
         compare (rank a) (rank b))
 
+  (* conflict-resolution §4.3: a file key's removal before every placement, so
+     a filesystem that takes two names for one meets only the clashes [N]
+     holds; placements by name, so a clash's least name is placed first; a
+     folder's removal last, once it is empty. *)
+  let enactment_order : Log_entry.command list -> Log_entry.command list =
+    List.stable_sort (fun a b ->
+        let rank : Log_entry.command -> int * string = function
+          | `File (_, _, None) -> (0, "")
+          | `File ((p : Algebra.place), _, Some _) -> (1, p.name)
+          | `Folder (_, _, Some (p : Algebra.place)) -> (1, p.name)
+          | `Folder (_, _, None) -> (2, "")
+        in
+        compare (rank a) (rank b))
+
   (* The steps that take [L] to [N]: folders merged into another re-identified
      first, then files moved aside, to names free in both, then the rest in an
      order Theorem 3 allows. *)
@@ -509,10 +576,11 @@ module Make (C : Engine_ctx.S) = struct
     let ordered =
       List.mapi
         (fun i step -> (i, step))
-        (Algebra.order ~temp:park_name moved (removals_last rest))
+        (Algebra.order ~temp:park_name moved (enactment_order rest))
     in
     (* conflict-resolution §4.1, a move the main made: a removal of an
-       unedited file paired with an earlier creation of the same content. *)
+       unedited file paired with a creation of the same content, enacted at
+       the creation. *)
     let unedited p =
       match path_of p with
         | Some path -> Staged.edit staged path = None
@@ -534,12 +602,12 @@ module Make (C : Engine_ctx.S) = struct
               match
                 List.find_opt
                   (fun (i, src, identity) ->
-                    i > j
+                    i <> j
                     && identity = Log_entry.identity_of m
                     && not (List.mem src used))
                   removed
               with
-                | Some (_, src, _) -> ((j, src, dst) :: moves, src :: used)
+                | Some (i, src, _) -> ((j, i, src, dst) :: moves, src :: used)
                 | None -> (moves, used))
           | _ -> (moves, used))
         ([], []) ordered
@@ -547,12 +615,21 @@ module Make (C : Engine_ctx.S) = struct
     List.map (fun (i, j) -> Sync_state.Reidentify (i, j)) merged.merged_into
     @ List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
     @ List.filter_map
-        (fun (j, step) ->
-          match (List.find_opt (fun (at, _, _) -> at = j) moves, step) with
-            | Some (_, src, dst), _ -> Some (Sync_state.Move (src, dst))
+        (fun (k, step) ->
+          (* A move within one folder frees its name with the removals
+             (conflict-resolution §4.3); another waits for its creation's
+             place in the order. *)
+          let here (j, i, (src : Algebra.place), (dst : Algebra.place)) =
+            if Folder_id.equal src.parent dst.parent then i = k else j = k
+          in
+          match (List.find_opt here moves, step) with
+            | Some (_, _, src, dst), _ -> Some (Sync_state.Move (src, dst))
             | None, `Set (`File (p, _, None)) ->
-                if List.exists (fun (_, src, _) -> src = p) moves then None
+                if List.exists (fun (_, _, src, _) -> src = p) moves then None
                 else Some (Sync_state.File (p, None))
+            | None, `Set (`File (p, _, Some _))
+              when List.exists (fun (_, _, _, dst) -> dst = p) moves ->
+                None
             | None, `Set (`File (p, _, Some (Log_entry.Known m))) ->
                 Some (File (p, Some m))
             | None, `Set (`File ((p : Algebra.place), _, Some _)) ->
@@ -665,6 +742,55 @@ module Make (C : Engine_ctx.S) = struct
     | `File (p, _, _) -> Folder_id.equal p.parent id
     | `Folder (_, before, after) -> inside before || inside after
 
+  (* conflict-resolution §4.1: a clash's least name keeps it. A held key whose
+     name a placement of [N] precedes moves to its clash name first, as this
+     client's change, so two clients whose filesystems agree make the same
+     change. Whether one moved. *)
+  let yield_clashes (steps : Sync_state.step list) =
+    let target : Sync_state.step -> string option = function
+      | File (p, Some _) -> path_of p
+      | Folder (i, Some place) when place.name <> park_name i -> path_of place
+      | _ -> None
+    in
+    (* A holder the arrival removes or moves away is no clash of [N]. *)
+    let leaving =
+      List.concat_map
+        (function
+          | Sync_state.File (p, None) | Move (p, _) ->
+              Option.to_list (path_of p)
+          | Folder (i, _) -> Option.to_list (Mirror.key_of_id mirror i)
+          | Reidentify _ | File (_, Some _) -> [])
+        steps
+    in
+    List.exists
+      (fun step ->
+        match target step with
+          | None -> false
+          | Some path -> (
+              let holder held = Names.join (Names.parent_of path) held in
+              match clash_of path with
+                | Some held
+                  when String.compare (Names.leaf_of path) held < 0
+                       && not (List.mem (holder held) leaving) ->
+                    let holder = Names.join (Names.parent_of path) held in
+                    let is_dir = kind holder = `Dir in
+                    let aside = clash_path ~is_dir holder in
+                    Log.warn
+                      "%s: the filesystem takes it for %s; %s moved to %s" path
+                      held holder aside;
+                    (match (is_dir, Mirror.folder_id mirror holder) with
+                      | true, Some id ->
+                          note_folder id;
+                          repost_moved
+                            (rename_local ~src:holder ~dst:aside ~is_dir:true);
+                          settle_folder id
+                      | _ ->
+                          with_keys [holder; aside] (fun () ->
+                              move_file_held ~src:holder ~dst:aside));
+                    true
+                | _ -> false))
+      steps
+
   (* publication §4.4 from the merge on. The decision is taken again with the
      key locks held, since a write may stage an edit under its key lock alone
      (conflict-resolution §4.1). *)
@@ -707,8 +833,13 @@ module Make (C : Engine_ctx.S) = struct
               "the local tree kept changing under an arrival"
         | `Again need -> attempt need (rounds - 1)
     in
+    let rec yield_all rounds =
+      if rounds > 0 && yield_clashes (arrival_of (decide ())).steps then
+        yield_all (rounds - 1)
+    in
     let touched =
       with_meta (fun () ->
+          yield_all 64;
           keeping_dirs (fun () -> attempt (paths_of (arrival_of (decide ()))) 8))
     in
     Rt.Signal.broadcast settled_signal;

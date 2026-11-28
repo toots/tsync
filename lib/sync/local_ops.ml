@@ -1090,6 +1090,21 @@ module Make (C : Engine_ctx.S) = struct
   let check_writable () =
     if C.read_only then Fail.raise_ Fail.Read_only "this domain is read-only"
 
+  (* 01 §2.8: the name another key records at a path's place, mirror or
+     staged, when the filesystem takes the path for it. *)
+  let clash_of path =
+    match Mirror.clash mirror path with
+      | Some _ as held -> held
+      | None -> Staged.clash staged path
+
+  (* A local operation onto such a name is refused like one onto a taken
+     name; [own] is the name a case-only rename moves away. *)
+  let refuse_clash ?own path =
+    match clash_of path with
+      | Some held when Some held <> own ->
+          Fail.raise_ Fail.Exists "%s: the filesystem takes it for %S" path held
+      | _ -> ()
+
   let write path ~off data =
     check_writable ();
     with_key path (fun () ->
@@ -1205,6 +1220,7 @@ module Make (C : Engine_ctx.S) = struct
           Fail.raise_ Fail.Exists "%s exists" path;
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
+        refuse_clash path;
         changing ~durable:false path @@ fun () ->
         let before = Staged.edit staged path in
         let e =
@@ -1367,6 +1383,7 @@ module Make (C : Engine_ctx.S) = struct
     with_key path (fun () ->
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
+        refuse_clash path;
         changing path @@ fun () ->
         let before = Staged.edit staged path in
         let current = content_id path in
@@ -1523,6 +1540,7 @@ module Make (C : Engine_ctx.S) = struct
           | `Absent ->
               if Staged.edit staged path <> None then
                 Fail.raise_ Fail.Exists "%s is a file" path;
+              refuse_clash path;
               ignore (require_parent path);
               let id = Identity.mint folder_minter in
               namespace_op
@@ -1703,6 +1721,9 @@ module Make (C : Engine_ctx.S) = struct
           if sk = `Absent then Fail.absent "%s: no such file or folder" src;
           if exclusive && dk <> `Absent then
             Fail.raise_ Fail.Exists "%s exists" dst;
+          if Names.parent_of src = Names.parent_of dst then
+            refuse_clash ~own:(Names.leaf_of src) dst
+          else refuse_clash dst;
           (match (sk, dk) with
             | `Dir, `Dir ->
                 if
@@ -1763,6 +1784,7 @@ module Make (C : Engine_ctx.S) = struct
     with_meta (fun () ->
         if exclusive && exists path then
           Fail.raise_ Fail.Exists "%s exists" path;
+        refuse_clash path;
         install path
           (Manifest.symlink ~name:(Names.leaf_of path) ~times:(new_times ())
              target))

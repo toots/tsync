@@ -11,7 +11,9 @@ Not normative.
 | Keys and values (§2) | `Algebra.key`, `place`; `Log_entry.value`, whose `equal` compares content identities and makes `Unknown` differ from everything |
 | Local state a merge reads (§3) | `Cycle.l_base` (`lib/sync`): the mirror overlaid with the staged edits, read under the metadata lock; `Cycle.pending` for the before-values |
 | Enacting a merge (§4) | `Cycle.merge_and_enact`: the decision is taken again with the key locks held; `steps_of` orders the changes; `run_arrival` and `apply_step` make them |
-| A move the main made (§4.1) | `Cycle.steps_of`: a removal of an unedited file paired with an earlier creation of the same content becomes one `Move` |
+| A move the main made (§4.1) | `Cycle.steps_of`: a removal of an unedited file paired with a creation of the same content becomes one `Move`, placed with the removals when both ends are in one folder |
+| Order (§4.3) | `Cycle.enactment_order`: file removals, then placements by name, then folder removals; `Algebra.order` defers what is blocked |
+| A name clash (§4.1, §4.2, §5) | `Local_ops.clash_of` (`Mirror.clash`, `Staged.clash`); `Cycle.yield_clashes` moves a greater held name aside before the arrival is decided; `Cycle.divert_file` and the folder case of `apply_step` set the main's item aside, their before-values applied after the arrival's; `Conflict.free_clash`; `Local_ops.refuse_clash` for local operations |
 | Conflicted-copy name (§5) | `Conflict.name`; the free name is picked by `Cycle.aside` (a merge) and `Local_ops.aside_name` (a stale base) |
 | A local write against a stale base (§7) | `Local_ops.write_whole` |
 | Every row of §8.3 | `tests/sync/rows_test`: two clients and a third that arrives by state, trees compared with contents |

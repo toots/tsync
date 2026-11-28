@@ -30,9 +30,9 @@
   B's applied log:
     put y.txt                fid=<id2>
     rename y.txt->z.txt      fid=<id2>
-    put q.txt                fid=<id6>
-    mkdir moved              fid=-
     delete z.txt             fid=<id2>
+    mkdir moved              fid=-
+    put q.txt                fid=<id6>
     put moved/f.txt          fid=<id7>
 == a peer's delete under a folder renamed here, rename unpublished
   B's X/f.txt: <id8>

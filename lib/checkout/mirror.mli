@@ -23,6 +23,10 @@ val file : t -> string -> file
 val manifest : t -> string -> Manifest.t option
 val kind : t -> string -> [ `Dir | `File | `Absent ]
 
+(** 01 §2.8: the name the entry at a path's place records, when the local
+    filesystem takes the path's leaf for that other name. *)
+val clash : t -> string -> string option
+
 (** The folder id held at a path: [.tsync-root] for the root, the marker's id
     otherwise. Never mints. *)
 val folder_id : t -> string -> Folder_id.t option
@@ -32,7 +36,9 @@ val ensure_dirs : ?durable:bool -> t -> string -> unit
 
 (** Replace a file entry with a manifest recording the path's leaf. [own] says
     this client stored it (the own marker, 04 §2.3). [durable] defaults to true.
-    EXISTS when the escape handle is held by another name. *)
+    EXISTS when the escape handle is held by another name, or when the
+    filesystem takes the leaf for a name another entry records (a name clash).
+*)
 val write_file : ?durable:bool -> ?own:bool -> t -> string -> Manifest.t -> unit
 
 (** Removes the entry, then its file id. *)

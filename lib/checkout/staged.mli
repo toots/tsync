@@ -40,9 +40,15 @@ val manifest_path : t -> string -> string
 val body_path : t -> string -> string
 val whole_path : t -> string -> string
 val read : t -> string -> [ `Edit of edit | `Absent | `Unparseable ]
+
+(** 01 §2.8: the name the staged edit at a path's place records, when the local
+    filesystem takes the path's leaf for that other name. *)
+val clash : t -> string -> string option
+
 val edit : t -> string -> edit option
 
-(** Replace the staged manifest of a path ([durable] by default). *)
+(** Replace the staged manifest of a path ([durable] by default). EXISTS when
+    the filesystem takes the path for one another edit records. *)
 val write : ?durable:bool -> t -> string -> edit -> unit
 
 val remove : t -> string -> unit

@@ -69,7 +69,7 @@ segment  = 1*byte  except  "/" and NUL,  and not exactly "." or ".."
 
 ```
 domain-name = 1*255 byte  except  "/", NUL, bytes 0x01–0x1F and 0x7F
-              and not "." or "..", not beginning with ".tsync-"
+              and not "." or "..", without the sentinel (§2.6)
               and not a reserved root name
 reserved    = "shares" | "corrupted" | "verify-jobs" | "gc-jobs"
 ```
@@ -173,6 +173,13 @@ reserved-key(prefix, id, name)  = prefix id "/" name     for name ∈ reserved l
   marker lives at the same key as a file of the same name would; the two cannot coexist in one
   parent.
 - **Reserved leaves.** Every name a store keeps for itself begins with the sentinel `.tsync-`.
+  A name **has the sentinel** iff its first 7 bytes are `.tsync-` ignoring ASCII case
+  (`.Tsync-`, `.TSYNC-`). That test decides whether a name is private: a user leaf with the
+  sentinel is never filed locally as itself (§2.8), and a local name with it is never shown,
+  since a filesystem that ignores case takes `.TSYNC-dir` for `.tsync-dir`. The names tsync
+  writes for itself (`.tsync-tmp-…`, `.tsync-esc-…`, `.tsync-ext`, markers) are written and
+  recognised in lowercase exactly; a sweep or a watcher acts only on those, so a user's
+  `.TSYNC-tmp-x.tmp`, filed at its escape handle, is never taken for a temporary.
   No user leaf reaches a store key unhashed, so no user name can collide with one. The reserved
   leaves under a folder namespace (`.tsync-parent`, `.tsync-index`), the full key layout and
   the bodies filed at each key are specified in [02](02-remote-model.md).
@@ -226,7 +233,7 @@ parent-and-leaf name would turn every file rename into a removal and a re-downlo
 ### 2.8 Mirror escaping (local names for real paths)
 
 A local mirror files each item by its real path. A component is **storable** as itself iff it
-is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains none of
+is at most `NAME_MAX_LOCAL` bytes, does not have the sentinel (§2.6), and contains none of
 `" * : < > ? \ |` and no byte below 0x20. Otherwise it is filed as
 `.tsync-esc-` followed by `hex16(XXH3(leaf, 0))`.
 
@@ -235,12 +242,25 @@ is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains n
 - The real name is recovered from the file's manifest (files) or from a `.tsync-name` record
   beside the escaped directory (folders); the layout of those records is owned by
   [04](04-checkout-cache.md).
-- **Filesystems that match names loosely.** Where the local filesystem compares names other than
-  byte for byte (ignoring case, as NTFS and APFS by default do, or up to Unicode normalisation),
-  a component is also unstorable as itself when the folder already files a different component
-  that the filesystem takes for the same name. A lookup confirms that the name the filesystem
-  holds equals the component byte for byte; a successful open alone does not. Readers accept
-  either form, as for every escaped name.
+- **Filesystems that match names loosely.** Where the local filesystem takes several names for
+  one (ignoring case, as NTFS and APFS by default do, or up to Unicode normalisation, NFC against
+  NFD), two names that differ byte for byte can reach one entry. Which names it conflates is never
+  stated in code: it is learned from what the filesystem does.
+  - A lookup accepts an entry only if its **recorded name** equals the component byte for byte:
+    the manifest's `name` for a file, the folder marker's `name` for a folder
+    ([04](04-checkout-cache.md) §2.3). A successful open alone does not, and neither does the
+    spelling a directory listing gives, since HFS+ rewrites a stored name to NFD. A folder with no
+    valid marker has no record to compare: it is taken to hold the name it is filed under (its
+    name marker when escaped), operations beneath it stay UNPREPARED (04 §2.3), and it is never
+    treated as free nor as a clash.
+  - A write never replaces an entry it did not look at. A new entry is linked into place with a
+    no-replace rename or an exclusive create; a refusal is then checked against the recorded name
+    of the entry the filesystem reached. The same name is an ordinary replacement. A different
+    name is a **name clash**: the filesystem holds another key's entry at that place.
+  - A name clash is handled by the conflict rules: a local operation is refused as EXISTS, and a
+    merge keeps the bytewise least name and sets the others aside under a name every client
+    computes alike ([conflict-resolution](algorithms/conflict-resolution.md) §4.1). The entry a change itself moves away does not count: a move between two names the
+    filesystem conflates (a case-only rename) is done in place.
 - The escape handle is a 64-bit hash, so two distinct unstorable leaves in one folder can map
   to one handle. A writer that finds the handle already taken by a different real name MUST
   refuse the second item locally as EXISTS rather than overwrite the first; the conflict policy
@@ -832,7 +852,7 @@ An implementation MUST exhibit these observable properties.
   `.tsync-ext` at the root through a frontend is refused INVALID; a `.tsync-ext` below the root
   is an ordinary name; `tsync mirror` and gc copy and keep the folder like any other.
 - **Validation.** Keys with an empty, `.` or `..` segment, a leading `/` or a NUL are refused;
-  domain names `shares`, `gc-jobs`, `a/b`, `..`, `.tsync-x` are refused, `SHARES` is refused
+  domain names `shares`, `gc-jobs`, `a/b`, `..`, `.tsync-x`, `.TSYNC-x` are refused, `SHARES` is refused
   for a domain with a local-filesystem store and accepted otherwise, and `Family Photos` and
   `chunks` are accepted; folder ids of 12, 16 and 32 hex digits, with or without a `-<counter>`, are accepted.
 - **Item references.** `d:.tsync-root` is the root; a leaf may contain `:`
