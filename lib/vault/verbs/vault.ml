@@ -511,7 +511,8 @@ let chosen typed =
 let machine_path domain =
   Names.join machines_folder (Tsync_domain.Domain.client_uuid domain)
 
-let host_name () = try Unix.gethostname () with Unix.Unix_error _ -> "tsync"
+(* §6.3: the configured client name; iOS answers [localhost] to gethostname. *)
+let machine_name (domain : Tsync_domain.Domain.t) = domain.config.client_name
 
 (* §6.3: every entry by client uuid; [None] for one that does not open. *)
 let machines engine ~key_id ~key =
@@ -556,7 +557,7 @@ let note_machine ?(enrolls = false) ~(domain : Tsync_domain.Domain.t) ~engine
         | None ->
             write_machine ~domain engine ~key_id ~key
               {
-                name = host_name ();
+                name = machine_name domain;
                 enrolled = now;
                 last_unlock = now;
                 seen = List.map fst entries;
@@ -959,7 +960,7 @@ let rekey ?new_passphrase ~domain ~engine ~lazy_tree t typed : Protocol.rekeyed
           | Some m -> { m with last_unlock = now; seen = [me]; modified = now }
           | None ->
               {
-                name = host_name ();
+                name = machine_name domain;
                 enrolled = now;
                 last_unlock = now;
                 seen = [me];

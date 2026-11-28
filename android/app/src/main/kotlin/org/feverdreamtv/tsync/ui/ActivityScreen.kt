@@ -254,6 +254,7 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
     }
     val stats = entry.stats
     val current = state(status, stats, entry.offline)
+    Vault(status, run, domain)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Badge(stringResource(current.badge), current.tone)
@@ -277,6 +278,14 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
         Text(stringResource(R.string.activity_nothing_to_transfer))
     }
 
+    Section(R.string.activity_this_device)
+    val cache = stats?.cacheBytes ?: 0
+    val limit = stats?.maxCache
+    if (limit != null && limit > 0) Meter(stringResource(R.string.activity_cache), stringResource(R.string.activity_cache_value, size(cache), size(limit)), cache, limit)
+    else Text(stringResource(R.string.activity_cache) + ": " + size(cache))
+    stats?.pinnedBytes?.takeIf { it > 0 }?.let { Text(stringResource(R.string.activity_kept_offline, size(it)), style = MaterialTheme.typography.bodySmall) }
+    stats?.ownRam?.let { Text(stringResource(R.string.activity_memory, size(it)), style = MaterialTheme.typography.labelSmall) }
+
     Section(R.string.problems)
     Problems(stats, run, domain)
 
@@ -285,14 +294,6 @@ private fun DomainActivity(entry: DomainSnapshot, run: (() -> String) -> Unit) {
         Section(R.string.activity_stores)
         stores.forEach { StoreCard(it) }
     }
-
-    Section(R.string.activity_this_device)
-    val cache = stats?.cacheBytes ?: 0
-    val limit = stats?.maxCache
-    if (limit != null && limit > 0) Meter(stringResource(R.string.activity_cache), stringResource(R.string.activity_cache_value, size(cache), size(limit)), cache, limit)
-    else Text(stringResource(R.string.activity_cache) + ": " + size(cache))
-    stats?.pinnedBytes?.takeIf { it > 0 }?.let { Text(stringResource(R.string.activity_kept_offline, size(it)), style = MaterialTheme.typography.bodySmall) }
-    stats?.ownRam?.let { Text(stringResource(R.string.activity_memory, size(it)), style = MaterialTheme.typography.labelSmall) }
 
     Details(status, stats)
 }
@@ -312,6 +313,20 @@ private fun Problems(stats: Stats?, run: (() -> String) -> Unit, domain: Served)
     if (setAside > 0) Problem(pluralStringResource(R.plurals.activity_set_aside, setAside, setAside), stringResource(R.string.activity_set_aside_text))
     stores.forEach { Problem(it.name, if (it.damagedChunks > 0 && !it.down && it.reachable != false) damaged(it) else connection(it)) }
     if (parked == 0 && setAside == 0 && stores.isEmpty()) Text(stringResource(R.string.no_problems))
+}
+
+/** activity §2.7: first, and only when it has a row. */
+@Composable
+private fun Vault(status: Status, run: (() -> String) -> Unit, domain: Served) {
+    val context = LocalContext.current
+    val machines = status.newMachines
+    if (machines.isEmpty()) return
+    Section(R.string.activity_vault)
+    machines.forEach { Problem(stringResource(R.string.activity_new_machine, it), null) }
+    // vault §6.3: listing the machines acknowledges them.
+    TextButton(onClick = {
+        run { domain.vault.acknowledgeMachines().let { context.getString(R.string.activity_machines_seen) } }
+    }) { Text(stringResource(R.string.activity_mark_seen)) }
 }
 
 @Composable

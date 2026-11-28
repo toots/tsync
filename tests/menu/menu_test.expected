@@ -55,16 +55,47 @@ Makefile -> text-x-generic
 icon    tsync-sync-symbolic
 tooltip tsync — Syncing: 1 to upload, 2 to download
         photos — Syncing -> open photos
+            Files and passwords · /home/u/tsync/photos
             1 to upload, 2 to download
+            Pixel 8 can now unlock this vault (computer)
+            Mark as seen -> seen photos
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
-                752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
+                ▱▱▱▱▱▱▱▱▱▱ 5% · 752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
             notes.pdf (x-office-document) -> reveal photos:notes.pdf
-                234.4 KiB of 878.9 KiB
+                ▰▰▱▱▱▱▱▱▱▱ 26% · 234.4 KiB of 878.9 KiB
         ---
         1000 B sent
         ---
-        Stats >
+        Details >
+        [ ] Pause syncing -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== formatters: progress bar
+0 / 100 -> ▱▱▱▱▱▱▱▱▱▱ 0%
+788529152 / 15589124313 -> ▱▱▱▱▱▱▱▱▱▱ 5%
+240000 / 900000 -> ▰▰▱▱▱▱▱▱▱▱ 26%
+100 / 100 -> ▰▰▰▰▰▰▰▰▰▰ 100%
+150 / 100 -> ▰▰▰▰▰▰▰▰▰▰ 100%
+-1 / 100 -> ▱▱▱▱▱▱▱▱▱▱ 0%
+
+== contents rows: what each domain holds, and where
+icon    tsync-idle-symbolic
+tooltip tsync — Up to date
+        plain — Up to date -> open plain
+        mounted — Up to date -> open mounted
+            Files · /home/u/tsync/mounted
+        vault — Up to date -> open vault
+            Files and an encrypted vault
+        codes — Up to date -> open codes
+            Files and one-time codes
+        all — Up to date -> open all
+            Files, passwords and one-time codes
+        unknown — Up to date -> open unknown
+        down — Not answering -> open down
+        ---
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -82,7 +113,7 @@ tooltip tsync — Syncing: 2 to upload
         6.0 MiB sent · 1.0 MiB to go
         1.0 MiB/s · under a minute left
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -98,7 +129,7 @@ tooltip tsync — Syncing: 2 to upload
         8.0 MiB sent · 180.0 MiB to go
         3.0 MiB/s · 1m left
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -108,7 +139,7 @@ icon    tsync-error-symbolic
 tooltip tsync — Daemon not running
         photos — Not answering -> open photos
         ---
-        Stats >
+        Details >
         [ ] Pause syncing (disabled) -> pause true
         ---
         Quit tsync tray -> quit
@@ -120,7 +151,7 @@ tooltip tsync — Paused
             Changes stay on this machine and downloads wait until you resume.
         music — Not answering -> open music
         ---
-        Stats >
+        Details >
         [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
@@ -130,12 +161,13 @@ icon    tsync-sync-symbolic
 tooltip tsync — Syncing: 1 to upload
         docs — Syncing -> open docs
             1 to upload
-            laptop joined the vault (computer)
-            booky joined the vault (computer)
+            laptop can now unlock this vault (computer)
+            booky can now unlock this vault (computer)
+            Mark as seen -> seen docs
             a.txt (text-x-generic) -> reveal docs:a.txt
         music — Up to date -> open music
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -144,11 +176,12 @@ tooltip tsync — Syncing: 1 to upload
 icon    tsync-idle-symbolic
 tooltip tsync — Up to date
         docs — Up to date -> open docs
-            laptop joined the vault (computer)
-            The vault's backup is overdue
+            laptop can now unlock this vault (computer)
+            Mark as seen -> seen docs
+            The vault's backup is overdue (dialog-warning)
         music — Up to date -> open music
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -161,7 +194,7 @@ tooltip tsync — Not syncing
         music — Syncing -> open music
             1 to upload
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -172,7 +205,7 @@ tooltip tsync — Paused
         media — Paused -> open media
             Changes stay on this machine and downloads wait until you resume.
         ---
-        Stats >
+        Details >
         [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
@@ -184,7 +217,7 @@ tooltip tsync — Up to date
             Changes stay on this machine and downloads wait until you resume.
         music — Up to date -> open music
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -203,7 +236,7 @@ tooltip tsync — Paused
         ---
         0 B sent · 6.7 MiB to go
         ---
-        Stats >
+        Details >
         [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
@@ -216,7 +249,7 @@ tooltip tsync — Syncing: 2 to download
             d0.bin (text-x-generic) -> reveal photos:d/d0.bin
             d1.bin (text-x-generic) -> reveal photos:d/d1.bin
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -228,7 +261,7 @@ tooltip tsync — Syncing: 1 to download
             1 to download
             d0.bin (text-x-generic) -> reveal photos:d/d0.bin
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -239,7 +272,7 @@ tooltip tsync — Syncing: 3 to download
         photos — Syncing -> open photos
             3 to download
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -262,7 +295,7 @@ tooltip tsync — Syncing: 6 to upload, 8 to download
             d4.bin (text-x-generic) -> reveal photos:d/d4.bin
             … and 3 more
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -274,7 +307,7 @@ tooltip tsync — Syncing: 1 to download
             1 to download
             a.bin (text-x-generic) -> reveal photos:a.bin
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -287,7 +320,7 @@ tooltip tsync — Syncing: 1 to download
             a.bin (text-x-generic) -> reveal photos:a.bin
                 0 B of 0 B
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -299,7 +332,7 @@ tooltip tsync — Syncing: 1 to download
             1 to download
             Compte rendu de la réunion générale extraordinaire du… (x-office-document) -> reveal docs:cr/Compte rendu de la réunion générale extraordinaire du comité élargi — version définitive.PDF
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -309,7 +342,7 @@ icon    tsync-error-symbolic
 tooltip tsync — No domains configured
         tsync — No domains configured
         ---
-        Stats >
+        Details >
         [ ] Pause syncing (disabled) -> pause true
         ---
         Quit tsync tray -> quit
@@ -319,7 +352,7 @@ icon    tsync-error-symbolic
 tooltip tsync — No domains configured
         tsync — No domains configured
         ---
-        Stats >
+        Details >
         [ ] Pause syncing (disabled) -> pause true
 
 == one idle domain, without a quit label
@@ -327,7 +360,7 @@ icon    tsync-idle-symbolic
 tooltip tsync — Up to date
         photos — Up to date -> open photos
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
 
 == the JSON form: every kind of entry and action
@@ -358,7 +391,7 @@ tooltip tsync — Up to date
     { "label": "10 B sent", "enabled": true, "indent": 0, "action": {} },
     { "separator": true },
     {
-      "label": "Stats",
+      "label": "Details",
       "enabled": true,
       "indent": 0,
       "action": { "stats": true },
@@ -389,43 +422,50 @@ tooltip tsync — Up to date
         No daemon answering
 
 == stats: full, two processes
-        box — owner
-        pid 102259 · up 12h 5m
-        cpu 1.0% · 739.8 MiB rss · 84.3 MiB heap
-        up 0 B · down 11.6 GiB (1.5 MiB/s)
-        ---
-        Media — read-only, versioned
-            /home/u/tsync/Media
-            cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
-            queue 0 files · 0 B owed
-            extensions totp
-            read 515.4 MiB · written 5 B
-            sync 3 pending · 1 parked
-            http-proxy (main) — reachable, 11 ms
-            cold (replica) — unreachable: connection refused · 3 corrupt — run tsync data-integrity
-            far (backfill) — unreachable · not checked
-        ---
-        box — owner
-        pid 7 · just started
+        Media — read-only, keeps versions
+            Cache: 10.0 GiB of 10.0 GiB, 2.0 GiB kept offline
+            1 upload waiting to be retried
+            3 changes to apply
+            http-proxy (main): connected, 11 ms
+            cold (replica): unreachable: connection refused · 3 damaged chunks — run tsync data-integrity
+            far (backfill): unreachable
         ---
         Files
+        ---
+        Service for Media: running 12h 5m · 739.8 MiB memory
+        Service for Files: just started
+        Sent 0 B · received 11.6 GiB (1.5 MiB/s)
 
 == stats: sparse
-        box — ?
+        Nothing reported
+
+== stats: counts of one, a read-only store, and Copy report
+        Files
+            Cache: 4.0 KiB
+            To upload: 1 file, 4.0 KiB
+            1 upload waiting to be retried
+            1 change to apply
+            ro (read-only): connected · 1 damaged chunk — run tsync data-integrity
+        ---
+        Service for Files: 1.0 MiB memory
+        Sent 2.0 KiB
+        ---
+        Copy report -> copy report
+
+== stats: Copy report with nothing answering
+        No daemon answering
 
 == stats: an entry that cannot be followed
-        ? — ?
-        ---
         Files
-            sync stopped at entry 8
-            gcs (main) — reachable
+            Can't follow change 8
+            gcs (main): connected
 
 == codes: a menu with code domains has the row, one without has not
 icon    tsync-idle-symbolic
 tooltip tsync — Up to date
         work — Up to date -> open work
         ---
-        Stats >
+        Details >
         One-time codes >
         [ ] Pause syncing -> pause true
         ---
@@ -438,14 +478,12 @@ tooltip tsync — Up to date
         ACME Co — john@example.com -> copy work:3f2a
         GitHub -> copy work:9c1e
         bob -> copy work:77aa
-        Add a code… -> add work
 
 == codes: two domains, one locked
         work
             ACME Co — john@example.com -> copy work:3f2a
             GitHub -> copy work:9c1e
             bob -> copy work:77aa
-            Add a code… -> add work
         home
             Locked — unlock… -> unlock home
 
@@ -458,33 +496,68 @@ tooltip tsync — Up to date
             not answering
         d
             No codes
-            Add a code… -> add d
         e
             No codes
             2 unreadable — run tsync totp list
-            Add a code… -> add e
         f
             LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… -> copy f:1
             1 unreadable — run tsync totp list
-            Add a code… -> add f
 
 == codes: no code domain at all
         No codes
 
-== codes: a caller that adds no codes gets no Add a code row
-        work
-            ACME Co — john@example.com -> copy work:3f2a
-            GitHub -> copy work:9c1e
-            bob -> copy work:77aa
-        d
-            No codes
-
 == codes: the JSON form, and no code in any row
-[{"label":"work","enabled":true,"indent":0,"action":{},"vault":"work"},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"Add a code…","enabled":true,"indent":1,"action":{"addCode":"work"}},{"label":"home","enabled":true,"indent":0,"action":{},"vault":"home"},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
+[{"label":"work","enabled":true,"indent":0,"action":{},"vault":"work"},{"label":"ACME Co — john@example.com","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"3f2a"}}},{"label":"GitHub","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"9c1e"}}},{"label":"bob","enabled":true,"indent":1,"action":{"copyCode":{"domain":"work","id":"77aa"}}},{"label":"home","enabled":true,"indent":0,"action":{},"vault":"home"},{"label":"Locked — unlock…","enabled":true,"indent":1,"action":{"unlock":"home"}}]
 the reply carries 123456: true
 carries 123456: false
 carries 654321: false
 carries 000000: false
+
+== passwords: a menu with password domains has the row, one without has not
+icon    tsync-idle-symbolic
+tooltip tsync — Up to date
+        work — Up to date -> open work
+        ---
+        Details >
+        Passwords >
+        [ ] Pause syncing -> pause true
+icon    tsync-idle-symbolic
+tooltip tsync — Up to date
+        work — Up to date -> open work
+        ---
+        Details >
+        [ ] Pause syncing -> pause true
+
+== passwords: before any answer
+        Reading…
+
+== passwords: one domain, notes and passkeys left out
+        GitHub — me -> copy password work:51c0
+        Bank -> copy password work:77e2
+        bob -> copy password work:90ab
+        Compte rendu de la réunion générale extraordinaire du… -> copy password work:long
+
+== passwords: two domains, locked, no vault, not answering, no logins
+        work
+            GitHub — me -> copy password work:51c0
+            Bank -> copy password work:77e2
+            bob -> copy password work:90ab
+            Compte rendu de la réunion générale extraordinaire du… -> copy password work:long
+        home
+            Locked — unlock… -> unlock home
+        none
+            No vault — run tsync vault init
+        gone
+            not answering
+        empty
+            No passwords
+
+== passwords: no password domain at all
+        No passwords
+
+== passwords: the JSON form, and no password in any row
+[{"label":"GitHub — me","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"51c0"}}},{"label":"Bank","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"77e2"}}},{"label":"bob","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"90ab"}}},{"label":"Compte rendu de la réunion générale extraordinaire du…","enabled":true,"indent":0,"action":{"copyPassword":{"domain":"work","id":"long"}}}]
+carries hunter2: false
 
 == replies with fields of the wrong type, and an empty object
 icon    tsync-sync-symbolic
@@ -495,15 +568,11 @@ tooltip tsync — Syncing: 1 to download
             1 to download
             ok.txt (text-x-generic) -> reveal wrong:ok.txt
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
-        ? — ?
-        ---
-        ? — ?
-        ---
         d
             ? (?)
 
-41 cases
+50 cases

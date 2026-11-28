@@ -40,6 +40,7 @@ targets:
       - path: ../../macos/Shared/Base64URL.swift
       - path: ../../macos/TsyncApp/Reconciler.swift
       - path: ../../macos/TsyncApp/Identities.swift
+      - path: ../../macos/TsyncApp/Activity.swift
       # vault §8.1: the glyph a vault without an icon is drawn with.
       - path: ../../macos/TsyncCredentials/Assets.xcassets
     settings:

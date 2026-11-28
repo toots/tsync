@@ -17,7 +17,11 @@ let action = function
   | Show_stats | Show_codes -> ""
   | Copy_code { domain; id } -> Printf.sprintf " -> copy %s:%s" domain id
   | Unlock d -> " -> unlock " ^ d
-  | Add_code d -> " -> add " ^ d
+  | Seen_machines d -> " -> seen " ^ d
+  | Copy_report -> " -> copy report"
+  | Show_passwords -> ""
+  | Copy_password { domain; id } ->
+      Printf.sprintf " -> copy password %s:%s" domain id
   | Quit -> " -> quit"
 
 let entry = function
@@ -44,9 +48,9 @@ let show (m : M.t) =
   Printf.printf "icon    %s\ntooltip %s\n" (M.icon_name m.icon) m.tooltip;
   List.iter entry m.entries
 
-let stats replies =
+let stats ?report replies =
   List.iter entry
-    (M.stats
+    (M.stats ?report
        (List.filter_map
           (fun text -> M.stats_of_json (Yojson.Safe.from_string text))
           replies))
@@ -136,8 +140,36 @@ let () =
                 {"name":"notes.pdf","rel":"notes.pdf","bytes":240000,"size":900000},
                 {"name":"holiday.mov","rel":"trips/holiday.mov","bytes":788529152,
                  "size":15589124313,"rate":1600000}],
+              "mount":"/home/u/tsync/photos","extensions":["vault","passwords"],
+              "newMachines":["Pixel 8"],
               "traffic":{"upBytes":1000},"pendingBytes":0}|}
          );
+       ]);
+
+  case "formatters: progress bar";
+  List.iter
+    (fun (moved, total) ->
+      Printf.printf "%d / %d -> %s\n" moved total (M.progress_bar ~moved ~total))
+    [
+      (0, 100);
+      (788529152, 15589124313);
+      (240000, 900000);
+      (100, 100);
+      (150, 100);
+      (-1, 100);
+    ];
+
+  case "contents rows: what each domain holds, and where";
+  show
+    (menu
+       [
+         ("plain", idle);
+         ("mounted", {|{"ok":true,"mount":"/home/u/tsync/mounted"}|});
+         ("vault", {|{"ok":true,"extensions":["vault"]}|});
+         ("codes", {|{"ok":true,"extensions":["vault","totp"]}|});
+         ("all", {|{"ok":true,"extensions":["totp","vault","passwords"]}|});
+         ("unknown", {|{"ok":true,"extensions":["frobnicate"]}|});
+         ("down", silent);
        ]);
 
   case "two domains, one busy: rows sorted, traffic and rate summed";
@@ -358,6 +390,20 @@ let () =
     ];
   case "stats: sparse";
   stats [{|{"ok":true,"self":{"server":{"hostname":"box"}}}|}];
+  case "stats: counts of one, a read-only store, and Copy report";
+  stats ~report:true
+    [
+      {|{"ok":true,
+         "self":{"process":{"rssBytes":1048576},"traffic":{"upBytes":2048}},
+         "domains":[{"name":"Files",
+           "queues":{"pendingFiles":1,"bytesOwed":4096,"parked":1},
+           "sync":{"pending":1},
+           "cache":{"chunks":3,"bytes":4096},
+           "backends":[{"name":"ro","role":"readOnly","reach":{"reachable":true},
+                        "corrupted":{"checked":true,"chunks":1}}]}]}|};
+    ];
+  case "stats: Copy report with nothing answering";
+  stats ~report:true [silent];
   case "stats: an entry that cannot be followed";
   stats
     [
@@ -367,9 +413,9 @@ let () =
          "backends":[{"name":"gcs","role":"main","reach":{"reachable":true}}]}]}|};
     ];
 
-  let codes ?add answers =
+  let codes answers =
     List.iter entry
-      (M.codes ?add
+      (M.codes
          (List.map
             (fun (d, reply) ->
               (d, M.codes_of_json (Option.map Yojson.Safe.from_string reply)))
@@ -411,12 +457,6 @@ let () =
     ];
   case "codes: no code domain at all";
   codes [];
-  case "codes: a caller that adds no codes gets no Add a code row";
-  codes ~add:false
-    [
-      ("work", Some two_records);
-      ("d", Some {|{"ok":true,"records":[],"corrupt":[]}|});
-    ];
   case "codes: the JSON form, and no code in any row";
   let rows =
     M.codes
@@ -435,6 +475,64 @@ let () =
     (fun code ->
       Printf.printf "carries %s: %b\n" code (Tsync_core.Text.contains json code))
     ["123456"; "654321"; "000000"];
+
+  let passwords answers =
+    List.iter entry
+      (M.passwords
+         (List.map
+            (fun (d, reply) ->
+              (d, M.passwords_of_json (Option.map Yojson.Safe.from_string reply)))
+            answers))
+  in
+  (* A list reply never carries a password; this one does, to show no row
+     would print it. *)
+  let logins =
+    {|{"ok":true,"records":[
+       {"id":"51c0","kind":"login","title":"GitHub","username":"me","password":"hunter2"},
+       {"id":"77e2","kind":"login","title":"Bank","username":""},
+       {"id":"90ab","kind":"login","title":"","username":"bob"},
+       {"id":"n1","kind":"note","title":"Wifi"},
+       {"id":"p1","kind":"passkey","rpId":"example.com"},
+       {"id":"long","kind":"login","title":"|}
+    ^ long_name ^ {|","username":"x"}]}|}
+  in
+  case
+    "passwords: a menu with password domains has the row, one without has not";
+  show (M.render ~passwords:["work"] [("work", status idle)]);
+  show (M.render ~passwords:[] [("work", status idle)]);
+  case "passwords: before any answer";
+  List.iter entry M.passwords_placeholder;
+  case "passwords: one domain, notes and passkeys left out";
+  passwords [("work", Some logins)];
+  case "passwords: two domains, locked, no vault, not answering, no logins";
+  passwords
+    [
+      ("work", Some logins);
+      ("home", Some {|{"ok":false,"code":"locked"}|});
+      ("none", Some {|{"ok":false,"code":"not_found"}|});
+      ("gone", None);
+      ( "empty",
+        Some
+          {|{"ok":true,"records":[{"id":"n1","kind":"note","title":"Wifi"}]}|}
+      );
+    ];
+  case "passwords: no password domain at all";
+  passwords [];
+  case "passwords: the JSON form, and no password in any row";
+  let json =
+    Yojson.Safe.to_string
+      (`List
+         (List.map M.entry_to_json
+            (M.passwords
+               [
+                 ( "work",
+                   M.passwords_of_json (Some (Yojson.Safe.from_string logins))
+                 );
+               ])))
+  in
+  print_endline json;
+  Printf.printf "carries hunter2: %b\n"
+    (Tsync_core.Text.contains json "hunter2");
 
   case "replies with fields of the wrong type, and an empty object";
   show

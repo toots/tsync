@@ -300,6 +300,10 @@
     <string name="activity_transfers">Transfers</string>
     <string name="activity_nothing_to_transfer">Nothing to transfer</string>
     <string name="activity_set_aside_text">Kept and never run.</string>
+    <string name="activity_new_machine">%1$s can now unlock this vault</string>
+    <string name="activity_mark_seen">Mark as seen</string>
+    <string name="activity_vault">Vault</string>
+    <string name="activity_machines_seen">Marked as seen</string>
     <string name="activity_show_all">Show all %1$d</string>
     <string name="activity_show_fewer">Show fewer</string>
     <string name="activity_stores">Stores</string>

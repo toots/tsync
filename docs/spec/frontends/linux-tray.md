@@ -140,7 +140,7 @@ Three things make this hard, and the rules of this section answer them:
 - the content is recomputed every few seconds, while a host that is told the whole layout changed
   may drop the menu it is drawing;
 - a click names a row by a number the host fetched earlier;
-- the Stats and codes submenus are written by another source than the rest of the tree.
+- the Details, codes and passwords submenus are written by another source than the rest of the tree.
 
 ### 4.1 State
 
@@ -184,11 +184,11 @@ A separator has `type` = `separator`. An item has:
   children;
 - otherwise the row gets a fresh id. If it is a submenu row, it takes the children of the old row
   at that level, wherever it stood, that was a submenu row with the same action; with no such
-  row, it takes the placeholder ([menu-model.md §6](menu-model.md#6-stats-submenu)), so that a
+  row, it takes the placeholder ([menu-model.md §6](menu-model.md#6-details-submenu)), so that a
   submenu row has content before anyone opens it.
 
 So an unchanged row keeps its id; a row that changed can no longer be clicked through its old id;
-and the Stats submenu keeps its content across a redraw, even when a new row above shifts it.
+and the Details submenu keeps its content across a redraw, even when a new row above shifts it.
 
 **Setting the whole menu**, at every refresh, given the model's entries:
 
@@ -201,7 +201,7 @@ While the menu is open the tray MUST NOT announce a change of the root. It annou
 layout when the menu closes, when a new opening begins, or at the first refresh after the menu
 has been open for `MENU_OPEN_BOUND`, whichever comes first (§4.4).
 
-**Setting the Stats row's children**, given entries (the codes row's alike, by `ShowCodes`):
+**Setting the Details row's children**, given entries (the codes row's alike, by `ShowCodes`):
 
 1. Find the top-level row whose action is `ShowStats`; none → nothing.
 2. Equal to its current children → nothing.
@@ -299,21 +299,21 @@ A refresh that is still waiting when the next is due is not started twice.
 
 ## 6. Actions
 
-### 6.1 Stats
+### 6.1 Details
 
 On an opening notice (§4.4), unless a fetch started less than `STATS_DEBOUNCE` ago:
 
 1. Send `stats` to every domain's owner at the same time, each under `TRAY_STATS_DEADLINE`. It is
    longer than the status deadline because the owner consults its stores to answer. A domain that
    does not answer is left out.
-2. Build the stats rows ([menu-model.md §6](menu-model.md#6-stats-submenu)) and set them as the
-   Stats row's children (§4.3).
+2. Build the stats rows ([menu-model.md §6](menu-model.md#6-details-submenu)) and set them as the
+   Details row's children (§4.3).
 
 Stats are fetched on opening and not at every poll: reaching every store every few seconds when
 nobody is looking is a cost nobody asked for. The debounce exists because one opening may be
 announced twice.
 
-A click on the Stats row itself does nothing.
+A click on the Details row itself does nothing.
 
 ### 6.2 Pause syncing
 
@@ -366,7 +366,9 @@ helper ever receives a secret in its arguments, which other processes can list.
   `x-kde-passwordManagerHint` = `secret` beside the text so Klipper keeps no history of it. The
   tray waits for `wl-copy` to return, which it does once it serves the clipboard. The code is not
   cleared on a timer, never logged and not kept. A refusal, or `wl-copy` failing, is a desktop
-  notification (`org.freedesktop.Notifications`) carrying the reason; nothing is copied.
+  notification (`org.freedesktop.Notifications`) carrying the reason; nothing is copied. A copy
+  that succeeded is a notification `One-time code copied`, which carries no code: the menu closed
+  on the click, so nothing else can say it.
 - **`Unlock(domain)`** asks `vault_status`, then runs `kdialog --password` naming the domain, and
   reads the passphrase from its standard output; on a machine not enrolled
   ([vault §6](../extensions/vault.md#6-unlocking-and-the-keystore)), a second one for the secret
@@ -377,6 +379,19 @@ helper ever receives a secret in its arguments, which other processes can list.
   `tsync vault unlock`. The answers are dropped once the request is sent, never logged.
 - These run outside the work that answers the bus (§5.1), one unlock at a time: a click on an
   unlock row while a dialog is open does nothing.
+
+### 6.6 Passwords
+
+The same as §6.5, for [menu-model.md §7.1](menu-model.md#71-passwords-submenu):
+
+- **Password domains** are the domains whose last `status` lists `passwords`, under the same
+  Wayland and `wl-copy` condition as code domains.
+- **The submenu** is set at every opening notice from `passwords_list`, sent to every password
+  domain at the same time under `TRAY_STATS_DEADLINE`, placeholder first.
+- **`CopyPassword(domain, id)`** asks the owner `passwords_get` for that record and copies its
+  `password` as `CopyCode` copies a code; nothing else of the reply is kept. Success is the
+  notification `Password copied`.
+- **`Unlock(domain)`** is §6.5's.
 
 ## 7. Showing a path in the file manager
 
@@ -446,11 +461,11 @@ records calls, and none; a config as a file.
 - **An open menu is not replaced.** After an opening notice for the root, with the content
   changing at every poll, no `LayoutUpdated` naming the root is emitted; a row fetched at the
   opening is still clickable. After `closed` for the root, the next layout is announced. After
-  `closed` for the Stats row's id, it is not.
+  `closed` for the Details row's id, it is not.
 - **A host that reports no close.** With no `closed` ever sent, the content becomes current
   by the first refresh after `MENU_OPEN_BOUND`, and at once at the next opening of the root.
 - **The revision increases** at every `LayoutUpdated`.
-- **Stats.** Before any answer the Stats row has one child, the placeholder; with no owner
+- **Details.** Before any answer the Details row has one child, the placeholder; with no owner
   answering, one child; after the answers, the rows of the model, announced against the row's id
   with the menu open. They are still there after two polls and after a domain is added above. One
   opening announced by both `AboutToShow` and `opened` causes one fetch.

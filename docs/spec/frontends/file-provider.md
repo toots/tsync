@@ -188,7 +188,7 @@ Requests are `{"action": <verb>, "domain": <display name>, …}`, routed as
   domain the running owner does not serve is answered `unreachable`; the owner's `recovered` notice
   clears it when it starts serving the domain.
 
-`menu` and `menu_stats` span domains and are answered by the router itself (§10).
+`menu` spans domains and is answered by the router itself (§10).
 
 ### 4.3 Client obligations
 
@@ -618,59 +618,79 @@ owner's binary lives inside the app bundle. tsync has no restart command.
 
 ## 10. Menu bar
 
-There is no settings window; configuration is `config.json`. The app's only UI is a status item whose
-content the owner renders (`menu`) from the model shared with the Linux tray
-([menu-model.md](menu-model.md)), so the platforms cannot drift. Every label of a rendered menu is the
-model's.
+There is no settings window; configuration is `config.json`. The app's only UI is a status item.
+Its image and tooltip are the owner's (`menu`, [menu-model.md §4](menu-model.md#4-icon-and-tooltip));
+a click opens a **panel**, a popover under the item, that is the Activity screen of
+[activity.md](activity.md) drawn with the platform's controls: badges, progress bars, gauges and
+buttons, no row of text standing in for one.
 
 `menu` answers `{"ok":true,"menu":<menu JSON>}`, the model's JSON form
-([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label:
+([menu-model.md §8](menu-model.md#8-json-form)), rendered with no quit label. The app reads its
+`icon`, its `tooltip` and the `Pause syncing` row's `checked`; it draws none of its rows.
 
 ```json
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Syncing: 1 to download",
   "entries":[{"label":"Files — Syncing","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
              {"label":"1 to download","enabled":true,"indent":1,"action":{}},
-             {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
-             {"label":"1.5 GiB of 3.7 GiB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
-             {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
+             {"label":"Details","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
              {"label":"Pause syncing","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
 
-`menu_stats` answers `{"ok":true,"entries":[…]}`: the stats rows of
-[menu-model.md §6](menu-model.md#6-stats-submenu), in the same JSON form. Until it arrives the
-submenu shows the model's placeholder row.
-
-- Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its
-  deadline counts as a failure and releases the latch. The menu is not rebuilt while open and is
-  rebuilt on close.
+- Poll `menu` every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that
+  exceeds its deadline counts as a failure and releases the latch.
 - An owner that cannot be reached, or a poll that timed out, shows the error icon and an
   "unreachable" tooltip rather than the last known state.
 - Icons are named as on the Linux panel (`tsync-idle|sync|paused|error-symbolic`); unknown → idle.
-- `openFolder` opens the domain's user-visible root (asked of the framework, never derived from the
-  display name) in Finder; `reveal` selects the file and never opens it.
-- "Pause syncing" toggles all domains through the owner (`pause`), with the semantics of
-  [07 §2.6](../07-daemon-cli.md#26-pause). The state shown is read back by the next poll.
-- The stats submenu is fetched with `menu_stats` when it opens, at most once per
-  `menu_stats_interval`; a failure leaves the placeholder.
-- The owner renders no quit row for this host (§2).
+
+The panel, top to bottom:
+
+1. **The app's own notices**, each a problem row: a registration that failed, domains not
+   registered for sharing an identifier, local edits kept aside (with the folder they were kept
+   in), and AutoFill turned off while a domain uses passwords, with **Open System Settings**
+   ([passwords/macos §1](../extensions/passwords/macos.md#1-the-component)).
+2. **The summary**: the tooltip's words after `tsync — `, with the item's image, and **Pause all**
+   or **Resume all**, which sends `pause` without a domain
+   ([07 §2.6](../07-daemon-cli.md#26-pause)): Resume all when every domain that answers is held.
+   The state shown is read back by the next poll.
+3. **The domain**: [activity.md §2–§4](activity.md#2-one-domain) for the picked domain of those
+   the reconciler registered, in config order, with **Open in Finder**, which opens the domain's
+   user-visible root (asked of the framework, never derived from the display name). A transfer's
+   row reveals its file in Finder (selected, never opened) from its `rel`. **Copy report** writes
+   both replies to the general pasteboard.
+4. **The warnings** of [activity.md §3](activity.md#3-below-the-domains), the owner's process's.
+5. **One-time codes** and **Passwords**, in the domain's Vault section (activity.md §2.7): each
+   opens its page, §10.1 for a domain that uses `totp`, §10.2 for one that uses `passwords`.
+
+- The panel polls only while it is shown, every `status_poll` (activity.md §5); closing it stops
+  the polling.
+- The panel closes when the user clicks elsewhere, and on Escape.
+- A popover has no toolbar: a page the panel opens (Details, every warning) starts with **Back**,
+  and Copy report is a row of Details, not a toolbar button.
+- The panel's size is its own, `panel_size`, less on a screen too short for it; it never takes the
+  height of its content, which would push it over the menu bar.
+- There is no Quit (§2).
 
 ### 10.1 One-time codes
 
-- The owner renders the `One-time codes` row with every domain that uses `totp` as a code
-  domain ([menu-model.md §5](menu-model.md#5-rows)).
-- A domain's header row, which the model names `vault` when there are several code domains,
-  shows its vault's appearance ([vault §8.1](../extensions/vault.md#81-appearance)): the vault's
-  icon, or the tsync glyph in the vault's colour, asked of `vault_status` once per domain at each
-  open. A record's row shows none.
-- `menu_codes` answers `{"ok":true,"entries":[…]}`: the rows of
-  [menu-model.md §7](menu-model.md#7-codes-submenu), built from each code domain's `totp_list`. It
-  is fetched each time the submenu opens, never cached: a record added on another machine shows at
-  the next open.
-- `copyCode` asks the owner `totp_code` for that record, then writes the code to the general
-  pasteboard as plain text together with the `org.nspasteboard.ConcealedType` marker, so clipboard
-  managers and history skip it. The code is never logged and never cached in the app. A refusal is
-  shown as a user notification carrying the reply's `error`; nothing is written.
+A page of the panel, opened from the Vault section, for one domain. The two pages of §10.1 and
+§10.2 look and behave alike: Back, a search field, one row per record with its icon, and a click on
+the row copies its secret.
+
+- It lists the domain's records from `totp_list`, with `filter` set to what is typed, asked again
+  as the text changes, each time the page opens, and when a shown code's `secondsLeft` runs out;
+  never cached.
+- Each row shows the record's issuer and account, its current code in large monospaced digits, and
+  the seconds it has left, drawn in warning colour for the last five.
+- A click on the row asks the owner `totp_code` for that record, so the code copied is current,
+  then writes it to the general pasteboard as plain text together with the
+  `org.nspasteboard.ConcealedType` marker, so clipboard managers and history skip it. The code is
+  never logged and never cached in the app beyond the page on screen. A refusal is shown as a user
+  notification carrying the reply's `error`; nothing is written. A copy that succeeded is said on
+  its row: a checkmark and `Copied` in place of the row's icon, for `copied_feedback`; a copy
+  that failed leaves the row as it was.
+- The page ends with **Add a code…**. A locked vault shows `Locked` and **Unlock…**; a domain with
+  no vault says so; a failure shows the reply's `error`.
 - `unlock` opens a dialog with a secure text field for the passphrase (no echo, no autofill,
   paste accepted) and the domain's name, plus a second one for the secret key when status says
   this machine is not enrolled (vault §6). A status that fails is shown as the dialog's failure,
@@ -684,14 +704,27 @@ submenu shows the model's placeholder row.
   `otpauth://` is sent as `totp_add` with `uri`; anything else with `secret`, `issuer` and
   `account` (totp §5.3). A refusal reopens the dialog with the owner's sentence, the issuer and
   the account as typed and the secret field empty; success closes it, and the record appears at
-  the next open of the submenu. The secret field is a secure field, cleared after sending.
-- Each open of the codes submenu shows the placeholder until the owner's rows arrive, and keeps
-  it when they do not: rows from an earlier open are never shown again.
+  the page's next listing. The secret field is a secure field, cleared after sending.
 - Each secure field of these dialogs has a `Show` checkbox under it that shows its value in clear
   while checked ([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)),
   unchecked each time a dialog opens.
 - The app offers neither `vault init`, `vault passphrase`, `vault delete` nor `totp export`: those
   set or print secrets, or destroy records, and stay with the CLI (totp §5).
+
+### 10.2 Passwords
+
+A page of the panel, opened from the Vault section, for one domain.
+
+- It starts with **Back** and a search field. It lists the domain's logins from `passwords_list`
+  with `filter` set to what is typed, asked again as the text changes and each time the page
+  opens, never cached; notes and passkeys are not listed.
+- Each login is a row with its title and username. A click on the row asks `passwords_get` for
+  that record and writes its `password` as §10.1 writes a code: plain text with the concealed
+  marker, never logged, never cached in the app. A refusal is a user notification carrying the
+  reply's `error`. A copy that succeeded is said on the row as §10.1 says it. A **Copy
+  username** button beside it copies the username, which is no secret, and says so the same way.
+- A locked vault shows `Locked` and **Unlock…**, the dialog of §10.1; a domain with no vault says
+  so; a failure shows the reply's `error`.
 
 ## 11. Installation
 
@@ -765,7 +798,9 @@ submenu shows the model's placeholder row.
 | `relay_backoff_min` / `relay_backoff_max` / `relay_backoff_reset` | 1 s / 30 s / 30 s | reset ≥ max |
 | `registration_deadline` / `registration_retry` | 10 s / 1 s | |
 | `purge_wait` | 60 s | |
-| `menu_poll_interval` / `menu_stats_interval` | 3 s / 1 s | |
+| `menu_poll_interval` | 3 s | |
+| `panel_size` | 380 × 560 points | |
+| `copied_feedback` | 1.5 s | long enough to be seen after a click, short enough not to be read as a state |
 
 ## 14. Conformance
 

@@ -32,6 +32,7 @@ external ask : string -> string -> string option = "tsync_wtray_ask"
 
 let stats_key = 1
 let codes_key = 2
+let passwords_key = 3
 
 (* ponytail: ids cycle through a fixed table, so a click on a menu left open
    for thousands of rows' worth of refreshes runs a newer row's action. *)
@@ -42,6 +43,7 @@ type t = {
   mutable entries : M.entry list;
   mutable stats : M.entry list;
   mutable codes : M.entry list;
+  mutable passwords : M.entry list;
   actions : M.action array;
   mutable next_id : int;
 }
@@ -52,6 +54,7 @@ let tray =
     entries = [];
     stats = M.stats_placeholder;
     codes = M.codes_placeholder;
+    passwords = M.passwords_placeholder;
     actions = Array.make id_count M.Nothing;
     next_id = 0;
   }
@@ -80,6 +83,8 @@ and row = function
         match item.action with
           | Show_stats when item.submenu -> (rows tray.stats, stats_key)
           | Show_codes when item.submenu -> (rows tray.codes, codes_key)
+          | Show_passwords when item.submenu ->
+              (rows tray.passwords, passwords_key)
           | action ->
               let id = tray.next_id in
               tray.actions.(id) <- action;
@@ -118,6 +123,7 @@ let platform =
             match action with
               | Show_stats -> tray.stats <- entries
               | Show_codes -> tray.codes <- entries
+              | Show_passwords -> tray.passwords <- entries
               | _ -> ());
         redraw ());
     marks = None;

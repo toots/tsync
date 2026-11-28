@@ -41,6 +41,7 @@ let submenu_action = function
 
 let placeholder = function
   | Menu_model.Show_codes -> Menu_model.codes_placeholder
+  | Menu_model.Show_passwords -> Menu_model.passwords_placeholder
   | _ -> Menu_model.stats_placeholder
 
 (* §4.3, row identity. *)

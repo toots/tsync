@@ -748,7 +748,7 @@ let open_menu w =
   own w file_manager;
   start_tray w;
   ignore (shows w "photos — Up to date");
-  let stats () = row w "Stats" in
+  let stats () = row w "Details" in
   say w "before any opening the Stats row holds: %s"
     (String.concat " | " (List.map label (stats ()).children));
   let stats_id = (stats ()).id and photos = (row w "photos").id in
@@ -890,9 +890,9 @@ let nobody w =
   ignore (menu w "AboutToShow" [Int32 0]);
   ignore
     (wait_until (fun () ->
-         List.map label (row w "Stats").children = ["No daemon answering"]));
+         List.map label (row w "Details").children = ["No daemon answering"]));
   say w "with no owner answering the Stats row holds: %s"
-    (String.concat " | " (List.map label (row w "Stats").children));
+    (String.concat " | " (List.map label (row w "Details").children));
   say w "icon %s, switch enabled %s"
     (match
        call_at w ~path:"/StatusNotifierItem"
@@ -1120,6 +1120,7 @@ let codes w =
     (script w "work" "totp_code")
     {|{"ok":true,"code":"492039","secondsLeft":12}|};
   wl_copy_double w;
+  own w "org.freedesktop.Notifications";
   start_tray ~wayland:true ~bare:true w;
   check w "a code domain on Wayland with wl-copy has the codes row"
     (wait_until (fun () -> codes_row w <> None));
@@ -1157,6 +1158,14 @@ let codes w =
     (lines (path w "wl-copy.in") = ["492039"]);
   check w "no argument holds the code"
     (not (List.exists (fun a -> Text.contains a "492039") arguments));
+  let notifications () = locked w (fun () -> w.notifications) in
+  check w "a copy that succeeded says so, without the code"
+    (wait_until (fun () ->
+         List.exists
+           (fun n -> Text.contains n "One-time code copied")
+           (notifications ()))
+    && not (List.exists (fun n -> Text.contains n "492039") (notifications ()))
+    );
   restart_tray ~bare:true w;
   check w "with no WAYLAND_DISPLAY there is no codes row"
     (Rt.sleep (2. *. poll_interval);

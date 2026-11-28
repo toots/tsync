@@ -112,6 +112,8 @@ data class Status(
     val pendingBytes: Long,
     /** Why the domain is not syncing, when it is not. */
     val failing: String? = null,
+    /** vault §6.3: machines enrolled since this one last listed them. */
+    val newMachines: List<String> = emptyList(),
     /** The reply itself, for Copy report (activity §2.6). */
     val raw: String = "",
 )
@@ -348,6 +350,9 @@ class Client(private val core: Core) {
             },
             pendingBytes = reply.optLong("pendingBytes", 0),
             failing = text(reply, "failing")?.takeIf { it.isNotEmpty() },
+            newMachines = reply.optJSONArray("newMachines")?.let { names ->
+                (0 until names.length()).mapNotNull { names.opt(it) as? String }
+            } ?: emptyList(),
             raw = reply.toString(2),
         )
     }

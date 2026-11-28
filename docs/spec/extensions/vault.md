@@ -342,7 +342,9 @@ and notices a new one.
 - The entry is `/.tsync-ext/vault/machines/<client uuid>`
   ([03](../03-journal-sync.md)), sealed under K like a record (§5, extension name `vault`):
   `{"name", "enrolled", "lastUnlock", "seen", "modified"}`, epoch seconds but for `name`, which
-  is the host's name (1 to 256 bytes) until the user gives another (`tsync vault machines --name
+  is the client name ([05 §2](../05-ops-config.md), config `name`: the host's name by default, the
+  device's name in the mobile apps; 1 to 256 bytes) until the user gives another. The host's name
+  is never asked of the system here: iOS answers `localhost` (`tsync vault machines --name
   NAME`, action `vault_machines` with `name`). `seen` lists the client uuids of the entries this
   machine has acknowledged; a reader takes it as empty when absent. A rewrite keeps the members
   this version does not know.

@@ -172,7 +172,7 @@ Field names, replies and refusals are those of [08 §3.3](../08-frontends.md#33-
 | `evict` | plugin | `rel` | `evicted`, `failed` |
 | `ping` | plugin | — | `ok` |
 | `status` | tray | — | [menu-model.md §2](menu-model.md#2-input-one-status-per-domain), and `mount` |
-| `stats` | tray | — | [menu-model.md §6](menu-model.md#6-stats-submenu) |
+| `stats` | tray | — | [menu-model.md §6](menu-model.md#6-details-submenu) |
 | `pause` | tray | `arg`: `on` or `off` | `ok`, `error` |
 
 `rel` is the item's path relative to the mount point, with no leading `/`; the empty string names

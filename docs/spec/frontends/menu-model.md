@@ -9,7 +9,7 @@ Three clients draw it: the Linux tray ([linux-tray.md](linux-tray.md)) and the W
 ([cloud-files.md §15](cloud-files.md#15-tray)), which evaluate the model themselves, and the macOS menu ([file-provider.md §10](file-provider.md#10-menu-bar)), which receives
 its output as JSON (§8) from the owner.
 
-Inputs are the `status`, `stats` and `totp_list` replies of the request handler
+Inputs are the `status`, `stats`, `totp_list` and `passwords_list` replies of the request handler
 ([08 §3.3](../08-frontends.md#33-actions), [07 §5.5](../07-daemon-cli.md#55-tsync-status),
 [totp §5](../extensions/totp.md#5-commands)). This file owns nothing of those replies; it names
 the fields it reads.
@@ -23,7 +23,9 @@ menu   = { icon, tooltip, entries }
 entry  = Separator | Item
 Item   = { label, enabled, icon?, checked?, indent, action, submenu }
 action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | ShowStats
-       | ShowCodes | CopyCode(domain, id) | Unlock(domain) | AddCode(domain) | Quit
+       | ShowCodes | CopyCode(domain, id) | Unlock(domain)
+       | ShowPasswords | CopyPassword(domain, id)
+       | SeenMachines(domain) | CopyReport | Quit
 ```
 
 - `indent` is a nesting level (0, 1 or 2). How it is drawn is the renderer's.
@@ -35,6 +37,10 @@ action = Nothing | OpenFolder(domain) | Reveal(domain, rel) | SetPaused(bool) | 
 - An informational row is `enabled` with action `Nothing`. A disabled row draws grey and reads as
   a broken command.
 - `icon` on a row is a generic name of the freedesktop icon naming specification (§3).
+- `SeenMachines(domain)` sends that domain's `vault_machines`, which acknowledges every machine
+  it lists ([vault §6.3](../extensions/vault.md#63-machines)); the next poll drops their rows.
+- `CopyReport` puts the `status` and `stats` replies the client last received on the clipboard,
+  as indented JSON, for a bug report. No row ever shows that JSON.
 
 ## 2. Input: one status per domain
 
@@ -57,6 +63,8 @@ the model reads:
 | `sentBytes` | `traffic.upBytes` (integer) | unknown |
 | `sendRate` | `traffic.upRate` (number) | unknown |
 | `newMachines` | `newMachines`: list of strings, the machines that joined the domain's vault ([vault §6.3](../extensions/vault.md#63-machines)) | empty |
+| `mount` | `mount` (string): where the domain's files are on this machine | unknown |
+| `extensions` | `extensions`: list of strings, the extensions in force | empty |
 
 - A transfer is kept only when both `name` and `rel` are non-empty strings. `bytes` is what has
   moved, `size` the total, `rate` bytes per second; each may be absent.
@@ -119,6 +127,18 @@ compute days, hours and minutes; drop the zero ones; keep the first two; join wi
 `under a minute left` when the duration of remaining / rate is undefined. An estimate is never
 shown as zero while bytes are still owed.
 
+**Progress bar**, for `moved` of `total` with total > 0: `BAR_CELLS` characters, the first
+⌊`BAR_CELLS` × moved / total⌋ of them `▰` (at most `BAR_CELLS`) and the rest `▱`, then a space and
+the integer percentage ⌊100 × moved / total⌋, at most 100, and `%`. It is text because a menu
+row can draw nothing else on every platform.
+
+| moved / total | output |
+|---|---|
+| 0 / 100 | `▱▱▱▱▱▱▱▱▱▱ 0%` |
+| 788529152 / 15589124313 | `▱▱▱▱▱▱▱▱▱▱ 5%` |
+| 240000 / 900000 | `▰▰▱▱▱▱▱▱▱▱ 26%` |
+| 100 / 100 | `▰▰▰▰▰▰▰▰▰▰ 100%` |
+
 **Ellipsis.** A text of at most `LABEL_MAX` bytes is kept. Otherwise: start at byte `LABEL_MAX`,
 step back while that byte is a UTF-8 continuation byte; if a space exists before that point at an
 index above `LABEL_MAX / 2`, cut at that space, else cut at that point; append `…`. The result is
@@ -170,8 +190,15 @@ In order:
 
 1. **Header**, only when there are no domains: `tsync — <summary>`.
 2. **Per domain**, in input order:
-   - the domain row: `<name> — <state>`, action `OpenFolder(name)`, then, when the state has a
-     sentence, a row at indent 1 with it, action `Nothing`. The states are those of the mobile
+   - the domain row: `<name> — <state>`, action `OpenFolder(name)`;
+   - when the domain answers and the row says more than `Files`, its **contents** row at indent 1,
+     action `Nothing`: what the domain holds, then ` · ` and the ellipsised `mount` when it is
+     known. What it holds is `Files`,
+     followed by the words of the extensions it knows, in this order, joined as an English list
+     (`Files and passwords`, `Files, passwords and one-time codes`): `passwords` for `passwords`,
+     `one-time codes` for `totp`, and `an encrypted vault` for `vault` when neither of the other
+     two is in force. An extension it does not know adds nothing;
+   - when the state has a sentence, a row at indent 1 with it, action `Nothing`. The states are those of the mobile
      apps ([activity.md §2.1](activity.md#21-state)), first match:
 
      | state | when | sentence |
@@ -185,11 +212,12 @@ In order:
 
      A state says what the domain is doing in a user's words; the sentence says what that means
      for them. A cause the owner reports is shown, never reduced to a word;
-   - for each name in its `newMachines`, in order, a row at indent 1 `<name> joined the vault`,
-     icon `computer`, action `Nothing`: it says so until the machines are listed
-     (`tsync vault machines`);
-   - when its `vaultBackupOverdue`, a row at indent 1 `The vault's backup is overdue`, no icon,
-     action `Nothing` ([vault §8.3](../extensions/vault.md#83-scheduled-backups));
+   - for each name in its `newMachines`, in order, a row at indent 1
+     `<name> can now unlock this vault`, icon `computer`, action `Nothing`; then, when there is
+     any, one row at indent 1 `Mark as seen`, action `SeenMachines(name)`. They show until the
+     machines are listed, by that row or by `tsync vault machines`;
+   - when its `vaultBackupOverdue`, a row at indent 1 `The vault's backup is overdue`, icon
+     `dialog-warning`, action `Nothing` ([vault §8.3](../extensions/vault.md#83-scheduled-backups));
    - its upload file rows, then its download file rows (below).
 3. **Traffic**, when shown: a separator, the traffic line, then the rate line when there is one.
    - The section, separator included, is absent when it has neither line.
@@ -199,11 +227,14 @@ In order:
    - Rate line, only when pending bytes > 0 and the send rate > 0: `<rate>/s · <time left>` for
      pending bytes at the send rate.
 4. A separator.
-5. **Stats**: label `Stats`, action `ShowStats`, `submenu`.
+5. **Details**: label `Details`, action `ShowStats`, `submenu`.
    **One-time codes**, only when the caller gives a non-empty list of **code domains** (the
    domains that use `totp`, [extensions README §3](../extensions/README.md#3-opting-in), and whose codes this
    client can copy): label
    `One-time codes`, action `ShowCodes`, `submenu`.
+   **Passwords**, only when the caller gives a non-empty list of **password domains** (the domains
+   that use `passwords`, and whose passwords this client can copy): label `Passwords`, action
+   `ShowPasswords`, `submenu`.
 6. **Pause syncing**: label `Pause syncing`; `checked` = all paused; `enabled` unless all
    unreachable; action `SetPaused(not all paused)`. The action applies to every domain that
    answers ([07 §2.6](../07-daemon-cli.md#26-pause) says what a pause holds).
@@ -221,6 +252,7 @@ In order:
 
 **Progress row**, parts joined with ` · `, in order, each only when known:
 
+- the progress bar (§3), when moved and a total > 0 are known;
 - `<moved> of <total>`, or `<moved>` alone, or `<total>` alone;
 - `<rate>/s` when the rate > 0;
 - the time left for total − moved at the rate, when moved, total and a rate > 0 are known and
@@ -228,23 +260,28 @@ In order:
 
 Worked example. Input: one domain `photos`, `pendingUploads` 1, `pendingDownloads` 9, one upload
 `out.raw` with no figures, downloads `holiday.mov` (rel `trips/holiday.mov`, 788529152 of
-15589124313 at 1600000 B/s) and `notes.pdf` (240000 of 900000, no rate), `traffic.upBytes` 1000,
-`pendingBytes` 0, quit label `Quit tsync tray`. `-> …` is the action, `(…)` the icon:
+15589124313 at 1600000 B/s) and `notes.pdf` (240000 of 900000, no rate), `mount`
+`/home/u/tsync/photos`, `extensions` `["vault", "passwords"]`, `newMachines` `["Pixel 8"]`,
+`traffic.upBytes` 1000, `pendingBytes` 0, quit label `Quit tsync tray`. `-> …` is the action,
+`(…)` the icon:
 
 ```
 icon    tsync-sync-symbolic
 tooltip tsync — Syncing: 1 to upload, 2 to download
         photos — Syncing -> open photos
+            Files and passwords · /home/u/tsync/photos
             1 to upload, 2 to download
+            Pixel 8 can now unlock this vault (computer)
+            Mark as seen -> seen photos
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
-                752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
+                ▱▱▱▱▱▱▱▱▱▱ 5% · 752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
             notes.pdf (x-office-document) -> reveal photos:notes.pdf
-                234.4 KiB of 878.9 KiB
+                ▰▰▱▱▱▱▱▱▱▱ 26% · 234.4 KiB of 878.9 KiB
         ---
         1000 B sent
         ---
-        Stats >
+        Details >
         [ ] Pause syncing -> pause true
         ---
         Quit tsync tray -> quit
@@ -257,7 +294,7 @@ icon    tsync-error-symbolic
 tooltip tsync — Daemon not running
         photos — Not answering -> open photos
         ---
-        Stats >
+        Details >
         [ ] Pause syncing (disabled)
         ---
         Quit tsync tray -> quit
@@ -266,7 +303,7 @@ icon    tsync-error-symbolic
 tooltip tsync — No domains configured
         tsync — No domains configured
         ---
-        Stats >
+        Details >
         [ ] Pause syncing (disabled)
         ---
         Quit tsync tray -> quit
@@ -282,76 +319,86 @@ tooltip tsync — Paused
             Changes stay on this machine and downloads wait until you resume.
         music — Not answering -> open music
         ---
-        Stats >
+        Details >
         [x] Pause syncing -> pause false
         ---
         Quit tsync tray -> quit
 ```
 
-## 6. Stats submenu
+## 6. Details submenu
 
 A second pure function, from the `stats` replies of the owners that answered to the rows of the
-Stats submenu. A reply whose `ok` is not `true` contributes nothing. A reply describes the process
-that answered under `self` and the domains it owns under `domains`
+Details submenu. It says what each store and the cache are doing in a user's words, as the mobile
+Activity screen does ([activity.md §2.3–2.5](activity.md#23-problems)); a process's own figures
+(pid, cpu, heap, chunk counts) are for a bug report, and reach one only through `CopyReport`.
+
+A reply whose `ok` is not `true` contributes nothing. A reply describes the process that answered
+under `self` and the domains it owns under `domains`
 ([07 §5.5](../07-daemon-cli.md#55-tsync-status)); a domain it lists as `unanswered` contributes
 nothing.
 
 - **Placeholder**, shown until the first answer: one row `Reading…`.
 - **No reply at all**: one row `No daemon answering`.
+- **Replies with nothing to show**: one row `Nothing reported`, before Copy report.
 - The submenu MUST never be empty: some panels do not open an empty submenu.
-- Every row is an informational row (§1).
+- Every row is an informational row (§1), but `Copy report`.
 - A figure the owner did not report produces no row, or no part of a row: a frontend that keeps no
   counters is not drawn as one that read nothing.
+- A count *n* is followed by its noun in the singular when *n* is 1, else in the plural.
 
-Per answering process, a separator before each one after the first:
-
-| row | from | when a field is absent |
-|---|---|---|
-| `<host> — <role>` | `self.server.hostname`, `self.server.role` | `?` |
-| `pid <pid> · up <duration>`, or `pid <pid> · just started` when the duration is undefined | `self.server.pid`, `self.server.uptimeSeconds` | the row is omitted without a pid; the second part without an uptime |
-| `cpu <x.x>% · <rss> rss · <heap> heap` | `self.process.cpuPercentAvg` (already a percentage), `self.process.rssBytes`, `self.process.heapBytes` | that part is omitted |
-| `up <bytes>[ (<rate>/s)] · down <bytes>[ (<rate>/s)]` | `self.traffic.upBytes`, `upRate`, `downBytes`, `downRate` | that part is omitted; a rate is appended only when > 0 |
-
-Then per domain body of that reply, each preceded by a separator:
+**Per domain**, over every reply in order and each reply's domains in order, a separator before
+each one after the first:
 
 | row | indent | shown when | from |
 |---|---|---|---|
-| `<name>`, `<name> — read-only`, `<name> — versioned` or `<name> — read-only, versioned` | 0 | always | the body's `name`, `settings.readOnly`, `settings.versioning` |
-| the mount point, ellipsised | 1 | some frontend reports one | the first `frontends[].mount` |
-| `cache <n> chunks · <bytes>[ of <max>][ · <pinned> pinned]` | 1 | chunks and bytes known | `cache.chunks`, `.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
-| `queue <n> files · <bytes> owed` | 1 | either known | `queues.pendingFiles`, `queues.bytesOwed` |
-| `extensions <name>, <name>` | 1 | the list is not empty | `settings.extensions` |
-| `read <bytes> · written <bytes>` | 1 | either known | the sums over `frontends[]` of `bytesRead`, `bytesWritten` |
-| `sync <n> pending · <n> parked · stopped at entry <n>` | 1 | any part present (the counts only when > 0, the last part only when an entry cannot be followed) | `sync.pending`, the pending count of the cycle's status ([03 §3.4](../03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)); `queues.parked`, the upload queue's parked count; `sync.cannotFollow.entry`, the number of the entry the client cannot follow |
+| `<name>`, or `<name> — <traits>`, the traits `read-only` and `keeps versions` joined with `, ` | 0 | always | the body's `name`, `settings.readOnly`, `settings.versioning` |
+| `Cache: <bytes>[ of <max>][, <pinned> kept offline]` | 1 | bytes known | `cache.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
+| `To upload: <n> files[, <bytes>]` | 1 | the count > 0 | `queues.pendingFiles`, `queues.bytesOwed` |
+| `<n> uploads waiting to be retried` | 1 | the count > 0 | `queues.parked` |
+| `<n> changes to apply` | 1 | the count > 0 | `sync.pending` |
+| `Can't follow change <n>` | 1 | an entry cannot be followed | `sync.cannotFollow.entry` |
 | one row per backend | 1 | always | `backends[]` |
 
-Backend row, parts joined with ` · `:
+Backend row: `<name> (<role>): <connection>`, then ` · <damage>` when there is one.
 
-- `<name> (<role>) — <health>`, from the backend's `reach`: health is `reachable`,
-  `reachable, <n> ms` (`reach.latencyMs`, rounded), `unreachable`, or `unreachable: <error>`
-  (`reach.error`, when not empty). Only the error is ellipsised, so the figures after it survive.
-  With no `reach`, the row is `<name> (<role>)`;
-- corruption, from `corrupted`: `not checked` when `checked` is not true;
-  `<n> corrupt — run tsync data-integrity` when checked and `chunks` > 0; nothing when checked and
-  clean, or when the backend carries no `corrupted`.
+- `<role>` is the backend's `role`, `readOnly` read as `read-only`; `?` when absent, as is a name.
+- `<connection>`, from `reach`: `connected`, `connected, <n> ms` (`reach.latencyMs`, rounded),
+  `unreachable`, or `unreachable: <error>` (`reach.error` when not empty, ellipsised). With no
+  `reach`, the row is `<name> (<role>)`.
+- `<damage>`, from `corrupted`, only when `checked` is true and `chunks` > 0:
+  `<n> damaged chunks — run tsync data-integrity`. A store not checked says nothing.
+
+**This device**, after the domains: a separator, then
+
+- per reply, in order, `Service for <names>: running <duration>`, `<names>` the reply's domain
+  names joined with `, ` (`Service: …` when it lists none); `running` and the duration from `self.server.uptimeSeconds`, or
+  `just started` when it is undefined; then ` · <rss> memory` from `self.process.rssBytes`. With
+  neither figure there is no row; with one, the row has that part alone;
+- one traffic row, `Sent <bytes>[ (<rate>/s)] · received <bytes>[ (<rate>/s)]`, each the sum of
+  the known `self.traffic` values (`upBytes`, `upRate`, `downBytes`, `downRate`) over the replies;
+  a part is omitted when none is known, a rate appended only when > 0, and no row with neither part.
+
+The section, separator included, is absent when it has no row.
+
+**Copy report**, only when the caller asks for it: a separator and a row `Copy report`, action
+`CopyReport`. The Linux and Windows trays ask for it; the macOS owner renders none.
 
 Worked example:
 
 ```
-        box — owner
-        pid 102259 · up 12h 5m
-        cpu 1.0% · 739.8 MiB rss · 84.3 MiB heap
-        up 0 B · down 11.6 GiB (1.5 MiB/s)
+        Media — read-only, keeps versions
+            Cache: 10.0 GiB of 10.0 GiB, 2.0 GiB kept offline
+            To upload: 1 file, 4.0 KiB
+            1 upload waiting to be retried
+            3 changes to apply
+            http-proxy (main): connected, 11 ms
+            cold (replica): unreachable: connection refused · 3 damaged chunks — run tsync data-integrity
+            far (backfill): unreachable
         ---
-        Media — read-only, versioned
-            /home/u/tsync/Media
-            cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
-            queue 0 files · 0 B owed
-            read 515.4 MiB · written 5 B
-            sync 3 pending · 1 parked
-            http-proxy (main) — reachable, 11 ms
-            cold (replica) — unreachable: connection refused · 3 corrupt — run tsync data-integrity
-            far (backfill) — unreachable · not checked
+        Service for Media: running 12h 5m · 739.8 MiB memory
+        Sent 0 B · received 11.6 GiB (1.5 MiB/s)
+        ---
+        Copy report -> copy report
 ```
 
 ## 7. Codes submenu
@@ -373,9 +420,6 @@ is never drawn stale and never travels in a menu.
     is not empty, ellipsised to `LABEL_MAX`; action `CopyCode(domain, id)`.
 - Records the reply lists as `corrupt` add one informational row
   `<n> unreadable — run tsync totp list`.
-- When the caller adds codes (the macOS menu does, the Linux tray does not), a domain that
-  answered with records, or with none, ends with a row `Add a code…`, action `AddCode(domain)`;
-  a locked, vault-less or silent domain has none.
 - Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
 
 Worked example, two code domains, one locked:
@@ -384,7 +428,35 @@ Worked example, two code domains, one locked:
         work
             ACME Co — john@example.com -> copy work:3f2a…
             GitHub — me -> copy work:9c1e…
-            Add a code… -> add work
+        home
+            Locked — unlock… -> unlock home
+```
+
+### 7.1 Passwords submenu
+
+A fourth pure function, from one `passwords_list` reply (or failure) per password domain, in
+configuration order, to the rows of the Passwords submenu. As with codes, no row carries a
+password: a row names a login, and `CopyPassword` makes the client ask the owner `passwords_get`
+for that one record when it is clicked, and copy its `password` under the rules of a code
+([security-model §10.6](../algorithms/security-model.md#106-vault-keys-and-passphrases)): onto
+the clipboard marked sensitive, never logged, never kept.
+
+- **Placeholder**, shown until the replies arrive: one row `Reading…`.
+- **Per domain**, a header row `<domain>` (informational, `vault` naming the domain) when there is
+  more than one password domain, then, first match:
+  - a reply refused `locked`: a row `Locked — unlock…`, action `Unlock(domain)`;
+  - a reply refused `not_found` (no vault): a row `No vault — run tsync vault init` (informational);
+  - another failure or no reply: a row `not answering` (informational);
+  - a reply with no login: a row `No passwords` (informational);
+  - else one row per record of `kind` `login`, in the reply's order, label `<title> — <username>`,
+    or the one that is not empty, ellipsised to `LABEL_MAX`; action `CopyPassword(domain, id)`.
+    Notes and passkeys have no row: neither has a password.
+- Rows sit at indent 1 under a header, else 0. The submenu MUST never be empty.
+
+```
+        work
+            GitHub — me -> copy password work:51c0…
+            Bank -> copy password work:77e2…
         home
             Locked — unlock… -> unlock home
 ```
@@ -400,12 +472,13 @@ For a client that cannot evaluate the model. The menu:
   "entries": [
     { "label": "photos — Syncing", "enabled": true, "indent": 0,
       "action": { "openFolder": "photos" } },
+    { "label": "Files and passwords", "enabled": true, "indent": 1, "action": {} },
     { "label": "1 to upload, 1 to download", "enabled": true, "indent": 1, "action": {} },
     { "label": "out.raw", "enabled": true, "indent": 1,
       "action": { "reveal": { "domain": "photos", "rel": "out.raw" } } },
     { "label": "1.1 MiB", "enabled": true, "indent": 2, "action": {} },
     { "separator": true },
-    { "label": "Stats", "enabled": true, "indent": 0, "action": { "stats": true }, "submenu": true },
+    { "label": "Details", "enabled": true, "indent": 0, "action": { "stats": true }, "submenu": true },
     { "label": "Pause syncing", "enabled": true, "indent": 0,
       "action": { "setPaused": true }, "checked": false }
   ]
@@ -416,7 +489,8 @@ For a client that cannot evaluate the model. The menu:
 - `action` is an object with at most one key: `{}` (Nothing), `{"openFolder": <domain>}`,
   `{"reveal": {"domain", "rel"}}`, `{"setPaused": <bool>}`, `{"stats": true}`,
   `{"codes": true}`, `{"copyCode": {"domain", "id"}}`, `{"unlock": <domain>}`,
-  `{"addCode": <domain>}`, `{"quit": true}`.
+  `{"seenMachines": <domain>}`, `{"copyReport": true}`, `{"passwords": true}`,
+  `{"copyPassword": {"domain", "id"}}`, `{"quit": true}`.
 - `checked` and `submenu` are present only when set.
 - A row's `icon` is not sent: it is a freedesktop name, and a reader of this form has no such
   icons. A reader that draws a file icon MUST derive it from the action's `rel`, never from the
@@ -452,12 +526,19 @@ someone agrees to; and both functions are total.
   boundary and the icon is that of the real extension;
 - no domains; with and without a quit label;
 - the JSON form of a menu containing every kind of entry and action;
-- the stats rows: full, sparse, an entry that cannot be followed, nothing answering;
-- the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable, the Add a code row only where the domain answered;
-  records, a label longer than `LABEL_MAX`; a caller that adds no codes gets no `Add a code…` row;
+- a domain's contents row: no extension and no mount (no row), each known extension alone and
+  together, `vault` alone, an unknown extension, with and without a mount; a new machine with its Mark as seen row;
+- the passwords rows: one domain and two; locked, no vault, not answering, no logins; notes and
+  passkeys left out; a label longer than `LABEL_MAX`; no row of any menu carries a password; no
+  password domain gives no `Passwords` row;
+- the details rows: full, sparse, an entry that cannot be followed, counts of one, two replies,
+  a reply with nothing to show, nothing answering; with and without Copy report; no row carries a pid, a cpu figure or a
+  chunk count;
+- the codes rows: one domain and two; locked, no vault, not answering, no codes, unreadable;
+  records, a label longer than `LABEL_MAX`;
   no code domain gives no `One-time codes` row; no row
   of any menu carries a code;
-- the formatter tables of §3;
+- the formatter tables of §3, the progress bar's included;
 - replies with fields of the wrong type, and an empty object: no failure.
 
 **Binding:** every label, the order of rows, separators, icon names, the tooltip, each row's
@@ -472,3 +553,4 @@ action and its target, `enabled`, `checked`, `submenu`, and the JSON key names a
 |---|---|---|
 | `FILE_ROWS` | 5 | the menu from being pushed off the screen by a long transfer list |
 | `LABEL_MAX` | 64 bytes | the menu's width from one long file name |
+| `BAR_CELLS` | 10 | a progress row from being wider than its file's name |
