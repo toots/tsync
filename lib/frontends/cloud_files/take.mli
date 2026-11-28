@@ -20,6 +20,9 @@ val create :
     scheduled meanwhile. *)
 val schedule : t -> string -> unit
 
+(** Takes every file awaiting commit at once (§9.3), on a [changed] notice. *)
+val commits_changed : t -> unit
+
 (** Starts the watch, the periodic sweep and the taking thread; a first sweep is
     scheduled at once. *)
 val start : t -> unit

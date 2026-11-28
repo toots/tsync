@@ -366,7 +366,12 @@ let present root (domain : Domain.t) engine ~publish:_ =
   let hooks =
     {
       Handler.changed =
-        (fun _ -> Option.iter (fun t -> Apply.wake t.apply) !served);
+        (fun _ ->
+          Option.iter
+            (fun t ->
+              Apply.wake t.apply;
+              Take.commits_changed t.take)
+            !served);
       reannounce =
         (fun () -> Option.iter (fun t -> Apply.restart_anchor t.apply) !served);
       frontend =

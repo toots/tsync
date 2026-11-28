@@ -239,7 +239,7 @@ macOS, and are not reported by `tsync ls`.
 |---|---|
 | `changed(keys)` | wake the apply loop (§10.3) |
 | `reannounce()` | the apply's anchor is stale at its next read |
-| `on_upload_done(key)` | nothing: in sync is set by the take (§9.3) |
+| `on_upload_done(key)` | take every file awaiting commit (§9.3); it arrives as `changed` |
 | `status_fields()` | `syncRoot`; `unpresented`, `untaken` and `pendingFolders` when non-zero |
 | `stats_fields()` | `type:"cloud_files"`, `syncRoot`, `bytesTransferred`, `takes`, `handlerFailures` |
 | `on_stop()` | request the owner's stop |
@@ -387,8 +387,15 @@ A take brings one item of the sync root into the domain. It is idempotent: a tak
 domain already holds changes nothing, so every trigger may be repeated.
 
 **The in-sync bit is the owed marker.** A placeholder out of sync, or a file or folder that is not a
-placeholder, is a local change the domain does not hold yet. The bit is durable on the volume, so a
-crash leaves nothing owed unrecorded, and no provider-side queue exists.
+placeholder, is a local change the domain does not hold yet or has not committed. The bit is
+durable on the volume, so a crash leaves nothing owed unrecorded, and no provider-side queue exists.
+
+**In sync means committed.** Explorer shows the bit as the check mark, which a user reads as
+"published, ready to share". A file whose write the owner staged but has not committed is
+*awaiting commit*: it keeps the bit clear, so Explorer shows it pending. The provider keeps, in
+memory, each such file's path and the last write time and size of the bytes written: the last write
+time is what the in-sync policy compares (§8.3), and the size catches most tools that restore it. A
+sequence number cannot serve: releasing a handle appends a close record, which moves it.
 
 ```
 take(item):
@@ -396,6 +403,7 @@ take(item):
     foreign items counted untaken)
   parent not a placeholder → take(parent), which takes its children
   in-sync placeholder → nothing
+  file awaiting commit, its last write time and size the ones recorded → settle(file)
   read-only domain → nothing; counted untaken
   folder, not a placeholder:
     mkdir(parentRef, name, aside: true); landed = the reply's aside when present, else its item
@@ -411,11 +419,19 @@ take(item):
     placeholder       → write(ref, staging, base: its contentId)
     landed = the reply's aside when present, else its item  # the item the file's bytes now are
     under a handle that denies write, if the sequence number is still u:
-      store landed's identity and metadata, marked in sync
+      store landed's identity and metadata; marked in sync when landed is uploaded, else
+        awaiting commit and settled once at once, since the commit's notice may precede the entry
     else: store landed's identity, not in sync (the item stays owed and is taken again)
     landed is the reply's aside:
       rename the file to landed's presented name; apply the parent folder, which creates the
       placeholder of what the domain holds at the original name
+
+settle(file):
+  row = stat(its ref)
+  row uploaded, gone, or holding another content than the identity's → no longer awaiting commit;
+    under a handle that denies write, if the last write time and size are still the recorded ones:
+    marked in sync and its pin followed (§11), else taken as any owed file
+  else → nothing; the commit's `changed` takes it again
 ```
 
 - `aside` ([08 §3.3](../08-frontends.md#33-actions)) puts a new local item whose place the domain
@@ -427,10 +443,14 @@ take(item):
 - A local folder created where the domain holds a folder merges into it, as two folders of one name
   do in a merge.
 - The whole file is copied on every edit; chunk deduplication keeps unchanged chunks off the wire.
-- **In sync means the owner holds it**, not that it is published: the content is staged durably
-  when the bit is set. A file the user saves can be dehydrated at once, offline included, because
-  staged content is never dropped ([08 §3.4](../08-frontends.md#34-evict-and-restore)). Publication
-  is shown by the tray.
+- A file awaiting commit cannot be dehydrated, which the system refuses for any file out of sync;
+  offline, a saved file stays pending and whole on disk until the owner reconnects and commits it.
+- A row that holds another content or is gone means a later change superseded the write: the
+  domain's history holds it, and the apply that follows the bit brings what the domain holds now.
+- Settling reads one row and writes nothing, so the provider's own identity update, the watch and
+  the sweep may wake it as often as they like.
+- The awaiting-commit set does not survive a restart: each such file is owed again, and its take
+  writes the same bytes against its own `contentId`.
 - A take that fails on a local error is retried at the next trigger; a refusal (`read_only`, a name
   the domain refuses) is counted untaken and not retried until the item changes again.
 
@@ -736,6 +756,9 @@ An implementation MUST exhibit these properties; [09](../09-tests.md) says how t
   each reach a peer.
 - An edit made while offline reaches the domain after a restart with no event delivered: the sweep
   finds it from its in-sync bit.
+- A saved file is not in sync until its content is committed, offline included, and is in sync
+  once it is, with no further event from the user.
+- A file edited while awaiting commit is taken again, not marked in sync.
 - A save through a temporary file renamed over the original reaches the domain as one content at
   the original name.
 - A local file created where a peer's file of that name arrived lands as a conflicted copy, and both
@@ -781,8 +804,9 @@ An implementation MUST exhibit these properties; [09](../09-tests.md) says how t
   wedged domain from taking the others with it.
 - **The in-sync bit is the owed marker.** It is durable on the volume and cleared by the system on
   any content change, so a crash between an edit and its take loses nothing and needs no queue.
-- **In sync at staging, not at commit.** The owner's staged content is never dropped, so the user
-  can free space right after saving, offline included; the tray shows what is unpublished.
+- **In sync at commit, not at staging.** The check mark reads as "ready to share", and a share of
+  an uncommitted file does not serve the new content. Freeing space right after saving, offline
+  especially, is the cost.
 - **The apply walks folders, the feed only names them.** A folder walk is idempotent and repairs
   whatever it finds, so a lost op, a crash or a stale anchor costs a local walk, never a re-download.
 - **Identity in the placeholder, not a provider index.** It moves with the file, survives every
