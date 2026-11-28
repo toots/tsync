@@ -191,6 +191,7 @@ module Make (C : Engine_ctx.S) = struct
     Cache.sweep_at_start cache;
     let named = Hashtbl.create 64 in
     let staged_dir = Filename.concat root "staged" in
+    Staged.migrate_layout staged;
     Staged.fold staged
       (fun () -> function
         | `Edit (_, e) ->

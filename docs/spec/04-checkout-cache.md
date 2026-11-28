@@ -91,7 +91,7 @@ requires rewriting a valid existing file into another form.
   listing and walk of the mirror, the scratch tree and the staged tree skips internal leaves.
   Temporary files ([01](01-core.md) §2.9) are internal leaves.
 - Folders exist only in the mirror. The staged tree has directories only as containers of
-  staged manifests; a staged directory lives exactly as long as an edit beneath it. Every
+  staged manifests. Every
   component of the staged tree is filed at its escape handle, and every staged directory has a
   name marker ([local-names](algorithms/local-names.md) §3.2).
 - Directories under `<cache_root>/<domain>`, `<data_dir>/sync`, `<data_dir>/uploads-pending` and

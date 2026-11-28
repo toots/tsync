@@ -1,0 +1,20 @@
+files: 717 histories over 16 states, 0 states with more than one tree
+folders: 717 histories over 16 states, 0 states with more than one tree
+put of, put Of, delete of: X Of Y
+rename AB -> ab beside aB: same tree as the fresh history
+folder rename AB -> ab beside aB: same tree as the fresh history
+move x:y -> z: id kept true, name marker z
+a and A: d/a reads a, d/A reads A, d/b reads nothing
+put ab over a leftover probe: same tree as the fresh history
+failed placement: tree unchanged true
+demotion onto a held handle: EXISTS where the disk conflates, nothing moved
+demoted flag: only while a collision is filed, gone after it
+.TSYNC-dir storable false, .tsync-x storable false, a storable true
+concurrent reads during 300 demotions: of wrong 0, Of wrong 0, both ran true
+staged: d/A, d/a, z/f
+staged concurrent writers: 103 edits
+migrated: d/f, x:y/g:h; d/f found true
+move onto a left-over staged directory: b/g, b/g found true
+write over a staged directory with edits: refused true, kept b/g
+migration resumed: d/x:y/f
+names: .Tsync-x; .Tsync-x at its handle true; entries on disk 2

@@ -839,9 +839,9 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 6c654bc9.
 
 ### A-8.10 A local slot that depends on history
-- **Pitfall** — The mirror filed each name at its own spelling. One arrival from a Linux writer put `Kind Of Blue.md5` (and `.sfv`), renamed the folder, then deleted `Kind of Blue.md5`: two names there, one slot on the Mac's case-insensitive APFS, so the delete removed the file just put. The file-id records survived, their names being hashes, which left ids with no manifest and froze the File Provider feed. The loose-names rule of 01 §2.8 was specified and never implemented; the escape test was hand-written in four places, none of which looked at siblings. The same holds for NFC against NFD.
+- **Pitfall** — The mirror filed each name at its own spelling. One arrival from a Linux writer put `X Of Y.md5`, renamed the folder, then deleted `X of Y.md5`: two names there, one slot on the Mac's case-insensitive APFS, so the delete removed the file just put. The file-id records survived, their names being hashes, which left ids with no manifest and froze the File Provider feed. The loose-names rule of 01 §2.8 was specified and never implemented; the escape test was hand-written in four places, none of which looked at siblings. The same holds for NFC against NFD.
 - **Check** — Every local tree is a function of the exact state: in each folder the least member of each class the disk conflates is at its own spelling, the rest at their handles, and a removal promotes (local-names §3, §5). Classes are found by asking the disk, never by a stated relation. One module computes local names. Test every ordering of puts, deletes and renames within the class over `{a, A, á NFC, á NFD}` on case-insensitive APFS: one tree, and a non-zero count of orderings.
-- **Seen** — 2026-11-27, macOS, domain Jellyfin Media, applied-log line 1366 (17 ops).
+- **Seen** — 2026-11-27, macOS.
 
 ## 9. Security boundaries
 

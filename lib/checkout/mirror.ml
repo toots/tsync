@@ -53,13 +53,27 @@ let with_fid_index t f =
             f h)
 
 let root t = t.root
+let split rel = if rel = "" then [] else String.split_on_char '/' rel
 
-let path t rel =
-  if rel = "" then t.manifests
-  else Filename.concat t.manifests (Names.escape_path rel)
+(* An absent path ends in handles, which no other name holds. *)
+let resolve t rel =
+  let rec go dir = function
+    | [] -> (dir, true)
+    | c :: rest -> (
+        match Local_names.find dir c with
+          | Some l -> go (Filename.concat dir l) rest
+          | None ->
+              ( List.fold_left
+                  (fun d c -> Filename.concat d (Names.handle c))
+                  dir (c :: rest),
+                false ))
+  in
+  go t.manifests (split rel)
 
-let dir_marker dir = Filename.concat dir ".tsync-dir"
-let name_marker dir = Filename.concat dir ".tsync-name"
+let path t rel = fst (resolve t rel)
+let locate t rel = match resolve t rel with p, true -> Some p | _ -> None
+let dir_marker = Local_names.dir_marker
+let name_marker = Local_names.name_marker
 
 let own_marker dir leaf =
   Filename.concat dir (".tsync-own-" ^ Xxh.hex16 (Xxh.string leaf))
@@ -82,22 +96,35 @@ let write_if_changed ?durable p data =
 
 type file = [ `File of Manifest.t | `Corrupt | `Dir | `Absent ]
 
+(* Reads take no lock: what [locate] found may move before it is read, and a
+   repeat finds it at its other name (local-names §6).
+   ponytail: [locate] decodes the leaf's manifest and this reads it again; one
+   read if open latency shows it. *)
 let file t rel : file =
-  let p = path t rel in
-  match Fs.lstat_opt p with
-    | None -> `Absent
-    | Some { st_kind = S_DIR; _ } -> `Dir
-    | Some _ -> (
-        match Manifest.decode (Fs.read_file p) with
-          | Some m -> `File m
-          | None -> `Corrupt)
+  let leaf = Names.leaf_of rel in
+  let rec attempt tries =
+    if tries = 0 then Fail.raise_ Fail.Unexplained "%s kept moving" rel;
+    match locate t rel with
+      | None -> `Absent
+      | Some p -> (
+          match Fs.lstat_opt p with
+            | None -> attempt (tries - 1)
+            | Some { st_kind = S_DIR; _ } -> `Dir
+            | Some _ -> (
+                match Option.map Manifest.decode (Fs.read_file_opt p) with
+                  | None -> attempt (tries - 1)
+                  | Some (Some m) when m.name = leaf -> `File m
+                  | Some (Some _) -> attempt (tries - 1)
+                  | Some None -> `Corrupt))
+  in
+  attempt 100
 
 let manifest t rel = match file t rel with `File m -> Some m | _ -> None
 
 let kind t rel =
   if rel = "" then `Dir
   else (
-    match Fs.lstat_opt (path t rel) with
+    match Option.bind (locate t rel) Fs.lstat_opt with
       | Some { st_kind = S_DIR; _ } -> `Dir
       | Some _ -> `File
       | None -> `Absent)
@@ -105,58 +132,44 @@ let kind t rel =
 let parse_marker body =
   match Folder.classify_marker body with `Marker m -> Some m | _ -> None
 
+let folder_id_at p =
+  Option.bind
+    (Fs.read_file_opt (dir_marker p))
+    (fun b -> Option.map (fun (m : Folder.marker) -> m.id) (parse_marker b))
+
 let folder_id t rel =
   if rel = "" then Some Folder_id.root
-  else
-    Option.bind
-      (Fs.read_file_opt (dir_marker (path t rel)))
-      (fun b -> Option.map (fun (m : Folder.marker) -> m.id) (parse_marker b))
+  else Option.bind (locate t rel) folder_id_at
 
-(* The real leaf held by the local name [local] in [dir]. *)
-let real_name dir local =
-  if String.starts_with ~prefix:Names.escape_prefix local then (
-    let p = Filename.concat dir local in
-    match Fs.lstat_opt p with
-      | Some { st_kind = S_DIR; _ } -> Fs.read_file_opt (name_marker p)
-      | Some _ ->
-          Option.map
-            (fun (m : Manifest.t) -> m.name)
-            (Option.bind (Fs.read_file_opt p) Manifest.decode)
-      | None -> None)
-  else Some local
-
-(* 01 §2.8: an escape handle already held by another real name refuses the
-   second item as EXISTS. *)
-let check_handle t rel =
-  let leaf = Names.leaf_of rel in
-  let local = Names.escape leaf in
-  if local <> leaf then (
-    let dir = path t (Names.parent_of rel) in
-    match real_name dir local with
-      | Some other when other <> leaf ->
-          Fail.raise_ Fail.Exists "%s: its local name is held by %S" rel other
-      | _ -> ())
+(* A new directory is whole, its name marker in it, before it takes a slot. *)
+let make_dir ~durable dir leaf =
+  let tmp = Fs.temp_in dir in
+  Fs.mkdir_p ~durable tmp;
+  match
+    write ~durable (name_marker tmp) leaf;
+    Local_names.place ~durable dir ~from:tmp leaf
+  with
+    | l -> Filename.concat dir l
+    | exception e ->
+        Fs.rm_rf tmp;
+        raise e
 
 (* Without [durable], a new directory waits for the caller's syncfs where that
    is a barrier. *)
-let ensure_dirs ?(durable = true) t rel =
+let dirs ?(durable = true) t rel =
   let durable = durable || not Fs.syncfs_is_barrier in
-  let rec go rel =
-    if rel <> "" then (
-      go (Names.parent_of rel);
-      let p = path t rel in
-      match Fs.lstat_opt p with
-        | Some { st_kind = S_DIR; _ } -> ()
-        | Some _ -> Fail.raise_ Fail.Exists "%s is a file" rel
-        | None ->
-            check_handle t rel;
-            Fs.mkdir_p ~durable p;
-            let leaf = Names.leaf_of rel in
-            if Names.escape leaf <> leaf then
-              write ~durable (name_marker p) leaf)
-  in
   Fs.mkdir_p t.manifests;
-  go rel
+  List.fold_left
+    (fun dir c ->
+      match Local_names.find dir c with
+        | Some l ->
+            let p = Filename.concat dir l in
+            if Fs.is_dir p then p
+            else Fail.raise_ Fail.Exists "%s is a file" rel
+        | None -> make_dir ~durable dir c)
+    t.manifests (split rel)
+
+let ensure_dirs ?durable t rel = ignore (dirs ?durable t rel)
 
 let is_own t rel =
   let leaf = Names.leaf_of rel in
@@ -228,19 +241,31 @@ let move_fid_subtree t ~src ~dst =
 
 (* Every write stamps the recorded name, and replaces the entry whole; a path
    keeps its file id across replacements. *)
-let write_file ?durable ?(own = false) t rel (m : Manifest.t) =
-  ensure_dirs ?durable t (Names.parent_of rel);
-  check_handle t rel;
-  let m = Manifest.rename m (Names.leaf_of rel) in
+let write_file ?(durable = true) ?(own = false) t rel (m : Manifest.t) =
+  let dir = dirs ~durable t (Names.parent_of rel) in
+  let leaf = Names.leaf_of rel in
+  let m = Manifest.rename m leaf in
   if not own then clear_own t rel;
-  write ?durable (path t rel) m.body;
-  ignore (ensure_file_id ?durable t rel);
+  let tmp =
+    Fs.write_temp_with ~sync:(durable || not Fs.syncfs_is_barrier) dir
+      (fun fd -> Fs.write_all fd m.body)
+  in
+  (match Local_names.place ~durable dir ~from:tmp leaf with
+    | _ -> ()
+    | exception e ->
+        Fs.unlink_quiet tmp;
+        raise e);
+  ignore (ensure_file_id ~durable t rel);
   if own then set_own t rel
+
+let remove_entry t rel ~drop =
+  Option.iter
+    (fun dir -> Local_names.remove dir (Names.leaf_of rel) ~drop:(drop dir))
+    (locate t (Names.parent_of rel))
 
 let remove_file t rel =
   clear_own t rel;
-  let p = path t rel in
-  if Fs.release p then Fs.fsync_dir (Filename.dirname p);
+  remove_entry t rel ~drop:(fun dir p -> if Fs.release p then Fs.fsync_dir dir);
   clear_file_id t rel
 
 let md5_hex s = Digest.to_hex (Digest.string s)
@@ -271,11 +296,9 @@ let write_removed ?durable t rel id =
    the removed-id record, and the reverse entry with the leaf of [rel]. *)
 let replace_folder ?durable t rel id =
   if rel <> "" then (
-    ensure_dirs ?durable t rel;
-    let p = path t rel in
+    let p = dirs ?durable t rel in
     let leaf = Names.leaf_of rel in
-    if Names.escape leaf <> leaf then
-      write_if_changed ?durable (name_marker p) leaf;
+    write_if_changed ?durable (name_marker p) leaf;
     write_if_changed ?durable (dir_marker p)
       (Folder.marker_body { name = leaf; id });
     write_removed ?durable t rel id;
@@ -302,9 +325,11 @@ let mkdir_without_id t rel = ensure_dirs t rel
 let remove_folder t rel =
   Atomic.incr t.folders_moved;
   move_fid_subtree t ~src:rel ~dst:None;
-  let p = path t rel in
-  Fs.rm_rf p;
-  Fs.fsync_dir (Filename.dirname p)
+  if rel = "" then Fs.rm_rf t.manifests
+  else
+    remove_entry t rel ~drop:(fun dir p ->
+        Fs.rm_rf p;
+        Fs.fsync_dir dir)
 
 let lookup_id_removed t rel =
   match folder_id t rel with
@@ -357,17 +382,38 @@ let whereabouts t rel =
 (* The one routine that moves a folder: directory, name marker, folder
    marker's name, removed-id record and reverse entry together. *)
 let move_folder t ~src ~dst =
-  ensure_dirs t (Names.parent_of dst);
-  check_handle t dst;
+  let ddir = dirs t (Names.parent_of dst) in
+  let sdir = path t (Names.parent_of src) in
+  let sleaf = Names.leaf_of src and leaf = Names.leaf_of dst in
+  let local =
+    match Local_names.find sdir sleaf with
+      | Some l -> l
+      | None -> (
+          (* Its markers were rewritten for this move; the rename was not. *)
+            match Local_names.find ~slot_of:sleaf sdir leaf with
+            | Some l -> l
+            | None -> Fail.raise_ Fail.Absent "%s: no folder to move" src)
+  in
+  let from = Filename.concat sdir local in
   Atomic.incr t.folders_moved;
-  let id = folder_id t src in
-  Fs.rename (path t src) (path t dst);
+  let id = folder_id_at from in
+  (* The entry records its new name before it moves, so its slot is chosen
+     for that name (local-names §5). *)
+  let name_as n =
+    write (name_marker from) n;
+    Option.iter
+      (fun id -> write (dir_marker from) (Folder.marker_body { name = n; id }))
+      id
+  in
+  name_as leaf;
+  (match Local_names.place ddir ~from leaf with
+    | _ -> ()
+    | exception e ->
+        (try if Fs.is_dir from then name_as sleaf with _ -> ());
+        raise e);
   move_fid_subtree t ~src ~dst:(Some dst);
-  Fs.fsync_dir (Filename.dirname (path t src));
-  Fs.fsync_dir (Filename.dirname (path t dst));
-  let p = path t dst and leaf = Names.leaf_of dst in
-  if Names.escape leaf <> leaf then write (name_marker p) leaf
-  else Fs.unlink_quiet (name_marker p);
+  Fs.fsync_dir sdir;
+  Local_names.promote sdir sleaf;
   Option.iter (fun id -> replace_folder t dst id) id
 
 (* The file id goes first, so the destination entry is never written under
@@ -383,10 +429,11 @@ let move_file t ~src ~dst =
         let own = is_own t src in
         write_file ~own t dst m;
         remove_file t src
-    | None -> (
-        match Fs.lstat_opt (path t src) with
-          | Some _ -> Fs.rename (path t src) (path t dst)
-          | None -> ()));
+    | None ->
+        (* An undecodable entry has no record to file it by; an arrival by
+           state replaces it. *)
+        remove_entry t src ~drop:(fun dir p ->
+            if Fs.release p then Fs.fsync_dir dir));
   clear_file_id t src
 
 type child = {
@@ -394,53 +441,56 @@ type child = {
   kind : [ `Dir of Folder_id.t option | `File of Manifest.t ];
 }
 
+let is_entry_name local =
+  not (Names.is_internal_local local || Names.is_temp_name local)
+
 let list t rel =
-  let dir = path t rel in
-  match Fs.readdir_opt dir with
+  match
+    Option.bind (locate t rel) (fun d ->
+        Option.map (fun l -> (d, l)) (Fs.readdir_opt d))
+  with
     | None -> []
-    | Some names ->
+    | Some (dir, locals) ->
         List.filter_map
           (fun local ->
-            if Names.is_internal_local local || Names.is_temp_name local then
-              None
+            if not (is_entry_name local) then None
             else (
               let p = Filename.concat dir local in
-              match Fs.lstat_opt p with
-                | Some { st_kind = S_DIR; _ } ->
+              match Local_names.lookup p with
+                | Some ({ st_kind = S_DIR; _ } as st) ->
+                    let name =
+                      Option.value ~default:local (Local_names.recorded p st)
+                    in
+                    Some { name; kind = `Dir (folder_id_at p) }
+                | Some { st_kind = S_REG; _ } ->
                     Option.map
-                      (fun name ->
-                        {
-                          name;
-                          kind = `Dir (folder_id t (Names.join rel name));
-                        })
-                      (real_name dir local)
-                | Some { st_kind = S_REG; _ } -> (
-                    match Option.bind (Fs.read_file_opt p) Manifest.decode with
-                      | Some m ->
-                          Some
-                            {
-                              name =
-                                (if
-                                   String.starts_with
-                                     ~prefix:Names.escape_prefix local
-                                 then m.name
-                                 else local);
-                              kind = `File m;
-                            }
-                      | None -> None)
+                      (fun (m : Manifest.t) ->
+                        { name = m.name; kind = `File m })
+                      (Option.bind (Fs.read_file_opt p) Manifest.decode)
                 | _ -> None))
-          names
+          locals
+
+(* ponytail: a plain entry is named by its listed spelling, which is its
+   recorded name except on HFS+, which lists NFD; [list] reads the record. A
+   probe is no entry. *)
+let listed_name dir local =
+  if String.starts_with ~prefix:Names.escape_prefix local then
+    Local_names.name_at dir local
+  else (
+    match Local_names.lookup (Filename.concat dir local) with
+      | Some st when not (Local_names.is_probe st) -> Some local
+      | _ -> None)
 
 let names t rel =
-  let dir = path t rel in
-  match Fs.readdir_opt dir with
+  match
+    Option.bind (locate t rel) (fun d ->
+        Option.map (fun l -> (d, l)) (Fs.readdir_opt d))
+  with
     | None -> []
-    | Some locals ->
+    | Some (dir, locals) ->
         List.filter_map
           (fun local ->
-            if Names.is_internal_local local || Names.is_temp_name local then
-              None
-            else real_name dir local)
+            if not (is_entry_name local) then None else listed_name dir local)
           locals
 
 let dir_times t rel =
@@ -505,9 +555,9 @@ let sweep_removed_records t ~older_than =
 (* 04 §4.10 step 8: one flush instead of a fsync per marker. *)
 let file_ids_record t = Filename.concat t.root "file-ids-complete"
 
-(* Names come from the directory, not from decoding every manifest: only an
-   escaped name is read back from its entry. Once a pass completed, every write
-   path gives an id, so later starts skip it (04 §4.10 step 8). *)
+(* Names come from the directory, as [names] reads them: only an escaped name
+   is read back from its entry. Once a pass completed, every write path gives an
+   id, so later starts skip it (04 §4.10 step 8). *)
 let backfill_file_ids t =
   if Fs.exists (file_ids_record t) then 0
   else begin
@@ -516,10 +566,9 @@ let backfill_file_ids t =
       let dir = path t rel in
       List.iter
         (fun local ->
-          if not (Names.is_internal_local local || Names.is_temp_name local)
-          then (
+          if is_entry_name local then (
             match
-              (Fs.lstat_opt (Filename.concat dir local), real_name dir local)
+              (Fs.lstat_opt (Filename.concat dir local), listed_name dir local)
             with
               | Some { st_kind = S_DIR; _ }, Some name ->
                   walk (Names.join rel name)

@@ -13,7 +13,7 @@ code and what is known to stand in the way.
 |---|---|---|
 | Windows refusals (§2, 05 §2.1) | `lib/config`: the validator's per-host rules; `bin/` command dispatch for the refused commands | — |
 | Files (§5.1) | `lib/core/fs.ml` keeps its interface | `lib/core/sys_stubs.c`: a `_WIN32` block beside the Linux and macOS ones (positioned reads and writes, locks, flush, POSIX rename and delete, reserve, free space, pid liveness, boot time); `malloc_trim`, `drop_mapped_pages` and `syncfs` no-ops |
-| Exact names (§5.1, 01 §2.8) | `lib/checkout/mirror.ml`: the storable test and every lookup | a stub returning the on-disk name of a path |
+| Exact names (§5.1, 01 §2.8) | `lib/checkout/local_names.ml`: every lookup compares the recorded name | none: the recorded name is read from the entry, never from the disk's spelling |
 | Processes (§5.2) | `lib/supervisor`: start children with `Unix.create_process`, stop them through their socket | job object, process groups, console and session-end handlers, the hidden window |
 | Sockets (§5.3) | `lib/ipc` | access-list check of the data directory; peer SID from the peer pid |
 | Keystore (§5.4) | `bin/platform.windows.ml`, selected in `bin/dune` like `platform.linux.ml` | Credential Manager stubs |

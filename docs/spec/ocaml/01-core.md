@@ -16,7 +16,7 @@ Bodies and memory are in [memory.md](memory.md).
 | folder ids (§2.5) | `Folder_id.t` (`root`, `of_string`, `v`, `mint ~uuid ~counter`); grammar in `Names.valid_folder_id` |
 | stored keys (§2.6) | `Key.namespace`, `Key.child` (namespace and `Xxh.dual leaf`), `Key.anchor`, `Key.index`; readers `Key.leaf`, `parent_segment`, `is_internal_leaf`, `is_child_of`, `folder_of_namespace_key` |
 | item references (§2.7) | `Names.item_ref` (`Root`, `Dir`, `File_id`, `File`), `parse_ref` (a `result`, so total), `ref_to_string`, `dir_ref`, `valid_file_id`; a malformed one is answered INVALID in `Handler.resolve_ref` |
-| mirror escaping (§2.8) | `Names.storable`, `escape`, `escape_path`, `name_max_local`, `is_internal_local`; the taken-handle refusal is `Mirror.check_handle` |
+| mirror escaping (§2.8) | `Names.storable`, `handle`, `name_max_local`, `is_internal_local`; which component sits where, and the taken-handle refusal, is `Local_names` ([local-names](../algorithms/local-names.md)) |
 | temporary names (§2.9) | `Names.is_temp_name`, `temp_owner`, `temp_name`; `Fs.temp_in`, `Fs.sweep_temps`; the local store's random form is `temp_name` in `lib/store/local.ml` |
 | random ids (§2.10) | `Ids.urandom` (raises, no fallback), `token`, `secret`, `short` |
 | hash (§3.1) | `Xxh.string`, `bigstring`, `hex16`, `dual`, `dual_bigstring`, the streaming `dual_create` / `dual_update_*` / `dual_digest`; stubs in `xxh_stubs.c`; known answers in `tests/unit/hash` |

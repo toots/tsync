@@ -13,7 +13,7 @@ Companion to [../04-checkout-cache.md](../04-checkout-cache.md). Not normative. 
 
 | Spec concept | Code |
 |---|---|
-| Layout, escaping, internal leaves (§2.1) | `Mirror.path`, `Staged.manifest_path` / `body_path` / `whole_path`, `Cache.whole_path`; `Names.escape`, `escape_path`, `is_internal_local`, `is_temp_name` |
+| Layout, escaping, internal leaves (§2.1) | `Mirror.path` through `Local_names` (`find`, `place`, `promote`, `remove`); `Staged.manifest_path` (every component at `Names.handle`), `Staged.migrate_layout`, `body_path` / `whole_path`, `Cache.whole_path`; `Names.is_internal_local`, `is_temp_name` |
 | `per`, group, group key (§2.2) | `Cache.per`, `group_of`, `groups`, `group_index`, `group_key` |
 | File entry, own marker (§2.3) | `Mirror`: `file`, `manifest`, `write_file`, `remove_file`, `move_file`, `is_own` |
 | File-id marker and index | `Mirror`: `file_id`, `ensure_file_id`, `path_of_file_id`, `load_file_ids`, `save_file_ids`, `await_file_ids`, `backfill_file_ids` |

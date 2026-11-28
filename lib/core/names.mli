@@ -92,7 +92,11 @@ val name_max_local : int
 (** Whether a leaf is filed under its own name in a local mirror. *)
 val storable : string -> bool
 
-(** The local name of a leaf: itself, or [.tsync-esc-<hex16>]. *)
+(** [.tsync-esc-<hex16>], the escape handle of a leaf. *)
+val handle : string -> string
+
+(** A leaf, or its handle when it is not storable. Not a mirror's local name,
+    which depends on its siblings (spec algorithms/local-names). *)
 val escape : string -> string
 
 val escape_path : string -> string

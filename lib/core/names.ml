@@ -139,24 +139,30 @@ let dir_ref id = if id = root_id then Root else Dir id
 let name_max_local = 250
 let escape_prefix = ".tsync-esc-"
 
+(* The prefix test ignores ASCII case, so no name reaches an internal leaf on a
+   disk that folds case. *)
 let storable leaf =
   String.length leaf <= name_max_local
-  && (not (String.starts_with ~prefix:".tsync-" leaf))
+  && (not
+        (String.length leaf >= 7
+        && String.lowercase_ascii (String.sub leaf 0 7) = ".tsync-"))
   && not
        (String.exists
           (fun c -> Char.code c < 0x20 || String.contains "\"*:<>?\\|" c)
           leaf)
 
-let escape leaf =
-  if storable leaf then leaf else escape_prefix ^ Xxh.hex16 (Xxh.string leaf)
+let handle leaf = escape_prefix ^ Xxh.hex16 (Xxh.string leaf)
+let escape leaf = if storable leaf then leaf else handle leaf
 
 let escape_path p =
   if p = "" then ""
   else String.concat "/" (List.map escape (String.split_on_char '/' p))
 
-(* An internal leaf begins with the sentinel and is not an escape handle. *)
+(* An internal leaf begins with the sentinel, in any case, and is not an escape
+   handle: a user name of that shape is filed at its handle. *)
 let is_internal_local leaf =
-  String.starts_with ~prefix:".tsync-" leaf
+  String.length leaf >= 7
+  && String.lowercase_ascii (String.sub leaf 0 7) = ".tsync-"
   && not (String.starts_with ~prefix:escape_prefix leaf)
 
 let is_temp_name n =

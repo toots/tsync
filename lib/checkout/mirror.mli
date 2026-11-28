@@ -1,6 +1,6 @@
 (** The local mirror of a domain's namespace (spec 04 §2.3–2.4, §4.1, §4.9): one
     manifest file per published file and one directory per folder, filed by real
-    path with escape handles, plus the folder-id index.
+    path where {!Local_names} places each component, plus the folder-id index.
 
     Only the owner writes it; other processes may read entries, which are only
     ever replaced by rename. *)
@@ -14,7 +14,8 @@ val create : cache_root:string -> Domain_name.t -> t
 (** [<cache_root>/<domain>]. *)
 val root : t -> string
 
-(** The local path of a domain-relative path, escaped component by component. *)
+(** The local path of a domain-relative path; for an absent path, one that no
+    other name holds. *)
 val path : t -> string -> string
 
 type file = [ `File of Manifest.t | `Corrupt | `Dir | `Absent ]
@@ -27,12 +28,9 @@ val kind : t -> string -> [ `Dir | `File | `Absent ]
     otherwise. Never mints. *)
 val folder_id : t -> string -> Folder_id.t option
 
-(** Create the missing folders of a path, escaped, with name markers. *)
-val ensure_dirs : ?durable:bool -> t -> string -> unit
-
 (** Replace a file entry with a manifest recording the path's leaf. [own] says
     this client stored it (the own marker, 04 §2.3). [durable] defaults to true.
-    EXISTS when the escape handle is held by another name. *)
+    EXISTS when a handle it needs is held by another name. *)
 val write_file : ?durable:bool -> ?own:bool -> t -> string -> Manifest.t -> unit
 
 (** Removes the entry, then its file id. *)
@@ -98,7 +96,8 @@ type child = {
 val list : t -> string -> child list
 
 (** The real names of {!list}, decoding a manifest only behind an escape handle;
-    an undecodable entry is not skipped. *)
+    an undecodable entry is not skipped. Assumes the disk lists the spelling it
+    was given (not HFS+). *)
 val names : t -> string -> string list
 
 (** The time the folder's set of children last changed here. *)

@@ -21,7 +21,7 @@ Names in tsync are byte strings, compared byte for byte ([01](../01-core.md) §2
 may map several of them to one slot: ignoring case (APFS and NTFS by default, ext4 casefold per
 folder), up to Unicode normalisation (APFS, HFS+, ZFS `normalization=`), or by rules nobody
 listed. A tree that files each name at its own spelling then loses data: a writer on a
-byte-exact disk puts `Kind Of Blue.md5` and deletes `Kind of Blue.md5`, two names; on the
+byte-exact disk puts `X Of Y.md5` and deletes `X of Y.md5`, two names; on the
 conflating disk the delete removes the file just put.
 
 The disk's lookup is a function from names to slots. "Reaches the same slot" is therefore an
@@ -89,14 +89,17 @@ promote and demote rows of §5 do not apply to it, and a staged step needs no lo
 04 §3.2 already assigns. `find` (§6) is step 2 alone. The staged tree is internal and never
 shown, so nothing is lost by its names being unreadable.
 
-- A staged directory lives exactly as long as an edit beneath it: the last edit removed from it
-  removes the directory, and each ancestor left empty.
+- A staged directory left without edits stays: at its handle it is in no other name's way, and
+  removing it would race a writer that holds only its own key lock.
 - **Migration.** A staged edit or directory found at a name that is not an escape handle was
   written before this rule. Owner start, before the domain serves, moves each such entry to its
   handle with one rename, writing a directory's name marker first; its recorded name is its
   manifest's name (files), or for a directory the recorded name of the mirror folder at the same
-  local path, which the old layout shared, else the listed name. A move whose
-  handle is held by another name sets the entry aside ([04](../04-checkout-cache.md) §2.1).
+  local path, which the old layout shared, else the listed name; an old escaped directory that
+  neither names stays where it is. A file whose handle is taken is set aside
+  ([04](../04-checkout-cache.md) §2.1); a directory whose handle holds edits stops the start
+  with an error, and one holding none is cleared first. A staged directory without edits that
+  lies at a handle a write or a move needs is cleared the same way.
 
 ## 4. Detection
 
@@ -179,7 +182,9 @@ folder it affects, which can move a sibling.
    is n;
 2. otherwise look up `esc(n)`; if it reaches an entry whose recorded name is exactly n, that is
    n;
-3. otherwise n is absent.
+3. otherwise look at the plain name again, as in step 1: a promotion that landed between steps 1
+   and 2 is found there;
+4. otherwise n is absent.
 
 A path is found component by component. `find` never needs the relation. Reads take no lock
 ([04](../04-checkout-cache.md) §3.2), so a reader confirms the recorded name of what it opened;
@@ -217,12 +222,12 @@ A local operation (not an arrival) follows the same steps under its local intent
 
 The arrival that motivated this, in one folder, with `Of` < `of` (0x4F < 0x6F):
 
-1. `Kind of Blue.md5` holds the plain name.
-2. `put Kind Of Blue.md5`: its plain name reaches the holder, recorded `… of …` ≠ `… Of …`, and
+1. `X of Y.md5` holds the plain name.
+2. `put X Of Y.md5`: its plain name reaches the holder, recorded `… of …` ≠ `… Of …`, and
    `Of` is less: `… of …` moves to `esc(… of …)`, then `… Of …` takes the plain name.
-3. `delete Kind of Blue.md5`: it is escaped; `esc(… of …)` is removed.
+3. `delete X of Y.md5`: it is escaped; `esc(… of …)` is removed.
 
-The result is `Kind Of Blue.md5` at its plain name, as `delete` then `put` gives.
+The result is `X Of Y.md5` at its plain name, as `delete` then `put` gives.
 
 ## 10. Out of scope
 

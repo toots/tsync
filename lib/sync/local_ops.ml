@@ -1632,12 +1632,7 @@ module Make (C : Engine_ctx.S) = struct
       let moved = Staged.edits_under staged src in
       List.iter (fun (p, _) -> supersede p) moved;
       Mirror.move_folder mirror ~src ~dst;
-      let sdir = Staged.manifest_path staged src
-      and ddir = Staged.manifest_path staged dst in
-      if Fs.exists sdir then (
-        Fs.mkdir_p (Filename.dirname ddir);
-        Fs.rename sdir ddir;
-        Fs.fsync_dir (Filename.dirname ddir));
+      Staged.move_dir staged ~src ~dst;
       move_handles ~src ~dst;
       List.map
         (fun (p, e) ->

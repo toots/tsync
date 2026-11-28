@@ -36,7 +36,6 @@ val decode : string -> edit option
 type t
 
 val create : cache_root:string -> Domain_name.t -> t
-val manifest_path : t -> string -> string
 val body_path : t -> string -> string
 val whole_path : t -> string -> string
 val read : t -> string -> [ `Edit of edit | `Absent | `Unparseable ]
@@ -57,6 +56,12 @@ val edits_under : t -> string -> (string * edit) list
 
 (** Move a staged manifest, stamping the new leaf. *)
 val move : t -> src:string -> dst:string -> unit
+
+(** Move the staged directory of a folder, with its name marker. *)
+val move_dir : t -> src:string -> dst:string -> unit
+
+(** Owner start, before {!fold}: move a tree filed by name to handles. *)
+val migrate_layout : t -> unit
 
 val bodies_named : edit -> string list
 

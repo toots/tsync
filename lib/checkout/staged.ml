@@ -181,7 +181,58 @@ let create ~cache_root domain =
         "";
   }
 
-let manifest_path t rel = Filename.concat t.manifests (Names.escape_path rel)
+(* local-names §3.2: every component at its handle, so no two names of the
+   tree ever share a slot and no edit moves for a sibling. *)
+let handles rel =
+  if rel = "" then [] else List.map Names.handle (String.split_on_char '/' rel)
+
+let manifest_path t rel =
+  List.fold_left Filename.concat t.manifests (handles rel)
+
+let name_marker = Local_names.name_marker
+
+(* A directory takes its handle whole, its name marker in it. Another writer
+   may have made it meanwhile. *)
+let make_dir dir leaf =
+  let p = Filename.concat dir (Names.handle leaf) in
+  if not (Fs.is_dir p) then (
+    let tmp = Fs.temp_in dir in
+    Fs.mkdir_p tmp;
+    Fs.durable_replace (name_marker tmp) leaf;
+    match Fs.rename tmp p with
+      | () -> Fs.fsync_dir dir
+      | exception Fail.E { kind = Exists | Not_empty; _ } -> Fs.rm_rf tmp
+      | exception e ->
+          Fs.rm_rf tmp;
+          raise e);
+  p
+
+let ensure_dirs t rel =
+  Fs.mkdir_p t.manifests;
+  ignore
+    (List.fold_left make_dir t.manifests
+       (if rel = "" then [] else String.split_on_char '/' rel))
+
+(* A staged directory outlives its edits (local-names §3.2); one with no file
+   but name markers beneath it is cleared out of a name's way, and one with an
+   edit beneath it is refused with nothing changed. *)
+let rec holds_edits p =
+  List.exists
+    (fun l ->
+      let c = Filename.concat p l in
+      match Fs.lstat_opt c with
+        | Some { st_kind = S_DIR; _ } -> holds_edits c
+        | Some _ -> l <> ".tsync-name"
+        | None -> false)
+    (Fs.readdir p)
+
+let clear_way p =
+  if Fs.is_dir p then (
+    if holds_edits p then
+      Fail.raise_ Fail.Not_empty
+        "%s: a staged directory with edits is in the way" p;
+    Fs.rm_rf p)
+
 let body_path t id = Filename.concat t.chunks id
 let whole_path t id = Filename.concat t.whole id
 
@@ -202,8 +253,8 @@ let edit t rel = match read t rel with `Edit e -> Some e | _ -> None
    a file taking its name. *)
 let write ?(durable = true) t rel e =
   let p = manifest_path t rel in
-  Fs.mkdir_p (Filename.dirname p);
-  if Fs.is_dir p then Unix.rmdir p;
+  ensure_dirs t (Names.parent_of rel);
+  clear_way p;
   if durable then Fs.durable_replace p (encode e) else Fs.replace p (encode e)
 
 let remove t rel =
@@ -226,8 +277,8 @@ let set_aside_path p =
   in
   pick 1
 
-(* Every decodable file of the tree is an edit, whatever its name. An escaped
-   folder's real name is the mirror's, which files the same escaped path. *)
+(* Every decodable file of the tree is an edit, whatever its name; names come
+   from the records, never the listing. *)
 let fold t f acc =
   let rec walk dir rel acc =
     List.fold_left
@@ -241,35 +292,73 @@ let fold t f acc =
           match Fs.lstat_opt p with
             | Some { st_kind = S_DIR; _ } ->
                 let name =
-                  if String.starts_with ~prefix:Names.escape_prefix local then (
-                    let rel_local =
-                      String.sub p
-                        (String.length t.manifests + 1)
-                        (String.length p - String.length t.manifests - 1)
-                    in
-                    Option.value ~default:local
-                      (Fs.read_file_opt
-                         (Filename.concat
-                            (Filename.concat t.mirror_manifests rel_local)
-                            ".tsync-name")))
-                  else local
+                  Option.value ~default:local (Fs.read_file_opt (name_marker p))
                 in
                 walk p (Names.join rel name) acc
             | Some { st_kind = S_REG; _ } -> (
                 match Option.bind (Fs.read_file_opt p) decode with
-                  | Some e ->
-                      let leaf =
-                        if String.starts_with ~prefix:Names.escape_prefix local
-                        then e.name
-                        else local
-                      in
-                      f acc (`Edit (Names.join rel leaf, e))
+                  | Some e -> f acc (`Edit (Names.join rel e.name, e))
                   | None -> f acc (`Bad p))
             | _ -> acc))
       acc
       (Option.value ~default:[] (Fs.readdir_opt dir))
   in
   walk t.manifests "" acc
+
+(* local-names §3.2 migration: a tree filed by name moves to handles. An old
+   directory's name is the mirror folder's at the same path, which the old
+   layout shared, found by the mirror's own lookup so a repeat after a crash
+   still finds it. *)
+let migrate_layout t =
+  let rec walk dir mirror_dir =
+    List.iter
+      (fun local ->
+        if not (Names.is_temp_name local || Names.is_internal_local local) then (
+          let p = Filename.concat dir local in
+          match Fs.lstat_opt p with
+            | Some { st_kind = S_DIR; _ } -> migrate_dir dir mirror_dir local p
+            | Some { st_kind = S_REG; _ } -> (
+                match Option.bind (Fs.read_file_opt p) decode with
+                  | Some e when local <> Names.handle e.name ->
+                      let target = Filename.concat dir (Names.handle e.name) in
+                      if Fs.exists target then (
+                        Fs.rename p (set_aside_path p);
+                        Log.warn "set aside the staged manifest %s: %s is taken"
+                          p target)
+                      else Fs.rename p target
+                  | _ -> ())
+            | _ -> ()))
+      (Option.value ~default:[] (Fs.readdir_opt dir));
+    Fs.fsync_dir dir
+  and migrate_dir dir mirror_dir local p =
+    let name =
+      match Fs.read_file_opt (name_marker p) with
+        | Some n -> Some n
+        | None ->
+            let named = Local_names.name_at mirror_dir local in
+            if String.starts_with ~prefix:Names.escape_prefix local then
+              Option.bind named (fun n ->
+                  if Names.handle n = local then Some n else None)
+            else Some (Option.value ~default:local named)
+    in
+    match name with
+      | None ->
+          Log.warn "staged directory %s has no name; left where it is" p;
+          walk p (Filename.concat mirror_dir local)
+      | Some name ->
+          Fs.durable_replace (name_marker p) name;
+          let target = Filename.concat dir (Names.handle name) in
+          if target <> p then (
+            clear_way target;
+            Fs.rename p target);
+          let mirror_child =
+            Filename.concat mirror_dir
+              (Option.value ~default:(Names.escape name)
+                 (Local_names.find mirror_dir name))
+          in
+          walk target mirror_child
+  in
+  if Fs.is_dir t.manifests then walk t.manifests t.mirror_manifests
 
 let edits t =
   List.rev
@@ -284,6 +373,17 @@ let move t ~src ~dst =
     | Some e ->
         write t dst { e with name = Names.leaf_of dst };
         remove t src
+
+(* The marker first: a crash before the rename leaves a directory whose
+   handle disagrees with its name, which [migrate_layout] moves on. *)
+let move_dir t ~src ~dst =
+  let s = manifest_path t src and d = manifest_path t dst in
+  if Fs.exists s then (
+    ensure_dirs t (Names.parent_of dst);
+    clear_way d;
+    Fs.durable_replace (name_marker s) (Names.leaf_of dst);
+    Fs.rename s d;
+    Fs.fsync_dir (Filename.dirname d))
 
 let bodies_named e =
   match e.content with
