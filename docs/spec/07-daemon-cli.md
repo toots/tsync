@@ -740,7 +740,10 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   client has none; the count of pending commands; the number of the entry being created; the tree
   head as the cycle last read it; the entry this client cannot follow; the reason the last
   background cycle failed, absent once one runs again), `setAside?` (the count of
-  set-aside objects, §5.3),
+  set-aside objects, §5.3), `nameClashes?` (the keys set aside because this machine's filesystem
+  takes their name for another's, as the `status` action gives them,
+  [08 §3.3](08-frontends.md#33-actions); the text form shows a `name clashes` row with how many
+  and the latest),
   `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`, `queues {pendingFiles, parked,
   inFlight: [FIFO], bytesOwed, lastError?}` (the upload queue: pending and parked counted in files;
   bytes owed are whole-file bytes, in-flight included),

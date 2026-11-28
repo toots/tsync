@@ -12,7 +12,7 @@
 | The mount fails with `allowOther` | Add `user_allow_other` to `/etc/fuse.conf`. |
 | A file will not open offline | It was online-only. While connected, `tsync cache --fetch PATH`, or *Make Available Offline* in the file manager. |
 | Opening a folder downloads everything in it | Something is generating thumbnails. Keep `mountSubtype` at its default. |
-| A "conflicted copy" appeared beside a name that differs only by case or accents | Another machine keeps both names apart and this one cannot. Rename one of them. See [when two machines change the same thing](machines.md#when-two-machines-change-the-same-thing). |
+| A file named "(name clash)" appeared | Another machine keeps two names apart that differ only by case or accents, and this one cannot. Rename one of them. See [when two machines change the same thing](machines.md#when-two-machines-change-the-same-thing). |
 | A file named "conflicted copy" appeared | Two machines changed the same name. Keep the one you want and delete the other. See [when two machines change the same thing](machines.md#when-two-machines-change-the-same-thing). |
 | Changes stay pending and the log says "this store cannot claim a name" | The S3-compatible service lacks conditional writes. See [backend types](config.md#backend-types). |
 | A share link or `tsync versions` misses a change the other machines already have | The machine that made it went offline too soon. It catches up when that machine is back, or within about a quarter of an hour. |

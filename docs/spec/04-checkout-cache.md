@@ -169,8 +169,10 @@ requires rewriting a valid existing file into another form.
   serialisation ([08 §2.2](08-frontends.md#22-item-references)), within its deadline.
 - Mirror entries are replaced only by rename, never modified in place, so a reader SHOULD read
   them by mapping them read-only.
-- Mirror files are projections: they are written by *replace*, and made durable when a later
-  step relies on them ([durable-queue](algorithms/durable-queue.md) §3.2, R2, R5).
+- Mirror files are projections: they are written aside and linked into place without replacing an
+  entry the writer did not look at ([01](01-core.md) §2.8); a replacement is a rename over an entry
+  whose recorded name the writer checked, under the metadata lock. They are made durable when a
+  later step relies on them ([durable-queue](algorithms/durable-queue.md) §3.2, R2, R5).
 
 ### 2.4 Folder-index files
 
