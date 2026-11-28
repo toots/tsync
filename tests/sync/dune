@@ -372,3 +372,33 @@
  (alias runtest)
  (action
   (diff rsync_times_test.expected rsync_times_test.output)))
+
+; A Mac's case- and normalisation-insensitive APFS against a case-sensitive
+; volume for the peer.
+
+(executable
+ (name name_clash_test)
+ (modules name_clash_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (enabled_if
+  (= %{system} macosx))
+ (action
+  (with-stdout-to
+   name_clash_test.output
+   (run ./name_clash_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} macosx))
+ (action
+  (diff name_clash_test.expected name_clash_test.output)))

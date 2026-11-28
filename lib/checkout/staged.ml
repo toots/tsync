@@ -187,6 +187,8 @@ let whole_path t id = Filename.concat t.whole id
 
 (* Staged manifests mirror the tree, so a path with edits beneath it is a
    directory here: that path itself has no edit. *)
+(* 01 §2.8: an edit another name records, which the filesystem takes this
+   name for, is not this name's. *)
 let read t rel =
   let p = manifest_path t rel in
   if Fs.is_dir p then `Absent
@@ -194,21 +196,38 @@ let read t rel =
     match Fs.read_file_opt p with
       | None -> `Absent
       | Some b -> (
-          match decode b with Some e -> `Edit e | None -> `Unparseable))
+          match decode b with
+            | Some e when e.name <> Names.leaf_of rel -> `Absent
+            | Some e -> `Edit e
+            | None -> `Unparseable))
+
+let clash t rel =
+  let p = manifest_path t rel in
+  if Fs.is_dir p then None
+  else (
+    match Option.bind (Fs.read_file_opt p) decode with
+      | Some e when e.name <> Names.leaf_of rel -> Some e.name
+      | _ -> None)
 
 let edit t rel = match read t rel with `Edit e -> Some e | _ -> None
 
 (* A folder whose edits are all gone leaves its directory here, in the way of
    a file taking its name. *)
-let write ?(durable = true) t rel e =
+let write_edit ?(durable = true) ?moving t rel e =
   let p = manifest_path t rel in
+  (match clash t rel with
+    | Some held when Some held <> moving ->
+        Fail.raise_ Fail.Exists "%s: the filesystem takes it for %S" rel held
+    | _ -> ());
   Fs.mkdir_p (Filename.dirname p);
   if Fs.is_dir p then Unix.rmdir p;
   if durable then Fs.durable_replace p (encode e) else Fs.replace p (encode e)
 
+let write ?durable t rel e = write_edit ?durable t rel e
+
 let remove t rel =
   let p = manifest_path t rel in
-  if Fs.release p then Fs.fsync_dir (Filename.dirname p)
+  if clash t rel = None && Fs.release p then Fs.fsync_dir (Filename.dirname p)
 
 (* An internal leaf, which no user name escapes to (04 §2.5). *)
 let set_aside_prefix = ".tsync-bad-"
@@ -282,8 +301,19 @@ let move t ~src ~dst =
   match edit t src with
     | None -> ()
     | Some e ->
-        write t dst { e with name = Names.leaf_of dst };
-        remove t src
+        let s = manifest_path t src and d = manifest_path t dst in
+        let same =
+          match (Fs.lstat_opt s, Fs.lstat_opt d) with
+            | Some x, Some y -> x.st_dev = y.st_dev && x.st_ino = y.st_ino
+            | _ -> false
+        in
+        (* A case-only rename reaches its own manifest: renamed in place. *)
+        if same then (
+          Fs.rename s d;
+          write_edit ~moving:e.name t dst { e with name = Names.leaf_of dst })
+        else (
+          write t dst { e with name = Names.leaf_of dst };
+          remove t src)
 
 let bodies_named e =
   match e.content with
